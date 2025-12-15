@@ -5,6 +5,8 @@
 
 #include <iostream>
 
+#include <miopen/ck_builder/example_conversion.hpp>
+
 #include <ck_tile/builder/conv_builder.hpp>
 #include <ck_tile/builder/reflect/conv_description.hpp>
 #include <ck_tile/builder/reflect/instance_traits.hpp>
@@ -15,8 +17,10 @@
 
 #include <miopen/logger.hpp>
 
-namespace ckb      = ck_tile::builder;
-using BaseOperator = ck::tensor_operation::device::BaseOperator;
+namespace ckb         = ck_tile::builder;
+using BaseOperator    = ck::tensor_operation::device::BaseOperator;
+using BaseOperatorPtr = std::unique_ptr<BaseOperator>;
+
 struct DefaultAlgorithm
 {
     using ConvSpecial = ckb::ConvSpecialization;
@@ -243,4 +247,195 @@ TEST(CKBuilderXdl, CreateExistingInstance)
             MIOPEN_LOG_T("\t" << instanceString);
         }
     }
+}
+
+TEST(CK_Builder, Static_Instance)
+{
+    constexpr XdlInstance instance = miopen::ck_builder::make_instance();
+
+    using Builder = ckb::ConvBuilder<instance.signature, instance.algorithm>;
+    do_builder_checks<Builder>();
+
+    auto builderKernelInstance       = Builder::Instance{};
+    auto builderKernelInstanceString = builderKernelInstance.GetInstanceString();
+
+    ASSERT_TRUE(builderKernelInstanceString.find(
+                    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3") == std::string::npos)
+        << " builder returned wrong kind of instance";
+
+    // These are the instances that MIOpen currently gets from CK's static library
+    auto factoryInstances = DeviceOpGFwdDefaultPtrs<float>::GetInstances();
+
+    ASSERT_GT(factoryInstances.size(), 0) << "Factory returned no instances";
+
+    auto result =
+        std::find_if(factoryInstances.begin(),
+                     factoryInstances.end(),
+                     [&builderKernelInstanceString](const auto& kernelPtr) {
+                         return kernelPtr->GetInstanceString() == builderKernelInstanceString;
+                     });
+
+    std::size_t m = 0;
+    std::string desc{};
+
+    for(auto&& k : factoryInstances)
+    {
+        auto kernelDescription = k->GetInstanceString();
+        auto firstDifferent    = FirstDifference(builderKernelInstanceString, kernelDescription);
+        if(firstDifferent > m)
+        {
+            m    = firstDifferent;
+            desc = kernelDescription;
+        }
+    }
+
+    if(m < builderKernelInstanceString.size())
+    {
+        std::cout << builderKernelInstanceString << std::endl << desc << std::endl;
+
+        for(auto i = 0; i < m; i++)
+        {
+            std::cout << ' ';
+        }
+
+        std::cout << '^' << std::endl << std::endl;
+    }
+
+    ASSERT_TRUE(result != factoryInstances.end())
+        << "Instance string " << builderKernelInstanceString
+        << " not found in list of instances returned by factory.";
+}
+
+template <typename T>
+void test_instance(const std::unique_ptr<T> &builderKernelInstance)
+{
+    auto builderKernelInstanceString = builderKernelInstance->GetInstanceString();
+
+    ASSERT_TRUE(builderKernelInstanceString.find(
+                    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3") == std::string::npos)
+        << " builder returned wrong kind of instance";
+
+    // These are the instances that MIOpen currently gets from CK's static library
+    auto factoryInstances = DeviceOpGFwdDefaultPtrs<float>::GetInstances();
+
+    ASSERT_GT(factoryInstances.size(), 0) << "Factory returned no instances";
+
+    auto result =
+        std::find_if(factoryInstances.begin(),
+                     factoryInstances.end(),
+                     [&builderKernelInstanceString](const auto& kernelPtr) {
+                         return kernelPtr->GetInstanceString() == builderKernelInstanceString;
+                     });
+
+    std::size_t m = 0;
+    std::string desc{};
+
+    for(auto&& k : factoryInstances)
+    {
+        auto kernelDescription = k->GetInstanceString();
+        auto firstDifferent    = FirstDifference(builderKernelInstanceString, kernelDescription);
+        if(firstDifferent > m)
+        {
+            m    = firstDifferent;
+            desc = kernelDescription;
+        }
+    }
+
+    if(m < builderKernelInstanceString.size())
+    {
+        std::cout << builderKernelInstanceString << std::endl << desc << std::endl;
+
+        for(auto i = 0; i < m; i++)
+        {
+            std::cout << ' ';
+        }
+
+        std::cout << '^' << std::endl << std::endl;
+    }
+
+    ASSERT_TRUE(result != factoryInstances.end())
+        << "Instance string " << builderKernelInstanceString
+        << " not found in list of instances returned by factory.";
+}
+
+template <typename T, std::size_t N, typename F>
+constexpr auto map_array(const std::array<T, N>& input, F&& func)
+{
+    using U = std::invoke_result_t<F, T>;
+    std::array<U, N> result{};
+    for(auto i = 0; i < N; i++)
+    {
+        result[i] = func(input[i]);
+    }
+
+    return result;
+}
+
+template <typename T1, std::size_t N1, typename T2, std::size_t N2, typename F>
+constexpr auto
+multiplex_array(const std::array<T1, N1>& input1, const std::array<T2, N2>& input2, F&& func)
+{
+    using U = std::invoke_result_t<F, T1, T2>;
+    std::array<U, N1 * N2> result{};
+    for(auto i1 = 0; i1 < N1; i1++)
+    {
+        auto arg1 = input1[i1];
+        for(auto i2 = 0; i2 < N2; i2++)
+        {
+            auto arg2            = input2[i2];
+            auto retval          = func(arg1, arg2);
+            result[i1 * N2 + i2] = retval;
+        }
+    }
+
+    return result;
+}
+
+template <auto KernelDescriptor>
+constexpr void InstantiateKernel(std::vector<BaseOperatorPtr>& kernels)
+{
+    // Create a ConvBuilder instance with the signature and algorithm
+    // This will instantiate the DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3 kernel
+    using Builder = ckb::ConvBuilder<KernelDescriptor.signature, KernelDescriptor.algorithm>;
+    do_builder_checks<Builder>();
+
+    kernels.push_back(std::make_unique<typename Builder::Instance>());
+}
+template <typename T, T... values>
+constexpr void build_kernels_helper(std::vector<BaseOperatorPtr>& kernels)
+{
+    std::array<BaseOperatorPtr, sizeof...(values)> result{};
+    ((InstantiateKernel<values>(kernels)), ...);
+}
+
+template <typename T, std::size_t N, std::array<T, N> arr, std::size_t... I>
+constexpr void build_kernels_impl(std::vector<BaseOperatorPtr>& kernels, std::index_sequence<I...>)
+{
+    build_kernels_helper<T, arr[I]...>(kernels);
+}
+
+template <typename T, std::size_t N, std::array<T, N> arr>
+constexpr void build_kernels(std::vector<BaseOperatorPtr>& kernels)
+{
+    build_kernels_impl<T, N, arr>(kernels, std::make_index_sequence<N>{});
+}
+
+TEST(CK_Builder, Multiple_Static_Instances)
+{
+    std::vector<BaseOperatorPtr> kernels{};
+    constexpr auto instances = miopen::ck_builder::example_instances();
+    constexpr auto instanceMultiplier = std::array<int, 1000>{};
+    constexpr auto moreInstances = multiplex_array(instances, instanceMultiplier, [](auto a, auto b) {return a;});
+
+    std::cout << moreInstances.size() << std::endl;
+
+    
+    build_kernels<XdlInstance, moreInstances.size(), moreInstances>(kernels);
+
+    std::cout << "Instance count: " << kernels.size() << std::endl;
+
+    for(auto&& k : kernels) {
+        test_instance(k);
+    }
+        
 }

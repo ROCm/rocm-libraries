@@ -84,7 +84,7 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
     find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
-    target_link_libraries(${TEST_NAME} composable_kernel::device_conv_operations)
+    target_link_libraries(${TEST_NAME} ck_builder composable_kernel::device_conv_operations)
   endif()
 
   if(MIOPEN_TEST_DISCRETE)

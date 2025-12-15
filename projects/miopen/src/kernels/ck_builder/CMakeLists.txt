@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 add_library(ck_builder STATIC 
-    builder_conv_xdl.cpp
+    example_conversion.cpp
 )
 target_include_directories(ck_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
