@@ -160,11 +160,11 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     SECTION("countCoordinateWritesInLoop")
     {
         // Written in both
-        CHECK(countCoordinateWritesInLoop(graph, 1122, 510, tracer) > 0);
-        CHECK(countCoordinateWritesInLoop(graph, 1127, 510, tracer) > 0);
+        CHECK(countCoordinateWritesInLoop(graph, 1122, 510, tracer) == 16);
+        CHECK(countCoordinateWritesInLoop(graph, 1127, 510, tracer) == 8);
 
         // For loop variable only written in one loop
-        CHECK(countCoordinateWritesInLoop(graph, 1127, 314, tracer) > 0);
+        CHECK(countCoordinateWritesInLoop(graph, 1127, 314, tracer) == 1);
         CHECK(countCoordinateWritesInLoop(graph, 1122, 314, tracer) == 0);
     }
 
