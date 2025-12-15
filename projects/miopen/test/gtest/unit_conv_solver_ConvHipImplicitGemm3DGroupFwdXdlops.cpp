@@ -69,9 +69,9 @@ const auto& GetTestParams()
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
         p.Tunable(5);
 
-        // Increased tolerance factor to 2 because of the following errors observed on :
+        // Increased tolerance factor to 2 because of the following errors observed :
         // Expected: (error) < (threshold), actual: 1.4733528696833642e-07 vs 1.1920928955078125e-07
-        // p.SetTolerance(supportedDevices, miopenFloat, 250.0f);
+        p.SetTolerance(supportedDevices, miopenFloat, 2.0f);
         return p;
     }();
     return params;
