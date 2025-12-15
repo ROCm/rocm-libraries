@@ -249,7 +249,7 @@ to CTest using the `--resource-spec-file` flag:
 
 ```shell
 # Run tests on specified GPU family
-ctest --resource-spec-file <path-to-my-resources.json> --parallel <number-of-jobs>
+ctest --resource-spec-file <path-to-your-resources.json> --parallel <number-of-jobs>
 ```
 
 ## Using custom seeds for the tests

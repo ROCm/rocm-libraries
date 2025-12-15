@@ -24,4 +24,4 @@ Alternatively, you can configure your tests using the ``AMDGPU_TEST_TARGETS`` CM
 
 .. note::
 
-    CTest resource allocation requires CMake 3.16 or later.
+    This feature requires CMake 3.18 or later.
