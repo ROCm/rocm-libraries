@@ -95,8 +95,8 @@ int datatype_to_bits(data_type_t type);
  * @param type Data type
  * @return int Number of bytes
  */
-inline int data_type_to_bytes(data_type_t type) {
-  return math::safe_ceil_div(datatype_to_bits(type), 8);
+inline double data_type_to_bytes(data_type_t type) {
+  return static_cast<double>(datatype_to_bits(type)) / 8.0;
 }
 
 /**

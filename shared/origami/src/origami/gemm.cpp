@@ -272,8 +272,8 @@ static inline double compute_cvt_overhead(const problem_t& problem,
   // const double mfma_cycles = num_mfma * L_MI_bf16;
 
   // 2) Bytes (per K-slice), using ceil-div to whole bytes
-  int a_bytes = data_type_to_bytes(problem.a_dtype);
-  int b_bytes = data_type_to_bytes(problem.b_dtype);
+  auto a_bytes = data_type_to_bytes(problem.a_dtype);
+  auto b_bytes = data_type_to_bytes(problem.b_dtype);
 
   const double bytesA = static_cast<double>(wave_tile_m) * config.mt.k * a_bytes;
   const double bytesB = static_cast<double>(wave_tile_n) * config.mt.k * b_bytes;
@@ -342,10 +342,10 @@ bool check_lds_capacity(const hardware_t& hardware,
                         data_type_t a_dtype,
                         data_type_t b_dtype) {
   // A and B size
-  size_t a_loads_in_bytes = mt.mk() * data_type_to_bytes(a_dtype);
-  size_t b_loads_in_bytes = mt.nk() * data_type_to_bytes(b_dtype);
+  auto a_loads_in_bytes = mt.mk() * data_type_to_bytes(a_dtype);
+  auto b_loads_in_bytes = mt.nk() * data_type_to_bytes(b_dtype);
   // Size of those in bytes
-  size_t LDS_usage = a_loads_in_bytes + b_loads_in_bytes;
+  auto LDS_usage = a_loads_in_bytes + b_loads_in_bytes;
 
   if (LDS_usage > hardware.lds_capacity) {
     return false;  // Exceeds LDS capacity
@@ -403,11 +403,11 @@ double estimate_l2_hit(const problem_t& problem,
   l2_tile_n = std::max(std::min(workgroups_n, l2_tile_n), static_cast<size_t>(1));
 
   // Calculate memory footprint in bytes.
-  const size_t a_bytes     = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
-  const size_t b_bytes     = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
-  auto calculate_footprint = [&](size_t tile_m, size_t tile_n) {
-    size_t a_footprint = tile_m * config.mt.mk() * a_bytes;
-    size_t b_footprint = tile_n * config.mt.nk() * b_bytes;
+  const auto a_bytes     = data_type_to_bytes(problem.a_dtype);
+  const auto b_bytes     = data_type_to_bytes(problem.b_dtype);
+  auto calculate_footprint = [&](auto tile_m, auto tile_n) {
+    auto a_footprint = tile_m * config.mt.mk() * a_bytes;
+    auto b_footprint = tile_n * config.mt.nk() * b_bytes;
     return a_footprint + b_footprint;
   };
 
@@ -480,12 +480,12 @@ double estimate_mall_hit(const problem_t& problem,
   mall_tile_n = std::max(std::min(workgroups_n, mall_tile_n), static_cast<size_t>(1));
 
   // --- CRITICAL: Shrink tile to fit into MALL Capacity ---
-  const size_t a_bytes = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
-  const size_t b_bytes = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
+  const auto a_bytes = data_type_to_bytes(problem.a_dtype);
+  const auto b_bytes = data_type_to_bytes(problem.b_dtype);
 
-  auto calculate_footprint = [&](size_t tile_m, size_t tile_n) {
-    size_t a_footprint = tile_m * config.mt.mk() * a_bytes;
-    size_t b_footprint = tile_n * config.mt.nk() * b_bytes;
+  auto calculate_footprint = [&](auto tile_m, auto tile_n) {
+    auto a_footprint = tile_m * config.mt.mk() * a_bytes;
+    auto b_footprint = tile_n * config.mt.nk() * b_bytes;
     return a_footprint + b_footprint;
   };
 
@@ -533,8 +533,8 @@ double compute_l2_hit_rate_global(const problem_t& problem,
 
   // 2. Calculate the working set size for one full pass of global reuse
   // This is the data needed by one full column of CUs (for A) and one full row (for B).
-  const double a_bytes = static_cast<double>(data_type_to_bytes(problem.a_dtype));
-  const double b_bytes = static_cast<double>(data_type_to_bytes(problem.b_dtype));
+  const double a_bytes = data_type_to_bytes(problem.a_dtype);
+  const double b_bytes = data_type_to_bytes(problem.b_dtype);
 
   const double a_working_set           = static_cast<double>(grid_m * config.mt.mk()) * a_bytes;
   const double b_working_set           = static_cast<double>(grid_n * config.mt.nk()) * b_bytes;
@@ -630,8 +630,8 @@ double compute_memory_latency(const problem_t& problem,
 
   size_t Ld_A_value  = MT_M_rounded_128bytes * MT_K_rounded_128bytes;
   size_t Ld_B_value  = MT_N_rounded_128bytes * MT_K_rounded_128bytes;
-  size_t Ld_CU_bytes = (Ld_A_value * static_cast<size_t>(a_bytes))     // A Bytes
-                       + (Ld_B_value * static_cast<size_t>(b_bytes));  // B Bytes
+  auto Ld_CU_bytes = (Ld_A_value * a_bytes)     // A Bytes
+                       + (Ld_B_value * b_bytes);  // B Bytes
 
   // Logic for block scaled datatypes (Assuming BS=32 and 8-bit scales)
   // TODO This is technically wrong, need separate flag to enable MX so we can differentiate FP8
@@ -755,8 +755,7 @@ double compute_tile_latency(const problem_t& problem,
 
   const auto a_bits    = datatype_to_bits(problem.a_dtype);
   const auto b_bits    = datatype_to_bits(problem.b_dtype);
-  const size_t a_bytes = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
-  const size_t d_bytes = static_cast<size_t>(data_type_to_bytes(problem.d_dtype));
+  const auto d_bytes = data_type_to_bytes(problem.d_dtype);
 
   // 1) Compute per-tile latencies
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
@@ -786,7 +785,7 @@ double compute_tile_latency(const problem_t& problem,
   size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
 
   double L_epilogue = (static_cast<double>(num_active_cus / splitting_factor) *
-                       MT_M_rounded_128bytes * MT_N * static_cast<double>(d_bytes)) /
+                       MT_M_rounded_128bytes * MT_N * d_bytes) /
                       mem_bw_occ_limited;
   // One compute iteration happens in the prologue
   L_epilogue += L_compute * effective_tile_penalty;
@@ -936,7 +935,6 @@ double compute_total_latency(const problem_t& problem,
   const int a_bits  = datatype_to_bits(problem.a_dtype);
   const int b_bits  = datatype_to_bits(problem.b_dtype);
   const int a_bytes = data_type_to_bytes(problem.a_dtype);
-  const int d_bytes = data_type_to_bytes(problem.d_dtype);
 
   if (get_runtime_options(config).debug_enabled) {
     config.logger.log(
@@ -964,8 +962,8 @@ double compute_total_latency(const problem_t& problem,
     // Use Dot2 only for M < 3
     if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
 
-    size_t K_mod_128bytes    = K * a_bytes % 128;
-    size_t MT_K_mod_128bytes = MT_K * a_bytes % 128;
+    size_t K_mod_128bytes    = K * a_bits % 1024;
+    size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
     if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
       // avoid division by 0 if K == 0
       if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
@@ -1017,7 +1015,7 @@ double compute_total_latency(const problem_t& problem,
 
     //  Heuristics for TF32
     if (tf32_emu) {
-      double bytes_per_element = static_cast<double>(a_bytes);
+      double bytes_per_element = a_bytes;
       double arith             = emulated_tf32_arithmetic_intensity(M, N, K, bytes_per_element);
       double compute_threshold = 1000;  // threshold empirically determined.
 
