@@ -36,8 +36,12 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
+    // ProblemConfig: (dataTypeAB, macM, macN, macK, m, n, k, numWGs)
+    using ProblemConfig = std::tuple<rocRoller::DataType, int, int, int, int, int, int, int>;
+
     class StreamKMultipleFixupsTestGPU
-        : public BaseGEMMContextFixture<std::tuple<StreamKMode,
+        : public BaseGEMMContextFixture<std::tuple<ProblemConfig,
+                                                   StreamKMode,
                                                    SolutionParams::LoadPath, /* loadPathA */
                                                    SolutionParams::LoadPath, /* loadPathB */
                                                    bool /* storeLDSD */>>
@@ -67,46 +71,55 @@ namespace GEMMTests
     {
     };
 
-    TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMMFP16)
+    TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMM)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMFP16 test: CDNA1 not supported";
+            GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
         }
+
+        auto [problemConfig, mode, loadPathA, loadPathB, storeLDSD] = std::get<1>(GetParam());
+        auto [dataTypeAB, macM, macN, macK, m, n, k, numWGs]        = problemConfig;
 
         GEMMProblem gemm;
 
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.macM   = macM;
+        gemm.macN   = macN;
+        gemm.macK   = macK;
+        gemm.m      = m;
+        gemm.n      = n;
+        gemm.k      = k;
+        gemm.numWGs = numWGs;
 
-        gemm.macM = 128;
-        gemm.macN = 128;
-        gemm.macK = 16;
-
-        gemm.waveK = 8;
+        if(dataTypeAB == DataType::Half)
+        {
+            gemm.waveK = 8;
+        }
 
         gemm.workgroupSizeX = 128;
         gemm.workgroupSizeY = 2;
-
-        gemm.numWGs = 128;
-
-        auto numTilesM = 1;
-        auto numTilesN = 2;
-        auto numTilesK = 249;
-
-        gemm.m = numTilesM * gemm.macM;
-        gemm.n = numTilesN * gemm.macN;
-        gemm.k = numTilesK * gemm.macK;
 
         // assert that the number of output tiles is smaller than number of WGs
         // which means there is not enough data-parallel tiles, and has to split
         // K dimension into multiple tiles
         ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
 
-        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
-            = std::get<1>(GetParam());
+        gemm.streamK   = mode;
+        gemm.loadPathA = loadPathA;
+        gemm.loadPathB = loadPathB;
+        gemm.storeLDSD = storeLDSD;
 
-        basicGEMM<Half>(gemm);
+        switch(dataTypeAB)
+        {
+        case DataType::Half:
+            basicGEMM<Half>(gemm, false, false, 100);
+            break;
+        case DataType::Float:
+            basicGEMM<float>(gemm, false, false, 100);
+            break;
+        default:
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. ", toString(dataTypeAB)));
+        }
     }
 
     TEST_P(StreamKWGMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
@@ -220,6 +233,17 @@ namespace GEMMTests
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(
+                ::testing::Values(
+                    // ProblemConfig: (dataTypeAB, macM, macN, macK, m, n, k, numWGs)
+                    ProblemConfig{rocRoller::DataType::Half, 128, 128, 16, 128, 256, 15936, 128},
+                    ProblemConfig{rocRoller::DataType::Float,
+                                  64,
+                                  64,
+                                  64,
+                                  256,
+                                  256,
+                                  16384,
+                                  256}), /* problemConfig */
                 ::testing::Values(
                     StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,

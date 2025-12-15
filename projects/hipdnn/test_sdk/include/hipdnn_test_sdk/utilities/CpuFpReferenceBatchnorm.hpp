@@ -219,12 +219,15 @@ public:
               class ComputeDataType = MeanVarianceDataType>
     static void backward(const hipdnn_sdk::utilities::TensorBase<DyDataType>& dy,
                          const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
-                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& mean,
-                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
                          const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
                          hipdnn_sdk::utilities::TensorBase<DxDataType>& dx,
                          hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
-                         hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias)
+                         hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* mean
+                         = nullptr,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance
+                         = nullptr,
+                         double epsilon = 1e-5)
     {
         if(x.dims().size() < 2)
         {
@@ -232,9 +235,15 @@ public:
                 "Batchnorm backward requires at least 2D tensor (batch and channel).");
         }
 
+        if((mean == nullptr) != (invVariance == nullptr))
+        {
+            throw std::runtime_error("Batchnorm backward requires both mean and invVariance to be "
+                                     "provided, or neither.");
+        }
+
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
-        //Cant cast directly from int64 to half or bloat16 so cast to float first.
         auto nhwF = hipdnn_sdk::utilities::staticCast<ComputeDataType>(elementsPerChannel);
+        auto epsilonCompute = hipdnn_sdk::utilities::staticCast<ComputeDataType>(epsilon);
 
         // Include batch dimension with spatial dimensions for iteration
         std::vector<int64_t> batchAndSpatial = {x.dims()[0]}; // batch dimension
@@ -242,10 +251,44 @@ public:
 
         auto batchnormBwdFunc = [&](const std::vector<int64_t>& indices) {
             auto cidx = indices[0];
-            auto channelMean
-                = hipdnn_sdk::utilities::staticCast<ComputeDataType>(mean.getHostValue(0, cidx));
-            auto channelInvVariance = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
-                invVariance.getHostValue(0, cidx)); // 1 / sqrt(var + eps)
+
+            ComputeDataType channelMean;
+            ComputeDataType channelInvVariance;
+
+            // Compute mean and invVariance if either are not provided
+            if(mean == nullptr || invVariance == nullptr)
+            {
+                auto meanAccum = hipdnn_sdk::utilities::staticCast<ComputeDataType>(0.0);
+                auto varianceAccum = hipdnn_sdk::utilities::staticCast<ComputeDataType>(0.0);
+
+                // Calculate mean and variance for this channel
+                hipdnn_sdk::utilities::iterateAlongDimensions(
+                    batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                        auto fullIndices = hipdnn_sdk::utilities::buildTensorIndices(
+                            batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+                        auto inVal = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                            x.getHostValue(fullIndices));
+                        meanAccum = meanAccum + inVal;
+                        varianceAccum = varianceAccum + (inVal * inVal);
+                    });
+
+                channelMean = meanAccum / nhwF;
+
+                ComputeDataType calculatedVariance
+                    = (varianceAccum / nhwF) - (channelMean * channelMean);
+
+                ComputeDataType denominator = sqrtInternal(calculatedVariance + epsilonCompute);
+                channelInvVariance
+                    = hipdnn_sdk::utilities::staticCast<ComputeDataType>(1.0) / denominator;
+            }
+            else
+            {
+                channelMean = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                    mean->getHostValue(0, cidx));
+                channelInvVariance = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                    invVariance->getHostValue(0, cidx));
+            }
+
             auto channelScale
                 = hipdnn_sdk::utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx));
 
@@ -310,6 +353,30 @@ public:
         dx.memory().markHostModified();
         dscale.memory().markHostModified();
         dbias.memory().markHostModified();
+    }
+
+    // Backwards compatible overload for old function signature
+    template <class DyDataType,
+              class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType = ScaleBiasDataType,
+              class DxDataType = XDataType,
+              class ComputeDataType = MeanVarianceDataType>
+    static void backward(const hipdnn_sdk::utilities::TensorBase<DyDataType>& dy,
+                         const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& mean,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
+                         const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+                         hipdnn_sdk::utilities::TensorBase<DxDataType>& dx,
+                         hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
+                         hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias)
+    {
+        backward<DyDataType,
+                 XDataType,
+                 ScaleBiasDataType,
+                 MeanVarianceDataType,
+                 DxDataType,
+                 ComputeDataType>(dy, x, scale, dx, dscale, dbias, &mean, &invVariance);
     }
 
 private:
