@@ -839,7 +839,7 @@ namespace rocRoller
                 {
                     co_yield m_context->mem()->moveData<Dir>(
                         info.kind,
-                        colOffsetReg->subset({0}),
+                        colOffsetReg,
                         info.data->element(
                             {static_cast<int>((i * info.n + j) / info.packedAmount)}),
                         info.offset,
