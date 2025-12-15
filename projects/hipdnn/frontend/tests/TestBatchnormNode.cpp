@@ -11,9 +11,17 @@ using namespace hipdnn_frontend::graph;
 TEST(TestBatchnormNode, PreValidateNode)
 {
     BatchnormAttributes batchnormAttributes;
-    batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
     batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
 
@@ -63,6 +71,14 @@ TEST(TestBatchnormNode, PreValidateNodeMissingValues)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    // Set proper dimensions for the final test to pass with enhanced validation
+    auto xTensor = batchnormAttributes.get_x();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+
+    auto scaleTensor = batchnormAttributes.get_scale();
+    scaleTensor->set_dim({1, 64, 1, 1});
+
     batchnormAttributesCopy = batchnormAttributes;
     BatchnormNode nodeWithAllValues(std::move(batchnormAttributesCopy), graphAttributes);
 
@@ -277,7 +293,7 @@ TEST(TestBatchnormNode, PreValidateNodeRejectsInvalidSpatialDimensions)
     BatchnormAttributes batchnormAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({1, 256, 1, 1}); // Invalid: N*H*W = 1*1*1 = 1
+    xTensor->set_dim({1, 256, 1, 1}).set_stride({256, 1, 1, 1}); // Invalid: N*H*W = 1*1*1 = 1
     batchnormAttributes.set_x(xTensor);
 
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
@@ -303,7 +319,7 @@ TEST(TestBatchnormNode, PreValidateNodeAcceptsValidSpatialDimensions)
     BatchnormAttributes batchnormAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({2, 3, 2, 2}); // Valid: N*H*W = 2*2*2 = 8
+    xTensor->set_dim({2, 3, 2, 2}).set_stride({12, 4, 2, 1}); // Valid: N*H*W = 2*2*2 = 8
     batchnormAttributes.set_x(xTensor);
 
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
@@ -314,6 +330,248 @@ TEST(TestBatchnormNode, PreValidateNodeAcceptsValidSpatialDimensions)
 
     batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+// ============================================================================
+// Shape and Dimension Validation Tests
+// ============================================================================
+
+TEST(TestBatchnormNode, PreValidateRejectsMismatchedInputOutputShapes)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({2, 64, 16, 16}); // Mismatched spatial dimensions
+    batchnormAttributes.set_y(yTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("dimension mismatch") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsMismatchedChannelDimensions)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("channel dimension") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsInvalidScaleTensorShape)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32}); // Should be [1, 64, 1, 1] for spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("Scale tensor") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsInvalidBiasTensorShape)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({2, 64, 1, 1}); // Batch dimension should be 1
+    batchnormAttributes.set_bias(biasTensor);
+
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("Bias tensor") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsInvalidMeanTensorShape)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 32, 1, 1}); // Wrong channel count
+    batchnormAttributes.set_mean(meanTensor);
+
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("Mean tensor") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsInvalidInvVarianceTensorShape)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 64, 2, 1}); // Spatial dimension should be 1
+    batchnormAttributes.set_inv_variance(invVarTensor);
+
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("Inverse variance tensor") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsIncompleteRunningStats)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    // Only provide some running stats, not all
+    auto prevRunningMean = std::make_shared<TensorAttributes>();
+    prevRunningMean->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_prev_running_mean(prevRunningMean);
+
+    // Missing: prev_running_variance, next_running_mean, next_running_variance
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("running statistics") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateAcceptsCompleteRunningStats)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    // Provide all running stats
+    auto prevRunningMean = std::make_shared<TensorAttributes>();
+    prevRunningMean->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_prev_running_mean(prevRunningMean);
+
+    auto prevRunningVar = std::make_shared<TensorAttributes>();
+    prevRunningVar->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_prev_running_variance(prevRunningVar);
+
+    auto nextRunningMean = std::make_shared<TensorAttributes>();
+    nextRunningMean->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_next_running_mean(nextRunningMean);
+
+    auto nextRunningVar = std::make_shared<TensorAttributes>();
+    nextRunningVar->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_next_running_variance(nextRunningVar);
 
     GraphAttributes graphAttributes;
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);

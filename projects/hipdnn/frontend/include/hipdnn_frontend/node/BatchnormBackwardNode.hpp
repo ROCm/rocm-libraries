@@ -27,42 +27,129 @@ public:
 
     Error pre_validate_node() const override
     {
-        if(!attributes.get_dy())
+        // ====================================================================
+        // BATCH NORMALIZATION BACKWARD VALIDATION
+        // ====================================================================
+        // Algorithm Overview:
+        // Given dy (gradient of loss w.r.t. y), compute gradients w.r.t. inputs:
+        //
+        // For each channel c, using saved forward stats (mean_c, invStd_c):
+        //   xhat[n,c,h,w] = (x[n,c,h,w] - mean_c) * invStd_c
+        //
+        // Compute parameter gradients (accumulated over N,H,W):
+        //   dγ_c = Σ_{n,h,w} xhat[n,c,h,w] * dy[n,c,h,w]
+        //   dβ_c = Σ_{n,h,w} dy[n,c,h,w]
+        //
+        // Compute input gradient:
+        //   dx[n,c,h,w] involves chain rule through normalization
+        //   (requires saved mean_c and invStd_c from forward pass)
+        // ====================================================================
+
+        // SECTION 1: Validate Required Tensor Pointers
+        HIPDNN_RETURN_IF_FALSE(attributes.get_dy(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormBackwardNode missing dy for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormBackwardNode missing x for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormBackwardNode missing scale for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_dx(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormBackwardNode missing dx for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_dscale(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormBackwardNode missing dscale for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_dbias(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormBackwardNode missing dbias for pre-validation");
+
+        // Get tensor references
+        auto dy = attributes.get_dy();
+        auto x = attributes.get_x();
+        auto dx = attributes.get_dx();
+        auto scale = attributes.get_scale();
+        auto dscale = attributes.get_dscale();
+        auto dbias = attributes.get_dbias();
+
+        // SECTION 2: Validate Input Tensor Properties
+        // Why: Both x (from forward pass) and dy (gradient from next layer) are required
+        // for backward computation. They must be at least 2D (N, C).
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(dy, 2, "Gradient input tensor (dy)"));
+
+        HIPDNN_RETURN_IF_FALSE(
+            x->validate_dims_and_strides_set_and_positive(),
+            ErrorCode::INVALID_VALUE,
+            "BatchnormBackwardNode: Input tensor (x) dimensions and strides must be set and "
+            "positive");
+
+        HIPDNN_RETURN_IF_FALSE(
+            dy->validate_dims_and_strides_set_and_positive(),
+            ErrorCode::INVALID_VALUE,
+            "BatchnormBackwardNode: Gradient input tensor (dy) dimensions and strides must be "
+            "set and positive");
+
+        // SECTION 3: Validate Tensor Shape Consistency
+        // Why: Gradients flow through the same computational graph as forward pass.
+        // - dy has same shape as y (and therefore x) from forward pass
+        // - dx has same shape as x (gradient w.r.t. input)
+        // All gradient tensors must match the data tensor shapes they correspond to.
+        HIPDNN_CHECK_ERROR(
+            validateTensorShapesMatch(x, dy, "Input tensor (x)", "Gradient input tensor (dy)"));
+
+        HIPDNN_CHECK_ERROR(
+            validateTensorShapesMatch(x, dx, "Input tensor (x)", "Gradient output tensor (dx)"));
+
+        // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
+        // Why: Parameter gradients (dγ_c, dβ_c) are accumulated per-channel over (N,H,W):
+        //   dγ_c = Σ_{n,h,w} xhat[n,c,h,w] * dy[n,c,h,w]  -> shape [1, C, 1, 1]
+        //   dβ_c = Σ_{n,h,w} dy[n,c,h,w]                   -> shape [1, C, 1, 1]
+        // Scale from forward pass is also per-channel [1, C, 1, 1].
+        // Saved statistics (mean_c, invStd_c) are per-channel for backward computation.
+        auto& xDims = x->get_dim();
+        if(!xDims.empty() && xDims.size() >= 2)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormBackwardNode missing dy for pre-validation"};
-        }
-        if(!attributes.get_x())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormBackwardNode missing x for pre-validation"};
-        }
-        if(!attributes.get_scale())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormBackwardNode missing scale for pre-validation"};
-        }
-        if(!attributes.get_dx())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormBackwardNode missing dx for pre-validation"};
-        }
-        if(!attributes.get_dscale())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormBackwardNode missing dscale for pre-validation"};
-        }
-        if(!attributes.get_dbias())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormBackwardNode missing dbias for pre-validation"};
+            int64_t channels = xDims[1];
+
+            // Validate scale has correct channel-only shape
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+
+            // Validate dscale has correct channel-only shape
+            HIPDNN_CHECK_ERROR(
+                validateChannelOnlyTensorShape(dscale, channels, "Scale gradient tensor (dscale)"));
+
+            // Validate dbias has correct channel-only shape
+            HIPDNN_CHECK_ERROR(
+                validateChannelOnlyTensorShape(dbias, channels, "Bias gradient tensor (dbias)"));
+
+            // Validate optional mean tensor
+            auto mean = attributes.get_mean();
+            if(mean)
+            {
+                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+            }
+
+            // Validate optional inv_variance tensor
+            auto invVar = attributes.get_inv_variance();
+            if(invVar)
+            {
+                HIPDNN_CHECK_ERROR(
+                    validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
+            }
         }
 
-        // Validate backward spatial dimension constraints
-        HIPDNN_CHECK_ERROR(validateBatchNormTrainingSpatialDimensions(
-            attributes.get_x(), attributes.get_scale(), "Batch normalization backward"));
+        // SECTION 5: Validate Spatial Mode Constraints
+        HIPDNN_CHECK_ERROR(
+            validateBatchNormTrainingSpatialDimensions(x, scale, "Batch normalization backward"));
 
-        return {};
+        return {ErrorCode::OK, ""};
     }
 
     Error infer_properties_node() override

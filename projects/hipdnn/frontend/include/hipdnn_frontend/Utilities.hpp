@@ -170,6 +170,206 @@ inline Error
 
     return {ErrorCode::OK, ""};
 }
+
+// Validates tensor has minimum required dimensions
+inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttributes>& tensor,
+                                             size_t minDims,
+                                             const std::string& tensorName)
+{
+    if(!tensor)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " is not set"};
+    }
+
+    const auto& dims = tensor->get_dim();
+    if(dims.empty())
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " dimensions are not set"};
+    }
+
+    HIPDNN_RETURN_IF_LT(dims.size(),
+                        minDims,
+                        ErrorCode::INVALID_VALUE,
+                        tensorName + " must have at least " + std::to_string(minDims)
+                            + " dimensions, but has " + std::to_string(dims.size()));
+
+    return {ErrorCode::OK, ""};
+}
+
+// Validates two tensors have matching shapes
+inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& tensor1,
+                                       const std::shared_ptr<TensorAttributes>& tensor2,
+                                       const std::string& tensor1Name,
+                                       const std::string& tensor2Name)
+{
+    if(!tensor1 || !tensor2)
+    {
+        return {ErrorCode::OK, ""}; // Skip if either tensor not set yet
+    }
+
+    const auto& dims1 = tensor1->get_dim();
+    const auto& dims2 = tensor2->get_dim();
+
+    if(dims1.empty() || dims2.empty())
+    {
+        return {ErrorCode::OK, ""}; // Skip if dimensions not set yet
+    }
+
+    if(dims1.size() != dims2.size())
+    {
+        std::string errorMsg = tensor1Name;
+        errorMsg += " and ";
+        errorMsg += tensor2Name;
+        errorMsg += " must have the same number of dimensions. Got ";
+        errorMsg += std::to_string(dims1.size());
+        errorMsg += " vs ";
+        errorMsg += std::to_string(dims2.size());
+        return {ErrorCode::INVALID_VALUE, std::move(errorMsg)};
+    }
+
+    for(size_t i = 0; i < dims1.size(); ++i)
+    {
+        if(dims1[i] != dims2[i])
+        {
+            std::string errorMsg = tensor1Name;
+            errorMsg += " and ";
+            errorMsg += tensor2Name;
+            errorMsg += " dimension mismatch at index ";
+            errorMsg += std::to_string(i);
+            errorMsg += ". Got ";
+            errorMsg += std::to_string(dims1[i]);
+            errorMsg += " vs ";
+            errorMsg += std::to_string(dims2[i]);
+            return {ErrorCode::INVALID_VALUE, std::move(errorMsg)};
+        }
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
+// Validates tensor has channel-only shape [1, C, 1, 1, ...] for batch normalization parameters
+inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttributes>& tensor,
+                                            int64_t expectedChannels,
+                                            const std::string& tensorName)
+{
+    if(!tensor)
+    {
+        return {ErrorCode::OK, ""}; // Skip if tensor not set
+    }
+
+    const auto& dims = tensor->get_dim();
+    if(dims.empty())
+    {
+        return {ErrorCode::OK, ""}; // Skip if dimensions not set yet
+    }
+
+    HIPDNN_RETURN_IF_LT(dims.size(),
+                        2,
+                        ErrorCode::INVALID_VALUE,
+                        tensorName + " must have at least 2 dimensions for batch normalization");
+
+    // Check batch dimension is 1
+    HIPDNN_RETURN_IF_NE(dims[0],
+                        1,
+                        ErrorCode::INVALID_VALUE,
+                        tensorName + " batch dimension (index 0) must be 1, got "
+                            + std::to_string(dims[0]));
+
+    // Check channel dimension matches expected
+    HIPDNN_RETURN_IF_NE(dims[1],
+                        expectedChannels,
+                        ErrorCode::INVALID_VALUE,
+                        tensorName + " channel dimension (index 1) must be "
+                            + std::to_string(expectedChannels) + ", got "
+                            + std::to_string(dims[1]));
+
+    // Check all spatial dimensions are 1
+    for(size_t i = 2; i < dims.size(); ++i)
+    {
+        HIPDNN_RETURN_IF_NE(dims[i],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            tensorName + " spatial dimension at index " + std::to_string(i)
+                                + " must be 1 for spatial batch normalization, got "
+                                + std::to_string(dims[i]));
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
+// Validates channel dimension matches between two tensors
+inline Error validateChannelDimensionMatch(const std::shared_ptr<TensorAttributes>& tensor1,
+                                           const std::shared_ptr<TensorAttributes>& tensor2,
+                                           const std::string& tensor1Name,
+                                           const std::string& tensor2Name)
+{
+    if(!tensor1 || !tensor2)
+    {
+        return {ErrorCode::OK, ""}; // Skip if either tensor not set
+    }
+
+    const auto& dims1 = tensor1->get_dim();
+    const auto& dims2 = tensor2->get_dim();
+
+    if(dims1.empty() || dims2.empty())
+    {
+        return {ErrorCode::OK, ""}; // Skip if dimensions not set yet
+    }
+
+    HIPDNN_RETURN_IF_LT(dims1.size(),
+                        2,
+                        ErrorCode::INVALID_VALUE,
+                        tensor1Name + " must have at least 2 dimensions");
+
+    HIPDNN_RETURN_IF_LT(dims2.size(),
+                        2,
+                        ErrorCode::INVALID_VALUE,
+                        tensor2Name + " must have at least 2 dimensions");
+
+    HIPDNN_RETURN_IF_NE(dims1[1],
+                        dims2[1],
+                        ErrorCode::INVALID_VALUE,
+                        tensor1Name + " and " + tensor2Name
+                            + " channel dimensions (index 1) must match. Got "
+                            + std::to_string(dims1[1]) + " vs " + std::to_string(dims2[1]));
+
+    return {ErrorCode::OK, ""};
+}
+
+// Validates scalar parameter tensor is properly configured
+inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& param,
+                                     const std::string& paramName)
+{
+    if(!param)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET, paramName + " parameter is not set"};
+    }
+
+    const auto& dims = param->get_dim();
+    if(dims.empty())
+    {
+        return {ErrorCode::OK, ""}; // Dimensions will be inferred, skip for now
+    }
+
+    // Scalar parameters should be single-element tensors
+    // Typically [1] or [1, 1, 1, 1] depending on how they're created
+    int64_t totalElements = 1;
+    for(auto dim : dims)
+    {
+        totalElements *= dim;
+    }
+
+    HIPDNN_RETURN_IF_NE(totalElements,
+                        1,
+                        ErrorCode::INVALID_VALUE,
+                        paramName + " must be a scalar (single element), but has "
+                            + std::to_string(totalElements) + " elements");
+
+    // Note: We can't validate the actual value (e.g., epsilon > 0) at pre-validation time
+    // since the data isn't available yet. This validation is structural only.
+
+    return {ErrorCode::OK, ""};
+}
 }
 
 inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)

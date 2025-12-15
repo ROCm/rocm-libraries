@@ -4,6 +4,7 @@
 
 #include "Node.hpp"
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
@@ -24,38 +25,104 @@ public:
 
     Error pre_validate_node() const override
     {
-        if(!attributes.get_x())
+        // ====================================================================
+        // BATCH NORMALIZATION INFERENCE VALIDATION
+        // ====================================================================
+        // Algorithm Overview:
+        // During inference, BN uses PRE-COMPUTED running statistics from training.
+        // For each channel c, using saved running stats (runMean_c, runVar_c):
+        //
+        // Normalizes: xhat[n,c,h,w] = (x[n,c,h,w] - runMean_c) / sqrt(runVar_c + ε)
+        // Transforms: y[n,c,h,w] = γ_c * xhat[n,c,h,w] + β_c
+        //
+        // Key difference from training:
+        // - NO batch statistics computed (no dependence on current batch)
+        // - Uses saved runMean_c and runVar_c (estimated from training)
+        // - NO running stats updates (read-only operation)
+        // ====================================================================
+
+        // SECTION 1: Validate Required Tensor Pointers
+        HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormInferenceNode missing x for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormInferenceNode missing scale for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_bias(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormInferenceNode missing bias for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormInferenceNode missing y for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_mean(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormInferenceNode missing mean for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_inv_variance(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormInferenceNode missing inv_variance for pre-validation");
+
+        // Get tensor references
+        auto x = attributes.get_x();
+        auto y = attributes.get_y();
+        auto scale = attributes.get_scale();
+        auto bias = attributes.get_bias();
+        auto mean = attributes.get_mean();
+        auto invVar = attributes.get_inv_variance();
+
+        // SECTION 2: Validate Input Tensor Properties
+        // Why: Input must be at least 2D (N, C) for per-channel normalization.
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
+
+        HIPDNN_RETURN_IF_FALSE(
+            x->validate_dims_and_strides_set_and_positive(),
+            ErrorCode::INVALID_VALUE,
+            "BatchnormInferenceNode: Input tensor (x) dimensions and strides must be set and "
+            "positive");
+
+        // SECTION 3: Validate Output Tensor Shape Consistency
+        // Why: BN preserves tensor shape during inference just as in training.
+        // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
+        HIPDNN_CHECK_ERROR(
+            validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
+
+        // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
+        // Why: All parameters are per-channel with shape [1, C, 1, 1]:
+        // - mean_c and var_c: Running statistics saved from training
+        // - γ_c (scale) and β_c (bias): Learned parameters from training
+        // These are the same parameters used during training, now fixed for inference.
+        auto& xDims = x->get_dim();
+        if(!xDims.empty() && xDims.size() >= 2)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormInferenceNode missing x for pre-validation"};
-        }
-        if(!attributes.get_scale())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormInferenceNode missing scale for pre-validation"};
-        }
-        if(!attributes.get_bias())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormInferenceNode missing bias for pre-validation"};
-        }
-        if(!attributes.get_y())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormInferenceNode missing y for pre-validation"};
-        }
-        if(!attributes.get_mean())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormInferenceNode missing mean for pre-validation"};
-        }
-        if(!attributes.get_inv_variance())
-        {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "BatchnormInferenceNode missing inv_variance for pre-validation"};
+            int64_t channels = xDims[1];
+
+            // Validate scale has correct channel-only shape
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+
+            // Validate bias has correct channel-only shape
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+
+            // Validate mean has correct channel-only shape
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+
+            // Validate inv_variance has correct channel-only shape
+            HIPDNN_CHECK_ERROR(
+                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
         }
 
-        return {};
+        // SECTION 5: Validate Spatial Mode Constraints
+        // Why: Inference uses running stats computed during training with spatial mode.
+        // While inference technically doesn't compute statistics from the current batch,
+        // we validate spatial consistency to ensure the saved stats were computed with
+        // the same assumptions (N*H*W > 1 during training).
+        HIPDNN_CHECK_ERROR(
+            validateBatchNormTrainingSpatialDimensions(x, scale, "Batch normalization inference"));
+
+        return {ErrorCode::OK, ""};
     }
 
     Error infer_properties_node() override
