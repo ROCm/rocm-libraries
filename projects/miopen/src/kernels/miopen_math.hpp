@@ -26,12 +26,10 @@
 
 #pragma once
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
-#include <hip/hip_bf16.h>
-#include <hip/hip_fp16.h>
-#endif
-
+#include "bfloat16_dev.hpp"
+#include "float_types.h"
 #include "vector_types.hpp"
+#include <type_traits>
 
 namespace miopen {
 namespace detail {
@@ -92,74 +90,87 @@ __forceinline__ __device__ _Float16 fma(_Float16 a, _Float16 b, _Float16 c)
 // BFloat16 overloads
 //=============================================================================
 
+using bf16_ushort_conversion_t = union
+{
+    unsigned short int usi;
+    __bf16 bf16;
+};
+
 __forceinline__ __device__ ushort exp(ushort x)
 {
-    return __bfloat16_as_ushort(hexp(__ushort_as_bfloat16(x)));
+    return float_to_bfloat16(exp(bfloat16_to_float(x)));
 }
+
 __forceinline__ __device__ ushort log(ushort x)
 {
-    return __bfloat16_as_ushort(hlog(__ushort_as_bfloat16(x)));
+    return float_to_bfloat16(log(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort sqrt(ushort x)
 {
-    return __bfloat16_as_ushort(hsqrt(__ushort_as_bfloat16(x)));
+    return float_to_bfloat16(sqrt(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort rsqrt(ushort x)
 {
-    return __bfloat16_as_ushort(hrsqrt(__ushort_as_bfloat16(x)));
+    return float_to_bfloat16(rsqrt(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort sin(ushort x)
 {
-    return __bfloat16_as_ushort(hsin(__ushort_as_bfloat16(x)));
+    return float_to_bfloat16(sin(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort cos(ushort x)
 {
-    return __bfloat16_as_ushort(hcos(__ushort_as_bfloat16(x)));
+    return float_to_bfloat16(cos(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort fabs(ushort x)
 {
-    return __bfloat16_as_ushort(__habs(__ushort_as_bfloat16(x)));
+    return float_to_bfloat16(__habs(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort fmax(ushort x, ushort y)
 {
-    return __bfloat16_as_ushort(__float2bfloat16(fmax(__bfloat162float(__ushort_as_bfloat16(x)),
-                                                      __bfloat162float(__ushort_as_bfloat16(y)))));
+    return float_to_bfloat16(fmax(bfloat16_to_float(x), bfloat16_to_float(y)));
 }
 __forceinline__ __device__ ushort fmin(ushort x, ushort y)
 {
-    return __bfloat16_as_ushort(__float2bfloat16(fmin(__bfloat162float(__ushort_as_bfloat16(x)),
-                                                      __bfloat162float(__ushort_as_bfloat16(y)))));
+    return float_to_bfloat16(fmin(bfloat16_to_float(x), bfloat16_to_float(y)));
 }
 
 __forceinline__ __device__ ushort pow(ushort x, ushort y)
 {
-    __hip_bfloat16 bf_x = __ushort_as_bfloat16(x);
-    __hip_bfloat16 bf_y = __ushort_as_bfloat16(y);
-    return __bfloat16_as_ushort(hexp(__hmul(bf_y, hlog(bf_x))));
+    bf16_ushort_conversion_t bf_x{x};
+    bf16_ushort_conversion_t bf_y{y};
+
+    bf16_ushort_conversion_t bf_mul{.bf16 = bf_x.bf16 * bf_y.bf16};
+
+    return float_to_bfloat16(exp(bfloat16_to_float(bf_mul.usi)));
 }
 __forceinline__ __device__ ushort tan(ushort x)
 {
-    __hip_bfloat16 bf_x = __ushort_as_bfloat16(x);
-    return __bfloat16_as_ushort(__hdiv(hsin(bf_x), hcos(bf_x)));
+    bf16_ushort_conversion_t bf_x{x};
+    bf16_ushort_conversion_t sinVal{float_to_bfloat16(sin(float_to_bfloat16(bf_x.usi)))};
+    bf16_ushort_conversion_t cosVal{float_to_bfloat16(cos(float_to_bfloat16(bf_x.usi)))};
+
+    return bf16_ushort_conversion_t{.bf16 = sinVal.bf16 / cosVal.bf16}.usi;
 }
 __forceinline__ __device__ ushort tanh(ushort x)
 {
-    __hip_bfloat16 bf_x        = __ushort_as_bfloat16(x);
-    __hip_bfloat16 two         = __float2bfloat16(2.0f);
-    __hip_bfloat16 one         = __float2bfloat16(1.0f);
-    __hip_bfloat16 exp2x       = hexp(__hmul(two, bf_x));
-    __hip_bfloat16 numerator   = __hsub(exp2x, one);
-    __hip_bfloat16 denominator = __hadd(exp2x, one);
-    return __bfloat16_as_ushort(__hdiv(numerator, denominator));
+    bf16_ushort_conversion_t bf_x{x};
+    bf16_ushort_conversion_t two{float_to_bfloat16(2.0f)};
+    bf16_ushort_conversion_t one{float_to_bfloat16(1.0f)};
+    bf16_ushort_conversion_t exp2x{exp(float_to_bfloat16(two.bf16 * bf_x.bf16))};
+    bf16_ushort_conversion_t numerator{.bf16 = exp2x.bf16 - one.bf16};
+    bf16_ushort_conversion_t denominator{.bf16 = exp2x.bf16 + one.bf16};
+    return bf16_ushort_conversion_t{.bf16 = numerator.bf16 / denominator.bf16}.usi;
 }
 
 __forceinline__ __device__ ushort fma(ushort a, ushort b, ushort c)
 {
-    __hip_bfloat16 bf_a = __ushort_as_bfloat16(a);
-    __hip_bfloat16 bf_b = __ushort_as_bfloat16(b);
-    __hip_bfloat16 bf_c = __ushort_as_bfloat16(c);
+    bf16_ushort_conversion_t bf_a{a};
+    bf16_ushort_conversion_t bf_b{b};
+    bf16_ushort_conversion_t bf_c{c};
 
-    return __hfma(bf_a, bf_b, bf_c);
+    return bf16_ushort_conversion_t{.bf16 =
+                                        __builtin_elementwise_fma(bf_a.bf16, bf_b.bf16, bf_c.bf16)}
+        .usi;
 }
 
 //=============================================================================
