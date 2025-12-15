@@ -79,6 +79,14 @@ void near_check_general(int64_t        M,
                         host_vector<T> hGPU[],
                         double         abs_error);
 
+template <typename T, typename T_hpa = T>
+void near_check_mixed(int64_t                        M,
+                      int64_t                        N,
+                      int64_t                        lda,
+                      const std::remove_cv_t<T_hpa>* hCPU,
+                      const T*                       hGPU,
+                      double                         abs_error);
+
 // currently only used for half-precision comparisons in dot_ex tests
 template <class T>
 inline constexpr double error_tolerance = 0.0;

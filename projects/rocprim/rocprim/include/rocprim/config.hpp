@@ -169,6 +169,8 @@
         __builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") \
             || __builtin_amdgcn_processor_is("gfx1102")                                      \
             || __builtin_amdgcn_processor_is("gfx1103")                                      \
+            || __builtin_amdgcn_processor_is("gfx1152")                                      \
+            || __builtin_amdgcn_processor_is("gfx1153")                                      \
             || __builtin_amdgcn_processor_is("gfx11-generic")
     #define IS_RDNA2()                                                                       \
         __builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031") \
