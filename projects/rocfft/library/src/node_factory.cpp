@@ -602,8 +602,10 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
                && isEven(dist);
     };
 
-    if(realLength[0] % 2 == 0 && evenLengthStrideDistOk(nodeData.inStride, nodeData.iDist)
-       && evenLengthStrideDistOk(nodeData.outStride, nodeData.oDist))
+    // Check stride + dist on "real" side of the transform
+    if(realLength[0] % 2 == 0
+       && (nodeData.direction == -1 ? evenLengthStrideDistOk(nodeData.inStride, nodeData.iDist)
+                                    : evenLengthStrideDistOk(nodeData.outStride, nodeData.oDist)))
     {
         switch(nodeData.dimension)
         {
