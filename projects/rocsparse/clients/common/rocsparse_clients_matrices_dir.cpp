@@ -50,7 +50,7 @@ private:
 
         fs::path default_path = rocsparse_exepath();
 
-        std::vector<std::string> possible_relative_paths = {
+        static constexpr const char* possible_relative_paths[] = {
             // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
             "../matrices",
             // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
@@ -60,13 +60,10 @@ private:
         bool found = false;
         for(const auto& rel_path : possible_relative_paths)
         {
-            // Try to verify the directory exists by attempting to open a common matrix file
-            fs::path test_path = default_path / rel_path / "nos3.csr";
-            FILE*    test_file = fopen(test_path.c_str(), "r");
-            if(test_file)
+            fs::path test_path = default_path / rel_path;
+            if(fs::exists(test_path))
             {
-                fclose(test_file);
-                this->m_default_path = (default_path / rel_path).string() + "/";
+                this->m_default_path = test_path.string() + "/";
                 found                = true;
                 break;
             }

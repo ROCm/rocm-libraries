@@ -115,23 +115,20 @@ inline std::string get_filename(const std::string& matrix_filename)
     }
     else
     {
-        std::vector<fs::path> possible_paths = {
+        static constexpr const char* possible_relative_paths[] = {
             // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
-            fs::path(hipsparse_exepath()) / ".." / "matrices",
+            "../matrices",
             // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
-            fs::path(hipsparse_exepath()) / ".." / "clients" / "matrices",
+            "../clients/matrices",
         };
 
         bool found = false;
-        for(const auto& matrices_path : possible_paths)
+        for(const auto& rel_path : possible_relative_paths)
         {
-            // Try to verify the directory exists by attempting to open a common matrix file
-            std::string test_path = matrices_path.string() + "/nos3.csr";
-            FILE*       test_file = fopen(test_path.c_str(), "r");
-            if(test_file)
+            fs::path test_path = fs::path(hipsparse_exepath()) / rel_path;
+            if(fs::exists(test_path))
             {
-                fclose(test_file);
-                r     = matrices_path / matrix_filename_with_ext;
+                r     = test_path / matrix_filename_with_ext;
                 found = true;
                 break;
             }
