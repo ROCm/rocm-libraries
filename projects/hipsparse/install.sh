@@ -39,10 +39,10 @@ supported_distro( )
   fi
 
   case "${ID}" in
-    ubuntu|debian|centos|rhel|fedora|sles|opensuse-leap)
+    ubuntu|debian|centos|rhel|fedora|sles|opensuse-leap|almalinux|rocky|ol)
         true
         ;;
-    *)  printf "This script is currently supported on Ubuntu, Debian, CentOS, RHEL, Fedora, SLES, and OpenSUSE-Leap\n"
+    *)  printf "This script is currently supported on Ubuntu, Debian, CentOS, RHEL, Fedora, SLES, OpenSUSE-Leap, Alma Linux, Rocky Linux (rocky), and Oracle Linux (ol) (detected: ${ID})\n"
         exit 2
         ;;
   esac
@@ -149,7 +149,7 @@ install_packages( )
   local client_dependencies_fedora=( "gcc-gfortran" )
   local client_dependencies_sles=( "gcc-fortran" )
 
-  if [[ ( "${ID}" == "centos" ) || ( "${ID}" == "rhel" ) ]]; then
+  if [[ ( "${ID}" == "centos" ) || ( "${ID}" == "rhel" ) || ( "${ID}" == "almalinux" ) || ( "${ID}" == "rocky" ) || ( "${ID}" == "ol" ) ]]; then
     if [[ "${MAJORVERSION}" == "6" ]]; then
       library_dependencies_centos_6+=( "numactl" )
     else
@@ -178,7 +178,7 @@ install_packages( )
       install_apt_packages "${library_dependencies_ubuntu[@]}"
       ;;
 
-    centos|rhel)
+    centos|rhel|almalinux|rocky|ol)
 #     yum -y update brings *all* installed packages up to date
 #     without seeking user approval
 #     elevate_if_not_root yum -y update
@@ -430,7 +430,7 @@ fi
 cmake_executable=cmake
 
 case "${ID}" in
-  centos|rhel)
+  centos|rhel|almalinux|rocky|ol)
   cmake_executable=cmake3
   ;;
 esac
@@ -568,7 +568,7 @@ pushd .
       ubuntu|debian)
         elevate_if_not_root dpkg -i hipsparse[-\_]*.deb
       ;;
-      centos|rhel)
+      centos|rhel|almalinux|rocky|ol)
         elevate_if_not_root yum -y localinstall hipsparse-*.rpm
       ;;
       fedora)

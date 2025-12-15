@@ -109,7 +109,9 @@ class TestNameValidator:
         suite_name = parsed_match.group("suite")
         case_name = parsed_match.group("case")
 
-        reconstructed_testcase_name = f"{prefix + '/' if prefix else ''}{suite_name}.{case_name}"
+        reconstructed_testcase_name = (
+            f"{prefix + '/' if prefix else ''}{suite_name}.{case_name}"
+        )
 
         for keyword in self.FLATTENED_KEYWORDS:
             matches = re.findall(
@@ -209,11 +211,13 @@ class TestNameValidator:
                     if not line:
                         continue
 
-                    if line.endswith("."):
+                    if line.endswith(".") and not line.endswith("..."):
                         current_suite = line[:-1]
                     elif line and current_suite:
                         test_case = line.strip()
-                        test_names.append(f"{current_suite}.{test_case}")
+                        test_names.append(
+                            f"{current_suite}.{test_case.split("#")[0].strip()}"
+                        )
 
             except subprocess.TimeoutExpired:
                 print(f"Warning: Timeout running {executable}", file=sys.stderr)
@@ -407,7 +411,7 @@ class TestTestNameValidator(unittest.TestCase):
             "Temp/TestConvolution.Forward",
             "Group/IntegrationGpuBatchNormFp32.Accuracy",
             "Config/TestMyClass.Method",
-            "Temp/TestShapeStrideOrder.VerifyOrder", 
+            "Temp/TestShapeStrideOrder.VerifyOrder",
             "CheckGpu/TestMyClass.Method",
             "CheckFp32/TestMyClass.Method",
             "CheckIntegration/TestMyClass.Method",
@@ -426,7 +430,7 @@ class TestTestNameValidator(unittest.TestCase):
         valid_names = [
             "TestMyClass.DISABLED_Something",
             "IntegrationGpuConvolutionFp32.DISABLED_Forward",
-            "Temp/TestShapeStrideOrder.DISABLED_VerifyOrder/14  # GetParam() = TestCase( [1, 1, 1, 1] )", 
+            "Temp/TestShapeStrideOrder.DISABLED_VerifyOrder/14  # GetParam() = TestCase( [1, 1, 1, 1] )",
         ]
 
         for name in valid_names:
@@ -533,7 +537,7 @@ class TestTestNameValidator(unittest.TestCase):
                 issues = self.validator.validate_test_name(name)
                 self.assertTrue(
                     any("appears more than once in" in issue for issue in issues),
-                    f"Expected issues for duplicate keywords in {name}"
+                    f"Expected issues for duplicate keywords in {name}",
                 )
 
     def test_complex_valid_names(self) -> None:

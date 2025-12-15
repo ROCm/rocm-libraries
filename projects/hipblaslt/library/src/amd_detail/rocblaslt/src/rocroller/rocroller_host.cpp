@@ -33,6 +33,7 @@
 #include "rocroller_host.hpp"
 #include "runtime_args_selection.hpp"
 #include "parameter_selection.hpp"
+#include "solution_cache.hpp"
 #include "solution_selection.hpp"
 
 #include "Debug.hpp"
@@ -49,12 +50,7 @@ using namespace rocRoller;
  */
 struct RocRollerHandle
 {
-    // Map of kernels that have already been generated.
-    // The first level of the map is indexed with a KernelType.
-    // The second level of the map is indexed with a hash value of a
-    // SolutionIndexParameters type.
-    // The value is a GemmKernel.
-    std::map<KernelType, std::map<int, std::shared_ptr<GemmKernel>>> generatedKernels;
+    SolutionCache cache;
 };
 
 /**
@@ -401,16 +397,16 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
     kernelType.typeAcc    = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
     kernelType.transA     = prob.trans_a == HIPBLAS_OP_T;
     kernelType.transB     = prob.trans_b == HIPBLAS_OP_T;
-    kernelType.scaleAMode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
+    kernelType.scaleTypeA.mode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
                                 ? rocRoller::Operations::ScaleMode::Separate
                                 : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleBMode = prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block
+    kernelType.scaleTypeB.mode = prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block
                                 ? rocRoller::Operations::ScaleMode::Separate
                                 : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleABlockRowSize = prob.scaleABlockRowSize;
-    kernelType.scaleABlockColSize = prob.scaleABlockColSize;
-    kernelType.scaleBBlockRowSize = prob.scaleBBlockRowSize;
-    kernelType.scaleBBlockColSize = prob.scaleBBlockColSize;
+    kernelType.scaleTypeA.blockRowSize = prob.scaleABlockRowSize;
+    kernelType.scaleTypeA.blockColSize = prob.scaleABlockColSize;
+    kernelType.scaleTypeB.blockRowSize = prob.scaleBBlockRowSize;
+    kernelType.scaleTypeB.blockColSize = prob.scaleBBlockColSize;
 
     return kernelType;
 }
@@ -429,12 +425,14 @@ rocblaslt_status
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
     try
     {
-        kernel                                                        = genGemmKernel(params);
-        rocroller_handle->generatedKernels[kernelType][solutionIndex] = kernel;
+        kernel = genGemmKernel(params);
+        rocroller_handle->cache.addKernel(kernelType, solutionIndexParameter, kernel);
     }
     catch(const std::exception& e)
     {
-        std::cerr << e.what() << '\n';
+        std::cerr << "Error building the following kernel:" << std::endl;
+        std::cerr << params->toString() << std::endl;
+        std::cerr << e.what() << std::endl;
         return rocblaslt_status_not_implemented;
     }
 
@@ -501,12 +499,6 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    auto existingKernelType = rocroller_handle->generatedKernels.find(kernelType);
-    if(existingKernelType == rocroller_handle->generatedKernels.end())
-    {
-        rocroller_handle->generatedKernels[kernelType] = {};
-    }
-
     auto solutionIndexParameters
         = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);
 
@@ -517,10 +509,10 @@ rocblaslt_status
             break;
 
         index = parametersToIndex(solutionIndexParameter);
-        auto existingSolutionIndex = rocroller_handle->generatedKernels[kernelType].find(index);
+        auto existingSolution = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
         std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
-        if(existingSolutionIndex == rocroller_handle->generatedKernels[kernelType].end())
+        if(!existingSolution)
         {
             auto                        status = genKernelFromSolutionIndexParameters(
                 rocroller_handle, kernelType, solutionIndexParameter, index, kernel);
@@ -529,7 +521,7 @@ rocblaslt_status
         }
         else
         {
-            kernel = existingSolutionIndex->second;
+            kernel = *existingSolution;
         }
 
         // Fill out heuristicResultsArray
@@ -614,26 +606,17 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
     RocRollerHandle* rocroller_handle = static_cast<RocRollerHandle*>(handle->rocroller_handle);
     auto             kernelType       = genKernelType(prob);
 
-    auto existingKernelType = rocroller_handle->generatedKernels.find(kernelType);
-    // If KernelType doesn't exist yet, add an empty container for it to map.
-    if(existingKernelType == rocroller_handle->generatedKernels.end())
+    auto solutionIndexParameters = indexToParameters(*solutionIndex);
+    auto existingKernel = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameters);
+    if(existingKernel)
     {
-        rocroller_handle->generatedKernels[kernelType] = {};
-        existingKernelType = rocroller_handle->generatedKernels.find(kernelType);
-    }
-
-    auto existingKernel = existingKernelType->second.find(*solutionIndex);
-    if(existingKernel != existingKernelType->second.end())
-    {
-        kernel = existingKernel->second;
+        kernel = *existingKernel;
         return rocblaslt_status_success;
     }
     else
     {
-        auto solutionIndexParameter = indexToParameters(*solutionIndex);
-
         auto status = genKernelFromSolutionIndexParameters(
-            rocroller_handle, kernelType, solutionIndexParameter, *solutionIndex, kernel);
+            rocroller_handle, kernelType, solutionIndexParameters, *solutionIndex, kernel);
         return status;
     }
 }

@@ -26,20 +26,16 @@
 #ifndef MIOPEN_FUSION_HPP_
 #define MIOPEN_FUSION_HPP_
 
-#include <miopen/common.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/kernel_info.hpp>
-#include <miopen/op_kernel_args.hpp>
 #include <miopen/fusion_ops.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <miopen/activ.hpp>
 
-#include <set>
 #include <vector>
-#include <unordered_map>
 
 namespace miopen {
 

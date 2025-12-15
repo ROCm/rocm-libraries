@@ -437,12 +437,21 @@ def getCUCount() -> int:
     """Return the number of CU Count in current Hardware."""
     CU = os.environ.get("CU", None)
     if CU is None:
-        res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={"ROCR_VISIBLE_DEVICES":"0"})
-        CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
-        match = re.search(CU_RE, res.stdout.decode("utf-8").split('\n')[-2])
-        if match:
-            CU = int(match.group('COMPUTE_UNIT').strip())
-    return CU
+        try:
+            res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={**os.environ, "ROCR_VISIBLE_DEVICES": "0"})
+            CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
+            lines = res.stdout.decode("utf-8").strip().split('\n')
+            if lines:
+                match = re.search(CU_RE, lines[-1])
+                if match:
+                    CU = int(match.group('COMPUTE_UNIT').strip())
+        except Exception:
+            pass
+
+    if CU is None:
+        printExit("Failed to get Compute Unit count from rocminfo or env variable 'CU'")
+
+    return int(CU)
 
 def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
     """Creates the data for a library logic file suitable for writing to YAML."""

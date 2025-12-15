@@ -38,7 +38,8 @@
 
 using namespace hipsparse_test;
 
-void testing_axpby_bad_arg(void)
+template <typename I, typename T>
+void testing_axpby_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 
@@ -89,7 +90,7 @@ void testing_axpby_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_axpby(Arguments argus)
+void testing_axpby(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     I size = argus.N;
@@ -116,7 +117,7 @@ hipsparseStatus_t testing_axpby(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, size);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
     hipsparseInit<T>(hx_val, 1, nnz);
     hipsparseInit<T>(hy, 1, size);
 
@@ -215,8 +216,6 @@ hipsparseStatus_t testing_axpby(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_AXPBY_HPP

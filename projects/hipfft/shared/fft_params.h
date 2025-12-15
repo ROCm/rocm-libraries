@@ -1474,7 +1474,7 @@ public:
         std::vector<size_t> ibuffer_sizes;
 
         // In-place real-to-complex transforms need to have enough space in the input buffer to
-        // accomadate the output, which is slightly larger.
+        // accommodate the output, which is slightly larger.
         if(placement == fft_placement_inplace && transform_type == fft_transform_type_real_forward)
         {
             return obuffer_sizes();

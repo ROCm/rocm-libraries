@@ -661,7 +661,7 @@ GetSolutionForDimensionality(const FusionContext& ctx,
     using Layouts = LayoutsSelector<NDimSpatial>;
     return MakeSolutionGroupConvImplicitGemmXdlops(
         conv_problem,
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             (void)data_type_val;
             return InitInvokerFactoryFwdNCHW<NDimSpatial,
                                              false,
@@ -674,7 +674,7 @@ GetSolutionForDimensionality(const FusionContext& ctx,
                                              miopen::fusion::FusionInvokeParams>(
                 ctx, conv_problem, config.kernel_id);
         },
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             (void)data_type_val;
             return InitInvokerFactoryNHWC<false,
                                           DeviceOpGFwdActPtrs<NDimSpatial,

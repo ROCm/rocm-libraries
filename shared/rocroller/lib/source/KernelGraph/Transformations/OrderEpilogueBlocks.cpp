@@ -64,14 +64,14 @@ namespace rocRoller
             using namespace ControlGraph;
 
             /**
-           * @brief Delete Body edges from a parent node to all its children
-          *
-          * 
-          *
-          * @param graph The kernel graph
-          * @param parent The parent node
-          * @param children The children nodes
-          */
+             * @brief Delete Body edges from a parent node to all its children
+             *
+             *
+             *
+             * @param graph The kernel graph
+             * @param parent The parent node
+             * @param children The children nodes
+             */
             void deleteBodyEdges(KernelGraph& graph, int parent, std::vector<int> const& children)
             {
                 for(auto const& child : children)
@@ -83,19 +83,19 @@ namespace rocRoller
             }
 
             /**
-            * @brief Create a chain of Scopes connected by Sequence edges
-          *
-          * 
-          * Creates: parent -> Body -> Scope -> Sequence -> Scope -> Sequence -> ... -> Scope
-          *                             |                   |                          |
-          *                           Body                Body                        Body
-          *                             |                   |                          |
-          *                          children[0]         children[1]               children[n]
-          * 
-          * @param graph The kernel graph
-          * @param parent The parent node to attach the first Scope to
-          * @param children The children nodes to place under each Scope
-          */
+             * @brief Create a chain of Scopes connected by Sequence edges
+             *
+             *
+             * Creates: parent -> Body -> Scope -> Sequence -> Scope -> Sequence -> ... -> Scope
+             *                             |                   |                          |
+             *                           Body                Body                        Body
+             *                             |                   |                          |
+             *                          children[0]         children[1]               children[n]
+             *
+             * @param graph The kernel graph
+             * @param parent The parent node to attach the first Scope to
+             * @param children The children nodes to place under each Scope
+             */
             void createScopeChain(KernelGraph& graph, int parent, std::vector<int> const& children)
             {
                 if(children.empty())
@@ -142,19 +142,19 @@ namespace rocRoller
 
             /**
              * @brief Order fixup chains within unrolled RECEIVE loops
-             * 
+             *
              * This transformation finds fixup chains across different unrolled iterations
              * and orders them sequentially using Scopes and Sequence edges, similar to
              * how orderEpilogueBlocks orders epilogue blocks. This change reduces the register pressure
              * by avoiding overlapping the fixup chains.
-             * 
+             *
              * Before:
              *   ForLoop (within RECEIVE)
              *   |           |           |
              *   Body       Body       Body
              *   |           |           |
              *   Fixup1     Fixup2     Fixup3
-             * 
+             *
              * After:
              *   ForLoop (within RECEIVE)
              *   |

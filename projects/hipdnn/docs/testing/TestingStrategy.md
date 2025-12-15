@@ -1,6 +1,6 @@
 # hipDNN Testing Strategy
 
-This document outlines the comprehensive testing strategy for hipDNN, covering unit tests(white box testing), integration tests (black box testing, api tests, and end to end tests), and performance/benchmarking.
+This document outlines the comprehensive testing strategy for hipDNN, covering unit tests (white box testing), integration tests (black box testing, api tests, and end to end tests), and performance/benchmarking.
 
 Please refer to the coding standards in [Coding Style and Naming Guidelines](../CodingStyleAndNamingGuidelines.md) to see test naming conventions we follow.
 
@@ -16,7 +16,7 @@ White box tests focus on internal implementation details of hipDNN components.
 |-----------|----------|---------|-------------|--------------|
 | **Backend** | `backend/tests/` | Test internal implementation of hipDNN backend | Minimal/None | Windows & Linux |
 | **Frontend** | `frontend/tests/` | Test internal implementation of hipDNN frontend | Minimal/None | Windows & Linux |
-| **SDK** | `sdk/tests/` | Test internal implementation of hipDNN SDK | Minimal/None expected | Windows & Linux |
+| **SDK** | `sdk/tests/` | Test internal implementation of hipDNN SDK | Minimal/None | Windows & Linux |
 | **Plugin** | `plugins/<name>/tests/` | Test internal implementation of specific plugin | Minimal & fast | Windows & Linux |
 
 Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_DEVICE()` so tests run and pass correctly on CPU only machines.
@@ -51,7 +51,7 @@ Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_D
 
 ### Common Requirements
 - **Mocking**: Use GMOCK for mocking dependencies
-- **Execution**: Fast execution required
+- **Execution**: Fast execution required (Time limits enabled in TheRock CI)
 - **Isolation**: Use stubbed/mocked implementations for dependencies
 - **GPU Operations**: Must be marked with `SKIP_IF_NO_DEVICE()`
 - **Coverage**: Each component should maintain >80% code coverage
@@ -118,11 +118,14 @@ Integration tests validate end-to-end functionality across components.
   - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
   - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
+### Graph Validation
+We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](./CpuGraphExecutorDesign.md) for more details.
+
 ---
 
 ## 3. General Testing Requirements
 
-### Code Coverage 
+### Code Coverage
 - **Target**: 80% overall coverage
 - **Component Target**: Each sub-section should be above 80% individually
 - **Enforcement**: Coverage must remain above 80% for PRs to be accepted
