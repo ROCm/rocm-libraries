@@ -24,12 +24,12 @@
 ################################################################################
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CMSValidator import verify_lrs_and_grs
+from Tensile.Components.CMSValidator import verify_lrs_finished_before_vmfma
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
     def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_and_grs(sched, kernel_dict, codePathIdx)
+        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
 
     def test_simple_LR0(self):
         """

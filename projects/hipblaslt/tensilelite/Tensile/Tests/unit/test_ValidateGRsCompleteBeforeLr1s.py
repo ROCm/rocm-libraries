@@ -24,12 +24,12 @@
 ################################################################################
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CMSValidator import verify_lrs_and_grs
+from Tensile.Components.CMSValidator import verify_grs_finish_before_lr1s
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
     def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_and_grs(sched, kernel_dict, codePathIdx)
+        return verify_grs_finish_before_lr1s(sched, kernel_dict, codePathIdx)
 
     def test_simple_case_success(self):
         """

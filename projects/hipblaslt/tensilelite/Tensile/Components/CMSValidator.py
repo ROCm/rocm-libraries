@@ -971,16 +971,10 @@ def verify_gr_inc_order(scheduleInfo, context: dict, code_path: int) -> tuple[bo
 
     return True, ""
 
-def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+def verify_grs_finish_before_lr1s(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Ensure several properties are valid of LRs and GRs for a single code path:
-    1. The GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
-    2. The LR1s and LR0s are guaranteed to be complete before the first VMFMA that uses their data.
+    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
     """
-    if len(schedule_info.mfmaReorder) != 0:
-        printWarning("Do not currently support mfmaReorder in CMS validation, cannot guarantee that LR1s will be correct.")
-        return True, ""
-
     available_keys = schedule_info.optSchedule.keys()
     if "LRA1" not in available_keys and "LRA3" in available_keys:
         printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
@@ -989,13 +983,34 @@ def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict, code_path: 
         printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
         return True, ""
 
-    relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
+    relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "SYNC"]
     kernel = context["kernel"]
     timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
     
     # Apply standalone functions to populate timeline fields
-    set_lr_needed_by_for_VMFMA(timeline, kernel)
     set_gr_needed_by_from_lr1s(timeline, kernel["SwapGlobalReadOrder"])
+    apply_swaits(timeline)
+    apply_barriers(timeline)
+
+    message = validate_timeline(timeline)
+    if message:
+        return False, message
+    return True, ""
+
+
+def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+    """
+    Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
+    """
+    if len(schedule_info.mfmaReorder) != 0:
+        printWarning("CMS Validation does not currently support mfmaReorder, cannot guarantee that LRs will be correct.")
+        return True, ""
+
+    relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
+    kernel = context["kernel"]
+    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
+
+    set_lr_needed_by_for_VMFMA(timeline, kernel)
     apply_swaits(timeline)
     apply_barriers(timeline)
 
@@ -1094,8 +1109,9 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     rules = [
         verify_correct_number_of_instructions,
         verify_ascending_order,
+        verify_lrs_finished_before_vmfma,
         verify_global_reads_not_too_early,
-        verify_lrs_and_grs,
+        verify_grs_finish_before_lr1s,
         verify_scc_overlap,
         verify_gr_inc_order
     ]
