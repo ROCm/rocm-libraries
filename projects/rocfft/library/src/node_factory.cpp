@@ -592,7 +592,18 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
     // use size in real units to decide what scheme to use
     const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
 
-    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1)
+    // For even-length optimization, we treat real data as
+    // complex-interleaved, so fastest dimension stride must be 1.
+    // Subsequent strides + dist must all be expressible as complex
+    // stride + dist; that is, they must all be even.
+    auto evenLengthStrideDistOk = [](const std::vector<size_t>& stride, size_t dist) {
+        auto isEven = [](size_t val) { return val % 2 == 0; };
+        return stride[0] == 1 && std::all_of(stride.begin() + 1, stride.end(), isEven)
+               && isEven(dist);
+    };
+
+    if(realLength[0] % 2 == 0 && evenLengthStrideDistOk(nodeData.inStride, nodeData.iDist)
+       && evenLengthStrideDistOk(nodeData.outStride, nodeData.oDist))
     {
         switch(nodeData.dimension)
         {
