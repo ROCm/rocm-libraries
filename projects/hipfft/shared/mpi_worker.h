@@ -971,7 +971,7 @@ int mpi_worker_main(const char*                                               de
         std::copy(final_input_grid.begin(), final_input_grid.end(), input_grid.begin() + 1);
         std::copy(final_output_grid.begin(), final_output_grid.end(), output_grid.begin() + 1);
 
-        // get number of nodes to asign local GPU indexing, since within
+        // get number of nodes to assign local GPU indexing, since within
         // each node, GPUs are indexed 0,1,...,N
 
         // distribute input and output among the available number of ranks and GPUs per rank

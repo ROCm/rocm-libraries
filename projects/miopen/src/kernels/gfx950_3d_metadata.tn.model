@@ -14,7 +14,7 @@
     ],
     "note": "Data merged from sessions: [6, 69, 71]",
     "num_inputs": 24,
-    "num_solvers": 12,
+    "num_solvers": 9,
     "num_outputs": 12,
     "encodings": {
         "in_layout": {
@@ -40,18 +40,15 @@
             "W": 2
         },
         "solver": {
-            "ConvDirectNaiveConvBwd": 0,
-            "ConvDirectNaiveConvFwd": 1,
-            "ConvDirectNaiveConvWrw": 2,
-            "ConvHipImplicitGemm3DGroupBwdXdlops": 3,
-            "ConvHipImplicitGemm3DGroupFwdXdlops": 4,
-            "ConvHipImplicitGemm3DGroupWrwXdlops": 5,
-            "GemmBwd1x1_stride1": 6,
-            "GemmBwdRest": 7,
-            "GemmFwd1x1_0_1": 8,
-            "GemmFwdRest": 9,
-            "GemmWrw1x1_stride1": 10,
-            "GemmWrwUniversal": 11
+            "ConvHipImplicitGemm3DGroupBwdXdlops": 0,
+            "ConvHipImplicitGemm3DGroupFwdXdlops": 1,
+            "ConvHipImplicitGemm3DGroupWrwXdlops": 2,
+            "GemmBwd1x1_stride1": 3,
+            "GemmBwdRest": 4,
+            "GemmFwd1x1_0_1": 5,
+            "GemmFwdRest": 6,
+            "GemmWrw1x1_stride1": 7,
+            "GemmWrwUniversal": 8
         }
     },
     "conv_params_used_as_features": [
