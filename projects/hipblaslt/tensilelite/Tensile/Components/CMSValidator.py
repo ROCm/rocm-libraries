@@ -318,10 +318,14 @@ class LocalRead(ValidatorInstruction):
     name: str
     num_vmfma: int
     issued_at: int | float
-    needed_by: int
+    needed_by: int | float = float('inf')
     guaranteed_by: int | float = float('inf')
 
     def validate(self) -> str | None:
+        # For when local reads are not being guaranteed by a particular pass.
+        if self.needed_by == float('inf'):
+            return None
+
         # Needs to be guaranteed BEFORE the index at which it's needed since the
         # SWaitCnt is issued AFTER the vmfma.
         if self.guaranteed_by < self.needed_by:
@@ -519,13 +523,10 @@ class Timeline:
                     
                     self._insert(idx_vmfma, sync_instruction)
             elif name.startswith("LRA") or name.startswith("LRB"):
-                offset = halfway_point if "0" in name else self.num_vmfma
-                is_lra = name.startswith("LRA")
                 for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
 
-                    needed_by = lr_needed_by_mfma(is_lra, idx_LR, offset, schedule_info, kernel)
-                    local_read = LocalRead(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma, needed_by=needed_by)
+                    local_read = LocalRead(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma)
                     self._insert(idx_vmfma, local_read)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
@@ -584,10 +585,6 @@ class Timeline:
                        and loop in [NO_LOCAL_LOAD_LOOP]:
                         _instruction.dscnt = 0
 
-                # Other fields on other instructions are calculated later based on the issued_at index and LR.needed_by.
-                if isinstance(_instruction, LocalRead):
-                    _instruction.needed_by += adjust
-
                 self._instructions_at_index[loop][vmfma_index+1].append(_instruction)
 
     def _should_add(self, instruction: ValidatorInstruction, loop: str) -> bool:
@@ -611,6 +608,12 @@ class Timeline:
 
     def __getitem__(self, index: int) -> ValidatorInstruction:
         return self._timelines[index]
+
+    def get_instruction_names(self) -> list[str]:
+        """
+        Return the names of all instructions scheduled in the timeline.
+        """
+        return list(self._instructions_for_name_combined.keys())
 
     def get_instructions(self, name: str, loop: str) -> list[tuple[int, ValidatorInstruction]]:
         """
@@ -704,6 +707,28 @@ def apply_swaits(timeline: Timeline) -> None:
             apply(timeline.combined_timeline[i_swait-1::-1], swait, GlobalRead, swait.vlcnt)
 
 
+def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution') -> None:
+    """
+    Set the needed_by field of LocalReads based on the VMFMA index they are required for.
+    Timeline is modified in place.
+    
+    For LRA0/LRB0, the data is needed at a VMFMA index offset by num_vmfma // 2 (halfway point).
+    For LRA1/LRB1, the data is needed at a VMFMA index offset by num_vmfma (next iteration).
+    
+    Args:
+        timeline: The Timeline object containing the instructions.
+    """
+    for i_loop, loop in enumerate(timeline.loops):
+        loop_offset = timeline.num_vmfma * i_loop
+        for instruction_name in timeline.get_instruction_names():
+            if not instruction_name.startswith("LRA") and not instruction_name.startswith("LRB"):
+                continue
+            local_reads = timeline.get_instructions(instruction_name, loop)
+            for lr_idx, (_, lr) in enumerate(local_reads):
+                base_needed_by = lr_needed_by_mfma(lr, lr_idx, timeline, kernel)
+                lr.needed_by = base_needed_by + loop_offset
+
+
 def set_gr_needed_by_from_lr1s(timeline: Timeline, swap_global_read_order: bool) -> None:
     """
     Set the needed_by field of GlobalReads based on the LRA1/LRB1 instructions.
@@ -778,12 +803,11 @@ def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> li
     return schedules[0] if len(schedules) == 1 else schedules[code_path]
 
 
-def lr_needed_by_mfma(is_lra: bool, lr_idx: int, offset: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> int:
+def lr_needed_by_mfma(local_read: LocalRead, lr_idx: int, timeline: Timeline, kernel: 'Solution') -> int:
     """
     Helper fucntion to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
 
     Args:
-        is_lra: Whether the given LRA/LRB is an LRA (True) or LRB (False).
         lr_idx: The index of the LRA/LRB in the list of LRAs/LRBs for the given code path.
         offset: The offset from the halfway point of the main loop.
         schedule_info: The schedule information (ScheduleInfo object)
@@ -792,13 +816,15 @@ def lr_needed_by_mfma(is_lra: bool, lr_idx: int, offset: int, schedule_info: 'Sc
     Returns:
         The index of the MFMA at which the given LRA/LRB will be needed by.
     """
-    assert len(schedule_info.mfmaReorder) == 0, "Not implemented for mfmaReorder"
+    offset = local_read.num_vmfma
+    if "0" in local_read.name:
+        offset //= 2
 
     n_tiles_a = kernel['MIWaveTileA']
     n_tiles_b = kernel['MIWaveTileB']
     # NOTE: This calculation will produce incorrect results if the user provided the wrong number of LRs.
-    n_lr_a = len(schedule_get("LRA0", 0, schedule_info))
-    n_lr_b = len(schedule_get("LRB0", 0, schedule_info))
+    n_lr_a = len(timeline.get_instructions("LRA0", MAIN_LOOP))
+    n_lr_b = len(timeline.get_instructions("LRB0", MAIN_LOOP))
 
     # How many MFMA worth of data is loaded by each LRA/LRB
     n_tiles_per_lra = n_tiles_a / n_lr_a
@@ -817,7 +843,7 @@ def lr_needed_by_mfma(is_lra: bool, lr_idx: int, offset: int, schedule_info: 'Sc
         """
         return n_tiles_a * int(lrb_idx * n_tiles_per_lrb) + offset
 
-    if is_lra:
+    if local_read.name.startswith("LRA"):
         return index_lra_needed_by_mfma(lr_idx, offset)
     else:
         return index_lrb_needed_by_mfma(lr_idx, offset)
@@ -968,6 +994,7 @@ def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict, code_path: 
     timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
     
     # Apply standalone functions to populate timeline fields
+    set_lr_needed_by_for_VMFMA(timeline, kernel)
     set_gr_needed_by_from_lr1s(timeline, kernel["SwapGlobalReadOrder"])
     apply_swaits(timeline)
     apply_barriers(timeline)
