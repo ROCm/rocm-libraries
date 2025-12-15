@@ -226,11 +226,11 @@ namespace rocRoller::KernelGraph
 
                 if(allTagsLoopInvariant)
                 {
-                    Log::info("HoistLoopInvariant, hoisting {}, {}, to, {}, {}",
-                              controlNode,
-                              Graph::variantToString(graph.control.getElement(controlNode)),
-                              loopNode,
-                              Graph::variantToString(graph.control.getElement(loopNode)));
+                    Log::debug("HoistLoopInvariant, hoisting {}, {}, to, {}, {}",
+                               controlNode,
+                               Graph::variantToString(graph.control.getElement(controlNode)),
+                               loopNode,
+                               Graph::variantToString(graph.control.getElement(loopNode)));
 
                     hoistNodeBeforeLoop(graph, controlNode, loopNode);
                 }

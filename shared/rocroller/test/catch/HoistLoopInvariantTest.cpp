@@ -140,7 +140,6 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
                 if(str.find("KLoopTail") != std::string::npos)
                     foundTailLoop = true;
                 CHECK(writes.size() >= 8); // written at least 8 times in each loop
-                Log::info("Coordinate 510 written in loop {} with {} writes", str, writes);
             }
             CHECK(foundKLoop);
             CHECK(foundTailLoop);
