@@ -16,12 +16,35 @@ The following table lists all operations currently supported in hipDNN:
 | Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³⁴ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
+| Convolution Forward + (Bias) + Activation⁵ | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
 ³ See Fused Operations note below
 ⁴ See Batchnorm Training Running Statistics note below
+⁵ See Detailed Requirements below
+
+## Detailed Requirements
+
+### Convolution Forward + (Bias) + Activation
+#### Convolution forward node
+- Compute data type: FP32
+- Y tensor
+    - Virtual
+    - Data type:  FP32 or the input data type (the latter only if bias is used)
+#### Bias node (optional)
+- Compute data type: input data type
+- Output tensor
+    - Virtual
+    - Data type: FP32 or the input data type
+#### Activation node
+- Compute data type: FP32
+- Activation mode: RELU_FORWARD
+- Supports
+    - no clipping
+    - relu_lower_clip set
+    - relu_lower_clip and relu_upper_clip set
 
 ## Operation Notes
 
@@ -32,7 +55,10 @@ The following table lists all operations currently supported in hipDNN:
 > **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
 
 > [!NOTE]
-> **Fused Operations:** The Batchnorm Inference + Activation Backward operation is a fused graph pattern that combines three operations: (1) Batchnorm Inference, (2) Activation Backward (DReLU), and (3) Batchnorm Backward.
+> **Fused Operations:** Fused graph patterns combine multiple operations:
+> - **Batchnorm Inference + DReLU + Backward:** Combines batchnorm inference, activation backward (DReLU), and batchnorm backward
+> - **Batchnorm Training + Activation:** Combines batchnorm training with forward activation
+> - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
 > **Activation Functions:** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).

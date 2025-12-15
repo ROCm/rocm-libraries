@@ -13,10 +13,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING
-                                                                                "Toolchain file"
-)
-
+if(NOT CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+        CACHE FILEPATH "Toolchain file"
+    )
+endif()
 set(HIPDNN_VERSION "0.0.1")
 
 project(hipDNN VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
@@ -33,7 +34,7 @@ endif()
 
 if(NOT WIN32)
     # Only set if not already specified by user
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
         set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
     endif()
     message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
@@ -105,21 +106,20 @@ option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from sc
 option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(CODE_COVERAGE "Build with code coverage flags" OFF)
-option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+if(WIN32)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+    if(ENABLE_CLANG_TIDY)
+        message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
+    endif()
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
                                                  "Add paths to linker search and installed rpath"
 )
-
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-     ${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}/cmake/hip ${HIP_DIR}/cmake
-)
-
-# NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files; remove
-# when fixed. Added to prevent issues with not finding hip cmake.
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 include(cmake/Dependencies.cmake)
 include(cmake/CheckToolVersion.cmake)
@@ -174,6 +174,8 @@ if(HIP_DNN_BUILD_FRONTEND)
 endif()
 
 add_subdirectory(test_sdk)
+add_subdirectory(plugin_sdk)
+add_subdirectory(data_sdk)
 
 add_subdirectory(tests)
 
@@ -195,6 +197,9 @@ if(NOT HIP_DNN_SKIP_TESTS)
     add_dependencies(check validate_test_names)
     add_dependencies(check_ctest validate_test_names)
 endif()
+
+# keep this after all the targets have been added that could use the HIP language compiler.
+add_clang_tidy_custom_target()
 
 if(CODE_COVERAGE)
     findandcheckllvmtools()
@@ -220,6 +225,12 @@ if(CODE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_test_sdk_tests
         ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT}
     )
 

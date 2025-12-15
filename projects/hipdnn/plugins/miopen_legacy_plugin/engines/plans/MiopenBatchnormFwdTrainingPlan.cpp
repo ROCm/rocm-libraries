@@ -83,9 +83,11 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     , _bias(miopen_utils::createTensor(tensorMap, attributes.bias_tensor_uid()))
     , _activationOut(miopen_utils::createTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
 {
+    using namespace miopen_utils;
+
     // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = miopen_utils::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
 
     // Validate that activation input matches batchnorm output
     if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
@@ -96,25 +98,19 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     }
 
     // Get activation parameters
-    const auto activParams = miopen_utils::mapPointwiseModeToMiopenActivation(pointwiseAttributes);
-    if(!activParams.has_value())
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "BatchnormFwdTrainingParams: Unsupported activation mode");
-    }
-    _optActivation = activParams.value();
+    HIPDNN_PREPEND_MESSAGE_ON_THROW(_optActivation
+                                    = mapPointwiseModeToMiopenActivation(pointwiseAttributes),
+                                    "BatchnormFwdTrainingParams: ");
 
     // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE)
     if(attributes.mean_tensor_uid().has_value())
     {
-        _mean = miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid().value());
+        _mean = createTensor(tensorMap, attributes.mean_tensor_uid().value());
     }
 
     if(attributes.inv_variance_tensor_uid().has_value())
     {
-        _invVariance
-            = miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
+        _invVariance = createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
     }
 
     // Running statistics not supported - API mismatch between hipDNN and MIOpen

@@ -332,7 +332,7 @@ void testing_spgemm_csr_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spgemm_csr(Arguments argus)
+void testing_spgemm_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     J                    m        = argus.M;
@@ -373,7 +373,7 @@ hipsparseStatus_t testing_spgemm_csr(Arguments argus)
            filename, m, k, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idxBaseA))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // For sparse matrix B, use the transpose of A
@@ -726,8 +726,6 @@ hipsparseStatus_t testing_spgemm_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPGEMM_CSR_HPP

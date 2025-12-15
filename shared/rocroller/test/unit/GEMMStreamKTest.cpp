@@ -36,8 +36,12 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
+    // ProblemConfig: (dataTypeAB, macM, macN, macK, m, n, k, numWGs)
+    using ProblemConfig = std::tuple<rocRoller::DataType, int, int, int, int, int, int, int>;
+
     class StreamKMultipleFixupsTestGPU
-        : public BaseGEMMContextFixture<std::tuple<StreamKMode,
+        : public BaseGEMMContextFixture<std::tuple<ProblemConfig,
+                                                   StreamKMode,
                                                    SolutionParams::LoadPath, /* loadPathA */
                                                    SolutionParams::LoadPath, /* loadPathB */
                                                    bool /* storeLDSD */>>
@@ -52,64 +56,78 @@ namespace GEMMTests
     {
     };
 
-    // Params are: A & B type, UnrollK, LoadPath A, LoadPath B, LDS D, StreamK two-tile, beta is zero
+    // PrefetchConfig: (prefetchInFlight, prefetchLDSFactor)
+    using PrefetchConfig = std::tuple<int, int>;
+
+    // Params: typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero, prefetchConfig
     class StreamKTestGPU : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                                     int,
                                                                     SolutionParams::LoadPath,
                                                                     SolutionParams::LoadPath,
                                                                     bool,
                                                                     rocRoller::StreamKMode,
-                                                                    bool>>
+                                                                    bool,
+                                                                    PrefetchConfig>>
     {
     };
 
-    TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMMFP16)
+    TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMM)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+            GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
         }
+
+        auto [problemConfig, mode, loadPathA, loadPathB, storeLDSD] = std::get<1>(GetParam());
+        auto [dataTypeAB, macM, macN, macK, m, n, k, numWGs]        = problemConfig;
 
         GEMMProblem gemm;
 
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.macM   = macM;
+        gemm.macN   = macN;
+        gemm.macK   = macK;
+        gemm.m      = m;
+        gemm.n      = n;
+        gemm.k      = k;
+        gemm.numWGs = numWGs;
 
-        gemm.macM = 128;
-        gemm.macN = 128;
-        gemm.macK = 16;
-
-        gemm.waveK = 8;
+        if(dataTypeAB == DataType::Half)
+        {
+            gemm.waveK = 8;
+        }
 
         gemm.workgroupSizeX = 128;
         gemm.workgroupSizeY = 2;
-
-        gemm.numWGs = 128;
-
-        auto numTilesM = 1;
-        auto numTilesN = 2;
-        auto numTilesK = 249;
-
-        gemm.m = numTilesM * gemm.macM;
-        gemm.n = numTilesN * gemm.macN;
-        gemm.k = numTilesK * gemm.macK;
 
         // assert that the number of output tiles is smaller than number of WGs
         // which means there is not enough data-parallel tiles, and has to split
         // K dimension into multiple tiles
         ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
 
-        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
-            = std::get<1>(GetParam());
+        gemm.streamK   = mode;
+        gemm.loadPathA = loadPathA;
+        gemm.loadPathB = loadPathB;
+        gemm.storeLDSD = storeLDSD;
 
-        basicGEMM<Half>(gemm);
+        switch(dataTypeAB)
+        {
+        case DataType::Half:
+            basicGEMM<Half>(gemm, false, false, 100);
+            break;
+        case DataType::Float:
+            basicGEMM<float>(gemm, false, false, 100);
+            break;
+        default:
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. ", toString(dataTypeAB)));
+        }
     }
 
     TEST_P(StreamKWGMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test";
+            GTEST_SKIP()
+                << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test: CDNA1 not supported";
         }
 
         GEMMProblem gemm;
@@ -138,20 +156,12 @@ namespace GEMMTests
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+            GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
         }
 
-        auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero]
+        auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero, prefetchConfig]
             = std::get<1>(GetParam());
-
-        if((typeAB == DataType::Float)
-           && (loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR)
-           && (loadPathB == SolutionParams::LoadPath::BufferToLDSViaVGPR) && (storeLDSD)
-           && (mode != StreamKMode::Standard))
-        {
-            // We run out of LDS in this case
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
+        auto [prefetchInFlight, prefetchLDSFactor] = prefetchConfig;
 
         GEMMProblem gemm;
 
@@ -183,6 +193,14 @@ namespace GEMMTests
 
         if(betaZero)
             gemm.beta = 0;
+
+        // Enable prefetch if prefetchInFlight > 0
+        if(prefetchInFlight > 0)
+        {
+            gemm.prefetch          = true;
+            gemm.prefetchInFlight  = prefetchInFlight;
+            gemm.prefetchLDSFactor = prefetchLDSFactor;
+        }
 
         switch(typeAB)
         {
@@ -216,6 +234,17 @@ namespace GEMMTests
             currentGPUISA(),
             ::testing::Combine(
                 ::testing::Values(
+                    // ProblemConfig: (dataTypeAB, macM, macN, macK, m, n, k, numWGs)
+                    ProblemConfig{rocRoller::DataType::Half, 128, 128, 16, 128, 256, 15936, 128},
+                    ProblemConfig{rocRoller::DataType::Float,
+                                  64,
+                                  64,
+                                  64,
+                                  256,
+                                  256,
+                                  16384,
+                                  256}), /* problemConfig */
+                ::testing::Values(
                     StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
                                   SolutionParams::LoadPath::BufferToVGPR), /* loadPathA */
@@ -224,23 +253,81 @@ namespace GEMMTests
                 ::testing::Values(true, false) /* storeLDSD */
                 )));
 
+    using StreamKParamGenerator = ::testing::internal::ParamGenerator<StreamKTestGPU::ParamType>;
+    static auto FilterValidStreamKParams(StreamKParamGenerator&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+        using DT = rocRoller::DataType;
+        using SM = rocRoller::StreamKMode;
+
+        std::vector<StreamKTestGPU::ParamType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& params = std::get<1>(inputParam);
+
+            auto const& typeAB                                = std::get<0>(params);
+            auto const& unrollK                               = std::get<1>(params);
+            auto const& loadPathA                             = std::get<2>(params);
+            auto const& loadPathB                             = std::get<3>(params);
+            auto const& storeLDSD                             = std::get<4>(params);
+            auto const& mode                                  = std::get<5>(params);
+            auto const& [prefetchInFlight, prefetchLDSFactor] = std::get<7>(params);
+
+            // Prefetch requires LDS
+            if((prefetchInFlight > 0) and (loadPathA == LP::BufferToVGPR)
+               and (loadPathB == LP::BufferToVGPR))
+            {
+                continue;
+            }
+
+            // Prefetch requires unrollK > 1
+            if(prefetchInFlight > 0 and unrollK < 2)
+            {
+                continue;
+            }
+
+            // Runs out of LDS
+            if((typeAB == DT::Float) and (loadPathA == LP::BufferToLDSViaVGPR)
+               and (loadPathB == LP::BufferToLDSViaVGPR) and (storeLDSD) and (mode != SM::Standard))
+            {
+                continue;
+            }
+
+            // Runs out of VGPRs: Float + both LDS paths + non-Standard StreamK + prefetch
+            if((typeAB == DT::Float) and (loadPathA == LP::BufferToLDSViaVGPR)
+               and (loadPathB == LP::BufferToLDSViaVGPR) and (mode != SM::Standard)
+               and (prefetchInFlight > 0))
+            {
+                continue;
+            }
+
+            filtered.push_back(inputParam);
+        }
+
+        return ::testing::ValuesIn(filtered);
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         GEMMTest,
         StreamKTestGPU,
-        ::testing::Combine(
+        FilterValidStreamKParams(::testing::Combine(
             currentGPUISA(),
-            ::testing::Combine(
-                ::testing::Values(rocRoller::DataType::Float,
-                                  rocRoller::DataType::Half), // typeAB
-                ::testing::Values(1, 2), // UnrollK
-                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                  SolutionParams::LoadPath::BufferToLDSViaVGPR), // LoadPath A
-                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                  SolutionParams::LoadPath::BufferToLDSViaVGPR), // LoadPath B
-                ::testing::Values(true, false), // storeLDSD
-                ::testing::Values(rocRoller::StreamKMode::Standard,
-                                  rocRoller::StreamKMode::TwoTile,
-                                  rocRoller::StreamKMode::TwoTileDPFirst), // StreamKMode
-                ::testing::Values(true, false)))); // betaZero
+            ::testing::Combine(::testing::Values(rocRoller::DataType::Float,
+                                                 rocRoller::DataType::Half),
+                               ::testing::Values(1, 2), // unrollK
+                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR),
+                               ::testing::Values(true, false), // storeLDSD
+                               ::testing::Values(rocRoller::StreamKMode::Standard,
+                                                 rocRoller::StreamKMode::TwoTile,
+                                                 rocRoller::StreamKMode::TwoTileDPFirst),
+                               ::testing::Values(true, false), // betaZero
+                               ::testing::Values(PrefetchConfig{0, 0},
+                                                 PrefetchConfig{1, 0},
+                                                 PrefetchConfig{1, 2},
+                                                 PrefetchConfig{2, 0},
+                                                 PrefetchConfig{2, 2})))));
 
 } // namespace GEMMTests
