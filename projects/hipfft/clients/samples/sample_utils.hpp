@@ -57,33 +57,36 @@ void printarraylimit(const std::vector<Tvalue> &vals, const size_t Nx, const siz
 // An array printer that with bounds on the number of outputs to show
 template<typename Tvalue>
 void printarraylimit(const std::vector<Tvalue> &vals,
-                     const size_t Nx, const size_t Ny, const size_t Nz,
+                     const size_t Nx,
+                     const size_t Ny,
+                     const size_t Nz,
                      const size_t printlimit)
 {
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
-        if(xidx > printlimit)
+        if(xidx == printlimit)
         {
-            std::cout << "...\n";
-            xidx = Nx - 1;
+            std::cout << "\n...\n";
+            xidx = Nx - 3;
         }
         for(size_t yidx = 0; yidx < Ny; ++yidx)
         {
-            if(yidx > printlimit)
+            if(yidx == printlimit)
             {
                 std::cout << "...\n";
-                yidx = Ny - 1;
+                yidx = Ny - 3;
             }
             for(size_t zidx = 0; zidx < Nz; ++zidx)
             {
-                if(zidx > printlimit)
+                if(zidx == printlimit)
                 {
                     std::cout << "... ";
-                    zidx = Nz - 1;
+                    zidx = Nz - 3;
                 }
                 int pos = (xidx * Ny + yidx) * Nz + zidx;
                 std::cout << vals[pos] << " ";
             }
+            std::cout << "\n";
         }
         std::cout << "\n";
     }

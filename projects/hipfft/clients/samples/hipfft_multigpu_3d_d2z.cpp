@@ -71,7 +71,7 @@ int main()
     std::cout << "\n";
 
     // Initialize reference data
-    std::vector<double> rinput(Nx * Ny * Nz);
+    std::vector<double> rinput(Nx * Ny * (Nz + 2));
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
         for(size_t yidx = 0; yidx < Ny; ++yidx)
@@ -79,7 +79,8 @@ int main()
             for(size_t zidx = 0; zidx < Nz; ++zidx)
             {
                 const size_t pos = (xidx * Ny + yidx) * (Nz + 2) + zidx;
-                rinput[pos] = (xidx * Ny + yidx) * Nz + zidx;
+                const size_t idx = (xidx * Ny + yidx) * Nz + zidx;
+                rinput[pos] = idx;
             }
         }
     }
