@@ -214,14 +214,23 @@ pre-commit run --all-files
 
 ### Opting a Project into Pre-commit Checks
 
-By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project:
+By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project, follow this incremental approach to avoid breaking the build:
 
-1.  **Enable Checks**: Remove the project's exclusion pattern from the `exclude` block in [`.pre-commit-config.yaml`](.pre-commit-config.yaml).
-
-2.  **Apply Initial Formatting**: It is recommended to submit a dedicated "bulk" pull request that applies pre-commit fixes to the entire project. You can run pre-commit on all files in your project directory:
+1.  **Apply Fixes**:
+    Temporarily remove your project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml) on your local machine (**do not commit this change yet**) and run the checks:
     ```bash
     pre-commit run --files $(git ls-files projects/<your-project>)
     ```
+    Some fixes will be applied automatically, while others may require manual intervention. Submit pull requests to apply these fixes to your project's code. You may choose to fix issues incrementally or in bulk, but large bulk updates are often volatile and may require careful coordination within your team.
+
+2.  **Finalize Opt-in**:
+    Once all issues in the project are resolved:
+    *   Permanently remove the project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml).
+    *   Run a final check to ensure everything is clean:
+        ```bash
+        pre-commit run --files $(git ls-files projects/<your-project>)
+        ```
+    *   Submit a PR with the config change and any remaining fixes.
 
 3.  **Handle Optional Dependencies in CI**: If your project requires specific system dependencies to run pre-commit hooks in CI:
     > [!IMPORTANT]
