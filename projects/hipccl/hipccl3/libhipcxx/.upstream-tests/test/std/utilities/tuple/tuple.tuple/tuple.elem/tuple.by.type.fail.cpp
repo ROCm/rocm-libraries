@@ -52,13 +52,13 @@ void test_bad_index()
     cuda::std::string,
   #endif
     char, UserType, char> t1;
-  TEST_IGNORE_NODISCARD cuda::std::get<int>(t1); // expected-error-re@tuple:* {{type not found}}
+  TEST_IGNORE_NODISCARD cuda::std::get<int>(t1); // expected-error@*:* {{type not found}}
   TEST_IGNORE_NODISCARD cuda::std::get<long>(t1); // expected-note {{requested here}}
   TEST_IGNORE_NODISCARD cuda::std::get<char>(t1); // expected-note {{requested here}}
-                                                  // expected-error-re@tuple:* 2 {{type occurs more than once}}
+                                                  // expected-error@*:* 2 {{type occurs more than once}}
   cuda::std::tuple<> t0;
   TEST_IGNORE_NODISCARD cuda::std::get<char*>(t0); // expected-node {{requested here}}
-                                                   // expected-error-re@tuple:* 1 {{type not in empty type list}}
+                                                   // expected-error@*:* 1 {{type not in empty type list}}
 }
 
 void test_bad_return_type()

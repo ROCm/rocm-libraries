@@ -51,13 +51,13 @@
 // These error messages will have to change if clang ever gets fixed. But at least they're being rejected.
 enum E7 : cuda::std::underlying_type_t<E7>
 {
-}; // expected-error {{use of undeclared identifier 'E7'}}
+}; // expected-error@*:* {{use of undeclared identifier 'E7'}}
 enum class E8 : cuda::std::underlying_type_t<E8>
 {
-}; // expected-error {{use of undeclared identifier 'E8'}}
+}; // expected-error@*:* {{use of undeclared identifier 'E8'}}
 enum struct E9 : cuda::std::underlying_type_t<E9>
 {
-}; // expected-error {{use of undeclared identifier 'E9'}}
+}; // expected-error@*:* {{use of undeclared identifier 'E9'}}
 
 int main(int, char**)
 {
