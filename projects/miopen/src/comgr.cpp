@@ -960,9 +960,9 @@ void BuildHip(const std::string& name,
 
         if(!rocm_path.empty())
         {
-            auto rocm_path_arg = "--rocm-path=" + rocm_path;
-            opts.push_back(rocm_path_arg);
-            std::cout << "HIPRTC compile ROCm path override argument: " << rocm_path_arg
+            auto rocm_include_arg = "-I" + rocm_path + "/include";
+            opts.push_back(rocm_include_arg);
+            std::cout << "HIPRTC compile ROCm include path argument: " << rocm_include_arg
                       << std::endl;
         }
 
