@@ -5,30 +5,22 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   pre-commit:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          fetch-depth: 2
-          filter: blob:none 
-          lfs: false
-
       - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
-        with:
-          python-version: '3.12'
 
       - name: Detect project changes
         id: changes
         env:
+          # Add project names here (one per line) to enable conditional dependency installation
           PROJECTS_WITH_OPTIONAL_DEPS: >-
             hipdnn
         run: |
-          # MODIFIED: Compare HEAD (merge result) against HEAD^1 (base branch)
-          CHANGED_FILES=$(git diff --name-only HEAD^1 HEAD)
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD)
 
           # Check each project for changes
           for project in $PROJECTS_WITH_OPTIONAL_DEPS; do
@@ -38,6 +30,11 @@ jobs:
               echo "${project}_changed=false" >> $GITHUB_OUTPUT
             fi
           done
+
+      # To install optional deps for a project:
+      # 1. Add project name to PROJECTS_WITH_OPTIONAL_DEPS above
+      # 2. Like the example below, add an install step conditional on:
+      #    - steps.changes.outputs.<project-name>_changed == 'true'
 
       - name: Install hipDNN dependencies
         if: steps.changes.outputs.hipdnn_changed == 'true'
@@ -50,5 +47,5 @@ jobs:
 
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         with:
-          # MODIFIED: Use the local commit parents instead of remote refs
-          extra_args: --from-ref HEAD^1 --to-ref HEAD
+          # Only check changed files in the PR
+          extra_args: --from-ref origin/${{ github.event.pull_request.base.ref }} --to-ref HEAD
