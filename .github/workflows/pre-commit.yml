@@ -13,9 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          # fetch-depth: 2 is significantly faster than 500 and provides 
-          # just enough history to compare the merge result (HEAD) to the base (HEAD^1).
           fetch-depth: 2
+          filter: blob:none 
+          lfs: false
 
       - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
