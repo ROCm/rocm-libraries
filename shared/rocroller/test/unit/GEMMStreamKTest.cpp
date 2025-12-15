@@ -94,6 +94,17 @@ namespace GEMMTests
         gemm.workgroupSizeX = 128;
         gemm.workgroupSizeY = 2;
 
+        auto isas = rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
+        for(auto isa : isas)
+        {
+            if(isa.isRDNAGPU())
+            {
+                gemm.waveM = 16;
+                gemm.waveN = 16;
+                gemm.waveK = 16;
+            }
+        }
+
         // assert that the number of output tiles is smaller than number of WGs
         // which means there is not enough data-parallel tiles, and has to split
         // K dimension into multiple tiles
@@ -128,6 +139,17 @@ namespace GEMMTests
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
+        auto isas = rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
+        for(auto isa : isas)
+        {
+            if(isa.isRDNAGPU())
+            {
+                gemm.waveM = 16;
+                gemm.waveN = 16;
+                gemm.waveK = 16;
+            }
+        }
+
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
         gemm.k = gemm.macK * 8;
@@ -161,6 +183,17 @@ namespace GEMMTests
 
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+
+        auto isas = rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
+        for(auto isa : isas)
+        {
+            if(isa.isRDNAGPU())
+            {
+                gemm.waveM = 16;
+                gemm.waveN = 16;
+                gemm.waveK = 16;
+            }
+        }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
