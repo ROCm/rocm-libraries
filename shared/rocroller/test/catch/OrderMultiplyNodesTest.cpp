@@ -118,7 +118,7 @@ namespace OrderMultiplyNodesTest
             graph = transform<OrderEpilogueBlocks>(graph);
             graph = transform<CleanLoops>(graph);
             graph = transform<AddPrefetch>(graph, params, context.get());
-            graph = transform<AddComputeIndex>(graph);
+            graph = transform<AssignIndexExpressions>(graph, context.get(), example.getCommand());
             graph = transform<AddPRNG>(graph, context.get());
             graph = transform<UpdateWavefrontParameters>(graph, params);
             graph = transform<LoadPacked>(graph, context.get());

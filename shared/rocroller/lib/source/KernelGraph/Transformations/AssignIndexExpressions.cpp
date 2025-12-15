@@ -27,13 +27,20 @@
 #include <algorithm>
 #include <variant>
 
+#include <rocRoller/CodeGen/Buffer.hpp>
+#include <rocRoller/CodeGen/Utils.hpp>
+#include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/Context.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
+#include <rocRoller/KernelGraph/Transforms/AssignIndexExpressions.hpp>
+#include <rocRoller/KernelGraph/Transforms/AssignIndexExpressions_detail.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerTile_details.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -47,7 +54,7 @@ namespace rocRoller::KernelGraph
 
     using GD = Graph::Direction;
 
-    struct ComputeIndexChainSpecification
+    struct IndexChainSpec
     {
         int              target;
         std::vector<int> coords;
@@ -58,7 +65,7 @@ namespace rocRoller::KernelGraph
         bool             isStorePartOfGlobalToLDSOp = false;
     };
 
-    bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
+    bool operator<(const IndexChainSpec& a, const IndexChainSpec& b)
     {
         return std::tie(a.target,
                         a.coords,
@@ -76,10 +83,30 @@ namespace rocRoller::KernelGraph
                           b.isStorePartOfGlobalToLDSOp);
     }
 
-    struct ComputeIndexChain
+    /**
+     * @brief Information needed to create Assign nodes for a single dimension.
+     */
+    struct ChainNodeInfo
+    {
+        int      nopTag     = -1; // Placeholder NOP node
+        int      target     = -1;
+        int      increment  = -1;
+        int      baseOffset = -1; // The base offset coordinate (not the offset of this node)
+        int      offset     = -1;
+        int      stride     = -1;
+        int      buffer     = -1;
+        bool     forward    = false;
+        DataType valueType  = DataType::Count;
+        DataType offsetType = DataType::Count;
+        DataType strideType = DataType::Count;
+        bool     isStorePartOfGlobalToLDSOp = false;
+    };
+
+    struct IndexChain
     {
         int top, bottom;
 
+        std::vector<ChainNodeInfo>      nodeInfos;
         std::vector<DeferredConnection> connections;
 
         int update = -1;
@@ -164,46 +191,28 @@ namespace rocRoller::KernelGraph
     }
 
     /**
-     * @brief Add a ComputeIndex node and add mapper connections.
+     * @brief Create a placeholder NOP node and store info for later Assign creation.
      */
-    int makeComputeIndex(KernelGraph& graph,
-                         int          target,
-                         int          increment,
-                         int          base,
-                         int          offset,
-                         int          stride,
-                         int          buffer,
-                         int          baseAddress,
-                         bool         forward,
-                         DataType     valueType,
-                         DataType     offsetType,
-                         DataType     strideType,
-                         bool         isStorePartOfGlobalToLDSOp)
+    ChainNodeInfo makeIndexPlaceholder(KernelGraph& graph,
+                                       int          target,
+                                       int          increment,
+                                       int          base,
+                                       int          offset,
+                                       int          stride,
+                                       int          buffer,
+                                       int          baseAddress,
+                                       bool         forward,
+                                       DataType     valueType,
+                                       DataType     offsetType,
+                                       DataType     strideType,
+                                       bool         isStorePartOfGlobalToLDSOp)
     {
-        using CCI = Connections::ComputeIndex;
-        using CCA = Connections::ComputeIndexArgument;
-
-        auto ci = graph.control.addElement(
-            ComputeIndex{forward, isStorePartOfGlobalToLDSOp, valueType, offsetType, strideType});
-
-        if(base > 0)
-            graph.mapper.connect(ci, base, CCI{CCA::BASE});
-        if(baseAddress > 0)
-            graph.mapper.connect(ci, baseAddress, CCI{CCA::BASEADDRESS});
-        if(buffer > 0)
-            graph.mapper.connect(ci, buffer, CCI{CCA::BUFFER});
-        if(increment > 0)
-            graph.mapper.connect(ci, increment, CCI{CCA::INCREMENT});
-        if(offset > 0)
-            graph.mapper.connect(ci, offset, CCI{CCA::OFFSET});
-        if(stride > 0)
-            graph.mapper.connect(ci, stride, CCI{CCA::STRIDE});
-        if(target > 0)
-            graph.mapper.connect(ci, target, CCI{CCA::TARGET});
+        // Create a NOP placeholder that will be replaced with Assign nodes later
+        auto nopTag = graph.control.addElement(NOP());
 
         rocRoller::Log::getLogger()->debug(
-            "KernelGraph::makeComputeIndex: ci {} {}/{} {}; {}/{}/{} {}/{}",
-            ci,
+            "KernelGraph::makeIndexPlaceholder: nop {} {}/{} {}; {}/{}/{} {}/{}",
+            nopTag,
             target,
             increment,
             forward,
@@ -213,7 +222,18 @@ namespace rocRoller::KernelGraph
             buffer,
             baseAddress);
 
-        return ci;
+        return ChainNodeInfo{nopTag,
+                             target,
+                             increment,
+                             base,
+                             offset,
+                             stride,
+                             buffer,
+                             forward,
+                             valueType,
+                             offsetType,
+                             strideType,
+                             isStorePartOfGlobalToLDSOp};
     }
 
     /**
@@ -430,19 +450,17 @@ namespace rocRoller::KernelGraph
     }
 
     /**
-     * @brief Add ComputeIndex nodes required for `op`.
+     * @brief Create an index assignment chain for `op`.
      */
-    ComputeIndexChain addComputeIndex(KernelGraph&                          graph,
-                                      int                                   op,
-                                      ExpressionPtr                         step,
-                                      ComputeIndexChainSpecification const& spec,
-                                      BufferMap&                            bufferMap,
-                                      BaseAddressMap&                       baseAddressMap)
+    IndexChain createIndexChain(KernelGraph&          graph,
+                                int                   op,
+                                ExpressionPtr         step,
+                                IndexChainSpec const& spec,
+                                BufferMap&            bufferMap,
+                                BaseAddressMap&       baseAddressMap)
     {
         rocRoller::Log::getLogger()->debug(
-            "KernelGraph::AddComputeIndex()::genericComputeIndex(): op {} location {}",
-            op,
-            spec.location);
+            "KernelGraph::AssignIndexExpressions(): op {} location {}", op, spec.location);
 
         auto dtype = getDataType(graph.control.getNode(op));
 
@@ -450,6 +468,7 @@ namespace rocRoller::KernelGraph
 
         int                             update = -1;
         std::vector<int>                chain;
+        std::vector<ChainNodeInfo>      nodeInfos;
         std::vector<DeferredConnection> connections;
         std::map<int, int>              offsetOfCoord;
         std::vector<int>                strideCoords;
@@ -460,7 +479,7 @@ namespace rocRoller::KernelGraph
         for(auto info : getRequiredCoordinatesInfo(
                 op, locationForCoordInfo, graph, spec.isStorePartOfGlobalToLDSOp))
         {
-            // Add ComputeIndex operation
+            // Add coordinate nodes for Offset/Stride/Buffer
             int offset = -1, stride = -1, buffer = -1, baseAddress = -1;
 
             {
@@ -498,19 +517,22 @@ namespace rocRoller::KernelGraph
                 offsetDataType = DataType::Int64;
                 strideDataType = DataType::Int64;
             }
-            chain.push_back(makeComputeIndex(graph,
-                                             target,
-                                             info.coord,
-                                             base,
-                                             offset,
-                                             stride,
-                                             buffer,
-                                             baseAddress,
-                                             direction == Graph::Direction::Upstream,
-                                             dtype,
-                                             offsetDataType,
-                                             strideDataType,
-                                             spec.isStorePartOfGlobalToLDSOp));
+            // Create placeholder NOP and store info for later Assign creation
+            auto nodeInfo = makeIndexPlaceholder(graph,
+                                                 target,
+                                                 info.coord,
+                                                 base,
+                                                 offset,
+                                                 stride,
+                                                 buffer,
+                                                 baseAddress,
+                                                 direction == Graph::Direction::Upstream,
+                                                 dtype,
+                                                 offsetDataType,
+                                                 strideDataType,
+                                                 spec.isStorePartOfGlobalToLDSOp);
+            chain.push_back(nodeInfo.nopTag);
+            nodeInfos.push_back(nodeInfo);
 
             // Add connections for register allocate, and so tracer
             // can determine correct lifetimes
@@ -555,7 +577,7 @@ namespace rocRoller::KernelGraph
         for(int i = 1; i < chain.size(); ++i)
             graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
 
-        return {chain.front(), chain.back(), connections, update};
+        return {chain.front(), chain.back(), nodeInfos, connections, update};
     }
 
     namespace
@@ -625,34 +647,452 @@ namespace rocRoller::KernelGraph
 
     } // anonymous namespace
 
+    namespace AssignIndexExpressionsDetail
+    {
+        using namespace CoordinateGraph;
+        using namespace ControlGraph;
+
+        std::pair<uint, uint>
+            getElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
+        {
+            namespace CT            = rocRoller::KernelGraph::CoordinateGraph;
+            uint elementBlockNumber = 0;
+            uint elementBlockIndex  = 0;
+
+            using OpsAndTilesType
+                = std::tuple<std::pair<int, Operation>, std::pair<int, MacroTile>, DataType>;
+            std::vector<OpsAndTilesType> targetOpsAndTiles;
+
+            for(auto conn : graph.mapper.getCoordinateConnections(target))
+            {
+                auto     opTag = conn.control;
+                auto     op    = std::get<Operation>(graph.control.getElement(opTag));
+                DataType dataType;
+                if(std::visit(rocRoller::overloaded{[&](LoadTiled& load) {
+                                                        dataType = load.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](LoadLDSTile& load) {
+                                                        dataType = load.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](StoreTiled& store) {
+                                                        dataType = store.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](StoreLDSTile& store) {
+                                                        dataType = store.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](auto& other) { return false; }},
+                              op))
+                {
+                    auto [macTileTag, macTile] = graph.getDimension<MacroTile>(opTag);
+
+                    auto maybeParentTile = only(
+                        graph.coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<Duplicate>));
+
+                    if(maybeParentTile)
+                    {
+                        macTileTag = *maybeParentTile;
+                        macTile    = *graph.coordinates.get<MacroTile>(macTileTag);
+                    }
+
+                    targetOpsAndTiles.push_back({{opTag, op}, {macTileTag, macTile}, dataType});
+                }
+            }
+
+            // If we get here and targetOpsAndTiles is empty, it is
+            // because: we are using Direct2LDS to load scaling data
+            // that will be swizzled (or is already pre-swizzled): no
+            // remaining operations are directly connected to the LDS
+            // target.
+            if(targetOpsAndTiles.empty())
+            {
+                // Just look upstream of target
+                auto [required, path]
+                    = findRequiredCoordinates(target, Graph::Direction::Upstream, graph);
+                for(auto coordTag : required)
+                {
+                    auto maybeElementNumber = graph.coordinates.get<ElementNumber>(coordTag);
+                    if(maybeElementNumber)
+                    {
+                        if(maybeElementNumber->dim == 0)
+                            elementBlockNumber = getUnsignedInt(evaluate(maybeElementNumber->size));
+                        else if(maybeElementNumber->dim == 1)
+                            elementBlockIndex = getUnsignedInt(evaluate(maybeElementNumber->size));
+                    }
+                }
+                return {elementBlockNumber, elementBlockIndex};
+            }
+
+            auto [tagAndOp, tagAndTile, dataType] = [](auto opsAndTiles) -> OpsAndTilesType {
+                for(OpsAndTilesType& elem : opsAndTiles)
+                {
+                    auto memType = std::get<1>(elem).second.memoryType;
+                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE)
+                    {
+                        return elem;
+                    }
+                }
+                return opsAndTiles[0];
+            }(targetOpsAndTiles);
+
+            auto [opTag, op]           = tagAndOp;
+            auto [macTileTag, macTile] = tagAndTile;
+
+            if(macTile.memoryType == MemoryType::VGPR
+               || (macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
+                   && macTile.memoryType == MemoryType::WAVE_SPLIT))
+            {
+                auto [elementNumberXTag, elementNumberX]
+                    = graph.getDimension<ElementNumber>(opTag, 0);
+                AssertFatal(Expression::evaluationTimes(
+                                elementNumberX.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine ElementNumberX size at translate-time.\n",
+                            ShowValue(elementNumberX));
+
+                auto [elementNumberYTag, elementNumberY]
+                    = graph.getDimension<ElementNumber>(opTag, 1);
+                AssertFatal(Expression::evaluationTimes(
+                                elementNumberY.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine ElementNumber size at translate-time.\n",
+                            ShowValue(elementNumberY));
+
+                elementBlockNumber = getUnsignedInt(evaluate(elementNumberX.size));
+                elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
+            }
+            else if(macTile.memoryType == MemoryType::WAVE
+                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE)
+            {
+                auto [vgprBlockNumberTag, vgprBlockNumber]
+                    = graph.getDimension<VGPRBlockNumber>(opTag, 0);
+                AssertFatal(Expression::evaluationTimes(
+                                vgprBlockNumber.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine VGPRBlockNumber size at translate-time.\n",
+                            ShowValue(vgprBlockNumber));
+
+                auto [vgprBlockIndexTag, vgprBlockIndex]
+                    = graph.getDimension<VGPRBlockIndex>(opTag, 0);
+                AssertFatal(Expression::evaluationTimes(
+                                vgprBlockIndex.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine VGPRBlockIndex size at translate-time.\n",
+                            ShowValue(vgprBlockIndex));
+
+                elementBlockNumber = getUnsignedInt(evaluate(vgprBlockNumber.size));
+                elementBlockIndex  = getUnsignedInt(evaluate(vgprBlockIndex.size));
+                if(isScaleType(dataType))
+                {
+                    // Scales are another special case here. For Scales we need
+                    // to get VGPR coordinate instead of VGPRBlockNumber/Index
+                    // (see addLoadSwizzleTileCT).
+                    auto [vgprTag, vgpr] = graph.getDimension<VGPR>(opTag, 0);
+                    AssertFatal(Expression::evaluationTimes(
+                                    vgpr.size)[Expression::EvaluationTime::Translate],
+                                "Could not determine VGPR size at translate-time.\n",
+                                ShowValue(vgpr));
+                    // Multiplying by elementBlockNumber here forces the use
+                    // of the widest load/store possible
+                    elementBlockIndex = elementBlockNumber * getUnsignedInt(evaluate(vgpr.size));
+                }
+
+                if((!LowerTileDetails::isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(
+                        dataType,
+                        {.m = macTile.subTileSizes[0],
+                         .n = macTile.subTileSizes[1],
+                         .k = macTile.subTileSizes[2]})
+                    || isScaleType(dataType))
+                   && !isTransposed)
+                {
+                    // For Scales and other kinds of tiles, VGPRBlockIndex holds
+                    // number of VGPR per block and not elements per VGPRBlock.
+                    elementBlockIndex *= packingFactorForDataType(dataType);
+                }
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "Could not find ElementNumber or VGPRBlockNumber/Index coordinates.\n",
+                    ShowValue(op),
+                    ShowValue(macTile));
+            }
+
+            AssertFatal(elementBlockNumber > 0 && elementBlockIndex > 0,
+                        "elemementBlockNumber & elementBlockIndex must be greater than zero. ",
+                        ShowValue(elementBlockNumber),
+                        ShowValue(elementBlockIndex));
+            return {elementBlockNumber, elementBlockIndex};
+        }
+
+        int makeAssignBase(KernelGraph&              graph,
+                           IndexComputeParams const& params,
+                           const int                 target,
+                           const int                 offset,
+                           const bool                maybeLDS,
+                           const bool                isTransposed,
+                           const ContextPtr          context,
+                           Transformer&              coords)
+        {
+            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(params.valueType).elementBits;
+
+                // TODO: This would be a good place to add a GPU
+                // assert.  If numBits is not a multiple of 8, assert
+                // that (expr * numBits) is a multiple of 8.
+                Log::debug("  toBytes: {}: numBits {}", toString(params.valueType), numBits);
+
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
+
+            auto offsetRegisterType = Register::Type::Vector;
+            if(params.isStorePartOfGlobalToLDS)
+                offsetRegisterType = Register::Type::Scalar;
+
+            auto indexExpr
+                = params.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
+
+            auto const& typeInfo = DataTypeInfo::Get(params.valueType);
+            auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
+
+            auto const& arch = context->targetArchitecture();
+            const auto  needsPadding
+                = numBits == 6 && isTransposed
+                  && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+
+            Expression::ExpressionPtr paddingBytes{L(0u)};
+            if(needsPadding && maybeLDS)
+            {
+                uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
+                paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
+            }
+
+            auto expr = toBytes(indexExpr) + paddingBytes;
+
+            if(params.isStorePartOfGlobalToLDS)
+            {
+                expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
+            }
+
+            auto assignNode         = Assign{offsetRegisterType, convert(params.offsetType, expr)};
+            assignNode.variableType = params.offsetType;
+            auto assignTag          = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, offset, NaryArgument::DEST);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeAssignBase: assign {} expression {} to offset {}",
+                assignTag,
+                toString(assignNode.expression),
+                offset);
+
+            return assignTag;
+        }
+
+        int makeAssignStride(KernelGraph&              graph,
+                             IndexComputeParams const& params,
+                             const int                 target,
+                             const int                 stride,
+                             const int                 increment,
+                             bool                      maybeLDS,
+                             const bool                isTransposed,
+                             const ContextPtr          context,
+                             Transformer&              coords)
+        {
+            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(params.valueType).elementBits;
+
+                // TODO: This would be a good place to add a GPU
+                // assert.  If numBits is not a multiple of 8, assert
+                // that (expr * numBits) is a multiple of 8.
+                Log::debug("  toBytes: {}: numBits {}", toString(params.valueType), numBits);
+
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
+
+            auto indexExpr = params.forward ? coords.forwardStride(increment, L(1), {target})[0]
+                                            : coords.reverseStride(increment, L(1), {target})[0];
+
+            // We have to manually invoke m_fastArith here since it can't traverse into the
+            // RegisterTagManager.
+            // TODO: Revisit storing expressions in the RegisterTagManager.
+            bool unitStride = false;
+            if(Expression::evaluationTimes(indexExpr)[Expression::EvaluationTime::Translate])
+            {
+                if(getUnsignedInt(evaluate(indexExpr)) == 1u)
+                    unitStride = true;
+            }
+
+            uint                      elementBlockSize = 0;
+            Expression::ExpressionPtr elementBlockStride;
+            Expression::ExpressionPtr trLoadPairStride;
+            Expression::ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
+            Expression::ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
+            Expression::ExpressionPtr indexExprPaddingBytes{L(0u)};
+
+            auto const& typeInfo = DataTypeInfo::Get(params.valueType);
+            auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
+
+            if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
+            {
+                auto [elementBlockNumber, elementBlockIndex]
+                    = getElementBlockValues(graph, target, isTransposed);
+
+                elementBlockSize = elementBlockIndex;
+
+                auto const& arch = context->targetArchitecture();
+                if(isTransposed)
+                {
+                    // See addLoadWaveTileCTF8F6F4 in LowerTile.cpp
+                    const auto wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+                    uint const numVBlocks
+                        = wfs == 64 ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
+                    elementBlockSize = (elementBlockNumber / numVBlocks) * elementBlockSize;
+                }
+                AssertFatal(elementBlockSize > 0, "Invalid elementBlockSize: ", elementBlockSize);
+
+                const auto needsPadding
+                    = numBits == 6 && isTransposed
+                      && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+
+                // Padding is added after every 16 elements, thus for F6 datatypes that will
+                // be transpose loaded from LDS elementBlockSize is set to 16 instead of 32.
+                if(needsPadding)
+                {
+                    elementBlockSize = 16;
+                }
+
+                elementBlockStride
+                    = params.forward
+                          ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
+                          : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
+
+                uint elementsPerTrLoad = elementBlockIndex;
+                trLoadPairStride
+                    = params.forward
+                          ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
+                          : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
+
+                if(needsPadding && maybeLDS)
+                {
+                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
+                    elementBlockStridePaddingBytes
+                        = elementBlockStride / L(elementsPerTrLoad) * L(extraLdsBytes);
+                    trLoadPairStridePaddingBytes
+                        = trLoadPairStride / L(elementsPerTrLoad) * L(extraLdsBytes);
+                    indexExprPaddingBytes = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
+                }
+            }
+
+            auto assignNode
+                = Assign{Register::Type::Vector, toBytes(indexExpr) + indexExprPaddingBytes};
+            assignNode.variableType = params.strideType;
+            assignNode.strideExpressionAttributes
+                = {params.strideType,
+                   unitStride,
+                   elementBlockSize,
+                   toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
+                   toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes};
+            auto assignTag = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, stride, NaryArgument::DEST);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeAssignStride: assign {} expression {} to stride {}",
+                assignTag,
+                toString(assignNode.expression),
+                stride);
+            return assignTag;
+        }
+
+        int makeBuffer(KernelGraph&              graph,
+                       IndexComputeParams const& params,
+                       const int                 target,
+                       const int                 buffer,
+                       const ContextPtr          context,
+                       const CommandPtr          command)
+        {
+            // Check if target has a User coordinate
+            auto user = graph.coordinates.get<User>(target);
+            if(!user)
+                return -1;
+
+            AssertFatal(user->size, "Invalid User dimension: missing size.", ShowValue(target));
+
+            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(params.valueType).elementBits;
+
+                Log::debug("  toBytes: {}: numBits {}", toString(params.valueType), numBits);
+
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
+
+            auto bufferVarType = VariableType{DataType::None, PointerType::Buffer};
+            auto bufferRegType = Register::Type::Scalar;
+
+            // Create a buffer descriptor expression
+            Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
+            Expression::ExpressionPtr basePointer
+                = findArgumentByName(command, user->argumentName)->expression();
+
+            if(user->offset)
+                basePointer = basePointer + user->offset;
+
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
+            bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                      BufferDescriptor::GetDefaultOptions(context));
+            // TODO: Handle sizes larger than 32 bits
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
+
+            auto assignNode         = Assign{bufferRegType, bufferExpr};
+            assignNode.variableType = bufferVarType;
+            auto assignTag          = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, buffer, NaryArgument::DEST);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeBuffer: assign {} expression {} to buffer {}",
+                assignTag,
+                toString(assignNode.expression),
+                buffer);
+
+            return assignTag;
+        }
+
+    } // namespace AssignIndexExpressionsDetail
+
+    // Import detail namespace for internal use
+    using namespace AssignIndexExpressionsDetail;
+
     /**
-     * @brief Add ComputeIndex operations.
+     * @brief Add index assignment operations.
      *
-     * Adding ComputeIndex operations to the control graph is done in
+     * Adding index assignment operations to the control graph is done in
      * two phases: staging and committing.
      *
      * During the staging phase, we look at all load/store operations
-     * in the control graph and "stage" the addition of ComputeIndex
+     * in the control graph and "stage" the addition of index assignment
      * operations.  During the staging phase, we are able to detect
      * when two or more load/store operations would result in the same
-     * chain of ComputeIndex operations, and eliminate any
-     * redundancies.
+     * chain of index assignments, and eliminate any redundancies.
      *
-     * Usually ComputeIndex operations come in sequential groups of
-     * two or more operations, and hence we call them "compute index
-     * chains".
+     * Usually index assignment operations come in sequential groups of
+     * two or more operations, and hence we call them "index chains".
      *
-     * During the commit stage, we add ComputeIndex operations to the
+     * During the commit stage, we add Assign operations to the
      * graphs, and add connections for load/store operations to the
      * newly created Base, Offset, and Stride elements of the
      * coordinate graph.
      *
      * For each candidate load/store operation:
      *
-     * 1. The type of ComputeIndex chain is determined.
+     * 1. The type of index chain is determined.
      *
-     * 2. The required location of the ComputeIndex chain is
-     *    determined.
+     * 2. The required location of the index chain is determined.
      *
      * 3. The chain is staged.
      *
@@ -680,8 +1120,14 @@ namespace rocRoller::KernelGraph
      * 4. If both ForLoop and Unroll dimensions are required, the
      *    chain is added above the containing ForLoop.
      */
-    struct AddComputeIndexer
+    struct AssignIndexer
     {
+        AssignIndexer(ContextPtr context, CommandPtr command)
+            : m_context(context)
+            , m_command(command)
+        {
+        }
+
         void stageChain(KernelGraph const& graph,
                         int                target,
                         int                candidate,
@@ -698,13 +1144,13 @@ namespace rocRoller::KernelGraph
                 specCoords.push_back(info.coord);
             }
 
-            ComputeIndexChainSpecification spec{target,
-                                                specCoords,
-                                                location,
-                                                direction,
-                                                forLoop,
-                                                replaceWithScope,
-                                                isStorePartOfGlobalToLDSOp};
+            IndexChainSpec spec{target,
+                                specCoords,
+                                location,
+                                direction,
+                                forLoop,
+                                replaceWithScope,
+                                isStorePartOfGlobalToLDSOp};
             m_chains[spec].push_back(candidate);
         }
 
@@ -713,7 +1159,8 @@ namespace rocRoller::KernelGraph
             auto log = rocRoller::Log::getLogger();
 
             auto node = kgraph.control.getNode<Operation>(candidate);
-            log->debug("KernelGraph::addComputeIndex({}): {}", candidate, toString(node));
+            log->debug(
+                "AssignIndexExpressions: processing candidate({}): {}", candidate, toString(node));
 
             auto [target, direction]
                 = getOperationTarget(candidate, kgraph, isStorePartOfGlobalToLDSOp);
@@ -911,26 +1358,25 @@ namespace rocRoller::KernelGraph
                 }
 
                 // Use first candidate to compute indexes
-                Log::debug(
-                    "KernelGraph::AddComputeIndex()::commit({}) isStorePartOfGlobalToLDSOp({}) "
-                    "location={}",
-                    candidates[0],
-                    spec.isStorePartOfGlobalToLDSOp,
-                    spec.location);
+                Log::debug("KernelGraph::AssignIndexExpressions()::commit({}) "
+                           "isStorePartOfGlobalToLDSOp({}) "
+                           "location={}",
+                           candidates[0],
+                           spec.isStorePartOfGlobalToLDSOp,
+                           spec.location);
 
-                auto chain
-                    = addComputeIndex(kgraph, candidates[0], step, spec, bufferMap, baseAddressMap);
+                auto chain = createIndexChain(kgraph, candidates[0], step, spec, bufferMap, baseAddressMap)
 
                 if(spec.direction == GD::Downstream)
                 {
-                    // Add ComputeIndexes to an Initialize block below target
+                    // Add index assigns to an Initialize block below target
                     kgraph.control.addElement(Initialize(), {spec.location}, {chain.top});
                 }
                 else
                 {
                     if(spec.replaceWithScope)
                     {
-                        // Add ComputeIndexes in a Scope above target. Only the location
+                        // Add index assigns in a Scope above target. Only the location
                         // is within the scope.
                         if(!scopes.contains(spec.location))
                         {
@@ -941,7 +1387,7 @@ namespace rocRoller::KernelGraph
                         }
 
                         auto scope = scopes[spec.location];
-                        if(m_serializeComputeIndex)
+                        if(m_serializeAssigns)
                         {
                             auto insertionPoint = serializationPoints[spec.location];
                             auto isScope = kgraph.control.get<Scope>(insertionPoint).has_value();
@@ -960,7 +1406,7 @@ namespace rocRoller::KernelGraph
                     }
                     else
                     {
-                        // Add ComputeIndexes in a Scope above target. Everything underneath
+                        // Add index assigns in a Scope above target. Everything underneath
                         // the location is within the scope.
                         if(!scopes.contains(spec.location))
                         {
@@ -994,23 +1440,161 @@ namespace rocRoller::KernelGraph
                         kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
                     }
                 }
+
+                // Now create Assign nodes for each placeholder in the chain
+                for(auto const& nodeInfo : chain.nodeInfos)
+                {
+                    createAssignsForPlaceholder(kgraph, nodeInfo, m_context, m_command);
+                }
             }
 
             return kgraph;
         }
 
     private:
-        std::map<ComputeIndexChainSpecification, std::vector<int>> m_chains;
+        /**
+         * @brief Create Assign nodes for a placeholder and replace the placeholder.
+         */
+        static void createAssignsForPlaceholder(KernelGraph&         kgraph,
+                                                ChainNodeInfo const& nodeInfo,
+                                                ContextPtr           context,
+                                                CommandPtr           command)
+        {
+            int target = nodeInfo.target;
 
-        bool m_serializeComputeIndex = true;
+            // Determine if target is LDS
+            auto maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
+            if(maybeLDS)
+            {
+                // If target is LDS; it might be a duplicated LDS node.
+                // For the purposes of computing indexes, use the parent LDS as the target instead.
+                namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+                auto maybeParentLDS
+                    = only(kgraph.coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
+                if(maybeParentLDS)
+                    target = *maybeParentLDS;
+            }
+            maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
+
+            // Determine if transposed
+            auto isTransposed
+                = kgraph.coordinates
+                      .findNodes(target,
+                                 [&](int tag) -> bool {
+                                     auto maybeAdhoc = kgraph.coordinates.get<Adhoc>(tag);
+                                     return maybeAdhoc
+                                            && maybeAdhoc->name() == "Adhoc.transpose.simdsPerWave";
+                                 })
+                      .to<std::vector>()
+                      .size()
+                  == 1;
+
+            // Build the params struct
+            IndexComputeParams params{nodeInfo.forward,
+                                      nodeInfo.isStorePartOfGlobalToLDSOp,
+                                      nodeInfo.valueType,
+                                      nodeInfo.offsetType,
+                                      nodeInfo.strideType};
+
+            // Build transformer at the placeholder location
+            auto xform = kgraph.buildTransformer(nodeInfo.nopTag, rocRoller::IgnoreCache);
+
+            // Set register coordinates
+            auto const maybeForLoop = findContainingOperation<ForLoopOp>(nodeInfo.nopTag, kgraph);
+            auto       direction
+                = params.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
+            auto fullStop         = [&](int tag) { return tag == nodeInfo.increment; };
+            auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
+
+            auto isRegisterDim = [&maybeForLoop](auto dim) -> bool {
+                using T = std::decay_t<decltype(dim)>;
+                if(maybeForLoop)
+                    return CIsAnyOf<T, Wavefront, Workitem, Workgroup, ForLoop>;
+                else
+                    return CIsAnyOf<T, Wavefront, Workitem, Workgroup>;
+            };
+            for(auto coord : required)
+            {
+                if(std::visit(isRegisterDim, kgraph.coordinates.getNode(coord)))
+                {
+                    auto registerType = Register::Type::Vector;
+                    auto coordDF      = std::make_shared<Expression::Expression>(
+                        Expression::DataFlowTag{coord, registerType, DataType::UInt32});
+                    if(!xform.hasCoordinate(coord))
+                        xform.setCoordinate(coord, coordDF);
+                }
+            }
+
+            // Set remaining coordinates to 0
+            for(auto coord : required)
+                if((coord != nodeInfo.increment) && (!xform.hasCoordinate(coord)))
+                    xform.setCoordinate(coord, L(0u));
+
+            // Set the increment coordinate to zero if it doesn't already have a value
+            bool initializeIncrement
+                = !xform.hasPath({target}, direction == Graph::Direction::Upstream);
+            if(initializeIncrement)
+            {
+                xform.setCoordinate(nodeInfo.increment, L(0u));
+            }
+
+            int assignStrideTag = -1, assignBaseTag = -1, assignBufferTag = -1;
+
+            if(nodeInfo.baseOffset < 0 && nodeInfo.offset > 0)
+            {
+                assignBaseTag = makeAssignBase(kgraph,
+                                               params,
+                                               target,
+                                               nodeInfo.offset,
+                                               maybeLDS,
+                                               isTransposed,
+                                               context,
+                                               xform);
+            }
+
+            if(nodeInfo.stride > 0)
+            {
+                assignStrideTag = makeAssignStride(kgraph,
+                                                   params,
+                                                   target,
+                                                   nodeInfo.stride,
+                                                   nodeInfo.increment,
+                                                   maybeLDS,
+                                                   isTransposed,
+                                                   context,
+                                                   xform);
+            }
+
+            if(nodeInfo.buffer > 0)
+            {
+                assignBufferTag
+                    = makeBuffer(kgraph, params, target, nodeInfo.buffer, context, command);
+            }
+
+            // Insert Assign nodes after the NOP placeholder
+            if(assignBufferTag != -1)
+                insertAfter(kgraph, nodeInfo.nopTag, assignBufferTag, assignBufferTag);
+            if(assignStrideTag != -1)
+                insertAfter(kgraph, nodeInfo.nopTag, assignStrideTag, assignStrideTag);
+            if(assignBaseTag != -1)
+                insertAfter(kgraph, nodeInfo.nopTag, assignBaseTag, assignBaseTag);
+        }
+
+    private:
+        std::map<IndexChainSpec, std::vector<int>> m_chains;
+
+        bool       m_serializeAssigns = true;
+        ContextPtr m_context;
+        CommandPtr m_command;
     };
 
-    KernelGraph AddComputeIndex::apply(KernelGraph const& original)
+    KernelGraph AssignIndexExpressions::apply(KernelGraph const& original)
     {
-        AddComputeIndexer indexer;
+        AssignIndexer indexer(m_context, m_command);
 
         for(auto candidate :
-            findComputeIndexCandidates(original, *original.control.roots().begin()))
+            findIndexAssignmentCandidates(original, *original.control.roots().begin()))
         {
             // Global to LDS ops have two sets of coordinates for the load and store parts
             indexer.stage(original, candidate, false);
