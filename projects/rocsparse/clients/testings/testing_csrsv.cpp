@@ -213,10 +213,11 @@ void testing_csrsv(const Arguments& arg)
     }
 
     host_dense_matrix<T> hx(M, 1);
-    host_dense_matrix<T> hx_expected(M, 1); // Store expected integer solution for convert_to_int
+    host_dense_matrix<T> hx_expected(
+        M, 1); // Store expected integer solution for integer_based_manufactured_solution
 
-    // If convert_to_int is enabled, convert matrix to integer values and compute b = A*x
-    if(arg.convert_to_int)
+    // If integer_based_manufactured_solution is enabled, construct integer matrix and generate corresponding right-hand side
+    if(arg.integer_based_manufactured_solution)
     {
         for(rocsparse_int i = 0; i < hA.nnz; ++i)
         {
@@ -233,21 +234,26 @@ void testing_csrsv(const Arguments& arg)
 
                     if(col == i)
                     {
-                        hA.val[j] = static_cast<T>(128);
+                        // Find the lowest power of 2 strictly greater than the number of elements in the current row
+                        rocsparse_int row_nnz = hA.ptr[i + 1] - hA.ptr[i];
+                        rocsparse_int diag_val
+                            = 1 << static_cast<rocsparse_int>(std::ceil(std::log2(row_nnz + 1)));
+                        hA.val[j] = static_cast<T>(diag_val);
                         break;
                     }
                 }
             }
         }
 
-        // Generate integer vector x
+        // Set all the entries of the expected solution to alpha
         for(rocsparse_int i = 0; i < M; ++i)
         {
             hx_expected[i] = (*h_alpha);
         }
 
-        // Compute b = (1/alpha) * A * x (the right-hand side) using only the triangular part
-        // We need to account for alpha so that the solution remains integer
+        // Compute b = A * x / alpha (the right-hand side) using only the triangular part
+        // As we set all entries of x to alpha, this simplifies to b = A * o where o is a vector of ones.
+        // This is equivalent to summing the rows of A in the triangular part
         host_dense_matrix<T> hb(M, 1);
         for(rocsparse_int i = 0; i < M; ++i)
         {
@@ -271,7 +277,7 @@ void testing_csrsv(const Arguments& arg)
                     {
                         aval = static_cast<T>(1);
                     }
-                    hb[i] += aval * hx_expected[col] / (*h_alpha);
+                    hb[i] += aval;
                 }
             }
         }
@@ -371,8 +377,8 @@ void testing_csrsv(const Arguments& arg)
         {
             hy.near_check(dy, tol);
 
-            // If convert_to_int is enabled, verify that the solution has integer values
-            if(arg.convert_to_int)
+            // If integer_based_manufactured_solution is enabled, verify that the solution has integer values
+            if(arg.integer_based_manufactured_solution)
             {
                 // Check that the solution matches the expected integer vector
                 hx_expected.near_check(dy, tol);

@@ -159,6 +159,7 @@ struct Arguments
     bool sparsity_pattern_statistics;
     bool call_stage_analysis;
     bool convert_to_int;
+    bool integer_based_manufactured_solution;
     char filename[128];
     char function[64];
     char name[64];
@@ -307,6 +308,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(sparsity_pattern_statistics);
         ROCSPARSE_FORMAT_CHECK(call_stage_analysis);
         ROCSPARSE_FORMAT_CHECK(convert_to_int);
+        ROCSPARSE_FORMAT_CHECK(integer_based_manufactured_solution);
         ROCSPARSE_FORMAT_CHECK(filename);
         ROCSPARSE_FORMAT_CHECK(function);
         ROCSPARSE_FORMAT_CHECK(name);
@@ -528,6 +530,7 @@ private:
         print("sparsity_pattern_statistics", arg.sparsity_pattern_statistics);
         print("call_stage_analysis", arg.call_stage_analysis);
         print("convert_to_int", arg.convert_to_int);
+        print("integer_based_manufactured_solution", arg.integer_based_manufactured_solution);
         print("name", arg.name);
         print("category", arg.category);
         print("hardware", arg.hardware);
