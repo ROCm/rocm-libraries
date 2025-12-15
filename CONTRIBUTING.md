@@ -214,14 +214,14 @@ pre-commit run --all-files
 
 ### Opting a Project into Pre-commit Checks
 
-By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project, follow this incremental approach to avoid breaking the build:
+By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project, follow this incremental approach to avoid pre-commit failures:
 
 1.  **Apply Fixes**:
-    Temporarily remove your project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml) on your local machine (**do not commit this change yet**) and run the checks:
+    Remove your project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml) on your local machine (**do not commit this change yet**) and run the checks:
     ```bash
     pre-commit run --files $(git ls-files projects/<your-project>)
     ```
-    Some fixes will be applied automatically, while others may require manual intervention. Submit pull requests to apply these fixes to your project's code. You may choose to fix issues incrementally or in bulk, but large bulk updates are often volatile and may require careful coordination within your team.
+    Some fixes will be applied automatically, while others may require manual intervention. Submit pull requests to apply these fixes to your project's code. We recommend coordinating within your team and grouping fixes by directory or subcomponent to avoid the volatility that could ensue following a bulk PR.
 
 2.  **Finalize Opt-in**:
     Once all issues in the project are resolved:
