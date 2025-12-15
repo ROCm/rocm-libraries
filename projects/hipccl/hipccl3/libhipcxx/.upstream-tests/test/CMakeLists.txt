@@ -207,6 +207,11 @@ find_program(libcudacxx_LIT lit REQUIRED)
 set(libcudacxx_LIT_FLAGS "" CACHE STRING "Semi-colon separated list of flags passed to the invocation of lit.")
 message(STATUS "libcudacxx_LIT_FLAGS: ${libcudacxx_LIT_FLAGS}")
 
+# Restricted to avoid oversubscribing the GPU:
+set(libcudacxx_LIT_PARALLEL_LEVEL 8 CACHE STRING
+"Parallelism used to run libcudacxx's lit test suite."
+)
+
 if (LIBCUDACXX_ENABLE_CUDA)
   if (NOT LIBCUDACXX_TEST_WITH_NVRTC)
     # Build but don't run the tests. Used by CI to pre-seed sccache for the test machines.
@@ -231,11 +236,6 @@ elseif(LIBCUDACXX_ENABLE_HIP)
 
   endif()
 endif()
-
-# Restricted to avoid oversubscribing the GPU:
-set(libcudacxx_LIT_PARALLEL_LEVEL 8 CACHE STRING
-"Parallelism used to run libcudacxx's lit test suite."
-)
 
 add_test(NAME libcudacxx.test.lit COMMAND
   "${CMAKE_COMMAND}" -E env
