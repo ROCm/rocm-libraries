@@ -36,6 +36,9 @@ public:
         // Normalizes: xhat[n,c,h,w] = (x[n,c,h,w] - mean_c) / sqrt(var_c + ε)
         // Transforms: y[n,c,h,w] = γ_c * xhat[n,c,h,w] + β_c
         //
+        // Optionally outputs mean_c and invStd_c to device buffers
+        // (consumed by backward pass for gradient computation)
+        //
         // Updates running stats: runMean_c = (1-α)*runMean_c + α*mean_c
         //                       runVar_c  = (1-α)*runVar_c  + α*var_c
         // ====================================================================

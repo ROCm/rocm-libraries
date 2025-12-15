@@ -33,16 +33,20 @@ public:
         // Algorithm Overview:
         // Given dy (gradient of loss w.r.t. y), compute gradients w.r.t. inputs:
         //
+        // INPUTS: x, dy, scale, mean_c, invStd_c (saved from forward pass)
+        // OUTPUTS: dx, dscale, dbias
+        //
         // For each channel c, using saved forward stats (mean_c, invStd_c):
         //   xhat[n,c,h,w] = (x[n,c,h,w] - mean_c) * invStd_c
         //
         // Compute parameter gradients (accumulated over N,H,W):
-        //   dγ_c = Σ_{n,h,w} xhat[n,c,h,w] * dy[n,c,h,w]
-        //   dβ_c = Σ_{n,h,w} dy[n,c,h,w]
+        //   dscale_c += xhat[n,c,h,w] * dy[n,c,h,w]  // gradient of scale
+        //   dbias_c  += dy[n,c,h,w]                   // gradient of bias
         //
-        // Compute input gradient:
-        //   dx[n,c,h,w] involves chain rule through normalization
-        //   (requires saved mean_c and invStd_c from forward pass)
+        // Compute input gradient (where m = N*H*W per channel):
+        //   dx_i = (scale_c * invStd_c / m) * (m*dy_i - dbias_c - xhat_i*dscale_c)
+        //
+        // This chain rule derivative accounts for batch statistics coupling.
         // ====================================================================
 
         // SECTION 1: Validate Required Tensor Pointers
@@ -108,10 +112,10 @@ public:
             validateTensorShapesMatch(x, dx, "Input tensor (x)", "Gradient output tensor (dx)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
-        // Why: Parameter gradients (dγ_c, dβ_c) are accumulated per-channel over (N,H,W):
-        //   dγ_c = Σ_{n,h,w} xhat[n,c,h,w] * dy[n,c,h,w]  -> shape [1, C, 1, 1]
-        //   dβ_c = Σ_{n,h,w} dy[n,c,h,w]                   -> shape [1, C, 1, 1]
-        // Scale from forward pass is also per-channel [1, C, 1, 1].
+        // Why: Parameter gradients (dscale, dbias) are accumulated per-channel over (N,H,W):
+        //   dscale_c = Σ_{n,h,w} xhat[n,c,h,w] * dy[n,c,h,w]  -> shape [1, C, 1, 1]
+        //   dbias_c  = Σ_{n,h,w} dy[n,c,h,w]                   -> shape [1, C, 1, 1]
+        // scale from forward pass is also per-channel [1, C, 1, 1].
         // Saved statistics (mean_c, invStd_c) are per-channel for backward computation.
         auto& xDims = x->get_dim();
         if(!xDims.empty() && xDims.size() >= 2)
