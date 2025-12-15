@@ -42,19 +42,19 @@ base csrgeam_idxbaseA_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE
 base csrgeam_idxbaseB_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 base csrgeam_idxbaseC_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 
-std::string csrgeam_bin[] = {/*"rma10.bin",*/
-                             "mac_econ_fwd500.bin",
-                             /*"bibd_22_8.bin",*/
-                             "mc2depi.bin",
-                             "scircuit.bin",
-                             /*"bmwcra_1.bin",*/
-                             "nos1.bin",
-                             "nos2.bin",
-                             "nos3.bin",
-                             "nos4.bin",
-                             "nos5.bin",
-                             "nos6.bin",
-                             "nos7.bin"};
+std::string csrgeam_bin[] = {/*"rma10.csr",*/
+                             "mac_econ_fwd500.csr",
+                             /*"bibd_22_8.csr",*/
+                             "mc2depi.csr",
+                             "scircuit.csr",
+                             /*"bmwcra_1.csr",*/
+                             "nos1.csr",
+                             "nos2.csr",
+                             "nos3.csr",
+                             "nos4.csr",
+                             "nos5.csr",
+                             "nos6.csr",
+                             "nos7.csr"};
 
 class parameterized_csrgeam : public testing::TestWithParam<csrgeam_tuple>
 {

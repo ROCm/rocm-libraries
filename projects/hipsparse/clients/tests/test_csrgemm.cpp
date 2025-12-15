@@ -44,15 +44,15 @@ base csrgemm_idxbaseC_range[] = {HIPSPARSE_INDEX_BASE_ZERO};
 trans csrgemm_transA_range[] = {HIPSPARSE_OPERATION_NON_TRANSPOSE};
 trans csrgemm_transB_range[] = {HIPSPARSE_OPERATION_NON_TRANSPOSE};
 
-std::string csrgemm_bin[] = {"mc2depi.bin",
-                             "scircuit.bin",
-                             "nos1.bin",
-                             "nos2.bin",
-                             "nos3.bin",
-                             "nos4.bin",
-                             "nos5.bin",
-                             "nos6.bin",
-                             "nos7.bin"};
+std::string csrgemm_bin[] = {"mc2depi.csr",
+                             "scircuit.csr",
+                             "nos1.csr",
+                             "nos2.csr",
+                             "nos3.csr",
+                             "nos4.csr",
+                             "nos5.csr",
+                             "nos6.csr",
+                             "nos7.csr"};
 
 class parameterized_csrgemm : public testing::TestWithParam<csrgemm_tuple>
 {

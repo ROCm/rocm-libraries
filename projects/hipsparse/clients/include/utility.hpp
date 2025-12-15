@@ -48,13 +48,8 @@
 #include <omp.h>
 #endif
 
-#ifdef __cpp_lib_filesystem
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
 
 /*! \brief Return path of this executable */
 std::string hipsparse_exepath();
@@ -100,11 +95,11 @@ inline std::string get_filename(const std::string& matrix_filename)
 {
     std::string matrix_filename_with_ext = matrix_filename;
 
-    // Check if file already has extension, keep it, otherwise add .bin extension
+    // Check if file already has extension, keep it, otherwise add .csr extension
     size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
     if(last_dot_pos == std::string::npos || last_dot_pos == 0)
     {
-        matrix_filename_with_ext += ".bin";
+        matrix_filename_with_ext += ".csr";
     }
 
     const char* matrices_dir = get_hipsparse_clients_matrices_dir();
@@ -120,7 +115,33 @@ inline std::string get_filename(const std::string& matrix_filename)
     }
     else
     {
-        r = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
+        std::vector<fs::path> possible_paths = {
+            // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
+            fs::path(hipsparse_exepath()) / ".." / "matrices",
+            // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
+            fs::path(hipsparse_exepath()) / ".." / "clients" / "matrices",
+        };
+
+        bool found = false;
+        for(const auto& matrices_path : possible_paths)
+        {
+            // Try to verify the directory exists by attempting to open a common matrix file
+            std::string test_path = matrices_path.string() + "/nos3.csr";
+            FILE*       test_file = fopen(test_path.c_str(), "r");
+            if(test_file)
+            {
+                fclose(test_file);
+                r     = matrices_path / matrix_filename_with_ext;
+                found = true;
+                break;
+            }
+        }
+
+        if(!found)
+        {
+            // Fallback to default relative path
+            r = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
+        }
     }
 
     FILE* tmpf = fopen(r.string().c_str(), "r");

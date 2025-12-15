@@ -231,7 +231,7 @@ hipsparseStatus_t testing_csrcolor()
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     // Determine absolute path of test matrix
     // Matrices are stored at the same path in matrices directory
-    std::string filename = "nos3.bin";
+    std::string filename = "nos3.csr";
 
     // hipSPARSE handle
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);

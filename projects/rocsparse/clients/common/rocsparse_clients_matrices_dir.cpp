@@ -25,6 +25,9 @@
 #include "rocsparse_clients_envariables.hpp"
 #include "utility.hpp"
 
+#include <cstdio>
+#include <filesystem>
+
 //
 //
 //
@@ -36,26 +39,44 @@ private:
     bool        m_is_defined{};
     clients_matrices_dir()
     {
+        namespace fs       = std::filesystem;
         this->m_is_defined = rocsparse_clients_envariables::is_defined(
             rocsparse_clients_envariables::MATRICES_DIR);
         if(this->m_is_defined)
         {
             this->m_path
                 = rocsparse_clients_envariables::get(rocsparse_clients_envariables::MATRICES_DIR);
+        }
+
+        fs::path default_path = rocsparse_exepath();
+
+        std::vector<std::string> possible_relative_paths = {
+            // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
+            "../matrices",
+            // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
+            "../clients/matrices",
+        };
+
+        bool found = false;
+        for(const auto& rel_path : possible_relative_paths)
+        {
+            // Try to verify the directory exists by attempting to open a common matrix file
+            fs::path test_path = default_path / rel_path / "nos3.csr";
+            FILE*    test_file = fopen(test_path.c_str(), "r");
+            if(test_file)
             {
-                const size_t size = this->m_path.size();
-                if((size > 0) && (this->m_path[size - 1] != '/'))
-                    this->m_path += "/";
+                fclose(test_file);
+                this->m_default_path = (default_path / rel_path).string() + "/";
+                found                = true;
+                break;
             }
         }
 
-        this->m_default_path = rocsparse_exepath();
+        if(!found)
         {
-            const size_t size = this->m_default_path.size();
-            if((size > 0) && (this->m_default_path[size - 1] != '/'))
-                this->m_default_path += "/";
+            // Fallback if none of the paths exist
+            this->m_default_path = (default_path / ".." / "matrices").string() + "/";
         }
-        this->m_default_path += "../matrices/";
     }
 
 public:
