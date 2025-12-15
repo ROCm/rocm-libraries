@@ -23,6 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 from abc import abstractmethod
+from typing import Any
 import unittest
 
 from test_CustomSchedule import create_base_kernel, ScheduleInfo
@@ -49,10 +50,16 @@ class CMSValidationTestBase(unittest.TestCase):
         """
         raise NotImplementedError("Subclasses must implement validation_function")
     
-    def setUp(self):
+    def setUp(self, kernel_updates: dict[str, Any] | None = None):
         """Initialize kernel and compute number of VMFMAs."""
         self.kernel = create_base_kernel()
-        self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
+        if kernel_updates:
+            self.kernel.update(kernel_updates)
+        
+        self.num_vmfma = self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
+        self.num_vmfma *= self.kernel["DepthU"] // self.kernel["MatrixInstruction"][2]
+        if self.kernel.get("UseF32XEmulation", False):
+            self.num_vmfma *= 3
 
     def validate(
         self,
