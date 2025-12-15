@@ -58,7 +58,7 @@ LaunchParams = namedtuple(
         'transforms_per_block',
         'workgroup_size',
         'threads_per_transform',
-        'half_lds',  # load real and imag part separately with half regular lds resouce to increase occupancy
+        'half_lds',  # load real and imag part separately with half regular lds resource to increase occupancy
         'direct_to_from_reg'
     ]
 )  # load from global mem to registers directly and store from registers to global mem.
