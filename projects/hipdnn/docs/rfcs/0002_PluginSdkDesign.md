@@ -2,7 +2,6 @@
 
 - Contributors: Mitch Ousdahl, Sam Reeder, Adam Dickin
 - Original Implementation: Adam Dickin
-- Last Update: Dec 5, 2025
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
@@ -35,19 +34,6 @@ The C-compatible engine plugin API is certainly suggestive of certain concepts a
 
 While the proposed design isn't meant to be prescriptive, it should work either as a direct implementation aid (using the classes directly) or a documentation aid (these classes suggest how an engine plugin is used by hipDNN).
 
-### 2.1 Object Lifetimes
-For the plugin, there's a comment on `std::weak_ptr<MiopenContainer>` in [MiopenLegacyPlugin.cpp](../../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp) that describes why the weak_ptr / shared_ptr for the container exists.
-
-To summarize, it's so that if the plugin is opened more than once, the container can be shared, but the container gets cleaned up if that last plugin ref drops off.
-
-However, as the thread note indicates, that means that multiple threads can be accessing the container, the engine manager, the engines, and the plan builders. Since the plans are handed back up via handles, they should exist inside the execution context of a single thread.
-
-Any state required should be attached to plugin handles, which should be isolated to a single thread by hipDNN convention.
-
-### 2.2 Multi-Threading
-Shared library files aren't reloaded by `dlopen` calls from different threads, so we isolate threads by putting state on the hipDNN handle, but it also means that anything in the plugin needs to effectively be stateless after it's constructed (except for plans which are handed off to the execution context).
-
-For example, it would be problematic if the plugin container or engine manager had any caching or any other mutable state that wasn't thread safe.
 
 ## 3. Current System Overview
 The hipDNN framework consists of a frontend (C++ Graph API), a backend (core runtime), and a plugin system. The backend prepares and dispatches execution to dynamically loaded plugins via a C-API interface.
@@ -55,6 +41,21 @@ The hipDNN framework consists of a frontend (C++ Graph API), a backend (core run
 The following diagram demonstrates how frontend calls pass through the backend and ultimately get handled by an engine plugin.  The call-stack demonstrated isn't exhaustive, it's mostly to illustrate the entry / exit points for each layer.  Our current implementation of the MIOpen plugin is overlayed to demonstrate how a plugin might implement the plugin interface.  The proposed plugin SDK will be an engine agnostic version of this existing design.
 
 ![Current System Overview](../images/current_system_overview.png)
+
+### 3.1 Object Lifetimes
+For the plugin, there's a comment on `std::weak_ptr<MiopenContainer>` in [MiopenLegacyPlugin.cpp](../../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp) that describes why the weak_ptr / shared_ptr for the container exists.
+
+To summarize, it's so that if the plugin is opened more than once, the container can be shared, but the container gets cleaned up if that last plugin ref drops off.
+
+However, as the thread note indicates, that means that multiple threads can be accessing the container, the engine manager, the engines, and the plan builders.
+
+Due to this, the backend maintains a lifecycle for two types of objects (with corresponding create / destroy calls in the plugin).
+    - Plugin handle - This gets created when the plugin is intialized.  It is an opaque pointer, so plugin authors would typically use it for storing things like device state, and any further implementation handles (such as MIOpen's handles in the example of the MIOpen plugin)
+    - Execution Context - This gets created when a plan gets finalized.  It is another opaque pointer, allowing plugin authors to store state relevant to plans.
+
+### 3.2 Multi-Threading
+Shared library files aren't reloaded by `dlopen` calls from different threads, which means that multiple threads can be accessing the proposed objects below from multiple threads at the same time.  Given that, plugin containers, engine managers, and plan builders should either be stateless or use thread-safe objects with locking around any stored state.
+
 
 ### MIOpen Plugin Architecture
 
@@ -133,19 +134,23 @@ This represents an engine that can handle one or more graphs of operations.
 
 For example, a `BatchNormEngine` might be able to handle single-op and simple fused graphs that contain batchnorm operations.
 
+*Note:* You probably don't want to have an massive amount of engines in your plugin.  The plugin is responsible for choosing its solution given a graph, and without sampling.  The plan should be finalized and ready to go by execution time, which is when device pointers are available.
+
 - **Lifecycle:**
     - The engines typically have the same lifecycle as the `EngineManager` that contains them.
     - The `engine_details` returned by `getDetails()` has explicit create/destroy entry-points in the plugin.
     - The `execution_plan` created by `initializeExecutionContext()` also has explicit create/destroy entry-points in the plugin.
-    - Since engine_detauls and the execution_plan are "owned" by the plugin consumer, the EnginePluginContainer is sufficient to manage their cleanup during their destroy api calls.
+    - Since engine_details and the execution_plan are "owned" by the plugin consumer, the EnginePluginContainer is sufficient to manage their cleanup during their destroy api calls.
 
 - **Methods:** The class will implement the following:
-    - `bool isApplicable(handle, graph)` - Returns true if this engine can handle the supplied graph. Typically it would do this by checking all its plan builders. It's important that (for now) only a single plan builder for a given graph + engine combo be applicable until we have some sort of mechanism for plan builder selection.
+    - `bool isApplicable(handle, graph)` - Returns true if this engine can handle the supplied graph. Typically it would do this by checking all its plan builders.
+        - *Note:* only a single plan builder can be provided per engine. If multiple plan-builders have overlapping graph support, then it's up to the plugin implementor to decide on how to handle this selection. Two possible options could be splitting these plan builders up into multiple different engines, or having a priority selection system.
     - `engine_details getDetails(handle, graph)` - Returns details about this engine
-    - `size_t getMaxWorkspaceSize(handle, graph, engine_config)` - Pass-through to the plan builder indicated by the `engine_id` inside the `engine_config`
-    - `execution_context initializeExecutionContext(handle, graph, engine_config)` - Pass-through to the appropriate plan builder
+    - `size_t getMaxWorkspaceSize(handle, graph, engine_config)` - Pass-through to the plan builders that are applicable, taking the Max of all workspaces queried (typically only one should be applicable for a given graph).
+    - `execution_context initializeExecutionContext(handle, graph, engine_config)` - Pass-through to the appropriate plan builder.
+        - *Note:* It's expected that only one plan builder will ever be applicable, and it's up to the plugin author to either split things up into more engines, or have some mechanism for choosing between plan builders if multiple plan builders are applicable.
 
-- **Future Considerations:** Eventually engines will have behavioral notes (that will live in engine details) and settings (that will live in engine config)  This functionality is stubbed in somewhat for the future, but further work will need to be done here when those features land. Plugin authors will need to split their engines into grouping that have the same behavioral notes, and support similar engine configurations.
+- **Future Considerations:** Eventually engines will have behavioral notes (that will live in engine details) and settings (that will live in engine config)  This functionality is stubbed in somewhat for the future, but further work will need to be done here when those features land. Plugin authors will need to split their engines into groupings that have the same behavioral notes, and support similar engine configurations.
 
 - **Members:**
     - A container of several `IPlanBuilder`-derived class instances.
@@ -176,6 +181,7 @@ This class represents a ready-to-execute plan that can take device data and then
 Above of the plugin there are a few objects that have lifecycles managed by the backend / frontend.  They are usually opaque data tied to handles / descriptors which means that it's up to the plugin authors how they are used, but below are some examples of how they might be used in a plugin.
 
 - **Plugin Handle:** Created with explicit create / destroy methods, this is an opaque pointer to an object ultimately defined by the plugin author.  It can be used to tie information from invocations of a plugin to other resources.  In the MIOpen plugin, for example, the handle contains a reference to EnginePluginContainer and a pointer to the stream passed into setStream calls.  This handle is usually created when a plugin is loaded during initialization.
+    - *Note:* Care should be taken since that the handle that's used during plugin creation may not be the same as the one used during plan execution.  What this means, for example, is that a plugin may be instantiated and a plan created on one thread, for example, and then executed on a completely separate thread under the context of a different plugin handle.  So it would be unhelpful, for example, to store cache artifacts for plan exeuction on a plugin handle.
 
 - **Engine Details:** Created when the framework requests engine details from the plugin.  The lifespan is controlled by the consuming application.
 
@@ -195,7 +201,7 @@ Error handling will make use of C++ exceptions primarily, with the understanding
 - Use of wrappers and glue code to hide the details of the C API and provide a cleaner C++ interface for plugin writing
 
 ## 6. Risks
-- **Plugin API Breaking Changes**: If the C-API interface needs to evolve during implementation, existing plugins may require updates, creating compatibility issues
+- **Plugin API Breaking Changes**: If the C-API interface needs to evolve during implementation, existing plugins may require updates, creating compatibility issues.  We have a future RFC incoming around how to safely handle versioning and ABI breaks.
 - **Thread Safety Complexity**: While the design aims for stateless classes, ensuring thread safety across multiple plugin invocations and shared containers introduces potential race conditions and debugging challenges
 - **Performance Overhead**: The additional abstraction layers (container → manager → engine → plan builder → plan) may introduce latency compared to direct C-API implementations
 - **Adoption Risk**: Plugin developers may choose to bypass the SDK framework and implement directly against the C-API, reducing the value of this abstraction layer
@@ -234,8 +240,6 @@ Error handling will make use of C++ exceptions primarily, with the understanding
 - Engine config settings which allow the user to control the behavior of the engine
     - The available settings, and value ranges are controlled by plugin authors
 - Serialization of execution plans
-- Sampling execution API
-    - This should be a separate execution API that engines can use for sampling and determining the optimal choice during a benchmarking phase
 
 ## 10. Glossary
 
