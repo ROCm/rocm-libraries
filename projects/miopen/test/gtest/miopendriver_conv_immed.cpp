@@ -35,16 +35,10 @@ namespace miopen_conv_immed {
 
 std::vector<std::string> GetTestCases(const std::string& modeConvolutionArg)
 {
-    // clang-format off
     return std::vector<std::string>{
-        // Why we have to use the driver:
-        //   The transposed convolutions are paritally implemented in the convolution_api layer,
-        //   but test apps (including test_conv*) were designed as unit tests and, therefore, do not use the public API.
-        // Also serves as a regression test for https://github.com/ROCm/MIOpen/issues/2459.
-        {modeConvolutionArg + " -n 560 -c 128 -H 15 -W 20 -k 128 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 "
-                              "-m conv -g 1 -F 1 -t 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC  --iter 1"}
-    };
-    // clang-format on
+        {modeConvolutionArg +
+         " -n 560 -c 128 -H 15 -W 20 -k 128 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 "
+         "-m conv -g 1 -F 1 -t 1 --in_layout NHWC --fil_layout NHWC --out_layout NHWC --iter 1"}};
 }
 
 using TestCase = decltype(GetTestCases(""))::value_type;
