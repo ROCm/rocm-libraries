@@ -70,17 +70,17 @@ void ROC_FFT_CHECK_PLAN_CREATE(rocfft_plan& plan, unsigned int& plans_created, P
     }
 }
 
-struct hipfftIOType
+struct hipfftIOTransformType
 {
     hipDataType inputType  = HIP_C_32F;
     hipDataType outputType = HIP_C_32F;
 
-    hipfftIOType() = default;
+    hipfftIOTransformType() = default;
 
     // initialize from data types specified by hipfftType enum
-    hipfftResult_t init(hipfftType type)
+    hipfftResult_t init(hipfftType txtype)
     {
-        switch(type)
+        switch(txtype)
         {
         case HIPFFT_R2C:
             inputType  = HIP_R_32F;
@@ -211,9 +211,9 @@ struct hipfftIOType
         return !is_complex_to_real() && !is_real_to_complex();
     }
 
-    static bool is_forward(rocfft_transform_type type)
+    static bool is_forward(rocfft_transform_type txtype)
     {
-        switch(type)
+        switch(txtype)
         {
         case rocfft_transform_type_complex_forward:
         case rocfft_transform_type_real_forward:
@@ -245,7 +245,7 @@ struct hipfftIOType
 
 struct hipfftHandle_t
 {
-    hipfftIOType type;
+    hipfftIOTransformType iotxtype;
 
     // Due to hipExec** compatibility to cuFFT, we have to reserve all 4 types
     // rocfft handle separately here.
@@ -332,21 +332,21 @@ catch(...)
     return HIPFFT_INTERNAL_ERROR;
 }
 
-hipfftResult hipfftPlan1d(hipfftHandle* plan, int nx, hipfftType type, int batch)
+hipfftResult hipfftPlan1d(hipfftHandle* plan, int nx, hipfftType txtype, int batch)
 try
 {
     hipfftHandle handle = nullptr;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
     *plan = handle;
 
-    return hipfftMakePlan1d(*plan, nx, type, batch, nullptr);
+    return hipfftMakePlan1d(*plan, nx, txtype, batch, nullptr);
 }
 catch(...)
 {
     return handle_exception();
 }
 
-hipfftResult hipfftPlan2d(hipfftHandle* plan, int nx, int ny, hipfftType type)
+hipfftResult hipfftPlan2d(hipfftHandle* plan, int nx, int ny, hipfftType txtype)
 try
 {
 
@@ -354,14 +354,14 @@ try
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
     *plan = handle;
 
-    return hipfftMakePlan2d(*plan, nx, ny, type, nullptr);
+    return hipfftMakePlan2d(*plan, nx, ny, txtype, nullptr);
 }
 catch(...)
 {
     return handle_exception();
 }
 
-hipfftResult hipfftPlan3d(hipfftHandle* plan, int nx, int ny, int nz, hipfftType type)
+hipfftResult hipfftPlan3d(hipfftHandle* plan, int nx, int ny, int nz, hipfftType txtype)
 try
 {
 
@@ -369,7 +369,7 @@ try
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
     *plan = handle;
 
-    return hipfftMakePlan3d(*plan, nx, ny, nz, type, nullptr);
+    return hipfftMakePlan3d(*plan, nx, ny, nz, txtype, nullptr);
 }
 catch(...)
 {
@@ -385,7 +385,7 @@ hipfftResult hipfftPlanMany(hipfftHandle* plan,
                             int*          onembed,
                             int           ostride,
                             int           odist,
-                            hipfftType    type,
+                            hipfftType    txtype,
                             int           batch)
 try
 {
@@ -394,7 +394,7 @@ try
     *plan = handle;
 
     return hipfftMakePlanMany(
-        *plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, nullptr);
+        *plan, rank, n, inembed, istride, idist, onembed, ostride, odist, txtype, batch, nullptr);
 }
 catch(...)
 {
@@ -404,7 +404,7 @@ catch(...)
 hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                      size_t                     dim,
                                      size_t*                    lengths,
-                                     hipfftIOType               iotype,
+                                     hipfftIOTransformType      iotxtype,
                                      size_t                     number_of_transforms,
                                      hipfft_plan_description_t* desc,
                                      size_t*                    workSize,
@@ -436,9 +436,9 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     std::copy_n(lengths, dim, std::back_inserter(plan->inLength));
     std::copy_n(lengths, dim, std::back_inserter(plan->outLength));
 
-    if(iotype.is_real_to_complex())
+    if(iotxtype.is_real_to_complex())
         plan->outLength.front() = plan->outLength.front() / 2 + 1;
-    else if(iotype.is_complex_to_real())
+    else if(iotxtype.is_complex_to_real())
         plan->inLength.front() = plan->inLength.front() / 2 + 1;
     plan->batch = number_of_transforms;
 
@@ -691,8 +691,33 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
     // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
     if(plan->singleProcMultiDevice)
+    {
+        if(plan->batch > 1)
+        {
+            // Multi-batch configration
+
+            // Currently not implemented.
+        }
+        else
+        {
+            if(plan->iotxtype.is_complex_to_complex())
+            {
+                // FIXME
+            }
+            else if (plan->iotxtype.is_real_to_complex())
+            {
+                // FIXME
+            }
+            else if (plan->iotxtype.is_complex_to_real())
+            {
+                // FIXME
+            }
+                
+        }
+        
         set_io_bricks(
             plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks);
+    }
 
     // Create fields for the bricks
     if(!plan->inBricks.empty())
@@ -786,28 +811,28 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     // for out-place but not for in-place, so some of these rocfft_plan_creates could legitimately
     // fail.
     unsigned int plans_created = 0;
-    for(auto t : iotype.transform_types())
+    for(auto t : iotxtype.transform_types())
     {
         // in-place
-        auto& ip_plan_ptr  = iotype.is_forward(t) ? plan->ip_forward : plan->ip_inverse;
-        auto& ip_plan_desc = iotype.is_forward(t) ? ip_forward_desc : ip_inverse_desc;
+        auto& ip_plan_ptr  = iotxtype.is_forward(t) ? plan->ip_forward : plan->ip_inverse;
+        auto& ip_plan_desc = iotxtype.is_forward(t) ? ip_forward_desc : ip_inverse_desc;
         ROC_FFT_CHECK_PLAN_CREATE(ip_plan_ptr,
                                   plans_created,
                                   rocfft_placement_inplace,
                                   t,
-                                  iotype.precision(),
+                                  iotxtype.precision(),
                                   dim,
                                   lengths,
                                   number_of_transforms,
                                   ip_plan_desc);
         // out-of-place
-        auto& op_plan_ptr  = iotype.is_forward(t) ? plan->op_forward : plan->op_inverse;
-        auto& op_plan_desc = iotype.is_forward(t) ? op_forward_desc : op_inverse_desc;
+        auto& op_plan_ptr  = iotxtype.is_forward(t) ? plan->op_forward : plan->op_inverse;
+        auto& op_plan_desc = iotxtype.is_forward(t) ? op_forward_desc : op_inverse_desc;
         ROC_FFT_CHECK_PLAN_CREATE(op_plan_ptr,
                                   plans_created,
                                   rocfft_placement_notinplace,
                                   t,
-                                  iotype.precision(),
+                                  iotxtype.precision(),
                                   dim,
                                   lengths,
                                   number_of_transforms,
@@ -817,12 +842,12 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     // if no plans got created, fail
     if(plans_created == 0)
         return HIPFFT_PARSE_ERROR;
-    plan->type = iotype;
+    plan->iotxtype = iotxtype;
 
     size_t workBufferSize = 0;
     size_t tmpBufferSize  = 0;
 
-    bool const has_forward = !iotype.is_complex_to_real();
+    bool const has_forward = !iotxtype.is_complex_to_real();
     if(has_forward)
     {
         if(plan->ip_forward)
@@ -839,7 +864,7 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
-    bool const has_inverse = !iotype.is_real_to_complex();
+    bool const has_inverse = !iotxtype.is_real_to_complex();
     if(has_inverse)
     {
         if(plan->ip_inverse)
@@ -924,7 +949,7 @@ catch(...)
 }
 
 hipfftResult
-    hipfftMakePlan1d(hipfftHandle plan, int nx, hipfftType type, int batch, size_t* workSize)
+    hipfftMakePlan1d(hipfftHandle plan, int nx, hipfftType txtype, int batch, size_t* workSize)
 try
 {
     if(nx < 0 || batch < 0)
@@ -937,18 +962,18 @@ try
     size_t                     number_of_transforms = batch;
     hipfft_plan_description_t* desc                 = nullptr;
 
-    hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    hipfftIOTransformType iotxtype;
+    HIP_FFT_CHECK_AND_RETURN(iotxtype.init(txtype));
 
     return hipfftMakePlan_internal(
-        plan, 1, lengths, iotype, number_of_transforms, desc, workSize, false);
+        plan, 1, lengths, iotxtype, number_of_transforms, desc, workSize, false);
 }
 catch(...)
 {
     return handle_exception();
 }
 
-hipfftResult hipfftMakePlan2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
+hipfftResult hipfftMakePlan2d(hipfftHandle plan, int nx, int ny, hipfftType txtype, size_t* workSize)
 try
 {
     if(nx < 0 || ny < 0)
@@ -962,11 +987,11 @@ try
     size_t                     number_of_transforms = 1;
     hipfft_plan_description_t* desc                 = nullptr;
 
-    hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    hipfftIOTransformType iotxtype;
+    HIP_FFT_CHECK_AND_RETURN(iotxtype.init(txtype));
 
     return hipfftMakePlan_internal(
-        plan, 2, lengths, iotype, number_of_transforms, desc, workSize, false);
+        plan, 2, lengths, iotxtype, number_of_transforms, desc, workSize, false);
 }
 catch(...)
 {
@@ -974,7 +999,7 @@ catch(...)
 }
 
 hipfftResult
-    hipfftMakePlan3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType type, size_t* workSize)
+    hipfftMakePlan3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType txtype, size_t* workSize)
 try
 {
     if(nx < 0 || ny < 0 || nz < 0)
@@ -989,44 +1014,44 @@ try
     size_t                     number_of_transforms = 1;
     hipfft_plan_description_t* desc                 = nullptr;
 
-    hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    hipfftIOTransformType iotxtype;
+    HIP_FFT_CHECK_AND_RETURN(iotxtype.init(txtype));
 
     return hipfftMakePlan_internal(
-        plan, 3, lengths, iotype, number_of_transforms, desc, workSize, false);
+        plan, 3, lengths, iotxtype, number_of_transforms, desc, workSize, false);
 }
 catch(...)
 {
     return handle_exception();
 }
 
-template <typename T>
+template <typename Tint>
 hipfftResult hipfftMakePlanMany_internal(hipfftHandle plan,
                                          int          rank,
-                                         T*           n,
-                                         T*           inembed,
-                                         T            istride,
-                                         T            idist,
-                                         T*           onembed,
-                                         T            ostride,
-                                         T            odist,
-                                         hipfftIOType type,
-                                         T            batch,
+                                         Tint*           n,
+                                         Tint*           inembed,
+                                         Tint            istride,
+                                         Tint            idist,
+                                         Tint*           onembed,
+                                         Tint            ostride,
+                                         Tint            odist,
+                                         hipfftIOTransformType iotxtype,
+                                         Tint            batch,
                                          size_t*      workSize)
 {
+
+    // Validate user input
     if((inembed != nullptr && onembed == nullptr) || (inembed == nullptr && onembed != nullptr)
        || (rank < 0) || (istride < 0) || (idist < 0) || (ostride < 0) || (odist < 0)
-       || (std::any_of(n, n + rank, [](T val) { return val < 0; })))
+       || (std::any_of(n, n + rank, [](Tint val) { return val < 0; })))
         return HIPFFT_INVALID_VALUE;
-
     for(auto ptr : {inembed, onembed})
     {
         if(ptr == nullptr)
             continue;
-        if(std::any_of(ptr, ptr + rank, [](T val) { return val < 0; }))
+        if(std::any_of(ptr, ptr + rank, [](Tint val) { return val < 0; }))
             return HIPFFT_INVALID_SIZE;
     }
-
     if(batch < 0)
         return HIPFFT_INVALID_SIZE;
 
@@ -1034,75 +1059,74 @@ hipfftResult hipfftMakePlanMany_internal(hipfftHandle plan,
     for(int i = 0; i < rank; i++)
         lengths[i] = n[rank - 1 - i];
 
-    size_t number_of_transforms = batch;
+    const size_t number_of_transforms = batch;
 
+    hipfft_plan_description_t desc;
+    
     // Decide the inArrayType and outArrayType based on the transform type
-    rocfft_array_type in_array_type, out_array_type;
-    if(type.is_real_to_complex())
+    if(iotxtype.is_real_to_complex())
     {
-        in_array_type  = rocfft_array_type_real;
-        out_array_type = rocfft_array_type_hermitian_interleaved;
+        desc.inArrayType  = rocfft_array_type_real;
+        desc.outArrayType = rocfft_array_type_hermitian_interleaved;
     }
-    else if(type.is_complex_to_real())
+    else if(iotxtype.is_complex_to_real())
     {
-        in_array_type  = rocfft_array_type_hermitian_interleaved;
-        out_array_type = rocfft_array_type_real;
+        desc.inArrayType  = rocfft_array_type_hermitian_interleaved;
+        desc.outArrayType = rocfft_array_type_real;
     }
     else
     {
-        in_array_type  = rocfft_array_type_complex_interleaved;
-        out_array_type = rocfft_array_type_complex_interleaved;
+        desc.inArrayType  = rocfft_array_type_complex_interleaved;
+        desc.outArrayType = rocfft_array_type_complex_interleaved;
     }
 
-    hipfft_plan_description_t desc;
+    // FIXME: why re-calculate both if only one is null?
+    const bool re_calc_strides_in_desc = (inembed == nullptr) || (onembed == nullptr);
 
-    bool re_calc_strides_in_desc = (inembed == nullptr) || (onembed == nullptr);
-
+    // Set up input strides
     size_t i_strides[3] = {1, 1, 1};
-    size_t o_strides[3] = {1, 1, 1};
-    for(int i = 1; i < rank; i++)
+    if(inembed == nullptr)
     {
-        i_strides[i] = lengths[i - 1] * i_strides[i - 1];
-        o_strides[i] = lengths[i - 1] * o_strides[i - 1];
+        for(int i = 1; i < rank; i++)
+            i_strides[i] = lengths[i - 1] * i_strides[i - 1];
     }
-
-    if(inembed != nullptr)
+    else
     {
         i_strides[0] = istride;
-
         size_t inembed_lengths[3];
         for(int i = 0; i < rank; i++)
             inembed_lengths[i] = inembed[rank - 1 - i];
-
         for(int i = 1; i < rank; i++)
             i_strides[i] = inembed_lengths[i - 1] * i_strides[i - 1];
     }
+    for(int i = 0; i < rank; i++)
+        desc.inStrides[i] = i_strides[i];
 
-    if(onembed != nullptr)
+    // Set up output strides
+    size_t o_strides[3] = {1, 1, 1};
+    if(onembed == nullptr)
+    {
+        for(int i = 1; i < rank; i++)
+            o_strides[i] = lengths[i - 1] * o_strides[i - 1];
+    }
+    else
     {
         o_strides[0] = ostride;
-
         size_t onembed_lengths[3];
         for(int i = 0; i < rank; i++)
             onembed_lengths[i] = onembed[rank - 1 - i];
-
         for(int i = 1; i < rank; i++)
             o_strides[i] = onembed_lengths[i - 1] * o_strides[i - 1];
     }
-
-    desc.inArrayType  = in_array_type;
-    desc.outArrayType = out_array_type;
-
-    for(int i = 0; i < rank; i++)
-        desc.inStrides[i] = i_strides[i];
-    desc.inDist = idist;
-
     for(int i = 0; i < rank; i++)
         desc.outStrides[i] = o_strides[i];
+
+    desc.inDist  = idist;
     desc.outDist = odist;
 
     hipfftResult ret = hipfftMakePlan_internal(
-        plan, rank, lengths, type, number_of_transforms, &desc, workSize, re_calc_strides_in_desc);
+        plan, rank, lengths, iotxtype, number_of_transforms, &desc, workSize,
+        re_calc_strides_in_desc);
 
     return ret;
 }
@@ -1116,16 +1140,16 @@ hipfftResult hipfftMakePlanMany(hipfftHandle plan,
                                 int*         onembed,
                                 int          ostride,
                                 int          odist,
-                                hipfftType   type,
+                                hipfftType   txtype,
                                 int          batch,
                                 size_t*      workSize)
 try
 {
-    hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    hipfftIOTransformType iotxtype;
+    HIP_FFT_CHECK_AND_RETURN(iotxtype.init(txtype));
 
     return hipfftMakePlanMany_internal<int>(
-        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
+        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotxtype, batch, workSize);
 }
 catch(...)
 {
@@ -1141,27 +1165,27 @@ hipfftResult hipfftMakePlanMany64(hipfftHandle   plan,
                                   long long int* onembed,
                                   long long int  ostride,
                                   long long int  odist,
-                                  hipfftType     type,
+                                  hipfftType     txtype,
                                   long long int  batch,
                                   size_t*        workSize)
 try
 {
-    hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    hipfftIOTransformType iotxtype;
+    HIP_FFT_CHECK_AND_RETURN(iotxtype.init(txtype));
 
     return hipfftMakePlanMany_internal<long long int>(
-        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
+        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotxtype, batch, workSize);
 }
 catch(...)
 {
     return handle_exception();
 }
 
-hipfftResult hipfftEstimate1d(int nx, hipfftType type, int batch, size_t* workSize)
+hipfftResult hipfftEstimate1d(int nx, hipfftType txtype, int batch, size_t* workSize)
 try
 {
     hipfftHandle plan = nullptr;
-    hipfftResult ret  = hipfftGetSize1d(plan, nx, type, batch, workSize);
+    hipfftResult ret  = hipfftGetSize1d(plan, nx, txtype, batch, workSize);
     return ret;
 }
 catch(...)
@@ -1169,11 +1193,11 @@ catch(...)
     return handle_exception();
 }
 
-hipfftResult hipfftEstimate2d(int nx, int ny, hipfftType type, size_t* workSize)
+hipfftResult hipfftEstimate2d(int nx, int ny, hipfftType txtype, size_t* workSize)
 try
 {
     hipfftHandle plan = nullptr;
-    hipfftResult ret  = hipfftGetSize2d(plan, nx, ny, type, workSize);
+    hipfftResult ret  = hipfftGetSize2d(plan, nx, ny, txtype, workSize);
     return ret;
 }
 catch(...)
@@ -1181,11 +1205,11 @@ catch(...)
     return handle_exception();
 }
 
-hipfftResult hipfftEstimate3d(int nx, int ny, int nz, hipfftType type, size_t* workSize)
+hipfftResult hipfftEstimate3d(int nx, int ny, int nz, hipfftType txtype, size_t* workSize)
 try
 {
     hipfftHandle plan = nullptr;
-    hipfftResult ret  = hipfftGetSize3d(plan, nx, ny, nz, type, workSize);
+    hipfftResult ret  = hipfftGetSize3d(plan, nx, ny, nz, txtype, workSize);
     return ret;
 }
 catch(...)
@@ -1201,14 +1225,14 @@ hipfftResult hipfftEstimateMany(int        rank,
                                 int*       onembed,
                                 int        ostride,
                                 int        odist,
-                                hipfftType type,
+                                hipfftType txtype,
                                 int        batch,
                                 size_t*    workSize)
 try
 {
     hipfftHandle plan = nullptr;
     hipfftResult ret  = hipfftGetSizeMany(
-        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize);
+        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, txtype, batch, workSize);
     return ret;
 }
 catch(...)
@@ -1217,7 +1241,7 @@ catch(...)
 }
 
 hipfftResult
-    hipfftGetSize1d(hipfftHandle plan, int nx, hipfftType type, int batch, size_t* workSize)
+    hipfftGetSize1d(hipfftHandle plan, int nx, hipfftType txtype, int batch, size_t* workSize)
 try
 {
     if(nx < 0 || batch < 0)
@@ -1228,7 +1252,7 @@ try
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
     p->autoAllocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan1d(p, nx, type, batch, workSize));
+    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan1d(p, nx, txtype, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
@@ -1238,7 +1262,7 @@ catch(...)
     return handle_exception();
 }
 
-hipfftResult hipfftGetSize2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
+hipfftResult hipfftGetSize2d(hipfftHandle plan, int nx, int ny, hipfftType txtype, size_t* workSize)
 try
 {
     if(nx < 0 || ny < 0)
@@ -1249,7 +1273,7 @@ try
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
     p->autoAllocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan2d(p, nx, ny, type, workSize));
+    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan2d(p, nx, ny, txtype, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
@@ -1260,7 +1284,7 @@ catch(...)
 }
 
 hipfftResult
-    hipfftGetSize3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType type, size_t* workSize)
+    hipfftGetSize3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType txtype, size_t* workSize)
 try
 {
     if(nx < 0 || ny < 0 || nz < 0)
@@ -1271,7 +1295,7 @@ try
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
     p->autoAllocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan3d(p, nx, ny, nz, type, workSize));
+    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan3d(p, nx, ny, nz, txtype, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
@@ -1290,7 +1314,7 @@ hipfftResult hipfftGetSizeMany(hipfftHandle plan,
                                int*         onembed,
                                int          ostride,
                                int          odist,
-                               hipfftType   type,
+                               hipfftType   txtype,
                                int          batch,
                                size_t*      workSize)
 try
@@ -1301,7 +1325,7 @@ try
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
     p->autoAllocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany(
-        p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
+        p, rank, n, inembed, istride, idist, onembed, ostride, odist, txtype, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
@@ -1320,7 +1344,7 @@ hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
                                  long long int* onembed,
                                  long long int  ostride,
                                  long long int  odist,
-                                 hipfftType     type,
+                                 hipfftType     txtype,
                                  long long int  batch,
                                  size_t*        workSize)
 try
@@ -1331,7 +1355,7 @@ try
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
     p->autoAllocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany64(
-        p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
+        p, rank, n, inembed, istride, idist, onembed, ostride, odist, txtype, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
@@ -1583,7 +1607,7 @@ catch(...)
     return handle_exception();
 }
 
-hipfftResult hipfftGetProperty(hipfftLibraryPropertyType type, int* value)
+hipfftResult hipfftGetProperty(hipfftLibraryPropertyType txtype, int* value)
 try
 {
     if(!value)
@@ -1595,11 +1619,11 @@ try
     int minor = (full - major * 10000) / 100;
     int patch = (full - major * 10000 - minor * 100);
 
-    if(type == HIPFFT_MAJOR_VERSION)
+    if(txtype == HIPFFT_MAJOR_VERSION)
         *value = major;
-    else if(type == HIPFFT_MINOR_VERSION)
+    else if(txtype == HIPFFT_MINOR_VERSION)
         *value = minor;
-    else if(type == HIPFFT_PATCH_LEVEL)
+    else if(txtype == HIPFFT_PATCH_LEVEL)
         *value = patch;
     else
         return HIPFFT_INVALID_VALUE;
@@ -1628,56 +1652,56 @@ try
     switch(cbtype)
     {
     case HIPFFT_CB_LD_COMPLEX:
-        if(plan->type.precision() != rocfft_precision_single || plan->type.is_real_to_complex())
+        if(plan->iotxtype.precision() != rocfft_precision_single || plan->iotxtype.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_COMPLEX_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || plan->type.is_real_to_complex())
+        if(plan->iotxtype.precision() != rocfft_precision_double || plan->iotxtype.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL:
-        if(plan->type.precision() != rocfft_precision_single || !plan->type.is_real_to_complex())
+        if(plan->iotxtype.precision() != rocfft_precision_single || !plan->iotxtype.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || !plan->type.is_real_to_complex())
+        if(plan->iotxtype.precision() != rocfft_precision_double || !plan->iotxtype.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX:
-        if(plan->type.precision() != rocfft_precision_single || plan->type.is_complex_to_real())
+        if(plan->iotxtype.precision() != rocfft_precision_single || plan->iotxtype.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || plan->type.is_complex_to_real())
+        if(plan->iotxtype.precision() != rocfft_precision_double || plan->iotxtype.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL:
-        if(plan->type.precision() != rocfft_precision_single || !plan->type.is_complex_to_real())
+        if(plan->iotxtype.precision() != rocfft_precision_single || !plan->iotxtype.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || !plan->type.is_complex_to_real())
+        if(plan->iotxtype.precision() != rocfft_precision_double || !plan->iotxtype.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
@@ -1778,10 +1802,10 @@ hipfftResult hipfftXtMakePlanMany(hipfftHandle   plan,
                                   hipDataType    executiontype)
 try
 {
-    hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(inputtype, outputtype, executiontype));
+    hipfftIOTransformType iotxtype;
+    HIP_FFT_CHECK_AND_RETURN(iotxtype.init(inputtype, outputtype, executiontype));
     return hipfftMakePlanMany_internal<long long int>(
-        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
+        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotxtype, batch, workSize);
 }
 catch(...)
 {
@@ -1804,15 +1828,15 @@ hipfftResult hipfftXtGetSizeMany(hipfftHandle   plan,
                                  hipDataType    executiontype)
 try
 {
-    hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(inputtype, outputtype, executiontype));
+    hipfftIOTransformType iotxtype;
+    HIP_FFT_CHECK_AND_RETURN(iotxtype.init(inputtype, outputtype, executiontype));
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
     p->autoAllocate = false;
 
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany_internal(
-        p, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize));
+        p, rank, n, inembed, istride, idist, onembed, ostride, odist, iotxtype, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
     return HIPFFT_SUCCESS;
 }
@@ -1826,11 +1850,11 @@ try
 {
     bool        inplace  = input == output;
     rocfft_plan plan_ptr = nullptr;
-    if(plan->type.is_real_to_complex() || direction == HIPFFT_FORWARD)
+    if(plan->iotxtype.is_real_to_complex() || direction == HIPFFT_FORWARD)
     {
         plan_ptr = inplace ? plan->ip_forward : plan->op_forward;
     }
-    else if(plan->type.is_complex_to_real() || direction == HIPFFT_BACKWARD)
+    else if(plan->iotxtype.is_complex_to_real() || direction == HIPFFT_BACKWARD)
     {
         plan_ptr = inplace ? plan->ip_inverse : plan->op_inverse;
     }
@@ -1908,13 +1932,15 @@ try
     if(!plan || !libxtdesc)
         return HIPFFT_INVALID_VALUE;
 
+    // NB: we do not know the plan type (eg c2c / r2c) at this point.
+    
     if(plan->batch == 1)
     {
-        if(plan->type.is_real_to_complex() && format != HIPFFT_XT_FORMAT_INPLACE)
+        if(plan->iotxtype.is_real_to_complex() && format != HIPFFT_XT_FORMAT_INPLACE)
         {
             return HIPFFT_INVALID_PLAN;
         }
-        if(plan->type.is_complex_to_real() && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+        if(plan->iotxtype.is_complex_to_real() && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
         {
             return HIPFFT_INVALID_PLAN;
         }
@@ -1935,23 +1961,20 @@ try
     std::vector<hipfft_brick>* bricks           = nullptr;
     size_t                     bits_per_element = 0;
 
-
-            
-    
     switch(format)
     {
     case HIPFFT_XT_FORMAT_INPUT:
         bricks           = &plan->inBricks;
-        bits_per_element = hipDataType_bits(plan->type.inputType);
+        bits_per_element = hipDataType_bits(plan->iotxtype.inputType);
         break;
     case HIPFFT_XT_FORMAT_OUTPUT:
         bricks           = &plan->outBricks;
-        bits_per_element = hipDataType_bits(plan->type.outputType);
+        bits_per_element = hipDataType_bits(plan->iotxtype.outputType);
         break;
     case HIPFFT_XT_FORMAT_INPLACE:
         bricks           = &plan->outBricks;
-        bits_per_element = std::max(hipDataType_bits(plan->type.inputType),
-                                    hipDataType_bits(plan->type.outputType));
+        bits_per_element = std::max(hipDataType_bits(plan->iotxtype.inputType),
+                                    hipDataType_bits(plan->iotxtype.outputType));
         break;
     default:
         return HIPFFT_NOT_IMPLEMENTED;
@@ -2066,7 +2089,7 @@ try
             if(brick_length.size() == 1)
             {
                 if(hipMemcpy(destDesc->descriptor->data[i],
-                             offset_buffer(src, plan->type.inputType, brick.field_lower, srcStride),
+                             offset_buffer(src, plan->iotxtype.inputType, brick.field_lower, srcStride),
                              destDesc->descriptor->size[i],
                              hipMemcpyHostToDevice)
                    != hipSuccess)
@@ -2076,10 +2099,10 @@ try
             {
                 if(hipMemcpy2D(
                        destDesc->descriptor->data[i],
-                       hipDataType_bytes(plan->type.inputType, brick_stride[1]),
-                       offset_buffer(src, plan->type.inputType, brick.field_lower, srcStride),
-                       hipDataType_bytes(plan->type.inputType, field_stride[1]),
-                       hipDataType_bytes(plan->type.inputType, brick_length[0]),
+                       hipDataType_bytes(plan->iotxtype.inputType, brick_stride[1]),
+                       offset_buffer(src, plan->iotxtype.inputType, brick.field_lower, srcStride),
+                       hipDataType_bytes(plan->iotxtype.inputType, field_stride[1]),
+                       hipDataType_bytes(plan->iotxtype.inputType, brick_length[0]),
                        brick_length[1],
                        hipMemcpyHostToDevice)
                    != hipSuccess)
@@ -2112,7 +2135,7 @@ try
             if(brick_length.size() == 1)
             {
                 if(hipMemcpy(
-                       offset_buffer(dest, plan->type.outputType, brick.field_lower, destStride),
+                       offset_buffer(dest, plan->iotxtype.outputType, brick.field_lower, destStride),
                        srcDesc->descriptor->data[i],
                        srcDesc->descriptor->size[i],
                        hipMemcpyDeviceToHost)
@@ -2122,11 +2145,11 @@ try
             else
             {
                 if(hipMemcpy2D(
-                       offset_buffer(dest, plan->type.outputType, brick.field_lower, destStride),
-                       hipDataType_bytes(plan->type.outputType, field_stride[1]),
+                       offset_buffer(dest, plan->iotxtype.outputType, brick.field_lower, destStride),
+                       hipDataType_bytes(plan->iotxtype.outputType, field_stride[1]),
                        srcDesc->descriptor->data[i],
-                       hipDataType_bytes(plan->type.outputType, brick_stride[1]),
-                       hipDataType_bytes(plan->type.outputType, brick_length[0]),
+                       hipDataType_bytes(plan->iotxtype.outputType, brick_stride[1]),
+                       hipDataType_bytes(plan->iotxtype.outputType, brick_length[0]),
                        brick_length[1],
                        hipMemcpyDeviceToHost)
                    != hipSuccess)
@@ -2202,7 +2225,7 @@ static hipfftResult hipfftXtExecDescriptorBase(hipfftHandle  plan,
         const bool inplace = input == output;
         if(plan->batch == 1)
         {
-            if(plan->type.is_real_to_complex() || plan->type.is_complex_to_real())
+            if(plan->iotxtype.is_real_to_complex() || plan->iotxtype.is_complex_to_real())
             {
                 if(!inplace)
                 {
