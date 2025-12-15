@@ -229,8 +229,6 @@ template <typename T>
 void testing_csrcolor(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-    // Determine absolute path of test matrix
-    // Matrices are stored at the same path in matrices directory
     hipsparseIndexBase_t idxBase  = argus.baseA;
     std::string          filename = argus.filename;
 
