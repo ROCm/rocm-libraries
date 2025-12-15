@@ -31,125 +31,6 @@
 #include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 
-#if 0
-
-  ROCSPARSE_ROUTINE_TRACE;
-  rocsparse::bsric0_kernel_general_launch_t launch;
-  if(handle->wavefront_size == 32)
-    {
-      launch = find_bsric0_kernel_general_launch(handle,
-						 bsric0_info,
-						 A);
-    }
-  else
-    {
-      const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-      const bool sleep = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
-      if(sleep)
-        {
-	  launch = find_bsric0_kernel_general_launch(handle,
-						     bsric0_info,
-						     A);
-        }
-      else
-        {
-	  if(max_nnzb <= 32)
-            {
-	      if(A->block_dim <= 8)
-                {
-		  launch = find_bsric0_kernel_2_8_unrolled_launch(handle,
-							   bsric0_info,
-							   A);
-                }
-	      else if(A->block_dim <= 16)
-		{
-		  launch = find_bsric0_kernel_9_16_launch(handle,
-						   bsric0_info,
-						   A);
-                }
-	      else if(A->block_dim <= 32)
-                {
-		  launch = find_bsric0_kernel_17_32_launch(handle,
-						    bsric0_info,
-						    A);
-                }
-	      else
-                {
-		  launch = find_bsric0_kernel_general_launch(handle,
-						      bsric0_info,
-						      A);
-                }
-            }
-	  else if(max_nnzb <= 64)
-            {
-	      if(A->block_dim <= 8)
-                {
-		  launch = find_bsric0_kernel_2_8_launch(handle,
-						  bsric0_info,
-						  A);
-                }
-	      else if(A->block_dim <= 16)
-                {
-		  launch = find_bsric0_kernel_9_16_launch(handle,
-						   bsric0_info,
-						   A);
-                }
-	      else if(A->block_dim <= 32)
-		{
-		  launch = find_bsric0_kernel_17_32_launch(handle,
-						    bsric0_info,
-						    A);
-                }
-	      else
-                {
-		  launch = find_bsric0_kernel_general_launch(handle,
-						      bsric0_info,
-						      A);
-                }
-            }
-	  else if(max_nnzb <= 128)
-            {
-	      if(A->block_dim <= 8)
-                {
-		  launch = find_bsric0_kernel_2_8_launch(handle,
-						  bsric0_info,
-						  A);
-                }
-	      else if(A->block_dim <= 16)
-		{
-		  launch = find_bsric0_kernel_9_16_launch(handle,
-						   bsric0_info,
-						   A);
-		}
-	      else if(A->block_dim <= 32)
-		{
-		  launch = find_bsric0_kernel_17_32_launch(handle,
-						    bsric0_info,
-						    A);
-		}
-	      else
-		{
-		  launch = find_bsric0_kernel_general_launch(handle,
-						      bsric0_info,
-						      A);
-		}
-            }
-	  else
-	    {
-	      launch = find_bsric0_kernel_general_launch(handle,
-						  bsric0_info,
-						  A);
-            }
-        }
-    }
-
-    if(launch == nullptr)
-    {
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_arch_mismatch,
-                                               "No suitable kernel detected from bsric0");
-    }
-#endif
-
 rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
                                                  rocsparse_bsric0_info bsric0_info,
                                                  rocsparse_spmat_descr A,
@@ -164,7 +45,7 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
     auto       trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
     const auto max_nnzb = trm_info->get_max_nnz();
 
-    rocsparse::bsric0_kernel_general_launch_t launch{};
+    rocsparse::bsric0_kernel_launch_t launch{};
 
     if((sleep) || (handle->wavefront_size == 32) || (max_nnzb > 128) || (A->block_dim > 32))
     {
@@ -198,6 +79,10 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_arch_mismatch,
                                                "No suitable kernel detected from bsric0");
     }
+
+    int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
+    RETURN_IF_HIP_ERROR(
+        hipMemsetAsync(done_array, 0, sizeof(int32_t) * A->rows * A->batch_count, handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsric0_info, A, buffer_size, buffer));
 

@@ -24,6 +24,7 @@
 #pragma once
 
 #include "rocsparse-types.h"
+#include "rocsparse_bsric0_info.hpp"
 
 namespace rocsparse
 {
@@ -32,4 +33,11 @@ namespace rocsparse
                                           rocsparse_spmat_descr A,
                                           size_t                buffer_size,
                                           void* __restrict__ buffer);
+
+    typedef rocsparse_status (*bsric0_kernel_launch_t)(rocsparse_handle      handle,
+                                                       rocsparse_bsric0_info bsric0_info,
+                                                       rocsparse_spmat_descr A,
+                                                       size_t                buffer_size,
+                                                       void* __restrict__ buffer);
+
 }

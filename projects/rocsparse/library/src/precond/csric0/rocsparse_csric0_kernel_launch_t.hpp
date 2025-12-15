@@ -21,15 +21,17 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+
 #pragma once
 
-#include "rocsparse_bsric0_kernel_launch_t.hpp"
+#include "rocsparse-types.h"
+#include "rocsparse_csric0_info.hpp"
 
 namespace rocsparse
 {
-
-    bsric0_kernel_launch_t find_bsric0_kernel_17_32_launch(rocsparse_handle            handle,
-                                                           rocsparse_bsric0_info       bsric0_info,
-                                                           rocsparse_const_spmat_descr A);
-
+    typedef rocsparse_status (*csric0_kernel_launch_t)(rocsparse_handle      handle,
+                                                       rocsparse_csric0_info csric0_info,
+                                                       rocsparse_spmat_descr A,
+                                                       size_t                buffer_size,
+                                                       void* __restrict__ buffer);
 }

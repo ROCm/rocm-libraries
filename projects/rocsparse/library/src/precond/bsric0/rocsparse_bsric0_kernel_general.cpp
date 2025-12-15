@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template < bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE,typename T, typename I, typename J>
+    template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename I, typename J>
     ROCSPARSE_DEVICE_ILF void bsric0_general_device(rocsparse_direction direction,
                                                     J                   mb,
                                                     J                   block_dim,
@@ -329,27 +329,22 @@ namespace rocsparse
         }
     }
 
-    template <bool SLEEP,
-              uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-	      typename T,
-              typename I,
-              typename J>
+    template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-      void bsric0_kernel_general(rocsparse_direction  dir,
-				 J                    mb,
-				 const I*__restrict__             bsr_row_ptr,
-				 const J*__restrict__             bsr_col_ind,
-				 T*__restrict__                   bsr_val,
-				 int64_t              bsr_val_stride,
-				 const I*__restrict__             bsr_diag_ind,
-				 J                    bsr_dim,
-				 int32_t*__restrict__             done_array,
-				 int64_t              done_array_stride,
-				 const J*__restrict__             map,
-				 J*__restrict__                   zero_pivot,
-				 int64_t              zero_pivot_stride,
-				 rocsparse_index_base idx_base)
+    void bsric0_kernel_general(rocsparse_direction dir,
+                               J                   mb,
+                               const I* __restrict__ bsr_row_ptr,
+                               const J* __restrict__ bsr_col_ind,
+                               T* __restrict__ bsr_val,
+                               int64_t bsr_val_stride,
+                               const I* __restrict__ bsr_diag_ind,
+                               J bsr_dim,
+                               int32_t* __restrict__ done_array,
+                               int64_t done_array_stride,
+                               const J* __restrict__ map,
+                               J* __restrict__ zero_pivot,
+                               int64_t              zero_pivot_stride,
+                               rocsparse_index_base idx_base)
     {
         const auto batch_index = hipBlockIdx_y;
         rocsparse::bsric0_general_device<SLEEP, BLOCKSIZE, WFSIZE>(
@@ -366,43 +361,40 @@ namespace rocsparse
             idx_base);
     }
 
-  
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename I, typename J>
-    rocsparse_status bsric0_kernel_general_launch(rocsparse_handle       handle,
-						  rocsparse_bsric0_info  bsric0_info,
-						  rocsparse_spmat_descr  A,
-						  size_t                 buffer_size,
-						  void*__restrict__      buffer)
+    rocsparse_status bsric0_kernel_general_launch(rocsparse_handle      handle,
+                                                  rocsparse_bsric0_info bsric0_info,
+                                                  rocsparse_spmat_descr A,
+                                                  size_t                buffer_size,
+                                                  void* __restrict__ buffer)
     {
-      auto trm_info
-        = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
-      
-      int32_t*__restrict__      done_array        = reinterpret_cast<int32_t*__restrict__>(reinterpret_cast<char*>(buffer)+256);
-      const int64_t done_array_stride = A->rows;
-      
-      // Initialize buffers
-      RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int32_t) * A->rows * A->batch_count, handle->stream));
-      
-      RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_general<SLEEP, BLOCKSIZE, WFSIZE>),
-					 dim3(A->rows, A->batch_count),
-					 dim3(BLOCKSIZE),
-					 0,
-					 handle->stream,
-					 A->block_dir,
-					 static_cast<J>(A->rows),
-					 reinterpret_cast<const I*__restrict__>(A->const_row_data),
-					 reinterpret_cast<const J*__restrict__>(A->const_col_data),
-					 reinterpret_cast<T*__restrict__>(A->val_data),
-					 A->batch_stride,
-					 reinterpret_cast<const I*__restrict__>(trm_info->get_diag_ind()),
-					 static_cast<J>(A->block_dim),
-					 done_array,
-					 done_array_stride,
-					 reinterpret_cast<const J*__restrict__>(trm_info->get_row_map()),
-					 reinterpret_cast<J*__restrict__>(bsric0_info->get_zero_pivot()),
-					 bsric0_info->get_zero_pivot_stride(),
-					 A->descr->base);
-      
+        auto trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+
+        int32_t* __restrict__ done_array
+            = reinterpret_cast<int32_t* __restrict__>(reinterpret_cast<char*>(buffer) + 256);
+        const int64_t done_array_stride = A->rows;
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsric0_kernel_general<SLEEP, BLOCKSIZE, WFSIZE>),
+            dim3(A->rows, A->batch_count),
+            dim3(BLOCKSIZE),
+            0,
+            handle->stream,
+            A->block_dir,
+            static_cast<J>(A->rows),
+            reinterpret_cast<const I* __restrict__>(A->const_row_data),
+            reinterpret_cast<const J* __restrict__>(A->const_col_data),
+            reinterpret_cast<T* __restrict__>(A->val_data),
+            A->batch_stride,
+            reinterpret_cast<const I* __restrict__>(trm_info->get_diag_ind()),
+            static_cast<J>(A->block_dim),
+            done_array,
+            done_array_stride,
+            reinterpret_cast<const J* __restrict__>(trm_info->get_row_map()),
+            reinterpret_cast<J* __restrict__>(bsric0_info->get_zero_pivot()),
+            bsric0_info->get_zero_pivot_stride(),
+            A->descr->base);
+
         return rocsparse_status_success;
     }
 
@@ -412,81 +404,64 @@ namespace rocsparse
               typename T,
               typename I,
               typename... P>
-    static rocsparse::bsric0_kernel_general_launch_t
-    transform_j_type(const rocsparse_indextype j, P... p)
+    static rocsparse::bsric0_kernel_launch_t transform_j_type(const rocsparse_indextype j, P... p)
     {
-      return (j == rocsparse_indextype_i32)
-	? rocsparse::bsric0_kernel_general_launch<SLEEP,
-						  BLOCKSIZE,
-						  WF_SIZE,
-						  T,
-						  I,
-						  int32_t>
-	: (j == rocsparse_indextype_i64)
-	? rocsparse::bsric0_kernel_general_launch<SLEEP,
-						  BLOCKSIZE,
-						  WF_SIZE,
-						  T,
-						  I,
-						  int64_t>
-	: nullptr;
+        return (j == rocsparse_indextype_i32) ? rocsparse::
+                       bsric0_kernel_general_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int32_t>
+               : (j == rocsparse_indextype_i64) ? rocsparse::
+                       bsric0_kernel_general_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int64_t>
+                                                : nullptr;
     }
-  
-  template < bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE,typename T, typename... P>
-  static rocsparse::bsric0_kernel_general_launch_t
-  transform_i_type(const rocsparse_indextype i, P... p)
-  {
-    return (i == rocsparse_indextype_i32)
-      ? rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE,  T, int32_t>(p...)
-      : (i == rocsparse_indextype_i64)
-      ? rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE,  T, int64_t>(p...)
-      : nullptr;
-  }
-  
-  template < bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE,typename... P>
-  static rocsparse::bsric0_kernel_general_launch_t
-  transform_t_type(const rocsparse_datatype i, P... p)
-  {
-    return (i == rocsparse_datatype_f32_r)
-      ? rocsparse::transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE,  float>(p...)
-      : (i == rocsparse_datatype_f32_c) ? rocsparse::
-      transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE,  rocsparse_float_complex>(
-									   p...)
-      : (i == rocsparse_datatype_f64_c) ? rocsparse::
-      transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE,  rocsparse_double_complex>(
-									    p...)
-      : (i == rocsparse_datatype_f64_r)
-      ? rocsparse::transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE,  double>(p...)
-      : nullptr;
-  }
+
+    template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename... P>
+    static rocsparse::bsric0_kernel_launch_t transform_i_type(const rocsparse_indextype i, P... p)
+    {
+        return (i == rocsparse_indextype_i32)
+                   ? rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int32_t>(p...)
+               : (i == rocsparse_indextype_i64)
+                   ? rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int64_t>(p...)
+                   : nullptr;
+    }
+
+    template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename... P>
+    static rocsparse::bsric0_kernel_launch_t transform_t_type(const rocsparse_datatype i, P... p)
+    {
+        return (i == rocsparse_datatype_f32_r)
+                   ? rocsparse::transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, float>(p...)
+               : (i == rocsparse_datatype_f32_c) ? rocsparse::
+                       transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, rocsparse_float_complex>(p...)
+               : (i == rocsparse_datatype_f64_c) ? rocsparse::
+                       transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, rocsparse_double_complex>(p...)
+               : (i == rocsparse_datatype_f64_r)
+                   ? rocsparse::transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, double>(p...)
+                   : nullptr;
+    }
 }
 
-rocsparse::bsric0_kernel_general_launch_t
-rocsparse::find_bsric0_kernel_general_launch(rocsparse_handle             handle,
-					     rocsparse_bsric0_info        bsric0_info,
-					     rocsparse_const_spmat_descr  A)
+rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_general_launch(
+    rocsparse_handle handle, rocsparse_bsric0_info bsric0_info, rocsparse_const_spmat_descr A)
 {
-  const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-  const bool sleep = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
-  if(sleep)
+    const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
+    const bool sleep = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
+    if(sleep)
     {
-      return rocsparse::transform_t_type<true, 64, 64>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<true, 64, 64>(A->data_type, A->row_type, A->col_type);
     }
-  else
+    else
     {
-      if(handle->wavefront_size == 32)
+        if(handle->wavefront_size == 32)
         {
-	  return rocsparse::transform_t_type<false, 32, 32>(A->data_type, A->row_type, A->col_type);
+            return rocsparse::transform_t_type<false, 32, 32>(
+                A->data_type, A->row_type, A->col_type);
         }
-      else if(handle->wavefront_size == 64)
+        else if(handle->wavefront_size == 64)
         {
-	  return rocsparse::transform_t_type<false, 64, 64>(A->data_type, A->row_type, A->col_type);
+            return rocsparse::transform_t_type<false, 64, 64>(
+                A->data_type, A->row_type, A->col_type);
         }
-      else
+        else
         {
-	  return nullptr;
+            return nullptr;
         }
     }
 }
-
-

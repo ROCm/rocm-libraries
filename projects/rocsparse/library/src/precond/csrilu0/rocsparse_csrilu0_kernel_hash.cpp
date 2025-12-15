@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csrilu0_hash_kernel.hpp"
+#include "rocsparse_csrilu0_kernel_hash.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -34,7 +34,7 @@ namespace rocsparse
               typename T,
               typename I,
               typename J>
-    ROCSPARSE_DEVICE_ILF void csrilu0_hash_device(J m,
+    ROCSPARSE_DEVICE_ILF void csrilu0_device_hash(J m,
                                                   const I* __restrict__ csr_row_ptr,
                                                   const J* __restrict__ csr_col_ind,
                                                   T* __restrict__ csr_val,
@@ -257,7 +257,7 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrilu0_hash_kernel(J m,
+    void csrilu0_kernel_hash(J m,
 			     const I* __restrict__ csr_row_ptr,
 			     const J* __restrict__ csr_col_ind,
 			     T* __restrict__ csr_val,
@@ -281,21 +281,21 @@ namespace rocsparse
 			     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
 			     bool is_host_mode)
     {
-      const auto i = hipBlockIdx_y;
+      const auto batch_index= hipBlockIdx_y;
       ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
       ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
       ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
       const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
-      rocsparse::csrilu0_hash_device<BLOCKSIZE, WFSIZE, HASH>(m,
+      rocsparse::csrilu0_device_hash<BLOCKSIZE, WFSIZE, HASH>(m,
 							      csr_row_ptr,
 							      csr_col_ind,
-							      csr_val + i * csr_val_stride,
+							      csr_val + batch_index* csr_val_stride,
 							      csr_diag_ind,
-							      done + i * done_stride,
+							      done + batch_index* done_stride,
 							      map,
-							      zero_pivot + i * zero_pivot_stride,
+							      zero_pivot + batch_index* zero_pivot_stride,
 							      singular_pivot
-							      + i * singular_pivot_stride,
+							      + batch_index* singular_pivot_stride,
 							      tol,
 							      idx_base,
                                                                 enable_boost,
@@ -311,7 +311,7 @@ namespace rocsparse
               typename I,
               typename J>
   static rocsparse_status
-  csrilu0_hash_kernel_launch(rocsparse_handle         handle,
+  csrilu0_kernel_hash_launch(rocsparse_handle         handle,
 			     rocsparse_csrilu0_info   csrilu0_info,
 			     rocsparse_spmat_descr    A,
 			     int32_t                  boost_enable,
@@ -328,11 +328,6 @@ namespace rocsparse
     // done array
     int32_t*__restrict__ done_array = reinterpret_cast<int32_t*__restrict__>(reinterpret_cast<char*__restrict__>(buffer)+256);
     
-    // Initialize buffers
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array,
-				       0,
-				       sizeof(int32_t) * A->rows * A->batch_count,
-				       handle->stream)); 
     const int64_t done_array_stride = A->rows;
     
     
@@ -345,7 +340,7 @@ namespace rocsparse
     dim3         csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
     dim3         csrilu0_threads(BLOCKSIZE);
     
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrilu0_hash_kernel<BLOCKSIZE, WFSIZE, HASH>),
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrilu0_kernel_hash<BLOCKSIZE, WFSIZE, HASH>),
 				       csrilu0_blocks,
 				       csrilu0_threads,
 				       0,
@@ -382,19 +377,19 @@ namespace rocsparse
               typename T,
               typename I,
               typename... P>
-    static csrilu0_hash_kernel_launch_t transform_j_type(const rocsparse_indextype j,
+    static csrilu0_kernel_launch_t transform_j_type(const rocsparse_indextype j,
                                                                    P... p)
     {
         return //
             (j == rocsparse_indextype_i32) //
-                ? csrilu0_hash_kernel_launch<BLOCKSIZE,
+                ? csrilu0_kernel_hash_launch<BLOCKSIZE,
                                                              WF_SIZE,
                                                              HASH,
                                                              T,
                                                              I,
                                                              int32_t>
                 : (j == rocsparse_indextype_i64) //
-                      ? csrilu0_hash_kernel_launch<BLOCKSIZE,
+                      ? csrilu0_kernel_hash_launch<BLOCKSIZE,
                                                                    WF_SIZE,
                                                                    HASH,
                                                                    T,
@@ -404,7 +399,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t HASH, typename T, typename... P>
-    static csrilu0_hash_kernel_launch_t transform_i_type(const rocsparse_indextype i,
+    static csrilu0_kernel_launch_t transform_i_type(const rocsparse_indextype i,
 							 P... p)
     {
         return //
@@ -418,7 +413,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t HASH, typename... P>
-    static csrilu0_hash_kernel_launch_t transform_t_type(const rocsparse_datatype i,
+    static csrilu0_kernel_launch_t transform_t_type(const rocsparse_datatype i,
 							 P... p)
     {
         return //
@@ -443,7 +438,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename... P>
-    static csrilu0_hash_kernel_launch_t transform_mxnnz(const int32_t max_nnz,
+    static csrilu0_kernel_launch_t transform_mxnnz(const int32_t max_nnz,
                                                                        P... p)
     {
         return //
@@ -464,7 +459,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename... P>
-    static csrilu0_hash_kernel_launch_t transform_wf(const int32_t i, P... p)
+    static csrilu0_kernel_launch_t transform_wf(const int32_t i, P... p)
     {
         return //
             (i == 32) //
@@ -476,8 +471,8 @@ namespace rocsparse
 
 }
 
-rocsparse::csrilu0_hash_kernel_launch_t
-rocsparse::find_csrilu0_hash_kernel_launch(rocsparse_handle handle,
+rocsparse::csrilu0_kernel_launch_t
+rocsparse::find_csrilu0_kernel_hash_launch(rocsparse_handle handle,
 					   rocsparse_csrilu0_info csrilu0_info,
 					   rocsparse_const_spmat_descr A)
 {  

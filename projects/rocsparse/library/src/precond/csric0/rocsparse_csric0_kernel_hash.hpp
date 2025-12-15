@@ -21,15 +21,14 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+
 #pragma once
 
-#include "rocsparse_bsric0_kernel_launch_t.hpp"
+#include "rocsparse_csric0_kernel_launch_t.hpp"
 
 namespace rocsparse
 {
-
-    bsric0_kernel_launch_t find_bsric0_kernel_17_32_launch(rocsparse_handle            handle,
-                                                           rocsparse_bsric0_info       bsric0_info,
-                                                           rocsparse_const_spmat_descr A);
-
+    csric0_kernel_launch_t find_csric0_kernel_hash_launch(rocsparse_handle            handle,
+                                                          rocsparse_csric0_info       csric0_info,
+                                                          rocsparse_const_spmat_descr A);
 }

@@ -101,8 +101,8 @@ namespace rocsparse
                                    descr,
                                    info);
 
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::csric0(handle, &csr, policy, csric0_info, temp_buffer));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0(
+            handle, csric0_info, &csr, std::numeric_limits<size_t>::max(), temp_buffer));
         return rocsparse_status_success;
     }
 }

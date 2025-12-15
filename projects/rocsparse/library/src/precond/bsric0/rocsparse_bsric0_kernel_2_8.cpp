@@ -407,10 +407,6 @@ namespace rocsparse
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
 
-        // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            done_array, 0, sizeof(int32_t) * A->rows * A->batch_count, handle->stream));
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_2_8<MX_NNZB>),
             dim3(A->rows, A->batch_count),
@@ -435,8 +431,8 @@ namespace rocsparse
     }
 
     template <uint32_t MX_NNZB, typename T, typename I, typename... P>
-    static rocsparse::bsric0_kernel_2_8_launch_t transform_j_type(const rocsparse_indextype value,
-                                                                  P... p)
+    static rocsparse::bsric0_kernel_launch_t transform_j_type(const rocsparse_indextype value,
+                                                              P... p)
     {
         switch(value)
         {
@@ -458,8 +454,8 @@ namespace rocsparse
     }
 
     template <uint32_t MX_NNZB, typename T, typename... P>
-    static rocsparse::bsric0_kernel_2_8_launch_t transform_i_type(const rocsparse_indextype value,
-                                                                  P... p)
+    static rocsparse::bsric0_kernel_launch_t transform_i_type(const rocsparse_indextype value,
+                                                              P... p)
     {
 
         switch(value)
@@ -482,8 +478,8 @@ namespace rocsparse
     }
 
     template <uint32_t MX_NNZB, typename... P>
-    static rocsparse::bsric0_kernel_2_8_launch_t transform_t_type(const rocsparse_datatype value,
-                                                                  P... p)
+    static rocsparse::bsric0_kernel_launch_t transform_t_type(const rocsparse_datatype value,
+                                                              P... p)
     {
 
         switch(value)
@@ -527,7 +523,7 @@ namespace rocsparse
 
 }
 
-rocsparse::bsric0_kernel_2_8_launch_t rocsparse::find_bsric0_kernel_2_8_launch(
+rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_2_8_launch(
     rocsparse_handle handle, rocsparse_bsric0_info bsric0_info, rocsparse_const_spmat_descr A)
 {
     auto trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);

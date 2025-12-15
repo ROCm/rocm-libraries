@@ -22,26 +22,41 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csric0.hpp"
 #include "rocsparse_csric0_kernel_launch.hpp"
-#include "rocsparse_utility.hpp"
+#include "rocsparse_common.hpp"
+#include "rocsparse_csric0_kernel_binsearch.hpp"
+#include "rocsparse_csric0_kernel_hash.hpp"
 
-rocsparse_status rocsparse::csric0(rocsparse_handle      handle,
-                                   rocsparse_csric0_info csric0_info,
-                                   rocsparse_spmat_descr A,
-                                   size_t                buffer_size,
-                                   void* __restrict__ buffer)
+rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
+                                                 rocsparse_csric0_info csric0_info,
+                                                 rocsparse_spmat_descr A,
+                                                 size_t                buffer_size,
+                                                 void* __restrict__ buffer)
 {
-    if(A->rows == 0)
+
+    const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
+                        && handle->asic_rev < 2);
+
+    auto trm_info = csric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+
+    rocsparse::csric0_kernel_launch_t launch{};
+
+    if(sleep || (trm_info->get_max_nnz() > 1024))
     {
-        //
-        // Quick return
-        //
-        return rocsparse_status_success;
+        launch = rocsparse::find_csric0_kernel_binsearch_launch(handle, csric0_info, A);
+    }
+    else
+    {
+
+        launch = rocsparse::find_csric0_kernel_hash_launch(handle, csric0_info, A);
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csric0_kernel_launch(handle, csric0_info, A, buffer_size, buffer));
+    int32_t* __restrict__ done_array = reinterpret_cast<int32_t* __restrict__>(
+        reinterpret_cast<char* __restrict__>(buffer) + 256);
+    RETURN_IF_HIP_ERROR(
+        hipMemsetAsync(done_array, 0, sizeof(int32_t) * A->rows * A->batch_count, handle->stream));
+
+    RETURN_IF_ROCSPARSE_ERROR(launch(handle, csric0_info, A, buffer_size, buffer));
 
     return rocsparse_status_success;
 }

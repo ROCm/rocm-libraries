@@ -22,14 +22,14 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csrilu0_binsearch_kernel.hpp"
+#include "rocsparse_csrilu0_kernel_binsearch.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
-    ROCSPARSE_DEVICE_ILF void csrilu0_binsearch_device(J m_,
+    ROCSPARSE_DEVICE_ILF void csrilu0_device_binsearch(J m_,
                                                        const I* __restrict__ csr_row_ptr,
                                                        const J* __restrict__ csr_col_ind,
                                                        T* __restrict__ csr_val,
@@ -193,7 +193,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrilu0_binsearch_kernel(J m,
+      void csrilu0_kernel_binsearch(J m,
                                                   const I* __restrict__ csr_row_ptr,
                                                   const J* __restrict__ csr_col_ind,
                                                   T* __restrict__ csr_val,
@@ -222,7 +222,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(boost_enable, boost_tol_64);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(boost_enable, boost_val);
         const double boost_tol = (boost_tol_size == sizeof(double)) ? boost_tol_64 : boost_tol_32;
-        rocsparse::csrilu0_binsearch_device<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>(
+        rocsparse::csrilu0_device_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>(
             m,
             csr_row_ptr,
             csr_col_ind,
@@ -241,7 +241,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
     rocsparse_status
-    csrilu0_binsearch_kernel_launch(rocsparse_handle         handle,
+    csrilu0_kernel_binsearch_launch(rocsparse_handle         handle,
 				    rocsparse_csrilu0_info   csrilu0_info,
 				    rocsparse_spmat_descr    A,
 				    int32_t                  boost_enable,
@@ -255,15 +255,8 @@ namespace rocsparse
       auto trm_info = csrilu0_info->get(rocsparse_operation_none,
 					rocsparse_fill_mode_lower);
       
-      int32_t*__restrict__ done_array = reinterpret_cast<int32_t*__restrict__>(reinterpret_cast<char*__restrict__>(buffer) + 256);
-      
-      // Initialize buffers
-      RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array,
-					 0,
-					 sizeof(int32_t) * A->rows * A->batch_count,
-					 handle->stream)); 
+      int32_t*__restrict__ done_array = reinterpret_cast<int32_t*__restrict__>(reinterpret_cast<char*__restrict__>(buffer) + 256);      
       const int64_t done_array_stride = A->rows;
-      
       
       const T*__restrict__     boost_val = reinterpret_cast<const T*__restrict__>(gboost_val);   
       const float*__restrict__ boost_tol_32
@@ -274,7 +267,7 @@ namespace rocsparse
       dim3         csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
       dim3         csrilu0_threads(BLOCKSIZE);
       
-      RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrilu0_binsearch_kernel<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>),
+      RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrilu0_kernel_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>),
 					 csrilu0_blocks,
 					 csrilu0_threads,
 					 0,
@@ -310,18 +303,18 @@ namespace rocsparse
               typename T,
               typename I,
               typename... P>
-    static csrilu0_binsearch_kernel_launch_t transform_j_type(rocsparse_indextype j,
+    static csrilu0_kernel_launch_t transform_j_type(rocsparse_indextype j,
                                                                              P... p)
     {
         return (j == rocsparse_indextype_i32)
-                   ? rocsparse::csrilu0_binsearch_kernel_launch<BLOCKSIZE,
+                   ? rocsparse::csrilu0_kernel_binsearch_launch<BLOCKSIZE,
                                                                                 WF_SIZE,
                                                                                 SLEEP,
                                                                                 T,
                                                                                 I,
                                                                                 int32_t>
                : (j == rocsparse_indextype_i64)
-                   ? rocsparse::csrilu0_binsearch_kernel_launch<BLOCKSIZE,
+                   ? rocsparse::csrilu0_kernel_binsearch_launch<BLOCKSIZE,
                                                                                 WF_SIZE,
                                                                                 SLEEP,
                                                                                 T,
@@ -331,7 +324,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename T, typename... P>
-    static csrilu0_binsearch_kernel_launch_t transform_i_type(rocsparse_indextype i,
+    static csrilu0_kernel_launch_t transform_i_type(rocsparse_indextype i,
                                                                              P... p)
     {
         return (i == rocsparse_indextype_i32) ? rocsparse::
@@ -342,7 +335,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename... P>
-    static csrilu0_binsearch_kernel_launch_t
+    static csrilu0_kernel_launch_t
     transform_t_type(rocsparse_datatype i, P... p)
     {
       return (i == rocsparse_datatype_f32_r)
@@ -364,8 +357,8 @@ namespace rocsparse
   
 }
 
-rocsparse::csrilu0_binsearch_kernel_launch_t
-rocsparse::find_csrilu0_binsearch_kernel_launch(rocsparse_handle handle,
+rocsparse::csrilu0_kernel_launch_t
+rocsparse::find_csrilu0_kernel_binsearch_launch(rocsparse_handle handle,
 						rocsparse_csrilu0_info csrilu0_info,
 						rocsparse_const_spmat_descr A)
 {  

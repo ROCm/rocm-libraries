@@ -29,18 +29,14 @@
 namespace rocsparse
 {
 
-    typedef rocsparse_status (*csrilu0_hash_kernel_launch_t)(rocsparse_handle         handle,
-							     rocsparse_csrilu0_info   csrilu0_info,
-							     rocsparse_spmat_descr    A,
-							     int32_t                  boost_enable,
-							     size_t                   boost_tol_size,
-							     const void*__restrict__  boost_tol,
-							     const void*__restrict__  boost_val,
-							     size_t                   buffer_size,
-							     void*__restrict__        buffer);
-
-    csrilu0_hash_kernel_launch_t find_csrilu0_hash_kernel_launch(rocsparse_handle       handle,
-								 rocsparse_csrilu0_info csrilu0_info,
-								 rocsparse_const_spmat_descr    A);
+  typedef rocsparse_status (*csrilu0_kernel_launch_t)(rocsparse_handle         handle,
+						      rocsparse_csrilu0_info   csrilu0_info,
+						      rocsparse_spmat_descr    A,
+						      int32_t                  boost_enable,
+						      size_t                   boost_tol_size,
+						      const void*__restrict__  boost_tol,
+						      const void*__restrict__  boost_val,
+						      size_t                   buffer_size,
+						      void*__restrict__        buffer);
   
 }

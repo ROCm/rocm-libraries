@@ -23,13 +23,13 @@
  * ************************************************************************ */
 #pragma once
 
-#include "rocsparse_bsric0_kernel_launch_t.hpp"
+#include "rocsparse_csrilu0_kernel_launch_t.hpp"
 
 namespace rocsparse
 {
 
-    bsric0_kernel_launch_t find_bsric0_kernel_17_32_launch(rocsparse_handle            handle,
-                                                           rocsparse_bsric0_info       bsric0_info,
-                                                           rocsparse_const_spmat_descr A);
+    csrilu0_kernel_launch_t find_csrilu0_kernel_hash_launch(rocsparse_handle       handle,
+                                                            rocsparse_csrilu0_info csrilu0_info,
+                                                            rocsparse_const_spmat_descr A);
 
 }

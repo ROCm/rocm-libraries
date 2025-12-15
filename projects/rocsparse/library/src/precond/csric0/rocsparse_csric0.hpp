@@ -39,14 +39,13 @@ namespace rocsparse
     rocsparse_status csric0_analysis(rocsparse_handle          handle,
                                      rocsparse_spmat_descr     A,
                                      rocsparse_analysis_policy analysis,
-                                     rocsparse_solve_policy    solve,
                                      rocsparse_csric0_info*    p_csric0_info,
                                      void*                     temp_buffer);
 
-    rocsparse_status csric0(rocsparse_handle       handle,
-                            rocsparse_spmat_descr  A,
-                            rocsparse_solve_policy policy,
-                            rocsparse_csric0_info  csric0_info,
-                            void*                  temp_buffer);
+    rocsparse_status csric0(rocsparse_handle      handle,
+                            rocsparse_csric0_info csric0_info,
+                            rocsparse_spmat_descr A,
+                            size_t                buffer_size,
+                            void* __restrict__ buffer);
 
 }

@@ -29,7 +29,6 @@
 rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
                                             rocsparse_spmat_descr     A,
                                             rocsparse_analysis_policy analysis,
-                                            rocsparse_solve_policy    solve,
                                             rocsparse_csric0_info*    p_csric0_info,
                                             void*                     temp_buffer)
 {

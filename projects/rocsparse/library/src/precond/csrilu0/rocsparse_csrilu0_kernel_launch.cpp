@@ -23,8 +23,8 @@
  * ************************************************************************ */
 
 #include "rocsparse_csrilu0_kernel_launch.hpp"
-#include "rocsparse_csrilu0_binsearch_kernel.hpp"
-#include "rocsparse_csrilu0_hash_kernel.hpp"
+#include "rocsparse_csrilu0_kernel_binsearch.hpp"
+#include "rocsparse_csrilu0_kernel_hash.hpp"
 #include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle       handle, // 0
@@ -69,27 +69,33 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle       handle,
         = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908 && //
            handle->asic_rev < 2);
 
-    auto launch_kernel
-        = (sleep || //
-           ((handle->wavefront_size == 32) && (max_nnz >= 512)) || //
-           ((handle->wavefront_size == 64) && (max_nnz >= 1024)))
-              ? rocsparse::find_csrilu0_binsearch_kernel_launch(handle, csrilu0_info, A)
-              : rocsparse::find_csrilu0_hash_kernel_launch(handle, csrilu0_info, A);
+    rocsparse::csrilu0_kernel_launch_t launch{};
 
-    if(launch_kernel == nullptr)
+    if(sleep || //
+       ((handle->wavefront_size == 32) && (max_nnz >= 512)) || //
+       ((handle->wavefront_size == 64) && (max_nnz >= 1024)))
     {
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_arch_mismatch,
-                                               "csrilu0 kernel not found");
+        launch = rocsparse::find_csrilu0_kernel_binsearch_launch(handle, csrilu0_info, A);
+    }
+    else
+    {
+        launch = rocsparse::find_csrilu0_kernel_hash_launch(handle, csrilu0_info, A);
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(launch_kernel(handle,
-                                            csrilu0_info,
-                                            A,
-                                            boost_enable,
-                                            boost_tol_size,
-                                            boost_tol,
-                                            boost_val,
-                                            buffer_size,
-                                            buffer));
+    int32_t* __restrict__ done_array = reinterpret_cast<int32_t* __restrict__>(
+        reinterpret_cast<char* __restrict__>(buffer) + 256);
+    // Initialize buffers
+    RETURN_IF_HIP_ERROR(
+        hipMemsetAsync(done_array, 0, sizeof(int32_t) * A->rows * A->batch_count, handle->stream));
+
+    RETURN_IF_ROCSPARSE_ERROR(launch(handle,
+                                     csrilu0_info,
+                                     A,
+                                     boost_enable,
+                                     boost_tol_size,
+                                     boost_tol,
+                                     boost_val,
+                                     buffer_size,
+                                     buffer));
     return rocsparse_status_success;
 }

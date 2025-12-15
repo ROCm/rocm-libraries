@@ -489,7 +489,9 @@ set(rocsparse_source
   src/precond/csric0/rocsparse_csric0_buffer_size.cpp
   src/precond/csric0/rocsparse_csric0_clear.cpp
   src/precond/csric0/rocsparse_csric0_get_tolerance.cpp
-  src/precond/csric0/rocsparse_csric0_launch_kernel.cpp
+  src/precond/csric0/rocsparse_csric0_kernel_hash.cpp
+  src/precond/csric0/rocsparse_csric0_kernel_binsearch.cpp
+  src/precond/csric0/rocsparse_csric0_kernel_launch.cpp
   src/precond/csric0/rocsparse_csric0_set_tolerance.cpp
   src/precond/csric0/rocsparse_csric0_singular_pivot.cpp
   src/precond/csric0/rocsparse_csric0_zero_pivot.cpp
@@ -534,8 +536,8 @@ set(rocsparse_source
   src/precond/csrilu0/rocsparse_csrilu0_get_tolerance.cpp
   src/precond/csrilu0/rocsparse_csrilu0_set_tolerance.cpp
   src/precond/csrilu0/rocsparse_csrilu0_kernel_launch.cpp
-  src/precond/csrilu0/rocsparse_csrilu0_hash_kernel.cpp
-  src/precond/csrilu0/rocsparse_csrilu0_binsearch_kernel.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_kernel_hash.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_kernel_binsearch.cpp
   src/precond/csrilu0/rocsparse_csrilu0_singular_pivot.cpp
   src/precond/csrilu0/rocsparse_csrilu0_zero_pivot.cpp
   src/precond/csrilu0/rocsparse_xcsrilu0.cpp

@@ -105,7 +105,7 @@ namespace rocsparse
                                    info);
 
         RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::csric0_analysis(handle, &csr, analysis, solve, &csric0_info, temp_buffer));
+            rocsparse::csric0_analysis(handle, &csr, analysis, &csric0_info, temp_buffer));
         return rocsparse_status_success;
     }
 }
