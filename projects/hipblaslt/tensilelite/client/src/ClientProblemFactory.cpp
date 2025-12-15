@@ -54,6 +54,10 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
+            , m_aOps(args["a-ops"].as<TensorOps>())
+            , m_bOps(args["b-ops"].as<TensorOps>())
+            , m_cOps(args["c-ops"].as<TensorOps>())
+            , m_dOps(args["d-ops"].as<TensorOps>())
         {
             using std::static_pointer_cast;
 
@@ -65,7 +69,10 @@ namespace TensileLite
                     m_freeIndices,
                     m_batchIndices,
                     m_boundIndices,
-                    isComplex);
+                    m_aOps,
+                    m_bOps,
+                    m_cOps,
+                    m_dOps);
 
                 for(size_t i = 0; i < isComplex.size(); i++)
                 {
@@ -299,12 +306,16 @@ namespace TensileLite
                                 m_problemSizes[i],
                                 m_tensorTypes[ContractionProblemGemm::TENSOR::A],
                                 aStrides,
+                                m_aOps,
                                 m_tensorTypes[ContractionProblemGemm::TENSOR::B],
                                 bStrides,
+                                m_bOps,
                                 m_tensorTypes[ContractionProblemGemm::TENSOR::C],
                                 cStrides,
+                                m_cOps,
                                 m_tensorTypes[ContractionProblemGemm::TENSOR::D],
                                 dStrides,
+                                m_dOps,
                                 m_constantValues[ContractionProblemGemm::CONST::BETA]));
 
                             rv.back().setComputeInputType(m_computeInputType);
