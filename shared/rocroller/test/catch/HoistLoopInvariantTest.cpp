@@ -124,15 +124,6 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     {
         auto loopMapping = kg::buildCoordinateLoopMapping(graph, tracer);
 
-        for(const auto& [coord, loopSet] : loopMapping)
-        {
-            Log::info("Coordinate {} is associated with loops:", coord);
-            for(const auto& loop : loopSet)
-            {
-                Log::info("  Loop {}", loop);
-            }
-        }
-
         {
             // coord 510 is a MacroTile
             CHECK(loopMapping[510].size() > 0);
