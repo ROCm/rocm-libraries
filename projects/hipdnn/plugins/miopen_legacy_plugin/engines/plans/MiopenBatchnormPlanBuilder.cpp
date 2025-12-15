@@ -10,6 +10,7 @@
 
 #include "MiopenBatchnormPlanBuilder.hpp"
 #include "MiopenUtils.hpp"
+#include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 #include "engines/plans/MiopenBatchnormBwdPlan.hpp"
 #include "engines/plans/MiopenBatchnormFwdInferencePlan.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
@@ -67,16 +68,6 @@ void batchnormBwdFusionCheckTensors(
     const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
-    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_BWD};
-
-    if(s_supportedActivations.count(actAttr.operation()) == 0)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fusion currently only supports RELU_BWD activation");
-    }
-
     // in_0 must be the batchnorm inference output (forward path)
     if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
     {
@@ -198,16 +189,6 @@ void batchnormFwdFusionCheckTensors(
     const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
-    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD};
-
-    if(s_supportedActivations.count(actAttr.operation()) == 0)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fusion currently only supports RELU_FWD activation");
-    }
-
     // in_0 must be the batchnorm inference output (forward path)
     if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
     {
@@ -348,6 +329,33 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             return false;
         }
 
+        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
+        // checks manually.
+        try
+        {
+            switch(node.attributes_type())
+            {
+            case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
+                break;
+            case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+                break;
+            case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap());
+                break;
+            default:
+                throw hipdnn_plugin::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "Unexpected node attribute type");
+            }
+        }
+        catch(const hipdnn_plugin::HipdnnPluginException& e)
+        {
+            HIPDNN_LOG_INFO(e.what());
+            return false;
+        }
+
         return true;
     }
     case 2:
@@ -375,11 +383,28 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             return false;
         }
 
+        const auto& bnInfAttr
+            = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+        const auto& actAttr =
+            node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
         if(!batchnormFwdFusionCheckTensorsLogErrors(
-               node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>(),
-               node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>(),
+               bnInfAttr,
+               actAttr,
                opGraph.getTensorMap()))
         {
+            return false;
+        }
+
+        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
+        // checks manually.
+        try
+        {
+            checkBatchnormTensorConfigSupported(bnInfAttr, opGraph.getTensorMap());
+            checkBatchnormBwdActivationModeSupported(actAttr);
+        }
+        catch(const hipdnn_plugin::HipdnnPluginException& e)
+        {
+            HIPDNN_LOG_INFO(e.what());
             return false;
         }
 
@@ -407,6 +432,22 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                                                     std::get<2>(nodeAttrs.value()),
                                                     opGraph.getTensorMap()))
         {
+            return false;
+        }
+
+        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
+        // checks manually.
+        try
+        {
+            checkBatchnormTensorConfigSupported(std::get<0>(nodeAttrs.value()),
+                                                std::get<1>(nodeAttrs.value()),
+                                                std::get<2>(nodeAttrs.value()),
+                                                opGraph.getTensorMap());
+            checkBatchnormBwdActivationModeSupported(std::get<1>(nodeAttrs.value()));
+        }
+        catch(const hipdnn_plugin::HipdnnPluginException& e)
+        {
+            HIPDNN_LOG_INFO(e.what());
             return false;
         }
 

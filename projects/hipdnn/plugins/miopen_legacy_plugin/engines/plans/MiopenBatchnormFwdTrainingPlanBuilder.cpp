@@ -9,6 +9,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "MiopenUtils.hpp"
+#include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
 namespace miopen_legacy_plugin
@@ -16,27 +17,6 @@ namespace miopen_legacy_plugin
 
 namespace
 {
-
-bool isNodeActivFwd(const hipdnn_sdk::data_objects::PointwiseAttributes& attr)
-{
-    using PointwiseMode = hipdnn_sdk::data_objects::PointwiseMode;
-
-    // Check if operation is supported for batchnorm fusion
-    switch(attr.operation())
-    {
-    case PointwiseMode::RELU_FWD:
-        break; // Continue to parameter validation
-    default:
-        return false;
-    }
-
-    // MIOpen batchnorm fusion supports:
-    // - Standard ReLU (no parameters)
-    // - Clipped ReLU (relu_upper_clip only)
-    // - CLAMP (relu_lower_clip + relu_upper_clip)
-    // But does NOT support Leaky ReLU (relu_lower_clip_slope)
-    return !attr.relu_lower_clip_slope();
-}
 
 const hipdnn_sdk::data_objects::BatchnormAttributes&
     checkBatchnormNode(const hipdnn_plugin::INodeWrapper& node)
@@ -76,12 +56,6 @@ const hipdnn_sdk::data_objects::PointwiseAttributes&
     }
 
     const auto& activAttr = node.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
-
-    if(!isNodeActivFwd(activAttr))
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion");
-    }
 
     if(activAttr.in_0_tensor_uid() != bnAttr.y_tensor_uid())
     {
@@ -294,6 +268,11 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         {
             // Solo batchnorm training
             checkTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
+
+            // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
+            // checks manually.
+            checkBatchnormTensorConfigSupported(bnAttr, opGraph.getTensorMap());
+
             HIPDNN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
                             "batchnorm training");
             return true;
@@ -302,8 +281,12 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         // nodeCount == 2: Batchnorm training + activation fusion
         const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
-        // Validate params can be created successfully
-        BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
+
+        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
+        // checks manually.
+        checkBatchnormTensorConfigSupported(bnAttr, opGraph.getTensorMap());
+        checkBatchnormFwdActivationModeSupported(activAttr);
+
         HIPDNN_LOG_INFO(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");
         return true;
