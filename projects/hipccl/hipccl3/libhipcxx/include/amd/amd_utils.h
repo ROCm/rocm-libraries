@@ -38,9 +38,9 @@ namespace libhipcxx
 {
   __host__ __device__ inline void __trap(){
     #ifndef NDEBUG
-    //#warning "__trap(): the call of __builtin_trap() will abort the host process. \
-    This deviates from the CUDA implementation where __trap() terminates a kernel \
-    and the host process is notified via an error status."
+    // #warning "__trap(): the call of __builtin_trap() will abort the host process. \
+    // This deviates from the CUDA implementation where __trap() terminates a kernel \
+    // and the host process is notified via an error status."
       __builtin_trap();
     #endif
   }
