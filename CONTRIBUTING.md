@@ -207,9 +207,14 @@ Run checks on staged files:
 pre-commit
 ```
 
-Run checks on all files in the repo:
+Run checks on all files in the repository:
 ```bash
 pre-commit run --all-files
+```
+
+Run checks on specific files:
+```bash
+pre-commit run --files path/to/file1.cpp path/to/file2.py
 ```
 
 ### Opting a Project into Pre-commit Checks
@@ -218,7 +223,7 @@ By default, most projects are excluded from pre-commit checks in [`.pre-commit-c
 
 1.  **Enable Checks**: Remove the project's exclusion pattern from the `exclude` block in [`.pre-commit-config.yaml`](.pre-commit-config.yaml).
 
-2.  **Apply Initial Formatting**: It is recommended to submit a dedicated "bulk" pull request that applies pre-commit fixes to the entire project. You can run pre-commit on all files in your project directory:
+2.  **Apply Initial Formatting**: It is recommended to submit dedicated pull requests that apply pre-commit fixes to the project. You can run pre-commit on all files in your project directory:
     ```bash
     pre-commit run --files $(git ls-files projects/<your-project>)
     ```
