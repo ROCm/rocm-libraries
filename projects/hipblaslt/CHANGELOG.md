@@ -2,6 +2,12 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.2.2 for ROCm 7.2.1
+
+### Changed
+
+* Enumeration value update to the Sigmoid Activation Function feature.
+
 ## hipBLASLt 1.2.1 for ROCm 7.2.1
 
 ### Changed
