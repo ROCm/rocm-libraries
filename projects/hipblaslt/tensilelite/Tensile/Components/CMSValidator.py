@@ -805,7 +805,7 @@ def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> li
 
 def lr_needed_by_mfma(local_read: LocalRead, lr_idx: int, timeline: Timeline, kernel: 'Solution') -> int:
     """
-    Helper fucntion to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
+    Helper function to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
 
     Args:
         lr_idx: The index of the LRA/LRB in the list of LRAs/LRBs for the given code path.
