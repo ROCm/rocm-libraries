@@ -237,11 +237,21 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                    || !std::has_single_bit(static_cast<uint>(wgt.n))))
                 continue;
 
-            params.push_back({wgt, true});
+            params.push_back({wgt, true, false});
 
             if (prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
                 params.back().workgroupMapping = false;
+            }
+
+            // Enable StreamK when number of output tiles < number of CUs and not f6 data type
+            size_t numTilesM = prob.m / wgt.m;
+            size_t numTilesN = prob.n / wgt.n;
+            size_t numTiles = numTilesM * numTilesN * prob.batch_count;
+            auto isF6 = (kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6 || kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6);
+            if(numTiles < analytical_hardware.N_CU && !isF6)
+            {
+                params.back().streamK = true;
             }
         }
     }
@@ -261,6 +271,8 @@ int parametersToIndex(const SolutionIndexParameters& params)
     result |= ((params.workgroupTile.m / REQUIRED_MULTIPLE_M_N) << pos);
     pos += MAX_BITS_WORKGROUPTILE_M;
     result |= ((params.workgroupMapping ? 1 : 0) << pos);
+    pos += 1;
+    result |= ((params.streamK ? 1 : 0) << pos);
 
     // Set top bit indicating it is a rocRoller index
     result |= (1 << 31);
@@ -290,6 +302,8 @@ SolutionIndexParameters indexToParameters(int index)
         = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_M)) * REQUIRED_MULTIPLE_M_N;
     pos += MAX_BITS_WORKGROUPTILE_M;
     result.workgroupMapping = (index >> pos) & 1;
+    pos += 1;
+    result.streamK = (index >> pos) & 1;
 
     return result;
 }

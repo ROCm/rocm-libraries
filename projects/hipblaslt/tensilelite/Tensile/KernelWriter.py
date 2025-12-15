@@ -3025,9 +3025,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]):
                 module.addComment1("local read inc b")
                 module.add(self.localReadInc(kernel, iui, tensorParametersB))
-              if kernel["UsePLRPack"] and self.states.numItersPLR:
-                module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete"))
-                module.add(pack[plrIdx])
+              if kernel["UseCustomMainLoopSchedule"]:
+                # Wait for all LR in pre-loop to complete before we start main loop
+                module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
+                if kernel["UsePLRPack"] and self.states.numItersPLR:
+                  module.add(pack[plrIdx])
         self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       elif self.states.numItersPLR == 0 and kernel["UseCustomMainLoopSchedule"]:
         # For numItersPLR=0 and CMS we prefetch only half the local reads
