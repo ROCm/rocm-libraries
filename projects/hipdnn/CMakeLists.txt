@@ -201,9 +201,6 @@ endif()
 # keep this after all the targets have been added that could use the HIP language compiler.
 add_clang_tidy_custom_target()
 
-# keep this after all the targets have been added that could use the HIP language compiler.
-add_clang_tidy_custom_target()
-
 if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
