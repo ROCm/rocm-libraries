@@ -173,6 +173,7 @@ enum class target_arch : unsigned int
     gfx1030 = 1030,
     gfx1100 = 1100,
     gfx1102 = 1102,
+    gfx1150 = 1150,
     gfx1152 = 1152,
     gfx1153 = 1153,
     gfx1200 = 1200,
@@ -224,6 +225,7 @@ constexpr auto target_arch_descriptors = std::array{
     X(gfx1030),
     X(gfx1100),
     X(gfx1102),
+    X(gfx1150),
     X(gfx1152),
     X(gfx1153),
     X(gfx1200),
@@ -271,6 +273,7 @@ constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_a
         case target_arch::gfx1030: return arch::wavefront::target::size32;
         case target_arch::gfx1100: return arch::wavefront::target::size32;
         case target_arch::gfx1102: return arch::wavefront::target::size32;
+        case target_arch::gfx1150: return arch::wavefront::target::size32;
         case target_arch::gfx1152: return arch::wavefront::target::size32;
         case target_arch::gfx1153: return arch::wavefront::target::size32;
         case target_arch::gfx1200: return arch::wavefront::target::size32;
@@ -505,6 +508,7 @@ auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
             X(gfx1030);
             X(gfx1100);
             X(gfx1102);
+            X(gfx1150);
             X(gfx1152);
             X(gfx1153);
             X(gfx1200);

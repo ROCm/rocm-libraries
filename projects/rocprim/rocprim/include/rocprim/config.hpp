@@ -169,6 +169,7 @@
         __builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") \
             || __builtin_amdgcn_processor_is("gfx1102")                                      \
             || __builtin_amdgcn_processor_is("gfx1103")                                      \
+            || __builtin_amdgcn_processor_is("gfx1150")                                      \
             || __builtin_amdgcn_processor_is("gfx1152")                                      \
             || __builtin_amdgcn_processor_is("gfx1153")                                      \
             || __builtin_amdgcn_processor_is("gfx11-generic")
