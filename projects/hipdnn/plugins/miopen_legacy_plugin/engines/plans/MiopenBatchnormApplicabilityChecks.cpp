@@ -344,7 +344,7 @@ void checkBatchnormTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, tensorMap, true);
 }
 
-void checkBatchnormFwdActivationModeSupported(
+void checkBatchnormActivationModeSupported(
     const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
 {
     // MIOpen currently only supports miopenActivationPASTHRU, miopenActivationRELU,
@@ -380,13 +380,13 @@ void checkBatchnormFwdActivationModeSupported(
 void checkBatchnormFwdActivationModeSupported(
     const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr)
 {
-    checkBatchnormFwdActivationModeSupported(activAttr, false);
+    checkBatchnormActivationModeSupported(activAttr, false);
 }
 
 void checkBatchnormBwdActivationModeSupported(
     const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr)
 {
-    checkBatchnormFwdActivationModeSupported(activAttr, true);
+    checkBatchnormActivationModeSupported(activAttr, true);
 }
 
 } // namespace miopen_legacy_plugin
