@@ -2114,4 +2114,3 @@ def priority_problems():
         "2. Halfs": {"type_A": "half"},
         "3. Floats": {"type_A": "float"},
     }
-
