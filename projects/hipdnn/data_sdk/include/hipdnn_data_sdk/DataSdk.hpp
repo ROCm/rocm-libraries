@@ -3,7 +3,7 @@
 
 #pragma once
 
-namespace hipdnn::test_sdk
+namespace hipdnn_data_sdk
 {
 inline void hello()
 {
