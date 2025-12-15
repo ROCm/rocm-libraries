@@ -32,6 +32,9 @@ typedef struct hipdnnHandle* hipdnnHandle_t;
 */
 typedef struct HipdnnBackendDescriptor* hipdnnBackendDescriptor_t;
 
+
+
+
 /*! @brief Creates a hipdnnHandle_t
  *
  * @param [in] handle        An instance of hipdnnHandle_t
