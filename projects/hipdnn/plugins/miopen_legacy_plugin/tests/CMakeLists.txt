@@ -4,7 +4,6 @@
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
-enable_language(HIP)
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     find_package(hipdnn_test_sdk CONFIG REQUIRED)
