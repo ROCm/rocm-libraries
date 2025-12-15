@@ -183,46 +183,46 @@ ctest
 
 ### Using multiple GPUs concurrently for testing
 
-This feature requires CMake 3.16+ to be used for building and testing. *(Prior versions of CMake can't
-assign IDs to tests when running in parallel. Assigning tests to distinct devices could only be done at
-the cost of extreme complexity.)*
+This feature requires CMake 3.18+ to be used for building and testing. *(Prior versions of CMake don't
+support the RESOURCE_SPEC_FILE argument for CTest and versions prior to 3.16 don't support the RESOURCE_GROUPS
+property on tests. Both are needed to run tests concurrently on multiple GPUs.)*
 
-Unit tests can make use of the
+Unit tests of rocThrust make use of the
 [CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature, which enables distributing tests across multiple GPUs in an intelligent manner. This feature can
 accelerate testing when multiple GPUs of the same family are in a system. It can also test multiple
 product families from one invocation without having to use the `HIP_VISIBLE_DEVICES` environment
 variable. CTest Resource Allocation requires a resource spec file.
 
-```important
-Using `RESOURCE_GROUPS` and `--resource-spec-file` with CMake and CTest, respectively for versions
-prior to 3.16 omits the feature silently. Therefore, you must ensure that the `cmake` and `ctest` you
-invoke are sufficiently recent.
-```
+> Using `RESOURCE_GROUPS` and `RESOURCE_SPEC_FILE` with CMake and CTest, respectively for versions
+> prior to 3.18 omits the feature silently. Therefore, you must ensure that the `cmake` and `ctest` you
+> invoke are sufficiently recent.
 
 #### Auto resource spec generation
 
-There is a utility script in the repo that may be called independently:
+A utility script, `GenerateResourceSpec.cmake`, is called when you run `cmake -DBUILD_TEST=ON`. It will generate the
+resource spec file, named `resources.json`, that describes the GPU resources available on your system. In addition,
+each test defines the GPU resource it requires through the `RESOURCE_GROUPS` property. Then when you run `ctest` with
+parallel jobs:
 
 ```shell
-# Go to rocThrust build directory
-cd projects/rocthrust; cd build
-
-# Generate the resource spec file by the name "resources.json"
-cmake -P ../cmake/GenerateResourceSpec.cmake
-
-# Run tests in parallel with the resource spec file and specify the number of jobs
-ctest --resource-spec-file ./resources.json --parallel <number-of-jobs>
+ctest --parallel <number-of-jobs>
 ```
 
-Then `ctest` will launch up to the specified number of jobs to run tests in parallel, while honoring the available GPU resources and their allocation defined by `--resource-spec-file` and `RESOURCE_GROUPS`.
+or
+
+```shell
+ctest -j <number-of-jobs>
+```
+
+it will launch up to the specified number of jobs to run tests in parallel, while honoring the available GPU resources and their allocation defined by the resource spec file and `RESOURCE_GROUPS`, respectively.
 
 #### Manual
 
 Assuming you have two GPUs from the gfx900 family and they are the first devices enumerated by the
 system, you can specify `-D AMDGPU_TEST_TARGETS=gfx900` during configuration to specify that you
-want only one family to be tested. If you leave this var empty (default), the default device in the system
-is targeted. To specify that there are two GPUs that should be targeted, you must feed a JSON file to
-CTest using the `--resource-spec-file <path_to_file>` flag. For example:
+want only one family to be tested. If you leave this var empty (default), all GPUs in the system
+are targeted. To specify that there are two GPUs that should be targeted, you must feed a JSON file,
+similar to the generated `resources.json` file, for example:
 
 ```json
 {
@@ -243,6 +243,13 @@ CTest using the `--resource-spec-file <path_to_file>` flag. For example:
     }
   ]
 }
+```
+
+to CTest using the `--resource-spec-file` flag:
+
+```shell
+# Run tests on specified GPU family
+ctest --resource-spec-file <path-to-my-resources.json> --parallel <number-of-jobs>
 ```
 
 ## Using custom seeds for the tests

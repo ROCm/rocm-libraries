@@ -11,7 +11,8 @@ Documentation for rocThrust available at
 
 ### Changed
 
-* Improved the `GenerateResourceSpec.cmake` script and the documentation on how to run rocThrust tests on multiple GPUs.
+* Improved the `GenerateResourceSpec.cmake` script and used in CMake to automatically generate the resource spec file for CTest.
+* Updated the documentation on how to run rocThrust tests on multiple GPUs in parallel.
 
 ## rocThrust 4.2.0 for ROCm 7.2
 
