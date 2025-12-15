@@ -101,7 +101,7 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     //    Don't fuse zPlan, trans2Plan to FT_STOCKHAM_WITH_TRANS_Z_XY
     //    because the preceding trans1 is XY_Z:
     //    xyPlan handles the first 2 dimensions without a transpose.
-    //    So the XY_Z tranpose arranges the Z dimension to the fastest dim, and
+    //    So the XY_Z transpose arranges the Z dimension to the fastest dim, and
     //    Z_XY puts it back to the expected arrangement for output.
 }
 

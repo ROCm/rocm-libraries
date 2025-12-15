@@ -491,7 +491,7 @@ void solution_kernel_combo(FMKey                             kernel_key,
         {
             placement_range = {rocfft_placement_inplace, rocfft_placement_notinplace};
         }
-        // sbcc can be used in 2D, 3D, for L1D, it's still psuedo-2D
+        // sbcc can be used in 2D, 3D, for L1D, it's still pseudo-2D
         if(static_dim == 0)
         {
             static_dims_range = {2, 3};
