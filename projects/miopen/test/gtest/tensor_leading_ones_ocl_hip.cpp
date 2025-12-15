@@ -50,36 +50,6 @@ std::vector<TensorsConfig> TensorsConfigs()
     auto insertTestCase = [&configs](int N, int C, int H, int W) {
         configs.push_back(
             {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, H, W}, {C * H * W, H * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, H, 1}, {C * H * 1, H * 1, 1, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, 1, W}, {C * 1 * W, 1 * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, 1, 1}, {C * 1 * 1, 1 * 1, 1, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, 1, H, W}, {1 * H * W, H * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, 1, H, 1}, {1 * H * 1, H * 1, 1, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, 1, 1, W}, {1 * 1 * W, 1 * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, 1, 1, 1}, {1 * 1 * 1, 1 * 1, 1, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, C, H, W}, {C * H * W, H * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, C, H, 1}, {C * H * 1, H * 1, 1, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, C, 1, W}, {C * 1 * W, 1 * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, C, 1, 1}, {C * 1 * 1, 1 * 1, 1, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, 1, H, W}, {1 * H * W, H * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, 1, H, 1}, {1 * H * 1, H * 1, 1, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, 1, 1, W}, {1 * 1 * W, 1 * W, W, 1}});
-        configs.push_back(
-            {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, 1, 1, 1}, {1 * 1 * 1, 1 * 1, 1, 1}});
     };
 
 #if PERF_ENABLE
@@ -109,23 +79,12 @@ std::vector<TensorsConfig> TensorsConfigs()
         maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
     }
 
-    for(int N = 1; N < maxTotalSize; N *= 4)
+    int C = 4;
+    int H = 8;
+    int W = 8;
+    for(int N = 32; N <= maxTotalSize / (C * H * W); N *= 2)
     {
-        for(int C : {1, 2, 4})
-        {
-            for(int H = 1; H < maxTotalSize / (N * C); H *= 2)
-            {
-                for(int W = 1; W < maxTotalSize / (N * C * H); W *= 2)
-                {
-                    size_t totalSize = N * C * H * W;
-                    // Ensure the total size does not exceed the maximum limit
-                    if(totalSize <= maxTotalSize)
-                    {
-                        insertTestCase(N, C, H, W);
-                    }
-                }
-            }
-        }
+        insertTestCase(N, C, H, W);
     }
 
     return configs;
@@ -135,20 +94,23 @@ std::vector<TensorsConfig> TensorsConfigs()
     int H = 1;
     int W = 1;
     insertTestCase(N, C, H, W);
+    N = 1024;
+    C = 4;
+    H = 8;
+    W = 8;
+    insertTestCase(N, C, H, W);
+    N = 2048;
     C = 4;
     H = 16;
     W = 16;
     insertTestCase(N, C, H, W);
-    C = 1;
-    H = 20;
-    W = 20;
-    insertTestCase(N, C, H, W);
+
     return configs;
 #endif
 }
 
 template <typename T>
-struct OpTensorFwdBiasGenericTest
+struct OpTensorLeadingOnesTest
     : public ::testing::TestWithParam<std::tuple<TensorsConfig, double, double, double>>
 {
 protected:
@@ -164,8 +126,7 @@ protected:
             tensor_elem_gen_integer{17});
         tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
             tensor_elem_gen_integer{17});
-        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
-            [](auto...) { return 1; });
+        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides};
 
         // Write the device tensors
         tensA_dev = handle.Write(tensA.data);
@@ -175,7 +136,7 @@ protected:
         tensC_ocl = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides};
         tensC_hip = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides};
 
-        // Prepare all parameters needed for kernel
+        // first_not_one is incorrect if btensor size equal to 1
         auto first_not_one = std::find_if(
             tensorsConfig.blens.rbegin(), tensorsConfig.blens.rend(), [](int i) { return i != 1; });
         auto d = std::distance(tensorsConfig.blens.begin(), first_not_one.base());
@@ -188,7 +149,8 @@ protected:
                                       1,
                                       std::multiplies<int>());
 
-        unsigned int bitmap = 0;
+        bitmap = 0;
+        // update bitmap for first_not_one
         bitmap |= (1 << (tensorsConfig.blens.size() - d));
 
         for(int i = (d - 2); i >= 0; i--)
@@ -213,7 +175,7 @@ protected:
         }
 
         // Forward Convolution Bias specialization
-        // for fwd-bias, bitmap looks like <0, 1, 0, 0>
+        // for fwd-bias, bitmap looks like <0,1,0,0>
         // Is the no. of work-groups and the work for each wg balanced?
         auto fwd_conv_bias = bitmap == (1 << 2) ? 1 : 0;
         auto dims          = tensorsConfig.aclens.size();
@@ -223,7 +185,6 @@ protected:
         { // 640 workgroups of size 256 needed to completely fill the GPU
             work_per_wg /= c_n;
             num_wg *= c_n;
-            incr_wg = 1;
         }
 
         if(num_wg > max_num_wg)
@@ -242,8 +203,7 @@ protected:
             local_threads = 64;
         }
 
-        // size_t global_threads = num_wg * local_threads;
-        //  Special case for adding tensors in place
+        // Special case for adding tensors in place
         size_t global_threads =
             (static_cast<int>(leading_ones) == 1 && (d - 1) == 3) ? num_wg : num_wg * local_threads;
         global_threads = (global_threads < local_threads) ? local_threads : global_threads;
@@ -264,37 +224,31 @@ protected:
         params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) +
                  " -DMAX_NUM_WG=" + std::to_string(max_num_wg);
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
-        params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS_GENERIC";
+        params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_LEADING_ONES";
 
-        std::string program_name{"MIOpenTensorKernels.cl"};
+        std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel(kernel_name,
-                         network_config_ocl,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),            // a
-                                 tensorsConfig.acstrides[0], // a_nstride
-                                 tensorsConfig.acstrides[1], // a_cstride
-                                 tensorsConfig.acstrides[2], // a_hstride
-                                 tensB_dev.get(),            // b
-                                 tensorsConfig.blens[1],     // b_c
-                                 tensorsConfig.bstrides[1],  // b_cstride
-                                 tensC_dev.get(),            // c
-                                 tensorsConfig.aclens[0],    // c_n
-                                 tensorsConfig.acstrides[0], // c_nstride
-                                 tensorsConfig.acstrides[1], // c_cstride
-                                 work_per_wg,
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 0L, // Aoffset
-                                 0L, // Boffset
-                                 0L, // Coffset
-                                 num_wg,
-                                 incr_wg);
+        handle.AddKernel(
+            kernel_name, network_config_ocl, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            tensB_dev.get(),
+            tensC_dev.get(),
+            tensorsConfig.aclens[1],    // c_c
+            tensorsConfig.aclens[2],    // c_h
+            tensorsConfig.aclens[3],    // c_w
+            tensorsConfig.acstrides[0], // c_nstride
+            tensorsConfig.acstrides[1], // c_cstride
+            tensorsConfig.acstrides[2], // c_hstride
+            work_per_wg,
+            alpha0,
+            alpha1,
+            beta,
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
+            num_wg,
+            bitmap);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
@@ -303,25 +257,23 @@ protected:
                     kernel_name,
                     network_config_ocl,
                     tensA_dev.get(),
+                    tensB_dev.get(),
+                    tensC_dev.get(),
+                    tensorsConfig.aclens[1],
+                    tensorsConfig.aclens[2],
+                    tensorsConfig.aclens[3],
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     tensorsConfig.acstrides[2],
-                    tensB_dev.get(),
-                    tensorsConfig.blens[1],
-                    tensorsConfig.bstrides[1],
-                    tensC_dev.get(),
-                    tensorsConfig.aclens[0],
-                    tensorsConfig.acstrides[0],
-                    tensorsConfig.acstrides[1],
                     work_per_wg,
                     alpha0,
                     alpha1,
                     beta,
                     0L,
-                    0L,
+                    0l,
                     0L,
                     num_wg,
-                    incr_wg);
+                    bitmap);
 #endif
     }
 
@@ -333,37 +285,31 @@ protected:
         params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) +
                  " -DMAX_NUM_WG=" + std::to_string(max_num_wg);
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
-        params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS_GENERIC";
+        params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_LEADING_ONES";
 
-        std::string program_name{"MIOpenTensorKernelsHip.cpp"};
+        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel(kernel_name,
-                         network_config_hip,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),            // a
-                                 tensorsConfig.acstrides[0], // a_nstride
-                                 tensorsConfig.acstrides[1], // a_cstride
-                                 tensorsConfig.acstrides[2], // a_hstride
-                                 tensB_dev.get(),            // b
-                                 tensorsConfig.blens[1],     // b_c
-                                 tensorsConfig.bstrides[1],  // b_cstride
-                                 tensC_dev.get(),            // c
-                                 tensorsConfig.aclens[0],    // c_n
-                                 tensorsConfig.acstrides[0], // c_nstride
-                                 tensorsConfig.acstrides[1], // c_cstride
-                                 work_per_wg,
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 0L, // Aoffset
-                                 0L, // Boffset
-                                 0L, // Coffset
-                                 num_wg,
-                                 incr_wg);
+        handle.AddKernel(
+            kernel_name, network_config_hip, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            tensB_dev.get(),
+            tensC_dev.get(),
+            tensorsConfig.aclens[1],    // c_c
+            tensorsConfig.aclens[2],    // c_h
+            tensorsConfig.aclens[3],    // c_w
+            tensorsConfig.acstrides[0], // c_nstride
+            tensorsConfig.acstrides[1], // c_cstride
+            tensorsConfig.acstrides[2], // c_hstride
+            work_per_wg,
+            alpha0,
+            alpha1,
+            beta,
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
+            num_wg,
+            bitmap);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
@@ -372,16 +318,14 @@ protected:
                     kernel_name,
                     network_config_hip,
                     tensA_dev.get(),
+                    tensB_dev.get(),
+                    tensC_dev.get(),
+                    tensorsConfig.aclens[1],
+                    tensorsConfig.aclens[2],
+                    tensorsConfig.aclens[3],
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     tensorsConfig.acstrides[2],
-                    tensB_dev.get(),
-                    tensorsConfig.blens[1],
-                    tensorsConfig.bstrides[1],
-                    tensC_dev.get(),
-                    tensorsConfig.aclens[0],
-                    tensorsConfig.acstrides[0],
-                    tensorsConfig.acstrides[1],
                     work_per_wg,
                     alpha0,
                     alpha1,
@@ -390,7 +334,7 @@ protected:
                     0L,
                     0L,
                     num_wg,
-                    incr_wg);
+                    bitmap);
 #endif
     }
 
@@ -423,17 +367,18 @@ protected:
         stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
                  "_beta_" + std::to_string(beta);
 
-        std::string filename = "tensor_fwd_bias_generic-" + miopen::GetDataType(data_type) + ".csv";
+        std::string filename = "tensor_leading_ones-" + miopen::GetDataType(data_type) + ".csv";
         ph.writeStatsToCSV(filename, stats);
 #endif
     }
 
-    const std::string kernel_name{"OpTensorFwdBiasGeneric"};
+    const std::string kernel_name{"OpTensorLeadingOnes"};
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
-    const int max_num_wg{4096};
-    int work_per_wg, num_wg, incr_wg{0};
+    unsigned int bitmap;
+    int work_per_wg, num_wg;
+    int max_num_wg{4096};
 
     tensor<T> tensA;
     tensor<T> tensB;
@@ -451,13 +396,13 @@ protected:
     T alpha0, alpha1, beta;
 
 #if PERF_ENABLE
-    PerfHelper<float> ph;
+    PerfHelper ph;
 #endif
 };
 
-using GPU_OpTensorFwdBiasGenericTest_FP16 = OpTensorFwdBiasGenericTest<half_float::half>;
+using GPU_OpTensorLeadingOnesTest_FP16 = OpTensorLeadingOnesTest<half_float::half>;
 
-TEST_P(GPU_OpTensorFwdBiasGenericTest_FP16, PortTest)
+TEST_P(GPU_OpTensorLeadingOnesTest_FP16, PortTest)
 {
     runOCL();
     runHIP();
@@ -465,15 +410,15 @@ TEST_P(GPU_OpTensorFwdBiasGenericTest_FP16, PortTest)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_OpTensorFwdBiasGenericTest_FP16,
+                         GPU_OpTensorLeadingOnesTest_FP16,
                          testing::Combine(testing::ValuesIn(TensorsConfigs<half_float::half>()),
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
 
-using GPU_OpTensorFwdBiasGenericTest_FP32 = OpTensorFwdBiasGenericTest<float>;
+using GPU_OpTensorLeadingOnesTest_FP32 = OpTensorLeadingOnesTest<float>;
 
-TEST_P(GPU_OpTensorFwdBiasGenericTest_FP32, PortTest)
+TEST_P(GPU_OpTensorLeadingOnesTest_FP32, PortTest)
 {
     runOCL();
     runHIP();
@@ -481,15 +426,15 @@ TEST_P(GPU_OpTensorFwdBiasGenericTest_FP32, PortTest)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_OpTensorFwdBiasGenericTest_FP32,
+                         GPU_OpTensorLeadingOnesTest_FP32,
                          testing::Combine(testing::ValuesIn(TensorsConfigs<float>()),
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
 
-using GPU_OpTensorFwdBiasGenericTest_FP64 = OpTensorFwdBiasGenericTest<double>;
+using GPU_OpTensorLeadingOnesTest_FP64 = OpTensorLeadingOnesTest<double>;
 
-TEST_P(GPU_OpTensorFwdBiasGenericTest_FP64, PortTest)
+TEST_P(GPU_OpTensorLeadingOnesTest_FP64, PortTest)
 {
     runOCL();
     runHIP();
@@ -497,7 +442,7 @@ TEST_P(GPU_OpTensorFwdBiasGenericTest_FP64, PortTest)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_OpTensorFwdBiasGenericTest_FP64,
+                         GPU_OpTensorLeadingOnesTest_FP64,
                          testing::Combine(testing::ValuesIn(TensorsConfigs<double>()),
                                           testing::Values(1.0),
                                           testing::Values(1.0),

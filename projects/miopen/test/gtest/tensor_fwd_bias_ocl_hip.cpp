@@ -86,7 +86,30 @@ std::vector<TensorsConfig> TensorsConfigs()
     };
 
 #if PERF_ENABLE
-    size_t maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName()) / sizeof(T);
+    // Determine a cache-aware cap on total tensor elements for HIP/AMD:
+    // 1) Query L2 size via HIP and use 2x L2 as working set
+    // 2) Fallback to per-architecture table if L2 is not reported
+    size_t maxTotalSize = 0;
+
+    // 1) HIP L2 cache query
+    int dev = -1;
+    if(hipSuccess == hipGetDevice(&dev))
+    {
+        int L2_bytes = 0;
+        if(hipSuccess == hipDeviceGetAttribute(&L2_bytes, hipDeviceAttributeL2CacheSize, dev) &&
+           L2_bytes > 0)
+        {
+            // Use 2x L2 as a working-set heuristic
+            maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
+            // Convert bytes -> elements of type T
+            maxTotalSize /= sizeof(T);
+        }
+    }
+    // 2) Fallback table by architecture family
+    if(maxTotalSize == 0)
+    {
+        maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
+    }
 
     // Generate all NCHW tensors that are limited by L3 cache size
     // or 2xL2 cache size when L3 is not available
@@ -255,9 +278,9 @@ protected:
             alpha0,
             alpha1,
             beta,
-            static_cast<int64_t>(0), // Aoffset
-            static_cast<int64_t>(0), // Boffset
-            static_cast<int64_t>(0), // Coffset
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
             num_wg,
             incr_wg);
 
@@ -279,9 +302,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    static_cast<int64_t>(0),
-                    static_cast<int64_t>(0),
-                    static_cast<int64_t>(0),
+                    0L,
+                    0L,
+                    0L,
                     num_wg,
                     incr_wg);
 #endif
@@ -313,9 +336,9 @@ protected:
             alpha0,
             alpha1,
             beta,
-            static_cast<int64_t>(0), // Aoffset
-            static_cast<int64_t>(0), // Boffset
-            static_cast<int64_t>(0), // Coffset
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
             num_wg,
             incr_wg);
 
@@ -337,9 +360,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    static_cast<int64_t>(0),
-                    static_cast<int64_t>(0),
-                    static_cast<int64_t>(0),
+                    0L,
+                    0L,
+                    0L,
                     num_wg,
                     incr_wg);
 #endif
@@ -382,7 +405,7 @@ protected:
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
-    const int max_num_wg = 4096;
+    const int max_num_wg{4096};
     int work_per_wg, num_wg, incr_wg{0};
 
     tensor<T> tensA;

@@ -50,7 +50,6 @@ MIOPEN_TYPE miopenMax(MIOPEN_TYPE a, MIOPEN_TYPE b) { return ((a > b) ? a : b); 
 MIOPEN_TYPE miopenMin(MIOPEN_TYPE a, MIOPEN_TYPE b) { return ((a < b) ? a : b); }
 
 #ifdef USE_FWD_BIAS
-
 __kernel void OpTensorFwdBias(global MIOPEN_TYPE* a,
                               global MIOPEN_TYPE* b,
                               const int b_c,
@@ -125,11 +124,9 @@ __kernel void OpTensorFwdBias(global MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
 
 #ifdef USE_FWD_BIAS_GENERIC
-
 __kernel void OpTensorFwdBiasGeneric(global MIOPEN_TYPE* a,
                                      const int a_nstride,
                                      const int a_cstride,
@@ -211,12 +208,10 @@ __kernel void OpTensorFwdBiasGeneric(global MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
 
 // DLOWELL : cutting out this section
 #ifdef USE_LEADING_ONES
-
 __kernel void OpTensorLeadingOnes(global MIOPEN_TYPE* a,
                                   global MIOPEN_TYPE* b,
                                   global MIOPEN_TYPE* c,
@@ -235,11 +230,9 @@ __kernel void OpTensorLeadingOnes(global MIOPEN_TYPE* a,
                                   const int num_wg,
                                   const unsigned int bitmap)
 {
-
     /* Special case for leading ones where the total no. of threads is the
      * inner_product of the tensor dims.  Each thread just updates one value
      */
-
     global MIOPEN_TYPE* a_off = a + Aoffset;
     global MIOPEN_TYPE* b_off = b + Boffset;
     global MIOPEN_TYPE* c_off = c + Coffset;
@@ -303,12 +296,9 @@ __kernel void OpTensorLeadingOnes(global MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
 
-// DLOWELL : cutting out this section
 #ifdef USE_LEADING_ONES_GENERIC
-
 __kernel void OpTensorLeadingOnesGeneric(global MIOPEN_TYPE* a,
                                          const int a_nstride,
                                          const int a_cstride,
@@ -334,7 +324,6 @@ __kernel void OpTensorLeadingOnesGeneric(global MIOPEN_TYPE* a,
                                          const int num_wg,
                                          const unsigned int bitmap)
 {
-
     /* Special case for leading ones where the total no. of threads is the
      * inner_product of the tensor dims.  Each thread just updates one value
      */
@@ -426,11 +415,9 @@ __kernel void OpTensorLeadingOnesGeneric(global MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
 
 #ifdef USE_4D_TENSOR_GENERIC
-
 __kernel void Op4dTensorGeneric(global MIOPEN_TYPE* a,
                                 const int a_nstride,
                                 const int a_cstride,
@@ -538,7 +525,6 @@ __kernel void Op4dTensorGeneric(global MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
 
 #ifdef USE_5D_TENSOR_GENERIC
@@ -671,7 +657,6 @@ __kernel void Op5dTensorGeneric(global MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
 
 #ifdef USE_2D_TENSOR_LITE
@@ -781,5 +766,4 @@ __kernel void Op2dTensorLite(const global MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
