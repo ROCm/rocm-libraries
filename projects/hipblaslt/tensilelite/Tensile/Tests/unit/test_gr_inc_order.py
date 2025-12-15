@@ -35,8 +35,7 @@ class TestGRIncOrder(CMSValidationTestBase):
         super().setUp()
         self.kernel["MIWaveTileA"] = 4
         self.kernel["MIWaveTileB"] = 4
-        
-        # self.kernel["DirectToLds"] = 1
+
         self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
 
     
