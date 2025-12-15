@@ -147,7 +147,7 @@ auto reduceWithCpu(hiptensorDataType_t          typeA,
                                                       typeCompute,
                                                       0 /* stream */));
 
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
     if(descA)

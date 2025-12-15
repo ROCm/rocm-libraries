@@ -155,7 +155,7 @@ auto elementaryBinaryOpWithCpu(hiptensorDataType_t inputType,
                                hiptensor::convertToComputeType(typeCompute),
                                0);
 
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
     if(descA)
     {
         CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descA));

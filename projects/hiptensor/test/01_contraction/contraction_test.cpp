@@ -1054,7 +1054,7 @@ namespace hiptensor
     {
         if(mRunFlag)
         {
-            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));

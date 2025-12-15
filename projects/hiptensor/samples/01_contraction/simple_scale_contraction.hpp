@@ -309,7 +309,7 @@ int scaleContractionSample(void* alpha)
 
 #endif
 
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
     if(a_ms_ks)
