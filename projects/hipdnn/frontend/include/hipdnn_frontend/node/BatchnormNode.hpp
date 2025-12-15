@@ -27,6 +27,7 @@ public:
     {
         // ====================================================================
         // BATCH NORMALIZATION FORWARD TRAINING VALIDATION
+        // (Spatial Mode: per-channel statistics over N×H×W)
         // ====================================================================
         // Algorithm Overview:
         // For each channel c, BN computes batch statistics over (N,H,W):
@@ -34,13 +35,13 @@ public:
         //   var_c  = (1/m) * Σ_{n,h,w} (x[n,c,h,w] - mean_c)²
         //
         // Normalizes: xhat[n,c,h,w] = (x[n,c,h,w] - mean_c) / sqrt(var_c + ε)
-        // Transforms: y[n,c,h,w] = γ_c * xhat[n,c,h,w] + β_c
+        // Transforms: y[n,c,h,w] = scale_c * xhat[n,c,h,w] + bias_c
         //
         // Optionally outputs mean_c and invStd_c to device buffers
         // (consumed by backward pass for gradient computation)
         //
-        // Updates running stats: runMean_c = (1-α)*runMean_c + α*mean_c
-        //                       runVar_c  = (1-α)*runVar_c  + α*var_c
+        // Updates running stats: runMean_c = (1-momentum)*runMean_c + momentum*mean_c
+        //                       runVar_c  = (1-momentum)*runVar_c  + momentum*var_c
         // ====================================================================
 
         // SECTION 1: Validate Required Tensor Pointers
@@ -91,9 +92,9 @@ public:
         // Why: All BN parameters (scale, bias, mean, variance) are per-channel with
         // shape [1, C, 1, 1, ...]. This is because:
         // - Each channel c has its own statistics: mean_c, var_c
-        // - Each channel c has its own learnable parameters: γ_c (scale), β_c (bias)
-        //   - γ_c controls feature importance/gain after normalization
-        //   - β_c controls activation threshold (e.g., for ReLU: active when γ_c*xhat + β_c > 0)
+        // - Each channel c has its own learnable parameters: scale_c, bias_c
+        //   - scale_c controls feature importance/gain after normalization
+        //   - bias_c controls activation threshold (e.g., for ReLU: active when scale_c*xhat + bias_c > 0)
         auto& xDims = x->get_dim();
         if(!xDims.empty() && xDims.size() >= 2)
         {

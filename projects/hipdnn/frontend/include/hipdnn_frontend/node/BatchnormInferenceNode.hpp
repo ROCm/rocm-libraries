@@ -27,13 +27,14 @@ public:
     {
         // ====================================================================
         // BATCH NORMALIZATION INFERENCE VALIDATION
+        // (Spatial Mode: per-channel statistics over N×H×W)
         // ====================================================================
         // Algorithm Overview:
         // During inference, BN uses PRE-COMPUTED running statistics from training.
         // For each channel c, using saved running stats (runMean_c, runVar_c):
         //
         // Normalizes: xhat[n,c,h,w] = (x[n,c,h,w] - runMean_c) / sqrt(runVar_c + ε)
-        // Transforms: y[n,c,h,w] = γ_c * xhat[n,c,h,w] + β_c
+        // Transforms: y[n,c,h,w] = scale_c * xhat[n,c,h,w] + bias_c
         //
         // Key difference from training:
         // - NO batch statistics computed (no dependence on current batch)
@@ -93,7 +94,7 @@ public:
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: All parameters are per-channel with shape [1, C, 1, 1]:
         // - mean_c and var_c: Running statistics saved from training
-        // - γ_c (scale) and β_c (bias): Learned parameters from training
+        // - scale and bias: Learned parameters from training
         // These are the same parameters used during training, now fixed for inference.
         auto& xDims = x->get_dim();
         if(!xDims.empty() && xDims.size() >= 2)

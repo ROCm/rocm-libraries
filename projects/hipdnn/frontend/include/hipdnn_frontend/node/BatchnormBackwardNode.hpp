@@ -29,6 +29,7 @@ public:
     {
         // ====================================================================
         // BATCH NORMALIZATION BACKWARD VALIDATION
+        // (Spatial Mode: per-channel statistics over N×H×W)
         // ====================================================================
         // Algorithm Overview:
         // Given dy (gradient of loss w.r.t. y), compute gradients w.r.t. inputs:
