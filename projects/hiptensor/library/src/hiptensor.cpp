@@ -105,12 +105,12 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
-hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t& handle)
+hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t* handle)
 {
     using hiptensor::Logger;
 
-    if(handle == nullptr)
-        return HIPTENSOR_STATUS_SUCCESS;
+    if(handle == nullptr || *handle == nullptr)
+        return HIPTENSOR_STATUS_INVALID_VALUE;
 
     auto& logger = Logger::instance();
 
@@ -120,8 +120,8 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t& handle)
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorDestroy", msg);
 
-    delete handle;
-    handle = nullptr;
+    delete *handle;
+    *handle = nullptr;
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
