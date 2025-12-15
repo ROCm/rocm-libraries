@@ -522,3 +522,120 @@ INSTANTIATE_TEST_SUITE_P(
     accuracy_test,
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
     accuracy_test::TestName);
+
+inline auto param_even_real_odd_base_index()
+{
+    std::vector<fft_params> params;
+    // C2R/R2C of even (real) lengths with odd distances (1D)
+    // or odd strides along first non-contiguous dimension (>1D)
+
+    const std::vector<std::vector<size_t>> test_lengths = {
+        // 1D
+        {16},
+        {64},
+        {192},
+        {194},
+        {442},
+        //2D
+        {16, 16},
+        {25, 16},
+        {64, 64},
+        {75, 64},
+        {64, 192},
+        {225, 192},
+        {128, 194},
+        {225, 194},
+        {256, 442},
+        {625, 442},
+        // 3D
+        {16, 16, 16},
+        {16, 25, 16},
+        {25, 16, 16},
+        {25, 25, 16},
+        {64, 64, 64},
+        {64, 75, 64},
+        {75, 64, 64},
+        {75, 75, 64},
+        {128, 128, 192},
+        {128, 225, 192},
+        {225, 128, 192},
+        {225, 225, 192},
+        {128, 128, 194},
+        {128, 225, 194},
+        {225, 128, 194},
+        {225, 225, 194},
+    };
+
+    for(auto precision : precision_range_full)
+    {
+        for(const auto& len : test_lengths)
+        {
+            fft_params param;
+            param.precision      = precision;
+            param.transform_type = fft_transform_type_real_forward;
+            param.itype          = fft_array_type_real;
+            param.otype          = fft_array_type_hermitian_interleaved;
+            param.placement      = fft_placement_notinplace; // cannot be in-place by definition
+            param.length         = len;
+            if(len.size() == 1)
+            {
+                param.nbatch  = 2;
+                param.istride = {1};
+                param.ostride = {1};
+                param.idist   = len[0] + 1; // +1 for generating odd addresses for some rows
+                param.odist   = len[0] / 2 + 1;
+            }
+            else if(len.size() > 1)
+            {
+                param.nbatch = 1;
+                param.idist  = 0; // irrelevant for batch size 1
+                param.odist  = 0; // irrelevant for batch size 1
+                param.istride.resize(len.size());
+                param.ostride.resize(len.size());
+                // unit stride along fastest-varying dimension
+                param.istride.back() = param.ostride.back() = 1;
+                param.istride[len.size() - 2]
+                    = len.back() + 1; // +1 for generating odd addresses for some rows
+                param.ostride[len.size() - 2] = len.back() / 2 + 1;
+                for(auto dim = len.size() - 2; dim-- > 0;)
+                {
+                    param.istride[dim] = param.istride[dim + 1] * len[dim + 1];
+                    param.ostride[dim] = param.ostride[dim + 1] * len[dim + 1];
+                }
+            }
+            param.validate();
+
+            {
+                const double roll = hash_prob(random_seed, param.token());
+                const double run_prob
+                    = test_prob * (param.is_planar() ? complex_planar_prob_factor : 1.0)
+                      * (param.is_interleaved() ? complex_interleaved_prob_factor : 1.0)
+                      * (param.is_real() ? real_prob_factor : 1.0);
+
+                if(roll > run_prob)
+                {
+                    if(verbose > 4)
+                    {
+                        std::cout << "Test skipped (probability " << run_prob << " > " << roll
+                                  << ")\n";
+                    }
+                    continue;
+                }
+                else
+                {
+                    if(param.valid(0))
+                    {
+                        params.push_back(param);
+                    }
+                }
+            }
+        }
+    }
+
+    return params;
+}
+
+INSTANTIATE_TEST_SUITE_P(DISABLED_adhoc_real_even_length_odd_base_index,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_even_real_odd_base_index()),
+                         accuracy_test::TestName);
