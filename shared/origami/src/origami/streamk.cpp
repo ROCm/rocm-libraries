@@ -473,8 +473,11 @@ namespace origami
 
                         size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
                         sk_grid = tiles * maxSplits;
+                        if (tiles % sk_grid != 0 && tile_size * sk_grid > workspace_size)
+                            sk_grid = tiles;
                     }
-                    else
+
+                    if(reduction_strategy != reduction_type::Parallel || sk_grid / tiles < 2)
                     {
                         const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
                         for(size_t frac: tile_fractions)
