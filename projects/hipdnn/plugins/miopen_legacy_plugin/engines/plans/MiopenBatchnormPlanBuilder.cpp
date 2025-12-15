@@ -336,18 +336,20 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             switch(node.attributes_type())
             {
             case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
+                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormAttributes(),
+                                                    opGraph.getTensorMap());
                 break;
             case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+                checkBatchnormTensorConfigSupported(
+                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap());
+                checkBatchnormTensorConfigSupported(
+                    *node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap());
                 break;
             default:
-                throw hipdnn_plugin::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                    "Unexpected node attribute type");
+                throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           "Unexpected node attribute type");
             }
         }
         catch(const hipdnn_plugin::HipdnnPluginException& e)
@@ -385,12 +387,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         const auto& bnInfAttr
             = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
-        const auto& actAttr =
-            node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
-        if(!batchnormFwdFusionCheckTensorsLogErrors(
-               bnInfAttr,
-               actAttr,
-               opGraph.getTensorMap()))
+        const auto& actAttr = node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+        if(!batchnormFwdFusionCheckTensorsLogErrors(bnInfAttr, actAttr, opGraph.getTensorMap()))
         {
             return false;
         }

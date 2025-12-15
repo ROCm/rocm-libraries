@@ -197,15 +197,16 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
         throw std::invalid_argument("Dimensions and strides must have the same number of elements");
     }
 
-    const auto count = std::accumulate(dims.begin(), dims.end(), static_cast<size_t>(1), std::multiplies<>());
+    const auto count
+        = std::accumulate(dims.begin(), dims.end(), static_cast<size_t>(1), std::multiplies<>());
 
-    const auto space =
-            std::inner_product(dims.begin(),
-                               dims.end(),
-                               strides.begin(),
-                               static_cast<size_t>(1),
-                               std::plus<>(),
-                               [](size_t len, size_t stride) { return (len - 1) * stride; });
+    const auto space
+        = std::inner_product(dims.begin(),
+                             dims.end(),
+                             strides.begin(),
+                             static_cast<size_t>(1),
+                             std::plus<>(),
+                             [](size_t len, size_t stride) { return (len - 1) * stride; });
 
     return count == space;
 }

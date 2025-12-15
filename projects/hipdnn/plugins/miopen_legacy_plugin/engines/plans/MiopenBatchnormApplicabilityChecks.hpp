@@ -13,25 +13,31 @@ namespace miopen_legacy_plugin
 {
 
 void checkBatchnormTensorConfigSupported(
-        const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap);
+    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 void checkBatchnormTensorConfigSupported(
-        const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap);
+    const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 void checkBatchnormTensorConfigSupported(
-        const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap);
+    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 void checkBatchnormTensorConfigSupported(
-        const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
-        const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap);
+    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
-void checkBatchnormFwdActivationModeSupported(const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr);
+void checkBatchnormFwdActivationModeSupported(
+    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr);
 
-void checkBatchnormBwdActivationModeSupported(const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr);
+void checkBatchnormBwdActivationModeSupported(
+    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr);
 
 } // namespace miopen_legacy_plugin
