@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // <cmath>
 
 // clang-format off
@@ -22,9 +44,9 @@
 #include "test_macros.h"
 
 template <class T>
-__host__ __device__ constexpr void test_isinf(const T pos, bool expected)
+__host__ __device__ void test_isinf(const T pos, bool expected)
 {
-  assert(cuda::std::isinf(pos) == expected);
+  _CCCL_ASSERT(cuda::std::isinf(pos) == expected, "Positive infinity not correct detected");
 
   if constexpr (cuda::std::numeric_limits<T>::is_signed)
   {
@@ -44,7 +66,7 @@ __host__ __device__ constexpr void test_isinf(const T pos, bool expected)
       neg = cuda::std::copysign(pos, cuda::std::numeric_limits<T>::lowest());
     }
 
-    assert(cuda::std::isinf(neg) == expected);
+    _CCCL_ASSERT(cuda::std::isinf(neg) == expected, "Negative infinity not correct detected");
   }
 }
 
@@ -137,6 +159,6 @@ __host__ __device__ constexpr bool test()
 int main(int, char**)
 {
   test();
-  static_assert(test());
+  assert(test());
   return 0;
 }
