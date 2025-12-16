@@ -173,7 +173,7 @@ install_packages( )
       library_dependencies_centos_8+=("wget" "openssl-devel")
       library_dependencies_rhel_8+=("wget" "openssl-devel")
       library_dependencies_rhel_9+=("wget" "openssl-devel")
-      library_dependencies_rhel_10+=("wget", "openssl-devel")
+      library_dependencies_rhel_10+=("wget" "openssl-devel")
       library_dependencies_fedora+=("wget")
       library_dependencies_sles+=("wget" "libopenssl-devel")
     fi
