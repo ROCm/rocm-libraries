@@ -593,6 +593,8 @@ namespace rocRoller
                         auto stop  = (i * numVGPRBlocks + r + 1) * elementsPerMove;
                         if(info.bufOpts.lds)
                         {
+                            info.offset
+                                = Register::Value::Literal(offsetValue + r * elementBlockStride);
                             co_yield moveTileDirect2LDS<Dir>(
                                 info, bytesPerMove, (i == 0 && r == 0), info.rowOffsetReg);
                         }
