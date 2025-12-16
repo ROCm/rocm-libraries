@@ -124,6 +124,13 @@ namespace stinkytofu
         return oss.str();
     }
 
+    inline std::ostream& operator<<(std::ostream& os, const IRList& irlist)
+    {
+        AsmPrinter printer(os, AsmPrinterOptions());
+        printer.print(irlist);
+        return os;
+    }
+
     // Stream operator overloads for convenient printing
     inline std::ostream& operator<<(std::ostream& os, const StinkyRegister& reg)
     {

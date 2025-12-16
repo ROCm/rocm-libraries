@@ -29,9 +29,15 @@ namespace rocisa
 
 namespace stinkytofu
 {
+    struct WaitCntConfig;
+
     std::unique_ptr<Pass> createStinkyClusterDSReadPass();
     std::unique_ptr<Pass> createStinkyDAGSchedulerPass();
     std::unique_ptr<Pass> createStinkyUnrollInsertWaitCntPass();
+    std::unique_ptr<Pass> createStinkyConservativeWaitCntPass();
+    std::unique_ptr<Pass> createStinkyMinimalWaitCntPass();
+    std::unique_ptr<Pass> createStinkyUnrollWaitCntPass();
+    std::unique_ptr<Pass> createStinkyCustomWaitCntPass(const WaitCntConfig& config);
     std::unique_ptr<Pass> createScheduleLastLRsPass();
     std::unique_ptr<Pass> createScheduleFirstLRsPass();
 
