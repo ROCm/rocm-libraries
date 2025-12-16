@@ -69,8 +69,12 @@ private:
 
         if(this->m_default_path.empty())
         {
-            // Fallback if none of the paths exist
-            this->m_default_path = (default_path / ".." / "matrices").string() + "/";
+            std::cerr
+                << "Could not find matrices directory. Please set ROCSPARSE_CLIENTS_MATRICES_DIR "
+                   "environment variable"
+                << std::endl;
+
+            throw rocsparse_status_internal_error;
         }
     }
 

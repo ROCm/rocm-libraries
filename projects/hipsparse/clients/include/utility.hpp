@@ -134,9 +134,9 @@ inline std::string get_filename(const std::string& matrix_filename)
 
         if(matrix_path.empty())
         {
-            // Fallback to default relative path
-            matrix_path
-                = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
+            missing_file_error_message(matrix_path.string().c_str());
+            std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
+            exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
         }
     }
 
