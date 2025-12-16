@@ -118,7 +118,14 @@ public:
         //   dbias_c  = Σ_{n,h,w} dy[n,c,h,w]                   -> shape [1, C, 1, 1]
         // scale from forward pass is also per-channel [1, C, 1, 1].
         // Saved statistics (mean_c, invStd_c) are per-channel for backward computation.
+
+        // Extract optional tensors once for reuse in both shape validation and consistency check
+        auto mean = attributes.get_mean();
+        auto invVar = attributes.get_inv_variance();
+
         auto& xDims = x->get_dim();
+        // NOTE: Defensive check - dimensions already validated in SECTION 2, but we verify again
+        // before accessing xDims[1] to ensure robustness against future code changes.
         if(!xDims.empty() && xDims.size() >= 2)
         {
             int64_t channels = xDims[1];
@@ -134,20 +141,30 @@ public:
             HIPDNN_CHECK_ERROR(
                 validateChannelOnlyTensorShape(dbias, channels, "Bias gradient tensor (dbias)"));
 
-            // Validate optional mean tensor
-            auto mean = attributes.get_mean();
+            // Validate optional tensor shapes (using mean and invVar extracted above)
             if(mean)
             {
                 HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
             }
 
-            // Validate optional inv_variance tensor
-            auto invVar = attributes.get_inv_variance();
             if(invVar)
             {
                 HIPDNN_CHECK_ERROR(
                     validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
             }
+        }
+
+        // SECTION 4.5: Validate Mean and Inverse Variance Consistency
+        // Why: Backward computation uses saved statistics (mean_c, invStd_c) from forward pass.
+        // These must be provided together (both or neither). If neither is provided, they will
+        // be recomputed during backward pass (less efficient but valid).
+        bool hasMean = (mean != nullptr);
+        bool hasInvVariance = (invVar != nullptr);
+        if(hasMean != hasInvVariance)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "BatchnormBackwardNode requires both mean and inv_variance to be set, or "
+                    "neither"};
         }
 
         // SECTION 5: Validate Spatial Mode Constraints

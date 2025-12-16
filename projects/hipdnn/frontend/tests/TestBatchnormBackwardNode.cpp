@@ -552,6 +552,126 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeAcceptsValidSpatialDimensions)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
+TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsMismatchedMeanInvVariance)
+{
+    // Test: Setting only mean without inv_variance should fail
+    {
+        BatchnormBackwardAttributes batchnormAttributes;
+
+        auto xTensor = std::make_shared<TensorAttributes>();
+        xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_x(xTensor);
+
+        auto dyTensor = std::make_shared<TensorAttributes>();
+        dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_dy(dyTensor);
+
+        auto scaleTensor = std::make_shared<TensorAttributes>();
+        scaleTensor->set_dim({1, 64, 1, 1});
+        batchnormAttributes.set_scale(scaleTensor);
+
+        batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+        // Intentionally NOT setting inv_variance
+
+        GraphAttributes graphAttributes;
+        BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+        auto error = node.pre_validate_node();
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+        EXPECT_TRUE(error.get_message().find("both mean and inv_variance") != std::string::npos);
+    }
+
+    // Test: Setting only inv_variance without mean should fail
+    {
+        BatchnormBackwardAttributes batchnormAttributes;
+
+        auto xTensor = std::make_shared<TensorAttributes>();
+        xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_x(xTensor);
+
+        auto dyTensor = std::make_shared<TensorAttributes>();
+        dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_dy(dyTensor);
+
+        auto scaleTensor = std::make_shared<TensorAttributes>();
+        scaleTensor->set_dim({1, 64, 1, 1});
+        batchnormAttributes.set_scale(scaleTensor);
+
+        batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+        // Intentionally NOT setting mean
+        batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+
+        GraphAttributes graphAttributes;
+        BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+        auto error = node.pre_validate_node();
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+        EXPECT_TRUE(error.get_message().find("both mean and inv_variance") != std::string::npos);
+    }
+
+    // Test: Setting both should pass
+    {
+        BatchnormBackwardAttributes batchnormAttributes;
+
+        auto xTensor = std::make_shared<TensorAttributes>();
+        xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_x(xTensor);
+
+        auto dyTensor = std::make_shared<TensorAttributes>();
+        dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_dy(dyTensor);
+
+        auto scaleTensor = std::make_shared<TensorAttributes>();
+        scaleTensor->set_dim({1, 64, 1, 1});
+        batchnormAttributes.set_scale(scaleTensor);
+
+        batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+
+        GraphAttributes graphAttributes;
+        BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+        auto error = node.pre_validate_node();
+        EXPECT_EQ(error.code, ErrorCode::OK);
+    }
+
+    // Test: Setting neither should pass
+    {
+        BatchnormBackwardAttributes batchnormAttributes;
+
+        auto xTensor = std::make_shared<TensorAttributes>();
+        xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_x(xTensor);
+
+        auto dyTensor = std::make_shared<TensorAttributes>();
+        dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+        batchnormAttributes.set_dy(dyTensor);
+
+        auto scaleTensor = std::make_shared<TensorAttributes>();
+        scaleTensor->set_dim({1, 64, 1, 1});
+        batchnormAttributes.set_scale(scaleTensor);
+
+        batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+        batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+        // Intentionally NOT setting mean or inv_variance
+
+        GraphAttributes graphAttributes;
+        BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+        auto error = node.pre_validate_node();
+        EXPECT_EQ(error.code, ErrorCode::OK);
+    }
+}
+
 TEST(TestBatchnormBackwardNode, PackNodeWithoutMeanAndInvVariance)
 {
     BatchnormBackwardAttributes batchnormAttributes;
