@@ -231,10 +231,8 @@ set_target_properties(mtx2csr PROPERTIES
 )
 
 set(HIPSPARSE_CLIENTMATRICES "${PROJECT_SOURCE_DIR}/cmake/hipsparse_clientmatrices.cmake")
-set(HIPSPARSE_CLIENTMATRICES "${HIPSPARSE_CLIENTMATRICES}" PARENT_SCOPE)
 
 set(HIPSPARSE_CONVERT "${PROJECT_BINARY_DIR}/hipsparse_mtx2csr")
-set(HIPSPARSE_CONVERT "${HIPSPARSE_CONVERT}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_CONVERT}"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:mtx2csr> "${HIPSPARSE_CONVERT}"
@@ -243,7 +241,6 @@ add_custom_command(
 )
 
 set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_common.yaml")
-set(HIPSPARSE_COMMON "${HIPSPARSE_COMMON}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_COMMON}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" "${HIPSPARSE_COMMON}"
@@ -252,7 +249,6 @@ add_custom_command(
 )
 
 set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_template.yaml")
-set(HIPSPARSE_TEMPLATE "${HIPSPARSE_TEMPLATE}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_TEMPLATE}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_template.yaml" "${HIPSPARSE_TEMPLATE}"
@@ -261,7 +257,6 @@ add_custom_command(
 )
 
 set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_gentest.py")
-set(HIPSPARSE_GENTEST "${HIPSPARSE_GENTEST}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_GENTEST}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${HIPSPARSE_GENTEST}"
@@ -297,9 +292,27 @@ rocm_install(
     FILES_MATCHING PATTERN "*.bin"
 )
 
-# NOTE: Installation of clients-common files (HIPSPARSE_COMMON, HIPSPARSE_TEMPLATE,
-# HIPSPARSE_GENTEST, HIPSPARSE_CONVERT, HIPSPARSE_CLIENTMATRICES) has been moved to
-# clients/CMakeLists.txt where they logically belong as shared client utilities.
+# Install clients-common files (shared client utilities)
+rocm_install(
+    FILES "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}"
+    COMPONENT clients-common
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
+)
+rocm_install(
+    PROGRAMS "${HIPSPARSE_GENTEST}"
+    COMPONENT clients-common
+    DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipsparse/test"
+)
+rocm_install(
+    PROGRAMS "${HIPSPARSE_CONVERT}"
+    COMPONENT clients-common
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+rocm_install(
+    FILES "${HIPSPARSE_CLIENTMATRICES}"
+    COMPONENT clients-common
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
+)
 
 # Windows-specific DLL copying (using script to avoid foreach in CMakeLists)
 if(WIN32)
