@@ -195,15 +195,6 @@ public:
         return detail::dereference_iterator_tuple<reference>(iterator_tuple_);
     }
 
-    [[deprecated("This operator is no longer supported and will be removed in the next major "
-                 "release.")]]
-    ROCPRIM_HOST_DEVICE
-    inline pointer
-        operator->() const
-    {
-        return &(*(*this));
-    }
-
     ROCPRIM_HOST_DEVICE
     inline reference
         operator[](difference_type distance) const
