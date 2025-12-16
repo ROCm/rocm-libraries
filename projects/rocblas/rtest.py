@@ -386,10 +386,9 @@ def test_xml_reduce():
         # Remove specific attributes
         attributes_to_remove = {"value_param", "timestamp", "file", "line"}
         for elem in root.iter():
-            for elem in root.iter():
-                for attr in attributes_to_remove:
-                    if attr in elem.attrib:
-                        del elem.attrib[attr]
+            for attr in attributes_to_remove:
+                if attr in elem.attrib:
+                    del elem.attrib[attr]
 
         # Save the modified XML
         tree.write(test_detail_reduced)

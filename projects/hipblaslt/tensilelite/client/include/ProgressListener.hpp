@@ -55,7 +55,7 @@ namespace TensileLite
 
             virtual void postProblem() override;
 
-            virtual void preSolution(ContractionSolution const& solution) override;
+            virtual void preSolution(ContractionSolution* const solution) override;
 
             virtual void postSolution() override;
 

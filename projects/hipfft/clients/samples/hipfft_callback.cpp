@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -26,8 +26,6 @@
 #include <hip/hip_runtime.h>
 #include <hipfft/hipfft.h>
 #include <hipfft/hipfftXt.h>
-
-#include "../hipfft_params.h"
 
 struct load_cbdata
 {
@@ -99,7 +97,7 @@ int main()
     std::cout << std::endl;
 
     // Create the plan
-    hipfftHandle plan      = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan{};
     hipfftResult hipfft_rt = hipfftCreate(&plan);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");

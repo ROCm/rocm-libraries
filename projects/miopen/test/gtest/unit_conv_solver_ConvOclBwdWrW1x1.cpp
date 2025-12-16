@@ -35,6 +35,8 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         TestCase{{1, 16, 14, 14}, {16, 16, 1, 1}, {0, 0}, {1, 1}, {1, 1}, datatype},
+        // Using a stride tests the subsampling kernel
+        TestCase{{1, 16, 14, 14}, {16, 16, 1, 1}, {0, 0}, {2, 2}, {1, 1}, datatype},
         // clang-format on
     };
 }
@@ -42,10 +44,8 @@ auto GetConvTestCases(miopenDataType_t datatype)
 const auto& GetTestParams()
 {
     static const auto params = [] {
-        // gfx10 and gfx11 are disabled due to WORKAROUND_SWDEV_266868
-        Gpu supported_gpus = Gpu::All & ~(Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X);
+        Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A;
         auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.EnableDeprecatedSolvers();
         return p;
     }();
     return params;

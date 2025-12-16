@@ -53,6 +53,12 @@ The hipDNN SDK is a header-only C++ library that provides utilities and interfac
 
 hipDNN components can be easily integrated into your CMake projects using the installed package files.
 
+> [!NOTE]
+> Enable PIC/PIE to ensure compatibility with the plugin loader system (dlopen). This prevents potential Thread Local Storage (TLS) allocation issues (such as static TLS exhaustion) between the executable and dynamically loaded backend plugins.
+> ```cmake
+> set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+> ```
+
 #### Frontend Integration
 ```cmake
 find_package(hipdnn_frontend REQUIRED)
@@ -167,7 +173,7 @@ Create C++ classes to expose the operation to users:
 
 #### Plugin Integration
 
-Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the operation execution in target plugins. 
+Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the operation execution in target plugins.
 
 ---
 
@@ -206,3 +212,15 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 - Use integration tests to verify operation behavior
 - Check plugin loading with `HIPDNN_LOG_LEVEL=info`
 - For plugin issues, check the default plugin path or use custom paths with `hipdnnSetEnginePluginPaths_ext`
+
+## ⚠️ Troubleshooting
+
+### Segmentation Faults during Graph Execution Plan Build
+
+If you are seeing segfaults when building execution plans for graphs, this might be caused by Thread Local Storage (TLS) allocation issues (such as static TLS exhaustion) between the executable and dynamically loaded backend plugins.
+
+To resolve this, enable PIC/PIE to ensure compatibility with the plugin loader system (dlopen). This setting instructs CMake to emit position-independent code (e.g., via `-fPIC`  or `-fPIE`), which is necessary for creating shared libraries or executables that load plugins dynamically.
+
+```cmake
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+```

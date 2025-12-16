@@ -384,12 +384,14 @@ private:
     // Work items are added to the plan.  Final work item per brick (that
     // future per-brick operations can depend on) is returned in
     // outputItems.
-    void C2CField(const rocfft_field_t&      field,
-                  const std::vector<size_t>& fftDims,
-                  std::vector<BufferPtr>&    input,
-                  std::vector<BufferPtr>&    output,
-                  const std::vector<size_t>& inputAntecedents,
-                  std::vector<size_t>&       outputItems);
+    void C2CField(const rocfft_field_t&          field,
+                  const std::vector<size_t>&     fftDims,
+                  std::vector<BufferPtr>&        input,
+                  std::vector<BufferPtr>&        output,
+                  const std::optional<LoadOps>&  loadOps,
+                  const std::optional<StoreOps>& storeOps,
+                  const std::vector<size_t>&     inputAntecedents,
+                  std::vector<size_t>&           outputItems);
 };
 
 bool PlanPowX(ExecPlan& execPlan);

@@ -135,7 +135,7 @@ extern "C" {
 *  dirA        direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW or by
 *              \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m           number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
 *  n           number of columns of the sparse CSR matrix.
 *  @param[in]
@@ -288,9 +288,6 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
 *              \p bsrColIndC, \p csrValA, \p csrRowPtrA or \p csrColIndA pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_csr2bsr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

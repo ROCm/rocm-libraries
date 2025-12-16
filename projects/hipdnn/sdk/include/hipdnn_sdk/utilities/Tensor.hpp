@@ -3,17 +3,18 @@
 
 #pragma once
 
+#include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
 #include <typeindex>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 struct TensorLayout
@@ -45,6 +46,7 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 {
 };
 
+// Forward declarations
 class ITensor;
 
 template <bool IsConst = false>
@@ -402,7 +404,7 @@ public:
         // Set packed flag after validations since it can be incorrect if dims/strides are invalid.
         _packed = TensorBase<T>::computeIsPacked(dims, strides);
 
-        _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(
+        _memory = utilities::MigratableMemory<T, HostAlloc, DeviceAlloc>(
             TensorBase<T>::calculateElementSpace(dims, strides));
     }
 
@@ -511,7 +513,7 @@ private:
         }
     }
 
-    MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
+    utilities::MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;
     size_t _elementCount;
@@ -521,5 +523,27 @@ private:
 template <typename T>
 using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
 
-} // namespace utilities
-} // namespace hipdnn_sdk
+inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType dataType,
+                                                        const std::vector<int64_t>& dims,
+                                                        const std::vector<int64_t>& strides)
+{
+    switch(dataType)
+    {
+    case data_objects::DataType::FLOAT:
+        return std::make_unique<Tensor<float>>(dims, strides);
+    case data_objects::DataType::HALF:
+        return std::make_unique<Tensor<half>>(dims, strides);
+    case data_objects::DataType::BFLOAT16:
+        return std::make_unique<Tensor<hip_bfloat16>>(dims, strides);
+    case data_objects::DataType::DOUBLE:
+        return std::make_unique<Tensor<double>>(dims, strides);
+    case data_objects::DataType::UINT8:
+        return std::make_unique<Tensor<uint8_t>>(dims, strides);
+    case data_objects::DataType::INT32:
+        return std::make_unique<Tensor<int32_t>>(dims, strides);
+    default:
+        throw std::runtime_error("Unsupported data type for tensor");
+    }
+}
+
+} // namespace hipdnn_sdk::utilities

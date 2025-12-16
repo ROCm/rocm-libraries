@@ -18,9 +18,9 @@ class PointwiseNode : public BaseNode<PointwiseNode>
 public:
     PointwiseAttributes attributes;
 
-    PointwiseNode(PointwiseAttributes&& batchnormAttrs, const GraphAttributes& graphAttrs)
+    PointwiseNode(PointwiseAttributes&& pointwiseAttributes, const GraphAttributes& graphAttrs)
         : BaseNode(graphAttrs)
-        , attributes(std::move(batchnormAttrs))
+        , attributes(std::move(pointwiseAttributes))
     {
     }
 
@@ -117,6 +117,7 @@ public:
         return hipdnn_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
+            toSdkType(attributes.compute_data_type),
             hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
             attributes.pack_attributes(builder).Union());
     }

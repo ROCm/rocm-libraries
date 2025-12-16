@@ -10,9 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class ConvWgradAttributes : public Attributes<ConvWgradAttributes>
 {
@@ -245,5 +243,4 @@ private:
     }
 };
 typedef ConvWgradAttributes Conv_wgrad_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

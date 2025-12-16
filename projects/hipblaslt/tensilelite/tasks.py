@@ -1,3 +1,6 @@
+# Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 from invoke.tasks import task
 import os
 

@@ -3,11 +3,22 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
-## (Unreleased) hipSPARSE 4.2.0
+## (Unreleased) hipSPARSE 4.3.0
+
+### Added
+
+* Added sliced ELL format support to the `hipsparseSpMV` routine.
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script
+
+## hipSPARSE 4.2.0 for ROCm 7.2.0
 
 ### Added
 
 * Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of hipSPARSE.
+
+### Optimized
+
+* Improved the user documentation.
 
 ### Resolved issues
 

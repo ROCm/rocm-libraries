@@ -337,4 +337,45 @@ namespace rocRoller::KernelGraph
             for(auto const b : B)
                 kg.control.addElement(EdgeType(), {a}, {b});
     }
+
+    template <ControlGraph::COperation SrcOpType, ControlGraph::COperation DstOpType>
+    requires(
+        (std::is_same_v<
+             SrcOpType,
+             ControlGraph::LoadTiled> && std::is_same_v<DstOpType, ControlGraph::StoreLDSTile>)
+        || (std::is_same_v<
+                SrcOpType,
+                ControlGraph::StoreLDSTile> && std::is_same_v<DstOpType, ControlGraph::LoadTiled>))
+        std::vector<int> getAssociatedOps(KernelGraph const& kgraph, int srcOpTag)
+    {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
+
+        const auto element = kgraph.control.getElement(srcOpTag);
+        AssertFatal(std::holds_alternative<Operation>(element),
+                    concatenate("Expected Operation but got Edge", ShowValue(srcOpTag)));
+
+        const auto op = std::get<Operation>(element);
+        AssertFatal(std::holds_alternative<SrcOpType>(op),
+                    fmt::format("Expected {} but got {}", typeName<SrcOpType>(), toString(op)));
+
+        auto macroTileTag = kgraph.mapper.get<MacroTile>(srcOpTag);
+
+        std::vector<int> rv{};
+
+        for(auto conn : kgraph.mapper.getCoordinateConnections(macroTileTag))
+        {
+            const auto dstOpTag = conn.control;
+            const auto element  = kgraph.control.getElement(dstOpTag);
+            AssertFatal(std::holds_alternative<Operation>(element),
+                        concatenate("Expected Operation but got Edge", ShowValue(dstOpTag)));
+
+            const auto op = std::get<Operation>(element);
+            if(std::holds_alternative<DstOpType>(op))
+            {
+                rv.push_back(dstOpTag);
+            }
+        }
+        return rv;
+    }
 }

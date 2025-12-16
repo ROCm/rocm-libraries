@@ -212,7 +212,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def makeSchedule(self, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, uDu=0, skipGlobalReadInc=False, firstIter=False, lastLoop=False, lastLc=False):
 
-    currentIsa = globalParameters["CurrentISA"]
+    currentIsa = kernel["ISA"]
     maxVmcnt = globalParameters["AsmCaps"][currentIsa]["MaxVmcnt"]
 
     self.unrollLoopHeaderCode = Code.Module()
@@ -2932,8 +2932,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
               #print("Waitcnt(%u..%u)\n"%(iter,waitCntItems[iter]))
           for iter in range(0,numGroups):
             #Mac Code
-            #place holder for future work Instruction class for generting MAC instruction
-            #FMAInstruction = MacInstruction(globalParameters["CurrentISA"])
             subIterCode = Code.Module()
             waitCode = Code.Module()
             macIterCodeGrp = Code.Module()
@@ -3707,6 +3705,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def initKernel(self, kernel, tensorParametersA, tensorParametersB ):
 
+    if "ISA" not in kernel:
+      raise ValueError(f"ISA not found in kernel {kernel}. This is required for assembly kernels.")
+
     self.staggerU = kernel["StaggerU"]
     if self.staggerU:
       assert (kernel["KernelLanguage"]=="Source" or kernel["BufferLoad"])
@@ -4272,7 +4273,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.useInitAccVgprOpt = False
     # enable for the following conditions
     if kernel["EnableMatrixInstruction"] and (kernel["PrefetchGlobalRead"] == 1 or kernel["PrefetchGlobalRead"] == 2) \
-       and globalParameters["AsmCaps"][globalParameters["CurrentISA"]]["HasMFMA_constSrc"] \
+       and globalParameters["AsmCaps"][kernel["ISA"]]["HasMFMA_constSrc"] \
        and kernel["StreamK"] == 0:
       self.useInitAccVgprOpt = True
     # force to disable for the following conditions
@@ -5385,9 +5386,7 @@ for codeObjectFileName in codeObjectFileNames:
         # ISA version, such as 803
         self.kernel = kernel
         self.language = "ASM"
-        self.version = globalParameters["CurrentISA"]
-        if "ISA" in kernel:
-          self.version = tuple(kernel["ISA"])
+        self.version = tuple(kernel["ISA"])
         if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
           defaultIsa = (9,0,0)
           print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)

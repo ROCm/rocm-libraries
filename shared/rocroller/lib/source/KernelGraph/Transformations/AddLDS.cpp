@@ -56,9 +56,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace CF = rocRoller::KernelGraph::ControlGraph;
-        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-
         using GD = rocRoller::Graph::Direction;
         using namespace ControlGraph;
         using namespace CoordinateGraph;
@@ -143,8 +140,7 @@ namespace rocRoller
             for(auto tag : graph.coordinates.getNodes<MacroTile>())
             {
                 auto tile = *graph.coordinates.get<MacroTile>(tag);
-                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS
-                   || tile.memoryType == MemoryType::WAVE_Direct2LDS)
+                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS)
                 {
                     retval.combine(false, concatenate("Tile has LDS memory type: ", tag));
                 }
@@ -181,12 +177,11 @@ namespace rocRoller
             {
                 Log::debug("KernelGraph::AddLDS()::commit({})", opTag);
 
-                auto isLoad       = k.control.get<LoadTiled>(opTag).has_value();
-                auto tileTag      = k.mapper.get<MacroTile>(opTag);
-                auto userTag      = k.mapper.get<User>(opTag);
-                auto varType      = getVariableType(k, opTag);
-                auto tile         = k.coordinates.getNode<MacroTile>(tileTag);
-                auto isDirect2LDS = tile.memoryType == MemoryType::WAVE_Direct2LDS;
+                auto isLoad  = k.control.get<LoadTiled>(opTag).has_value();
+                auto tileTag = k.mapper.get<MacroTile>(opTag);
+                auto userTag = k.mapper.get<User>(opTag);
+                auto varType = getVariableType(k, opTag);
+                auto tile    = k.coordinates.getNode<MacroTile>(tileTag);
 
                 // TODO: enable SwizzleScale when store D via LDS
                 auto isStoreD = tile.layoutType == LayoutType::MATRIX_ACCUMULATOR;
@@ -195,7 +190,7 @@ namespace rocRoller
                                 "Store D via LDS is not supported by SwizzleScale");
 
                 // Create new coordinates
-                auto              ldsTag      = k.coordinates.addElement(LDS(isDirect2LDS));
+                auto              ldsTag      = k.coordinates.addElement(LDS());
                 std::vector<uint> jammedTiles = {1, 1};
                 bool              splitStore  = false;
 
@@ -217,22 +212,11 @@ namespace rocRoller
                 k.coordinates.addElement(DataFlow(), {ldsTag}, {tileTag});
 
                 // Create new operations and update old operation
-                bool isTransposedTile = false;
-                if(isLoad)
-                {
-                    auto loadTile    = k.control.get<LoadTiled>(opTag).value();
-                    isTransposedTile = loadTile.isTransposedTile;
-                    if(isDirect2LDS)
-                    {
-                        loadTile.isDirect2LDS = isDirect2LDS;
-                        k.control.setElement(opTag, loadTile);
-                    }
-                }
-                auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType, isTransposedTile));
+                auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType));
                 auto storeLDSOp = k.control.addElement(StoreLDSTile(varType.dataType));
 
                 // Update tile
-                if(isDirect2LDS)
+                if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
                     tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::WAVE_LDS)
                     tile.memoryType = MemoryType::WAVE;

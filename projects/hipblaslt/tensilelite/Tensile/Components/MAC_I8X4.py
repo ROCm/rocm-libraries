@@ -51,7 +51,7 @@ class MAC_I8X4_Plain(MAC):
                     cStr         = "v[vgprValuC+{a}+{b}*{ThreadTile0}]".format_map(vars)
                     aStr         = "v[vgprValuA_X{m}_I{iui}+{a}]".format_map(vars)
                     bStr         = "v[vgprValuB_X{m}_I{iui}+{b}]".format_map(vars)
-                    module.addInst("v_dot4_i32_i8", cStr, aStr, bStr, cStr, "op_sel:[0,0]", "op_sel_hi:[1,1]", "valuC[%u]" % cidx)
+                    module.addInst("v_dot4_i32_i8", cStr, aStr, bStr, cStr, "valuC[%u]" % cidx)
                     module.add(priority(writer, 1, "Raise priority while processing macs"))
 
         module.add(priority(writer, 0, "Reset priority after macs"))

@@ -41,12 +41,12 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_gemmi_bad_arg(void)
+void testing_gemmi_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int safe_size = 100;
-    T   alpha     = 0.6;
-    T   beta      = 0.2;
+    T   alpha     = make_DataType<T>(0.6);
+    T   beta      = make_DataType<T>(0.2);
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
@@ -276,7 +276,7 @@ void testing_gemmi_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gemmi(Arguments argus)
+void testing_gemmi(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int         M        = argus.M;
@@ -292,7 +292,7 @@ hipsparseStatus_t testing_gemmi(Arguments argus)
     if(M == 0 || N == 0 || K == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -309,7 +309,7 @@ hipsparseStatus_t testing_gemmi(Arguments argus)
            filename, N, K, nnz, hcsc_col_ptrB, hcsc_row_indB, hcsc_valB, HIPSPARSE_INDEX_BASE_ZERO))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     int lda = std::max(1, M);
@@ -509,8 +509,6 @@ hipsparseStatus_t testing_gemmi(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GEMMI_HPP

@@ -459,7 +459,8 @@ validParameters = { # we need to make sure this matches develop
     # StaggerUStride will be internally increased so it is an integer multiple of DepthU*BpeAB.
     # (the implementation requires this - the unroll iteration accesses data in steps of
     # DepthU*BPE
-    "StaggerUStride": [-1, 16, 32, 64, 128, 256, 512, 1024, 2048],
+    # StaggerUStride = 0 is valid only when StaggerU = 0
+    "StaggerUStride": [-1, 0, 16, 32, 64, 128, 256, 512, 1024, 2048],
     # How the tile assignment (wg0, wg1, wg2) controls the initial StaggerU offset:
     # 0: Use wg0
     # 1: Use wg1
@@ -509,6 +510,8 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
+    # 0: WorkGroupMapping is predicted at runtime. 
+    # 1: No mapping
     "WorkGroupMappingXCC": [
         -1,
          1,
@@ -518,7 +521,9 @@ validParameters = { # we need to make sure this matches develop
          16,
          32,
     ],  # change a workgroup's id so that contiguous workgroup can map on same XCC
-    # -1 : WorkGroupMappingXCCGroup will be set to CU_count at runtime. Please ensure that (CU_count % WGMXCC == 0).
+    # -1: WorkGroupMappingXCCGroup will be set dynamically at runtime. Note that this is consistent with what StreamKXCCMapping
+    # does, but the value for the mapping will be set at runtime (=num_xcc).
+    # Please ensure that (CU_count % WGMXCC == 0).
     "WorkGroupMappingXCCGroup": list(
         range(-1, 1024)
     ),  # change a workgroup's id so that contiguous workgroup can map on same XCC, remap workgroup in a group of WGMXCCG.
@@ -853,7 +858,8 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1]
+    "UseCustomMainLoopSchedule" : [0, 1],
+    "AdaptiveGemm": [0, 1]
 }
 
 newMIValidParameters = {

@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename U>
 void trtri_checkBadArgs(const rocblas_handle handle,
@@ -279,7 +280,7 @@ void trtri_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -295,11 +296,11 @@ void trtri_getPerfData(const rocblas_handle handle,
     {
         trtri_initData<false, true, T>(handle, n, dA, lda, bc, hA, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_trtri(STRIDED, handle, uplo, diag, n, dA.data(), lda, stA, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -411,7 +412,7 @@ void testing_trtri(Arguments& argus)
                                        hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             trtri_getPerfData<STRIDED, T>(handle, uplo, diag, n, dA, lda, stA, dInfo, bc, hA, hInfo,
                                           &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf, argus.singular);
@@ -448,7 +449,7 @@ void testing_trtri(Arguments& argus)
                                        hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             trtri_getPerfData<STRIDED, T>(handle, uplo, diag, n, dA, lda, stA, dInfo, bc, hA, hInfo,
                                           &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf, argus.singular);

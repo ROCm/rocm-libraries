@@ -28,6 +28,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 namespace rocRollerTest::Graphs
@@ -285,12 +286,24 @@ namespace rocRollerTest::Graphs
                                                          rocRoller::NUMWGS);
         }
 
-        auto tagScratch = m_command->allocateTag();
+        m_scratchTags[Operations::ScratchPolicy::None] = m_command->allocateTag();
+        m_command->addOperation(rocRoller::Operations::Scratch(
+            m_scratchTags[Operations::ScratchPolicy::None], Operations::ScratchPolicy::None));
         m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                    tagScratch,
+                                    m_scratchTags[Operations::ScratchPolicy::None],
                                     ArgumentType::Value,
                                     DataDirection::ReadWrite,
-                                    rocRoller::SCRATCH);
+                                    getScratchName(Operations::ScratchPolicy::None));
+        m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter] = m_command->allocateTag();
+        m_command->addOperation(rocRoller::Operations::Scratch(
+            m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+            Operations::ScratchPolicy::ZeroedBeforeAndAfter));
+        m_command->allocateArgument(
+            VariableType(DataType::UInt32, PointerType::PointerGlobal),
+            m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+            ArgumentType::Value,
+            DataDirection::ReadWrite,
+            getScratchName(Operations::ScratchPolicy::ZeroedBeforeAndAfter));
     }
 
     CommandPtr GEMM::getCommand()
@@ -343,15 +356,26 @@ namespace rocRollerTest::Graphs
         m_problem.unrollK = std::max(2, prefetchInFlight);
     }
 
-    void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY)
+    void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY, unsigned int unrollK)
     {
         m_problem.unrollX = unrollX;
         m_problem.unrollY = unrollY;
+        m_problem.unrollK = unrollK;
+    }
+
+    void GEMM::setStreamK(StreamKMode streamKMode)
+    {
+        m_problem.streamK = streamKMode;
     }
 
     void GEMM::setProblem(GEMMProblem const& problem)
     {
         m_problem = problem;
+    }
+
+    int GEMM::getFlattenedWorkgroupSize() const
+    {
+        return m_problem.workgroupSizeX * m_problem.workgroupSizeY;
     }
 
     CommandParametersPtr GEMM::getCommandParameters() const

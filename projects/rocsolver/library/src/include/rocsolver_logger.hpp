@@ -38,6 +38,14 @@
 #include <unordered_map>
 #include <vector>
 
+#ifndef ROCSOLVER_USE_ASYNC_LOGGER
+#define ROCSOLVER_USE_ASYNC_LOGGER 1 // Default to async logger
+#endif
+
+#if ROCSOLVER_USE_ASYNC_LOGGER
+#include <hip/hip_runtime.h>
+#endif
+
 #include "common_host_helpers.hpp"
 #include "lib_host_helpers.hpp"
 #include "rocsolver/rocsolver.h"
@@ -102,6 +110,18 @@ struct rocsolver_log_entry
     std::vector<std::string> callers;
     std::string name;
     int level;
+
+#if ROCSOLVER_USE_ASYNC_LOGGER
+    hipEvent_t start_evt = nullptr;
+    hipEvent_t stop_evt = nullptr;
+
+    rocsolver_log_entry()
+        : level(0)
+        , start_evt(nullptr)
+        , stop_evt(nullptr)
+    {
+    }
+#else
     double start_time;
 
     rocsolver_log_entry()
@@ -109,6 +129,7 @@ struct rocsolver_log_entry
         , start_time(0)
     {
     }
+#endif
 
     // Move constructor
     rocsolver_log_entry(rocsolver_log_entry&&) = default;
@@ -129,13 +150,16 @@ struct rocsolver_profile_entry
     std::string name;
     int level;
     int calls;
-    double time;
+    double total_time; // stores accumulated elapsed time in microseconds
+#if ROCSOLVER_USE_ASYNC_LOGGER
+    std::vector<std::pair<hipEvent_t, hipEvent_t>> events;
+#endif
     std::unique_ptr<rocsolver_profile_map> internal_calls;
 
     rocsolver_profile_entry()
         : level(0)
         , calls(0)
-        , time(0)
+        , total_time(0)
     {
     }
 
@@ -174,6 +198,17 @@ private:
 
     // returns a unique_ptr to a file stream or a given default stream
     std::ostream* open_log_stream(const char* environment_variable);
+
+#if ROCSOLVER_USE_ASYNC_LOGGER
+    // recurse and accumulate HIP event timings (previously lambda in log_end_impl)
+    void accumulate_times(rocsolver_profile_map& m);
+    std::vector<hipEvent_t> event_cache;
+    size_t event_cache_head = 0; // index pointing to the next available event
+
+    // event pool management for caching
+    hipEvent_t get_event();
+    void release_event(hipEvent_t event);
+#endif
 
     // returns a log entry on the call stack
     rocsolver_log_entry& push_log_entry(rocblas_handle handle, std::string&& name);
@@ -238,10 +273,11 @@ private:
     template <typename T>
     void log_profile(rocblas_handle handle, rocsolver_log_entry& from_stack)
     {
+#if !ROCSOLVER_USE_ASYNC_LOGGER
         hipStream_t stream;
         rocblas_get_stream(handle, &stream);
-        double time = get_time_us_sync(stream) - from_stack.start_time;
-
+        double elapsed_time = get_time_us_sync(stream) - from_stack.start_time;
+#endif
         const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
 
         rocsolver_profile_map* map = &profile;
@@ -257,7 +293,12 @@ private:
         from_profile.name = from_stack.name;
         from_profile.level = from_stack.level;
         from_profile.calls++;
-        from_profile.time += time;
+#if ROCSOLVER_USE_ASYNC_LOGGER
+        // store HIP event pair for later to compute time at log_end_impl.
+        from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
+#else
+        from_profile.total_time += elapsed_time;
+#endif
     }
 
     static std::unique_lock<std::mutex> acquire_lock()
@@ -316,6 +357,7 @@ public:
         auto lock = acquire_lock();
         auto entry = pop_log_entry(handle);
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace;
+        bool profile_enabled = layer_mode & rocblas_layer_mode_log_profile;
         lock.unlock();
         ROCSOLVER_ASSUME(entry.level == 0);
 
@@ -326,6 +368,20 @@ public:
             trace_str.clear();
             trace_os->flush();
         }
+
+#if ROCSOLVER_USE_ASYNC_LOGGER
+        if(profile_enabled)
+        {
+            // Synchronize the stream and accumulate times for immediate profiling
+            hipStream_t stream;
+            rocblas_get_stream(handle, &stream);
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+
+            auto profile_lock = acquire_lock();
+            accumulate_times(profile);
+            profile_lock.unlock();
+        }
+#endif
     }
 
     // logging function to be called upon entering a sub-level (i.e. template) function

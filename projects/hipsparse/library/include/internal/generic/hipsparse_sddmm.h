@@ -65,10 +65,10 @@ extern "C" {
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p A, \p B, \p D, \p C or
-*          \p pBufferSizeInBytes pointer is invalid or the value of \p opA or \p opB is incorrect
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
-*          \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p A, \p B, \p C or
+*          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
@@ -276,11 +276,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
-*
-*  \par Example
-*  This example performs sampled dense-dense matrix product, \f$C := \alpha ( A \cdot B ) \circ spy(C) + \beta C\f$
-*  where \f$\circ\f$ is the hadamard product
-*  \snippet example_hipsparse_sddmm.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

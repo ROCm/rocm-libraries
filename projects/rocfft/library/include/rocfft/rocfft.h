@@ -537,8 +537,14 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  transform.  Callbacks are an experimental feature in rocFFT.
  *
  *  Callback function pointers/data are given as arrays, with one
- *  function/data pointer per device executing this plan.  Currently,
- *  plans can only use one device.
+ *  function/data pointer per brick in the input field of the plan.
+ *  A plan with no input field specified is considered to have one
+ *  brick.
+ *
+ *  All functions in the array must perform the same logical
+ *  operation.  That is, any function in the array must be
+ *  substitutable for any other function in the array if the data
+ *  being loaded were moved to another brick.
  *
  *  The provided function pointers replace any previously-specified
  *  load callback for this execution info handle.
@@ -555,8 +561,9 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  real-to-complex transform would load single-precision real
  *  elements).
  *
- *  A null value for 'cb' may be specified to clear any previously
- *  registered load callback.
+ *  A null value for 'cb_functions' may be specified to clear any
+ *  previously registered load callback.  'cb_data' may be null if
+ *  the functions require no additional pointer to be passed to them.
  *
  *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
@@ -580,6 +587,16 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  function/data pointer per device executing this plan.  Currently,
  *  plans can only use one device.
  *
+ *  Callback function pointers/data are given as arrays, with one
+ *  function/data pointer per brick in the output field of the plan.
+ *  A plan with no output field specified is considered to have one
+ *  brick.
+ *
+ *  All functions in the array must perform the same logical
+ *  operation.  That is, any function in the array must be
+ *  substitutable for any other function in the array if the data
+ *  being stored were moved to another brick.
+ *
  *  The provided function pointers replace any previously-specified
  *  store callback for this execution info handle.
  *
@@ -595,15 +612,16 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  real-to-complex transform would store single-precision complex
  *  elements).
  *
- *  A null value for 'cb' may be specified to clear any previously
- *  registered store callback.
+ *  A null value for 'cb_functions' may be specified to clear any
+ *  previously registered load callback.  'cb_data' may be null if
+ *  the functions require no additional pointer to be passed to them.
  *
  *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
  *  or output.
  *
  *  @param[in] info execution info handle
- *  @param[in] cb_functions callbacks function pointers
+ *  @param[in] cb_functions callback function pointers
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
  *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use
  *  */

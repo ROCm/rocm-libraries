@@ -348,6 +348,8 @@ a given algorithm is deterministic.
 +-----------------------------------------------+--------+--------+--------+--------+
 | rocsparse_spmv_alg_bsr                        |   x    |        |  N/A   |  N/A   |
 +-----------------------------------------------+--------+--------+--------+--------+
+| rocsparse_spmv_alg_sell                       |   x    |        |  N/A   |  N/A   |
++-----------------------------------------------+--------+--------+--------+--------+
 
 The reproducibility of :cpp:func:`rocsparse_spmm()` is more complicated because this generic routine
 supports multiple sparse matrix formats and algorithms. See the chart below to determine whether

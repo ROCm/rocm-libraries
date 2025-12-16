@@ -154,7 +154,7 @@ THRUST_HOST void test_event_when_all()
 
   ASSERT_EQUAL(e0_stream, e8.stream().native_handle());
 
-  e8.wait();
+  TEST_EVENT_WAIT(e8);
 
   ASSERT_EQUAL(false, e0.ready());
   ASSERT_EQUAL(false, e1.ready());

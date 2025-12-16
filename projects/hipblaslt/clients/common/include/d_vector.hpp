@@ -97,7 +97,9 @@ public:
         char* d = nullptr;
         if((use_HMM ? hipMallocManaged(&d, capacity) : hipMalloc(&d, capacity)) != hipSuccess)
         {
-            hipblaslt_cerr << "Insufficient memory to  allocate (" << (m_size >> 30) << " GB) in device "
+            size_t free_device_mem, total_device_mem;
+            (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
+            hipblaslt_cerr << "Insufficient device memory to allocate (" << (m_size >> 30) << " GB) as the available device memory is (" << (free_device_mem >> 30) << " GB) "
                            << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;
@@ -171,16 +173,6 @@ public:
         Instance().restore(dm);
     }
 
-    // Helper: get total device mem in bytes
-    size_t total_device_mem()
-    {
-        int device;
-        (void)hipGetDevice(&device);
-        hipDeviceProp_t prop;
-        (void)hipGetDeviceProperties(&prop, device);
-        return static_cast<size_t>(prop.totalGlobalMem);
-    }
-
 private:
     std::vector<M> m_pool, m_pool_managed;
 
@@ -204,8 +196,11 @@ private:
         }
         else
         {
-            // Threshold for "huge" allocations — skip 20% extra allocation 
-            static const size_t big_thresh = total_device_mem() / 4;
+            size_t free_device_mem, total_device_mem;
+            (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
+
+            // Threshold for "huge" allocations — skip 20% extra allocation
+            const size_t big_thresh = total_device_mem / 4;
             bool huge_request = (bytes >= big_thresh);
 
             // remove the (largest) buffer that was too small

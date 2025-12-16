@@ -47,6 +47,10 @@ public:
                     "BatchnormNode missing epsilon for pre-validation"};
         }
 
+        // Validate training spatial dimension constraints
+        HIPDNN_CHECK_ERROR(
+            validateBatchNormTrainingSpatialDimensions(attributes.get_x(), attributes.get_scale()));
+
         return {};
     }
 
@@ -142,6 +146,7 @@ public:
         return hipdnn_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
+            toSdkType(attributes.compute_data_type),
             hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
             attributes.pack_attributes(builder).Union());
     }
