@@ -8,6 +8,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Support for 'BF16' input with 'FP32' output data type for gfx90a.
 * Support for hipBLASLtExt operation APIs on gfx11XX and gfx12XX.
+* Added `HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32` to override compute type of xf32 to other compute types.
 
 ## hipBLASLt 1.1.0 for ROCm 7.1.0
 
