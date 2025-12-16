@@ -76,10 +76,8 @@ def builddir(pytestconfig, tmpdir_factory):
 
 @pytest.fixture(scope="session")
 def worker_lock_path(tmp_path_factory, worker_id):
-    if not worker_id:
-        return None
-
-    return tmp_path_factory.getbasetemp().parent / "client_execution.lock"
+    # Workers can safely run parallel. 
+    return None
 
 @pytest.fixture
 def tensile_script_path():
