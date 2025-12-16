@@ -52,7 +52,7 @@ void toJsonAndBackTestSuite(const hipdnn_sdk::data_objects::Graph* graph,
 TEST(TestJson, GraphToJsonAndBack)
 {
     auto nodeAttributeValues = EnumValuesNodeAttributes();
-    size_t maxEnumValue = static_cast<size_t>(hipdnn_sdk::data_objects::NodeAttributes::MAX);
+    auto maxEnumValue = static_cast<size_t>(hipdnn_sdk::data_objects::NodeAttributes::MAX);
     for(size_t i = 0; i <= maxEnumValue; i++)
     {
         auto enumValue = nodeAttributeValues[i];
@@ -104,6 +104,7 @@ TEST(TestJson, GraphToJsonAndBack)
             break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
+            break;
         }
 
         toJsonAndBackTestSuite(graph, context);
