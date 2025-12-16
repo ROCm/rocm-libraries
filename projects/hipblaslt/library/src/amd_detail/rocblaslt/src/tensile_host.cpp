@@ -4066,6 +4066,12 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                                    std::get_if<float>(&data->inputs.alpha),
                                    std::get_if<float>(&data->inputs.beta));
         }
+        else if (data->problem.computeType() == rocisa::DataType::Double)
+        {
+            setRestrictions<double>(data->problem,
+                                   std::get_if<double>(&data->inputs.alpha),
+                                   std::get_if<double>(&data->inputs.beta));
+        }
         else
         {
             return rocblaslt_status_not_implemented;
@@ -4085,6 +4091,16 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                 setRestrictions<float>(tensile_prob,
                                        std::get_if<float>(&data->inputs.grouped[i].alpha),
                                        std::get_if<float>(&data->inputs.grouped[i].beta));
+            }
+        }
+        else if (data->problem.gemms[0].computeType() == rocisa::DataType::Double)
+        {
+            for(int i = 0; i < data->problem.gemms.size(); i++)
+            {
+                auto& tensile_prob = data->problem.gemms[i];
+                setRestrictions<double>(tensile_prob,
+                                       std::get_if<double>(&data->inputs.grouped[i].alpha),
+                                       std::get_if<double>(&data->inputs.grouped[i].beta));
             }
         }
         else
