@@ -78,7 +78,18 @@ install_zypper_packages( )
 {
     package_dependencies="$@"
     printf "\033[32mInstalling following packages from distro package manager: \033[33m${package_dependencies}\033[32m \033[0m\n"
-    elevate_if_not_root zypper install -y ${package_dependencies}
+    local uid=$(id -u)
+    local exit_code=0
+    if (( ${uid} )); then
+        sudo zypper -n install -y ${package_dependencies} || exit_code=$?
+    else
+        zypper -n install -y ${package_dependencies} || exit_code=$?
+    fi
+    # Exit code 106 means some repos failed to refresh, but packages may still be available
+    # Only fail if it's a different error
+    if (( ${exit_code} != 0 && ${exit_code} != 106 )); then
+        exit ${exit_code}
+    fi
 }
 
 install_msgpack_from_source( )
@@ -135,7 +146,7 @@ install_packages( )
   local library_dependencies_fedora=( "make" "rpm-build"
                                       "python34" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" "libcxx-devel" )
-  local library_dependencies_sles=(   "make" "python3-PyYAML" "python3-virtualenv"
+  local library_dependencies_sles=(   "make" "python311" "python311-PyYAML" "python311-pip"
                                       "gcc-c++" "rpm-build" )
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
@@ -360,7 +371,7 @@ while true; do
   case "${1}" in
     -h|--help)
         display_help
-        python3 ./rmake.py --help
+        ${python_executable} ./rmake.py --help
         exit 0
         ;;
     -i|--install)
@@ -452,6 +463,13 @@ cxx="g++"
 cc="gcc"
 fc="gfortran"
 
+# Set Python executable based on distro
+if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
+  python_executable=python3.11
+else
+  python_executable=python3
+fi
+
 # #################################################
 # dependencies
 # #################################################
@@ -531,7 +549,12 @@ if [[ "${rmake_invoked}" == false ]]; then
   rm -rf ${full_build_dir}
 
   #rmake.py at top level same as install.sh
-  python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
+  # On SLES, explicitly set Python3_EXECUTABLE to use python3.11
+  if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
+    ${python_executable} ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH} --cmake-darg Python3_EXECUTABLE=/usr/bin/python3.11
+  else
+    ${python_executable} ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
+  fi
   check_exit_code "$?"
 
   popd
