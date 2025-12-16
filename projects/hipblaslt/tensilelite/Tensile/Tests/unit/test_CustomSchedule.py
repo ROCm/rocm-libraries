@@ -71,7 +71,7 @@ def create_base_kernel():
     }
     return kernel
 
-class TestCustomSchedule:
+class TestCustomScheduleBF16:
     def test_no_custom_schedule(self):
         """Test that a kernel that doesn't match any condition returns False."""
         kernel = create_base_kernel()
@@ -544,6 +544,33 @@ class TestCustomSchedule:
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 56
         valid, message = isValid(schedule_info, {"kernel" : kernel})
+        assert valid, message
+
+
+class TestCustomScheduleTF32:
+    def test_schedule_192x256x32_TF32(self):
+        """Tests the 192x256x32 TF32 TN schedule."""
+        kernel = create_base_kernel()
+        kernel["ProblemType"].update({
+            "TransposeA": True, "TransposeB": False
+        })
+        kernel.update({
+            "UseF32XEmulation": True,
+            "MacroTile0": 192, "MacroTile1": 256, "DepthU": 32,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "DirectToLds": True,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
+            "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 6, "MIWaveTileB": 8,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 2
+        assert schedule_info.numMfma == 144
+        assert kernel["UsePLRPack"]
+        valid, message = isValid(schedule_info, {"kernel": kernel})
         assert valid, message
 
 
