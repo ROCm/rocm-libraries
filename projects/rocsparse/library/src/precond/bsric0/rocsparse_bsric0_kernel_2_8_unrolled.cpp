@@ -422,18 +422,18 @@ namespace rocsparse
 
     template <uint32_t BSRDIM, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BSRDIM* BSRDIM)
-    void bsric0_kernel_2_8_unrolled(rocsparse_direction  dir,
-                                    J                    mb,
-                                    const I*             bsr_row_ptr,
-                                    const J*             bsr_col_ind,
-                                    T*                   bsr_val,
-                                    int64_t              bsr_val_stride,
-                                    const I*             bsr_diag_ind,
-                                    J                    bsr_dim,
-                                    J*                   done_array,
-                                    int64_t              done_array_stride,
-                                    const J*             map,
-                                    J*                   zero_pivot,
+    void bsric0_kernel_2_8_unrolled(rocsparse_direction dir,
+                                    J                   mb,
+                                    const I* __restrict__ bsr_row_ptr,
+                                    const J* __restrict__ bsr_col_ind,
+                                    T* __restrict__ bsr_val,
+                                    int64_t bsr_val_stride,
+                                    const I* __restrict__ bsr_diag_ind,
+                                    J bsr_dim,
+                                    J* __restrict__ done_array,
+                                    int64_t done_array_stride,
+                                    const J* __restrict__ map,
+                                    J* __restrict__ zero_pivot,
                                     int64_t              zero_pivot_stride,
                                     rocsparse_index_base idx_base)
     {
