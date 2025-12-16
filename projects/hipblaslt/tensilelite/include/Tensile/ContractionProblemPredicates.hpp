@@ -1367,13 +1367,14 @@ namespace TensileLite
                     return "BufferLoadOffsetLimitCheck";
                 }
 
+                // The min operator is used to handle cases where size_M/size_K is smaller than the value.depthUorMT0
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return (problem.a().strides()[1] * value.depthUorMT0 + value.shiftPtrElemA)
+                    return (problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA)
                                    * problem.a().elementBytes()
                                < TWO_POW_32
-                           && (problem.b().strides()[1] * value.depthUorMT1 + value.shiftPtrElemB)
+                           && (problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
                                       * problem.b().elementBytes()
                                   < TWO_POW_32;
                 }
@@ -1431,6 +1432,7 @@ namespace TensileLite
                     return "BufferLoadOffsetLimitCheck_Beta";
                 }
 
+                // The min operator is used to handle cases where size_N is smaller than the value(usually is MacroTile1)
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     if(problem.c().empty() || problem.beta() == 0)
@@ -1440,7 +1442,7 @@ namespace TensileLite
                     else
                     {
                         const uint64_t TWO_POW_32 = 4294967296;
-                        return problem.c().strides()[1] * problem.c().elementBytes() * value
+                        return problem.c().strides()[1] * problem.c().elementBytes() * min(value, problem.c().sizes()[1])
                                < TWO_POW_32;
                     }
                 }
@@ -1484,10 +1486,11 @@ namespace TensileLite
                     return "BufferStoreOffsetLimitCheck";
                 }
 
+                // The min operator is used to handle cases where size_N is smaller than the value(usually is MacroTile1)
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return problem.d().strides()[1] * problem.d().elementBytes() * value
+                    return problem.d().strides()[1] * problem.d().elementBytes() * min(value, problem.d().sizes()[1])
                            < TWO_POW_32;
                 }
 
@@ -1906,7 +1909,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };
@@ -1936,7 +1939,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };
@@ -1967,7 +1970,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };

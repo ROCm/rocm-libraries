@@ -275,7 +275,7 @@ namespace rocRoller
             {
                 static_assert(sizeof(op) == 16);
                 iot::mapRequired(io, "forward", op.forward);
-                iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
+                iot::mapRequired(io, "isStorePartOfGlobalToLDS", op.isStorePartOfGlobalToLDS);
                 iot::mapRequired(io, "valueType", op.valueType);
                 iot::mapRequired(io, "offsetType", op.offsetType);
                 iot::mapRequired(io, "strideType", op.strideType);
@@ -333,13 +333,9 @@ namespace rocRoller
                 {
                     //iot::mapRequired(io, "bufOpts", op.bufOpts);
                 }
-                else if constexpr(CIsAnyOf<Op,
-                                           KernelGraph::ControlGraph::LoadTiled,
-                                           KernelGraph::ControlGraph::LoadLDSTile>)
+                else if constexpr(CIsAnyOf<Op, KernelGraph::ControlGraph::LoadLDSTile>)
                 {
                     iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
-                    if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadTiled>)
-                        iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
                 }
                 else
                 {

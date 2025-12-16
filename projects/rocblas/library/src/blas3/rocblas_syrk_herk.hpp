@@ -52,7 +52,7 @@ inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_
                               && n < czsyrk_gfx90a_n_higher_threshold)));
 }
 
-template <typename T>
+template <typename T, bool FORCE_GEMM = false>
 inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
                                                    rocblas_int    n,
                                                    rocblas_int    k,
@@ -61,7 +61,7 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
     size_t size = 1;
 
     //Allocating workspace memory when only using gemm
-    if(rocblas_use_only_gemm<T>(handle, n, k))
+    if(FORCE_GEMM || rocblas_use_only_gemm<T>(handle, n, k))
         if(n > 0 && batch_count > 0)
             size = ((int64_t(n) * (n - 1)) / 2) * sizeof(T) * batch_count;
 
@@ -304,3 +304,13 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                            rocblas_int       ldc,
                                            rocblas_stride    strideC,
                                            rocblas_int       batch_count);
+
+// helper
+template <bool copy_from_C_to_W_C, bool is_upper, bool HERM, typename T, typename TPtr>
+rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
+                                                 rocblas_int    n,
+                                                 TPtr           C,
+                                                 rocblas_int    ldc,
+                                                 rocblas_stride stride_C,
+                                                 T*             W_C,
+                                                 rocblas_int    batch_count);

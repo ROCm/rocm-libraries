@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -51,6 +51,7 @@ struct FmhaFwdSplitKVKernel
     static constexpr bool kStoreLSE         = FmhaPipeline::kStoreLSE;
     static constexpr bool kDoFp8StaticQuant = FmhaPipeline::Problem::kDoFp8StaticQuant;
     static constexpr bool kIsPagedKV        = FmhaPipeline::Problem::kIsPagedKV;
+    static constexpr bool kHasSink          = FmhaPipeline::Problem::kHasSink;
     static constexpr bool kMergeNumHeadGroupsSeqLenQ =
         FmhaPipeline::Problem::kMergeNumHeadGroupsSeqLenQ;
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
@@ -70,7 +71,7 @@ struct FmhaFwdSplitKVKernel
     template <> struct t2s<ck_tile::bf8_t> { static constexpr const char * name = "bf8"; };
     // clang-format on
 
-    __host__ static std::string GetName()
+    CK_TILE_HOST static std::string GetName()
     {
         // sync with generate.py
         // clang-format off
@@ -101,7 +102,7 @@ struct FmhaFwdSplitKVKernel
             "v" + (std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor> ? "r" : "c") + (pn.empty() ? "_npad" : "_" + pn) +
             (kHasLogitsSoftCap ? "_logits" : "_nlogits" ) + (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? _SS_("_nbias") : (_SS_("_") + BlockAttentionBiasEnumToStr<BiasEnum>::name)) +
             (kHasMask ? "_" + _SS_(FmhaMask::name) : "_nmask") + (kStoreLSE ? "_lse" : "_nlse" ) +
-            (kDoFp8StaticQuant ? "_squant" : "_nsquant") + (kIsPagedKV ? "_pagedkv" : "_npagedkv" );
+            (kDoFp8StaticQuant ? "_squant" : "_nsquant") + (kIsPagedKV ? "_pagedkv" : "_npagedkv" ) + (kHasSink ? "_sink" : "_nsink" );
         #undef _SS_
         #undef _TS_
         // clang-format on
@@ -198,7 +199,7 @@ struct FmhaFwdSplitKVKernel
     struct MaskKargs
     {
         // ck_tile::index_t window_size_left, window_size_right;
-        ck_tile::index_t window_size_left, window_size_right;
+        ck_tile::index_t window_size_left, window_size_right, sink_size;
         ck_tile::GenericAttentionMaskEnum mask_type;
     };
 
@@ -279,7 +280,7 @@ struct FmhaFwdSplitKVKernel
     };
 
     template <bool Cond = !kIsGroupMode>
-    __host__ static constexpr std::enable_if_t<Cond, Kargs>
+    CK_TILE_HOST static constexpr std::enable_if_t<Cond, Kargs>
     MakeKargs(const void* q_ptr,
               const void* k_ptr,
               const void* v_ptr,
@@ -325,6 +326,7 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t split_stride_o_acc,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
+              ck_tile::index_t sink_size,
               ck_tile::index_t mask_type)
     {
         Kargs kargs{{q_ptr,
@@ -384,6 +386,7 @@ struct FmhaFwdSplitKVKernel
         {
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
+            kargs.sink_size         = sink_size;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
         }
         if constexpr(kDoFp8StaticQuant)
@@ -409,7 +412,7 @@ struct FmhaFwdSplitKVKernel
     }
 
     template <bool Cond = kIsGroupMode>
-    __host__ static constexpr std::enable_if_t<Cond, Kargs>
+    CK_TILE_HOST static constexpr std::enable_if_t<Cond, Kargs>
     MakeKargs(const void* q_ptr,
               const void* k_ptr,
               const void* v_ptr,
@@ -451,6 +454,7 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t split_stride_o_acc,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
+              ck_tile::index_t sink_size,
               ck_tile::index_t mask_type)
     {
         Kargs kargs{{q_ptr,
@@ -508,6 +512,7 @@ struct FmhaFwdSplitKVKernel
         {
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
+            kargs.sink_size         = sink_size;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
         }
         if constexpr(kDoFp8StaticQuant)
@@ -574,7 +579,17 @@ struct FmhaFwdSplitKVKernel
         }
     }
 
-    __host__ static constexpr auto BlockSize() { return dim3(kBlockSize); }
+    CK_TILE_HOST static dim3 BlockSize()
+    {
+        if(is_wave32())
+        {
+            return dim3(kBlockSize / 2);
+        }
+        else
+        {
+            return dim3(kBlockSize);
+        }
+    }
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
@@ -984,6 +999,7 @@ struct FmhaFwdSplitKVKernel
                 return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                     kargs.window_size_left,
                     kargs.window_size_right,
+                    kargs.sink_size,
                     kargs.seqlen_q,
                     kargs.seqlen_k,
                     kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);

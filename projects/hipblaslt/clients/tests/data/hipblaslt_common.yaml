@@ -42,6 +42,8 @@ Datatypes:
         hpl: 333
         special: 444
         zero: 555
+        norm_dist: 666
+        uniform_01: 777
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:

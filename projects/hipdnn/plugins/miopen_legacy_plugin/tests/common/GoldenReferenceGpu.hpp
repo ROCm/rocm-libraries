@@ -7,8 +7,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+#include <MiopenLegacyPlugin.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 
@@ -40,17 +41,19 @@ protected:
             GTEST_SKIP();
         }
 
-        hipdnnPluginStatus_t status = hipdnnEnginePluginCreate(&_handle);
+        hipdnnPluginStatus_t status = hipdnnEnginePluginCreateImpl(&_handle);
         ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-        _engineConfigBuffer = hipdnn_sdk::test_utilities::createValidEngineConfig(1).Release();
+        _engineConfigBuffer = hipdnn_test_sdk::utilities::createValidEngineConfig(1).Release();
 
-        _graphAndTensors = hipdnn_sdk::test_utilities::loadGraphAndTensors(path);
+        _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(path);
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
     void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
     {
+        SKIP_IF_WINDOWS();
+
         hipdnnPluginConstData_t opGraph
             = {_graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size()};
 
@@ -59,16 +62,16 @@ protected:
 
         hipdnnPluginStatus_t status;
         hipdnnEnginePluginExecutionContext_t executionContext;
-        status = hipdnnEnginePluginCreateExecutionContext(
+        status = hipdnnEnginePluginCreateExecutionContextImpl(
             _handle, &engineConfig, &opGraph, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         auto deviceBuffers = _graphAndTensors.deviceBuffers();
 
-        status = hipdnnEnginePluginExecuteOpGraph(_handle,
-                                                  executionContext,
-                                                  nullptr,
-                                                  deviceBuffers.data(),
-                                                  static_cast<uint32_t>(deviceBuffers.size()));
+        status = hipdnnEnginePluginExecuteOpGraphImpl(_handle,
+                                                      executionContext,
+                                                      nullptr,
+                                                      deviceBuffers.data(),
+                                                      static_cast<uint32_t>(deviceBuffers.size()));
         EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
         for(auto uid : _graphAndTensors.outputTensorUids)
         {
@@ -83,7 +86,7 @@ protected:
 auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(
-        hipdnn_sdk::test_utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
+        hipdnn_test_sdk::utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
             hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
                 / subDirectory,
             ".json"));

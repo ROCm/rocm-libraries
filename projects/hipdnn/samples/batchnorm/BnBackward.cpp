@@ -6,10 +6,10 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -33,20 +33,18 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
-        .set_compute_data_type(intermediateType);
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto dy = createTensor({n, c, h, w}, inputType, layout);
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto savedMean = createTensor({1, c, 1, 1}, intermediateType);
     auto savedInvVariance = createTensor({1, c, 1, 1}, intermediateType);
-
     auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
     bnBwdAttributes.set_name("bn_backward_node");
     bnBwdAttributes.set_saved_mean_and_inv_variance(savedMean, savedInvVariance);
 
     auto [dx, dscale, dbias] = graph->batchnorm_backward(dy, x, scale, bnBwdAttributes);
-
     dx->set_output(true);
     dscale->set_output(true);
     dbias->set_output(true);
@@ -71,7 +69,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
     utilities::Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
     utilities::Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
-
     utilities::Tensor<InputType> dxTensor(dx->get_dim(), layout);
     utilities::Tensor<IntermediateType> dscaleTensor(dscale->get_dim());
     utilities::Tensor<IntermediateType> dbiasTensor(dbias->get_dim());
@@ -86,7 +83,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                            static_cast<IntermediateType>(1.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
-
     variantPack[dy->get_uid()] = dyTensor.memory().deviceData();
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
     variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
@@ -114,22 +110,22 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> dscaleRefTensor(dscale->get_dim());
         utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
-        test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormBwd(
-            dyTensor,
-            xTensor,
-            savedMeanTensor,
-            savedInvVarTensor,
-            scaleTensor,
-            dxRefTensor,
-            dscaleRefTensor,
-            dbiasRefTensor);
+        hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::backward(dyTensor,
+                                                                      xTensor,
+                                                                      scaleTensor,
+                                                                      dxRefTensor,
+                                                                      dscaleRefTensor,
+                                                                      dbiasRefTensor,
+                                                                      &savedMeanTensor,
+                                                                      &savedInvVarTensor);
 
-        auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
+        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
 
         auto dxValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-        auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-            static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto dscaleDbiasValidator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
+                static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
         bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
         bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);
@@ -167,12 +163,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All batch normalization backwards runs completed.\n";
     return 0;
 }

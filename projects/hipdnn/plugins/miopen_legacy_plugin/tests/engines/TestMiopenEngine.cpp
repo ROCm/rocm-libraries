@@ -8,7 +8,7 @@
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "engines/MiopenEngine.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
@@ -92,6 +92,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
 TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
 
@@ -99,6 +100,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -117,6 +120,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -126,6 +131,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     MiopenEngine engine(0);
 
     MockGraph mockGraph;
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -140,6 +147,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }

@@ -29,12 +29,11 @@
 #include "runtime_args_selection.hpp"
 #include "solution_selection.hpp"
 
-#include <origami/utils.hpp>
+#include "origami/origami.hpp"
 
 const int MAX_BITS_WORKGROUPTILE_M     = 8;
 const int MAX_BITS_WORKGROUPTILE_N     = 8;
 const int MAX_BITS_WORKGROUPTILE_K     = 7;
-const int MAX_BITS_PREFETCH_IN_FLIGHT  = 4;
 const int REQUIRED_MULTIPLE_M_N        = 16;
 const int REQUIRED_MULTIPLE_K          = 32;
 const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
@@ -45,7 +44,9 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
  * compile-time known.
  */
 
- constexpr std::array<WorkGroupTileSize, 34> possibleTileSizes = {{
+ constexpr size_t possibleTileSizesCount = 34;
+
+ constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSizes = {{
     {256, 256, 128},
     {256, 192, 128},
     {256, 128, 128},
@@ -82,21 +83,11 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
     {16, 64, 256}
 }};
 
-constexpr int preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt) {
-    // Other datatypes run out of registers when prefetchInFlight is too
-    // large.
-    // There is an error with smaller tile sizes and larger prefetchInFlight.
-    if (typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32 && wgt.n > 32)
-        return 4;
-    else
-        return 2;
-}
-
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
-constexpr auto generateTileList() {
-    std::array<origami::tile_tuple, possibleTileSizes.size()> tileList{};
+auto generateTileList() {
+    std::array<origami::config_t, possibleTileSizesCount> tileList{};
 
-    for (size_t i = 0; i < possibleTileSizes.size(); ++i) {
+    for (size_t i = 0; i < possibleTileSizesCount; ++i) {
         const auto& wgt = possibleTileSizes[i];
         auto MI = pickMI(typeA, typeB, wgt);
 
@@ -107,27 +98,33 @@ constexpr auto generateTileList() {
 
         int unroll = preferredUnrolling(typeA, typeB, wgt);
 
-        int non_temporal_a = 0;
-        int non_temporal_b = 0;
+        origami::config_t origami_config = {
+            .mt = {
+                static_cast<size_t>(wgt.m), 
+                static_cast<size_t>(wgt.n), 
+                static_cast<size_t>(wgtk * unroll)
+            },
+            .mi = {
+                static_cast<size_t>(MI.m),
+                static_cast<size_t>(MI.n),
+                static_cast<size_t>(MI.k)
+            },
+            .occupancy = 1,
+            .cache_hints_a = 0,
+            .cache_hints_b = 0,
+        };
 
-        tileList[i] = std::make_tuple(
-            wgt.m, wgt.n, wgtk * unroll,
-            MI.m, MI.n, MI.k,
-            1, // occupancy
-            DEFAULT_WGM,
-            non_temporal_a,
-            non_temporal_b
-        );
+        tileList[i] = origami_config;
     }
 
     return tileList;
 }
 
-using TileListGeneratorFn = std::vector<origami::tile_tuple>(*)();
+using TileListGeneratorFn = std::vector<origami::config_t>(*)();
 
 template <rocRoller::DataType A, rocRoller::DataType B>
-std::vector<origami::tile_tuple> generateTileListWrapper() {
-    constexpr auto arr = generateTileList<A, B>();
+std::vector<origami::config_t> generateTileListWrapper() {
+    auto arr = generateTileList<A, B>();
     return {arr.begin(), arr.end()};
 }
 
@@ -155,7 +152,7 @@ const std::map<std::pair<rocRoller::DataType, rocRoller::DataType>, TileListGene
     INSTANTIATE_TILE_LIST_FOR(FP6)
 };
 
-std::vector<origami::tile_tuple> getTileListForKernelType(KernelType kernelType)
+std::vector<origami::config_t> getTileListForKernelType(KernelType kernelType)
 {
     auto key = std::make_pair(kernelType.typeA, kernelType.typeB);
     auto it = tileListGenerators.find(key);
@@ -181,43 +178,42 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 {
     std::vector<SolutionIndexParameters> params;
 
-    std::vector<origami::tile_tuple> tile_list = getTileListForKernelType(kernelType);
+    std::vector<origami::config_t> origami_config_list = getTileListForKernelType(kernelType);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
-    size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits;
 
-    origami::data_type_t dataType;
-    if (elementSizeA_bits < elementSizeB_bits)
-        dataType = rocroller_type_to_analytical_type(kernelType.typeB);
-    else
-        dataType = rocroller_type_to_analytical_type(kernelType.typeA);
+    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
-    const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
+    origami::problem_t origami_problem = {
+        .size = {prob.m, prob.n, prob.k},
+        .batch = prob.batch_count,
+        .a_transpose = (prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T : origami::transpose_t::N,
+        .b_transpose = (prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T : origami::transpose_t::N,
+        .a_dtype = rocroller_type_to_analytical_type(kernelType.typeA),
+        .b_dtype = rocroller_type_to_analytical_type(kernelType.typeB),
+        .mi_dtype = rocroller_type_to_analytical_type(elementSizeA_bits < elementSizeB_bits ? kernelType.typeB : kernelType.typeA),
+        .a_mx_block_size = kernelType.scaleTypeA.blockRowSize * kernelType.scaleTypeA.blockColSize,
+        .b_mx_block_size = kernelType.scaleTypeB.blockRowSize * kernelType.scaleTypeB.blockColSize,
+    };
 
-    int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
+    int defaultWGM = std::ceil(std::sqrt(analytical_hardware.N_CU / analytical_hardware.NUM_XCD));
+    for (auto& config : origami_config_list) {
+        config.workgroup_mapping = defaultWGM;
+    }
 
-    auto selected_tiles = origami::select_best_macro_tile_size(
-        prob.m,
-        prob.n,
-        prob.k,
-        prob.batch_count,
-        prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T,
-        prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T,
-        analaytical_hardware,
-        tile_list,
-        elementSizeA_bits,
-        elementSizeB_bits,
-        elementSizeC_bits,
-        dataType,
-        kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
-        0.8,
-        false,
-        WGM);
+    auto prediction_result = origami::rank_configs(
+        origami_problem,
+        analytical_hardware,
+        origami_config_list
+    );
 
-    for(auto const& selected_tile : selected_tiles)
+    for(auto const& result : prediction_result)
     {
-        WorkGroupTileSize wgt{(int)std::get<1>(selected_tile), (int)std::get<2>(selected_tile), (int)std::get<3>(selected_tile)};
+        auto mt_m = static_cast<int>(result.config.mt.m);
+        auto mt_n = static_cast<int>(result.config.mt.n);
+        auto mt_k = static_cast<int>(result.config.mt.k);
+        WorkGroupTileSize wgt{mt_m, mt_n, mt_k};
         int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt);
         wgt.k /= unrollAmount;
 
@@ -241,17 +237,21 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                    || !std::has_single_bit(static_cast<uint>(wgt.n))))
                 continue;
 
-            params.push_back({wgt, 1, true});
-            while (unrollAmount > 1 && (prob.k % (wgt.k * unrollAmount) != 0))
-            {
-                unrollAmount = unrollAmount / 2;
-            }
-
-            params.back().prefetchInFlight = unrollAmount;
+            params.push_back({wgt, true, false});
 
             if (prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
                 params.back().workgroupMapping = false;
+            }
+
+            // Enable StreamK when number of output tiles < number of CUs and not f6 data type
+            size_t numTilesM = prob.m / wgt.m;
+            size_t numTilesN = prob.n / wgt.n;
+            size_t numTiles = numTilesM * numTilesN * prob.batch_count;
+            auto isF6 = (kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6 || kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6);
+            if(numTiles < analytical_hardware.N_CU && !isF6)
+            {
+                params.back().streamK = true;
             }
         }
     }
@@ -270,9 +270,9 @@ int parametersToIndex(const SolutionIndexParameters& params)
     pos += MAX_BITS_WORKGROUPTILE_N;
     result |= ((params.workgroupTile.m / REQUIRED_MULTIPLE_M_N) << pos);
     pos += MAX_BITS_WORKGROUPTILE_M;
-    result |= (params.prefetchInFlight << pos);
-    pos += MAX_BITS_PREFETCH_IN_FLIGHT;
     result |= ((params.workgroupMapping ? 1 : 0) << pos);
+    pos += 1;
+    result |= ((params.streamK ? 1 : 0) << pos);
 
     // Set top bit indicating it is a rocRoller index
     result |= (1 << 31);
@@ -301,9 +301,9 @@ SolutionIndexParameters indexToParameters(int index)
     result.workgroupTile.m
         = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_M)) * REQUIRED_MULTIPLE_M_N;
     pos += MAX_BITS_WORKGROUPTILE_M;
-    result.prefetchInFlight = (index >> pos) & mask(MAX_BITS_PREFETCH_IN_FLIGHT);
-    pos += MAX_BITS_PREFETCH_IN_FLIGHT;
     result.workgroupMapping = (index >> pos) & 1;
+    pos += 1;
+    result.streamK = (index >> pos) & 1;
 
     return result;
 }

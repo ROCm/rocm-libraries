@@ -322,6 +322,7 @@ namespace rocsparse
 
         case rocsparse_format_coo_aos:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);

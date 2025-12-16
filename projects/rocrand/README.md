@@ -106,8 +106,7 @@ ctest --output-on-failure
 
 ### SPIR-V
 
-rocRAND supports the `amdgcnspirv` target, but it should be built with `USE_DEVICE_DISPATCH`
-turned off like `-DUSE_DEVICE_DISPATCH=0`.
+rocRAND supports the `amdgcnspirv` target, it should be built with `-DAMDGPU_TARGETS=amdgcnspirv`.
 
 ### HIP on Windows
 

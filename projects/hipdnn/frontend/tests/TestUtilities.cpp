@@ -4,33 +4,14 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_frontend/node/Node.hpp>
-#include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::test_utilities;
-
-// Mock node class for testing visitGraph
-class MockNode : public INode
-{
-public:
-    int value;
-
-    explicit MockNode(int val, GraphAttributes attrs = GraphAttributes())
-        : INode(std::move(attrs))
-        , value(val)
-    {
-    }
-
-    void addChild(const std::shared_ptr<MockNode>& child)
-    {
-        _sub_nodes.push_back(child);
-    }
-};
+using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestUtilities, FindCommonShapeValid)
 {
@@ -78,152 +59,268 @@ TEST(TestUtilities, InitializeFrontendLoggingReturnsCorrectly)
     EXPECT_EQ(hipdnn_frontend::initializeFrontendLogging(), 0);
 }
 
-TEST(TestUtilities, VisitGraphSingleNode)
+// ============================================================================
+// Batch Normalization Validation Tests
+// ============================================================================
+
+// Tests for isBatchNormSpatialMode()
+TEST(TestUtilities, IsBatchNormSpatialModeNullTensor)
 {
-    auto root = std::make_shared<MockNode>(1);
-    std::vector<int> visitedValues;
-
-    visitGraph(root, [&visitedValues](INode& node) {
-        auto& mockNode = static_cast<MockNode&>(node);
-        visitedValues.push_back(mockNode.value);
-    });
-
-    EXPECT_EQ(visitedValues.size(), 1);
-    EXPECT_EQ(visitedValues[0], 1);
+    std::shared_ptr<TensorAttributes> nullScale = nullptr;
+    EXPECT_TRUE(isBatchNormSpatialMode(nullScale));
 }
 
-TEST(TestUtilities, VisitGraphWithChildren)
+TEST(TestUtilities, IsBatchNormSpatialModeUninitializedDims)
 {
-    // Create a tree:
-    //       1
-    //      / \
-    //     2   3
-    auto root = std::make_shared<MockNode>(1);
-    auto child1 = std::make_shared<MockNode>(2);
-    auto child2 = std::make_shared<MockNode>(3);
-
-    root->addChild(child1);
-    root->addChild(child2);
-
-    std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
-        auto& mockNode = static_cast<MockNode&>(node);
-        visitedValues.push_back(mockNode.value);
-    });
-
-    // Pre-order traversal: root, then children left to right
-    EXPECT_EQ(visitedValues.size(), 3);
-    EXPECT_EQ(visitedValues[0], 1);
-    EXPECT_EQ(visitedValues[1], 2);
-    EXPECT_EQ(visitedValues[2], 3);
+    auto scale = std::make_shared<TensorAttributes>();
+    // Empty dimensions - should default to spatial mode
+    EXPECT_TRUE(isBatchNormSpatialMode(scale));
 }
 
-TEST(TestUtilities, VisitGraphDeepHierarchy)
+TEST(TestUtilities, IsBatchNormSpatialModeDimsSizeLessThanTwo)
 {
-    // Create a tree:
-    //       1
-    //       |
-    //       2
-    //      / \
-    //     3   4
-    //     |
-    //     5
-    auto root = std::make_shared<MockNode>(1);
-    auto child1 = std::make_shared<MockNode>(2);
-    auto child2 = std::make_shared<MockNode>(3);
-    auto child3 = std::make_shared<MockNode>(4);
-    auto child4 = std::make_shared<MockNode>(5);
-
-    root->addChild(child1);
-    child1->addChild(child2);
-    child1->addChild(child3);
-    child2->addChild(child4);
-
-    std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
-        auto& mockNode = static_cast<MockNode&>(node);
-        visitedValues.push_back(mockNode.value);
-    });
-
-    // Pre-order traversal: 1, 2, 3, 5, 4
-    EXPECT_EQ(visitedValues.size(), 5);
-    EXPECT_EQ(visitedValues[0], 1);
-    EXPECT_EQ(visitedValues[1], 2);
-    EXPECT_EQ(visitedValues[2], 3);
-    EXPECT_EQ(visitedValues[3], 5);
-    EXPECT_EQ(visitedValues[4], 4);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({32}); // Only 1 dimension
+    EXPECT_TRUE(isBatchNormSpatialMode(scale));
 }
 
-TEST(TestUtilities, VisitGraphNullSharedPtr)
+TEST(TestUtilities, IsBatchNormSpatialModeSpatialMode2D)
 {
-    std::shared_ptr<MockNode> nullRoot = nullptr;
-    int visitCount = 0;
-
-    // Should handle null gracefully without crashing
-    visitGraph(nullRoot, [&visitCount]([[maybe_unused]] INode& node) { visitCount++; });
-
-    EXPECT_EQ(visitCount, 0);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 1, 1});
+    EXPECT_TRUE(isBatchNormSpatialMode(scale));
 }
 
-TEST(TestUtilities, VisitGraphWithNullChildren)
+TEST(TestUtilities, IsBatchNormSpatialModeSpatialMode2DLargeChannels)
 {
-    auto root = std::make_shared<MockNode>(1);
-    auto child1 = std::make_shared<MockNode>(2);
-
-    root->addChild(child1);
-    root->addChild(nullptr); // Add a null child
-    root->addChild(std::make_shared<MockNode>(3));
-
-    std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
-        auto& mockNode = static_cast<MockNode&>(node);
-        visitedValues.push_back(mockNode.value);
-    });
-
-    // Should skip null children
-    EXPECT_EQ(visitedValues.size(), 3);
-    EXPECT_EQ(visitedValues[0], 1);
-    EXPECT_EQ(visitedValues[1], 2);
-    EXPECT_EQ(visitedValues[2], 3);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 256, 1, 1});
+    EXPECT_TRUE(isBatchNormSpatialMode(scale));
 }
 
-TEST(TestUtilities, VisitGraphReferenceOverload)
+TEST(TestUtilities, IsBatchNormSpatialModeSpatialMode3D)
 {
-    MockNode root(1);
-    auto child1 = std::make_shared<MockNode>(2);
-    auto child2 = std::make_shared<MockNode>(3);
-
-    root.addChild(child1);
-    root.addChild(child2);
-
-    std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
-        auto& mockNode = static_cast<MockNode&>(node);
-        visitedValues.push_back(mockNode.value);
-    });
-
-    EXPECT_EQ(visitedValues.size(), 3);
-    EXPECT_EQ(visitedValues[0], 1);
-    EXPECT_EQ(visitedValues[1], 2);
-    EXPECT_EQ(visitedValues[2], 3);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 1, 1, 1});
+    EXPECT_TRUE(isBatchNormSpatialMode(scale));
 }
 
-TEST(TestUtilities, VisitGraphModifyNodes)
+TEST(TestUtilities, IsBatchNormSpatialModeSpatialMode3DLargeChannels)
 {
-    auto root = std::make_shared<MockNode>(1);
-    auto child1 = std::make_shared<MockNode>(2);
-    auto child2 = std::make_shared<MockNode>(3);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 256, 1, 1, 1});
+    EXPECT_TRUE(isBatchNormSpatialMode(scale));
+}
 
-    root->addChild(child1);
-    root->addChild(child2);
+TEST(TestUtilities, IsBatchNormSpatialModePerActivation2DHGreaterThanOne)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 14, 14}); // H and W > 1
+    EXPECT_FALSE(isBatchNormSpatialMode(scale));
+}
 
-    // Modify all node values during traversal
-    visitGraph(root, [](INode& node) {
-        auto& mockNode = static_cast<MockNode&>(node);
-        mockNode.value *= 10;
-    });
+TEST(TestUtilities, IsBatchNormSpatialModePerActivation2DWGreaterThanOne)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 1, 14}); // Only W > 1
+    EXPECT_FALSE(isBatchNormSpatialMode(scale));
+}
 
-    EXPECT_EQ(root->value, 10);
-    EXPECT_EQ(child1->value, 20);
-    EXPECT_EQ(child2->value, 30);
+TEST(TestUtilities, IsBatchNormSpatialModePerActivation2DHOnlyGreaterThanOne)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 14, 1}); // Only H > 1
+    EXPECT_FALSE(isBatchNormSpatialMode(scale));
+}
+
+TEST(TestUtilities, IsBatchNormSpatialModePerActivation3DDGreaterThanOne)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 2, 1, 1}); // D > 1
+    EXPECT_FALSE(isBatchNormSpatialMode(scale));
+}
+
+TEST(TestUtilities, IsBatchNormSpatialModePerActivation3DMultipleSpatialDims)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 1, 14, 14}); // H and W > 1
+    EXPECT_FALSE(isBatchNormSpatialMode(scale));
+}
+
+// Tests for validateBatchNormTrainingSpatialDimensions()
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNullXTensor)
+{
+    std::shared_ptr<TensorAttributes> nullX = nullptr;
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(nullX, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNullScaleTensor)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 3, 14, 14});
+    std::shared_ptr<TensorAttributes> nullScale = nullptr;
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, nullScale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsXDimsLessThanTwo)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({32}); // Only 1 dimension
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsValid2DLargeNHW)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 3, 2, 2}); // N*H*W = 2*2*2 = 8
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsValid2DEdgeCase)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 1, 2}); // N*H*W = 1*1*2 = 2 (just above threshold)
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsValid2DTypicalCase)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({8, 32, 7, 7}); // N*H*W = 8*7*7 = 392
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsValid3D)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 3, 2, 2, 2}); // N*D*H*W = 2*2*2*2 = 16
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsInvalidSingleElement)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 256, 1, 1}); // N*H*W = 1*1*1 = 1 (invalid!)
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 256, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("N=1") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsInvalidSingleElement3D)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 64, 1, 1, 1}); // N*D*H*W = 1*1*1*1 = 1 (invalid!)
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 64, 1, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsPerActivationNotSupported)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 3, 14, 14});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 14, 14}); // Per-activation mode (H, W match input)
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("per-activation mode is not currently supported")
+                != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsCustomOperationName)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 32, 1, 1}); // Invalid: N*H*W = 1
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 32, 1, 1});
+
+    auto error
+        = validateBatchNormTrainingSpatialDimensions(x, scale, "Batch normalization backward");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("Batch normalization backward") != std::string::npos);
+}
+
+// Layout-specific tests to ensure validation is layout-agnostic
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNhwc)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 3, 14, 14}); // NCHW: N*H*W = 2*14*14 = 392
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1}); // Always channel-first
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNhwcInvalid)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 256, 1, 1}); // NCHW: N*H*W = 1*1*1 = 1 (invalid!)
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 256, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDhwc)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 3, 2, 2, 2}); // NCDHW: N*D*H*W = 2*2*2*2 = 16
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDhwcInvalid)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 256, 1, 1, 1}); // NCDHW: N*D*H*W = 1*1*1*1 = 1 (invalid!)
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 256, 1, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
 }

@@ -153,8 +153,11 @@ namespace rocRoller
              *
              * @param size How many elements make up the User dimension.
              * @param offset Location of data within the scratch space
+             * @param argName Name of the argument for this scratch space
              */
-            User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset);
+            User(Expression::ExpressionPtr size,
+                 Expression::ExpressionPtr offset,
+                 std::string const&        argName);
 
             std::string name() const override;
         };
@@ -263,12 +266,8 @@ namespace rocRoller
         struct LDS : public BaseDimension
         {
             static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
-
-            bool isDirect2LDS = false;
-
-            LDS();
-            explicit LDS(bool const isDirect2LDS);
 
             std::string name() const override;
         };

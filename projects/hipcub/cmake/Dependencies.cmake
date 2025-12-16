@@ -336,6 +336,7 @@ if(USER_BUILD_TEST)
 endif(USER_BUILD_TEST)
 
 if(USER_BUILD_BENCHMARK)
+  set(BENCHMARK_VERSION 1.8.0)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     find_package(benchmark CONFIG QUIET)
   endif()
@@ -346,7 +347,7 @@ if(USER_BUILD_BENCHMARK)
     FetchContent_Declare(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v1.8.0
+      GIT_TAG        v${BENCHMARK_VERSION}
     )
     FetchContent_MakeAvailable(googlebench)
     if(NOT TARGET benchmark::benchmark)

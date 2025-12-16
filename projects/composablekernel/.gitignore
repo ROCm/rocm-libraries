@@ -36,6 +36,9 @@ tags
 # Editors
 .vscode
 
+# CMake formatting configuration (local)
+.cmake-format.yaml
+
 # Cline
 .cline*
 
@@ -66,6 +69,12 @@ docs/doxygen/xml
 cmake-build*/
 build*/
 
+# LSP configuration
+.clangd
+
+# User-defined CMake presets
+CMakeUserPresets.json
+
 # Python virtualenv
 .venv/
 
@@ -73,6 +82,11 @@ build*/
 __pycache__/
 
 .cache/
+
+# Generated test data
+test_data/*
+!test_data/*.py
+!test_data/*.sh
 
 # Exceptions to build* patterns above
 # The experimental/builder directory should be tracked despite matching build*

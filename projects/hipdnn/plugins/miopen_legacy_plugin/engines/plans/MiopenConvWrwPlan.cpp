@@ -104,26 +104,6 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&&
     THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
 }
 
-ConvWrwPlan::ConvWrwPlan(ConvWrwPlan&& other) noexcept
-    : _params(std::move(other._params))
-    , _solution(std::move(other._solution))
-    , _workspaceSize(other._workspaceSize)
-{
-    other._workspaceSize = 0;
-}
-
-ConvWrwPlan& ConvWrwPlan::operator=(ConvWrwPlan&& other) noexcept
-{
-    if(this != &other)
-    {
-        _params = std::move(other._params);
-        _solution = std::move(other._solution);
-        _workspaceSize = other._workspaceSize;
-        other._workspaceSize = 0;
-    }
-    return *this;
-}
-
 size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
 {
     return _workspaceSize;

@@ -56,7 +56,7 @@ def run_benchmarks(benchmark_context):
 
     success = True
     benchmark_names = [name for name in os.listdir(benchmark_context.benchmark_dir) if is_benchmark_executable(name)]
-    print('The following benchmarks will be ran:\n{}'.format('\n'.join(benchmark_names)), file=sys.stderr, flush=True)
+    print('The following benchmarks will be run:\n{}'.format('\n'.join(benchmark_names)), file=sys.stderr, flush=True)
     for benchmark_name in benchmark_names:
         results_json_name = f'{benchmark_name}_{benchmark_context.gpu_architecture}.json'
 

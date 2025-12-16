@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <functional>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -11,9 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class INode
 {
@@ -61,9 +60,36 @@ public:
         return {};
     }
 
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
+    void visit(const std::function<void(INode&)>& visitor)
     {
-        return _sub_nodes;
+        // Visit current node first (pre-order traversal)
+        visitor(*this);
+
+        // Then visit all children
+        for(const auto& child : _sub_nodes)
+        {
+            if(child)
+            {
+                child->visit(visitor);
+            }
+        }
+    }
+
+    void visit(const std::function<void(const INode&)>& visitor) const
+    {
+        // Visit current node first (pre-order traversal)
+        visitor(*this);
+
+        // Then visit all children
+        for(const auto& child : _sub_nodes)
+        {
+            if(child)
+            {
+                // Explicitly call const version by getting const reference
+                const INode& constChild = *child;
+                constChild.visit(visitor);
+            }
+        }
     }
 
 protected:
@@ -131,6 +157,16 @@ public:
         }
     }
 
+    Error post_validate_node() const override // NOLINT(readability-identifier-naming)
+    {
+        if(self().attributes.compute_data_type == DataType::NOT_SET)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "Node " + self().attributes.name + " does not have a compute_data_type set"};
+        }
+        return {ErrorCode::OK, ""};
+    }
+
     std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const override
     {
         std::vector<std::shared_ptr<TensorAttributes>> inputAttributes;
@@ -165,5 +201,4 @@ protected:
 
 template <typename DerivedT>
 using NodeCRTP = BaseNode<DerivedT>; // NOLINT
-}
-}
+} // namespace hipdnn_frontend::graph

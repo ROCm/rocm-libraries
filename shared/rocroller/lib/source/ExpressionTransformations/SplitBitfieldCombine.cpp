@@ -31,94 +31,6 @@ namespace rocRoller
 {
     namespace Expression
     {
-
-        struct DeepBitfieldExtractVisitor
-        {
-
-            DeepBitfieldExtractVisitor(uint32_t offset, uint32_t width)
-                : m_offset(offset)
-                , m_width(width)
-            {
-            }
-
-            ExpressionPtr operator()(BitfieldCombine const& expr) const
-            {
-                uint32_t combineStartBit = expr.dstOffset;
-                uint32_t combineEndBit   = expr.dstOffset + expr.width - 1;
-                uint32_t endBit          = m_offset + m_width - 1;
-                // No overlap with this dword
-                if(combineStartBit > endBit || combineEndBit < m_offset)
-                {
-                    return call(expr.rhs);
-                }
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr operator()(Concatenate const& expr) const
-            {
-                uint32_t operandStartBit = 0;
-                uint32_t operandEndBit   = 0;
-                uint32_t endBit          = m_offset + m_width - 1;
-                for(int i = 0; i < expr.operands.size(); ++i)
-                {
-                    operandStartBit = operandEndBit;
-                    operandEndBit += resultVariableType(expr.operands[i]).getElementSize() * 8;
-                    // bitField is fully contained within this operand
-                    if(operandStartBit <= m_offset && endBit <= operandEndBit)
-                    {
-                        this->m_offset -= operandStartBit;
-                        return call(expr.operands[i]);
-                    }
-                }
-
-                return std::make_shared<Expression>(expr);
-            }
-
-            template <typename Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr call(ExpressionPtr expr) const
-            {
-                if(!expr)
-                    return expr;
-
-                return std::visit(*this, *expr);
-            }
-
-            uint32_t get_offset() const
-            {
-                return m_offset;
-            }
-
-        private:
-            mutable uint32_t m_offset;
-            uint32_t         m_width;
-        };
-
-        /**
-         * Returns a BitFieldExtract expression that extracts the specified bitfield from the given expression.
-         * Looks through Concatenate expressions to find the corresponding operand to extract.
-         * Looks through BitfieldCombine expressions to extract from its destination operand if the BitfieldCombine and BitFieldExtract do not overlap.
-         */
-        ExpressionPtr
-            deepExtract(ExpressionPtr expr, DataType type, uint32_t offset, uint32_t width)
-        {
-            auto visitor   = DeepBitfieldExtractVisitor(offset, width);
-            auto extracted = visitor.call(expr);
-            offset         = visitor.get_offset();
-
-            if(offset == 0 && width == resultVariableType(extracted).getElementSize() * 8)
-            {
-                return extracted;
-            }
-
-            ExpressionPtr extract = bfe(type, extracted, width, offset);
-            return extract;
-        }
-
         std::vector<ExpressionPtr>
             splitBitfield(BitfieldCombine const& expr, const size_t dstSize, const size_t dwordSize)
         {
@@ -133,8 +45,7 @@ namespace rocRoller
                 uint32_t dwordEndBit   = dwordStartBit + dwordSize - 1;
 
                 // Get new destination dword
-                ExpressionPtr dstDWord
-                    = deepExtract(expr.rhs, DataType::UInt32, dwordStartBit, dwordSize);
+                ExpressionPtr dstDWord = bfe(DataType::Raw32, expr.rhs, dwordStartBit, dwordSize);
 
                 // No overlap with this dword
                 if(combineStartBit > dwordEndBit || combineEndBit < dwordStartBit)
@@ -152,7 +63,7 @@ namespace rocRoller
                     ExpressionPtr srcDWord = expr.lhs;
                     if(resultVariableType(expr.lhs).getElementSize() * 8 > dwordSize)
                     {
-                        srcDWord  = bfe(DataType::UInt32, expr.lhs, srcOffset, overlapWidth);
+                        srcDWord  = bfe(DataType::Raw32, expr.lhs, srcOffset, overlapWidth);
                         srcOffset = 0;
                     }
 
@@ -230,18 +141,22 @@ namespace rocRoller
                 cpy.rhs = call(expr.rhs);
 
                 auto dstSize = resultVariableType(expr.rhs).getElementSize() * 8;
-                AssertFatal(expr.dstOffset + expr.width <= dstSize,
-                            "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
-                            expr.dstOffset,
-                            expr.width,
-                            dstSize);
+                AssertFatal(
+                    expr.dstOffset + expr.width <= dstSize,
+                    fmt::format(
+                        "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
+                        expr.dstOffset,
+                        expr.width,
+                        dstSize));
 
                 auto srcSize = resultVariableType(expr.lhs).getElementSize() * 8;
-                AssertFatal(expr.srcOffset + expr.width <= srcSize,
-                            "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
-                            expr.srcOffset,
-                            expr.width,
-                            srcSize);
+                AssertFatal(
+                    expr.srcOffset + expr.width <= srcSize,
+                    fmt::format(
+                        "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
+                        expr.srcOffset,
+                        expr.width,
+                        srcSize));
 
                 // No need to split if destination size is less than or equal to 32 bits
                 if(dstSize <= dwordSize && srcSize <= dwordSize)

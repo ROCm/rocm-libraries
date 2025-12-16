@@ -33,6 +33,7 @@
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_sort_checker.hpp"
 #include "test_utils_sort_comparator.hpp"
 
 // required rocprim headers
@@ -174,16 +175,6 @@ inline void sort_keys()
 
             common::device_ptr<offset_type> d_offsets(offsets);
 
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_input);
-            for(size_t i = 0; i < segments_count; i++)
-            {
-                std::stable_sort(
-                    expected.begin() + offsets[i],
-                    expected.begin() + offsets[i + 1],
-                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-            }
-
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
                                                                  temporary_storage_bytes,
@@ -229,6 +220,16 @@ inline void sort_keys()
                                                                      end_bit,
                                                                      stream,
                                                                      debug_synchronous));
+            }
+
+            // Calculate expected results on host
+            std::vector<key_type> expected(keys_input);
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + offsets[i],
+                    expected.begin() + offsets[i + 1],
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
             }
 
             const auto keys_output = d_keys_output.load();
@@ -298,8 +299,21 @@ inline void sort_keys_empty_data()
 
             if(descending)
             {
-                HIP_CHECK(
-                    rocprim::segmented_radix_sort_pairs_desc<config>(d_temporary_storage.get(),
+                HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
+                                                                          temporary_storage_bytes,
+                                                                          d_keys.get(),
+                                                                          d_keys.get(),
+                                                                          size,
+                                                                          segments_count,
+                                                                          d_offsets.get(),
+                                                                          d_offsets.get() + 1,
+                                                                          start_bit,
+                                                                          end_bit,
+                                                                          stream));
+            }
+            else
+            {
+                HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
                                                                      temporary_storage_bytes,
                                                                      d_keys.get(),
                                                                      d_keys.get(),
@@ -310,20 +324,6 @@ inline void sort_keys_empty_data()
                                                                      start_bit,
                                                                      end_bit,
                                                                      stream));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(d_temporary_storage.get(),
-                                                                      temporary_storage_bytes,
-                                                                      d_keys.get(),
-                                                                      d_keys.get(),
-                                                                      size,
-                                                                      segments_count,
-                                                                      d_offsets.get(),
-                                                                      d_offsets.get() + 1,
-                                                                      start_bit,
-                                                                      end_bit,
-                                                                      stream));
             }
 
             const auto keys_output = d_keys.load();
@@ -377,16 +377,6 @@ inline void sort_keys_large_segments()
 
         common::device_ptr<offset_type> d_offsets(offsets);
 
-        // Calculate expected results on host
-        std::vector<key_type> expected(keys_input);
-        for(size_t i = 0; i < segments_count; i++)
-        {
-            std::stable_sort(
-                expected.begin() + offsets[i],
-                expected.begin() + offsets[i + 1],
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-        }
-
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
                                                              temporary_storage_bytes,
@@ -432,9 +422,15 @@ inline void sort_keys_large_segments()
                                                                  stream));
         }
 
-        const auto keys_output = d_keys_output.load();
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+        bool all_blocks_sorted = true;
+        for(size_t s = 0; s < segments_count; ++s)
+        {
+            all_blocks_sorted &= test_utils::device_sort_check(
+                d_keys_output.get() + offsets[s],
+                offsets[s + 1] - offsets[s],
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
+        }
+        ASSERT_TRUE(all_blocks_sorted);
     }
 }
 
@@ -493,7 +489,8 @@ inline void sort_keys_unspecified_ranges()
             std::vector<offset_type> end_offsets(begin_offsets.cbegin() + 1, begin_offsets.cend());
             begin_offsets.pop_back();
 
-            size_t            empty_segments = rocprim::max(segments_count / 16, 1u);
+            size_t empty_segments = segments_count / 16;
+
             std::vector<bool> is_empty_segment(segments_count, false);
             std::fill(is_empty_segment.begin(), is_empty_segment.begin() + empty_segments, true);
             std::shuffle(is_empty_segment.begin(), is_empty_segment.end(), gen);
@@ -512,16 +509,6 @@ inline void sort_keys_unspecified_ranges()
 
             common::device_ptr<offset_type> d_offsets_begin(begin_offsets);
             common::device_ptr<offset_type> d_offsets_end(end_offsets);
-
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_input);
-            for(size_t i = 0; i < segments_count; i++)
-            {
-                std::stable_sort(
-                    expected.begin() + begin_offsets[i],
-                    expected.begin() + end_offsets[i],
-                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-            }
 
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
@@ -566,6 +553,16 @@ inline void sort_keys_unspecified_ranges()
                                                                      start_bit,
                                                                      end_bit,
                                                                      stream));
+            }
+
+            // Calculate expected results on host
+            std::vector<key_type> expected(keys_input);
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + begin_offsets[i],
+                    expected.begin() + end_offsets[i],
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
             }
 
             const auto keys_output = d_keys_output.load();
@@ -644,30 +641,6 @@ inline void sort_pairs()
 
             using key_value = std::pair<key_type, value_type>;
 
-            // Calculate expected results on host
-            std::vector<key_value> expected(size);
-            for(size_t i = 0; i < size; i++)
-            {
-                expected[i] = key_value(keys_input[i], values_input[i]);
-            }
-            for(size_t i = 0; i < segments_count; i++)
-            {
-                std::stable_sort(expected.begin() + offsets[i],
-                                 expected.begin() + offsets[i + 1],
-                                 test_utils::key_value_comparator<key_type,
-                                                                  value_type,
-                                                                  descending,
-                                                                  start_bit,
-                                                                  end_bit>());
-            }
-            std::vector<key_type>   keys_expected(size);
-            std::vector<value_type> values_expected(size);
-            for(size_t i = 0; i < size; i++)
-            {
-                keys_expected[i]   = expected[i].first;
-                values_expected[i] = expected[i].second;
-            }
-
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(nullptr,
                                                                   temporary_storage_bytes,
@@ -720,6 +693,30 @@ inline void sort_pairs()
                                                                       end_bit,
                                                                       stream,
                                                                       debug_synchronous));
+            }
+
+            // Calculate expected results on host
+            std::vector<key_value> expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                expected[i] = key_value(keys_input[i], values_input[i]);
+            }
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(expected.begin() + offsets[i],
+                                 expected.begin() + offsets[i + 1],
+                                 test_utils::key_value_comparator<key_type,
+                                                                  value_type,
+                                                                  descending,
+                                                                  start_bit,
+                                                                  end_bit>());
+            }
+            std::vector<key_type>   keys_expected(size);
+            std::vector<value_type> values_expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                keys_expected[i]   = expected[i].first;
+                values_expected[i] = expected[i].second;
             }
 
             const auto keys_output   = d_keys_output.load();
@@ -790,7 +787,8 @@ inline void sort_pairs_unspecified_ranges()
             std::vector<offset_type> end_offsets(begin_offsets.cbegin() + 1, begin_offsets.cend());
             begin_offsets.pop_back();
 
-            size_t            empty_segments = rocprim::max(segments_count / 16, 1u);
+            size_t empty_segments = segments_count / 16;
+
             std::vector<bool> is_empty_segment(segments_count, false);
             std::fill(is_empty_segment.begin(), is_empty_segment.begin() + empty_segments, true);
             std::shuffle(is_empty_segment.begin(), is_empty_segment.end(), gen);
@@ -814,23 +812,6 @@ inline void sort_pairs_unspecified_ranges()
             common::device_ptr<offset_type> d_offsets_end(end_offsets);
 
             using key_value = std::pair<key_type, value_type>;
-
-            // Calculate expected results on host
-            std::vector<key_value> expected(size);
-            for(size_t i = 0; i < size; i++)
-            {
-                expected[i] = key_value(keys_input[i], values_input[i]);
-            }
-            for(size_t i = 0; i < segments_count; i++)
-            {
-                std::stable_sort(expected.begin() + begin_offsets[i],
-                                 expected.begin() + end_offsets[i],
-                                 test_utils::key_value_comparator<key_type,
-                                                                  value_type,
-                                                                  descending,
-                                                                  start_bit,
-                                                                  end_bit>());
-            }
 
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(nullptr,
@@ -882,6 +863,23 @@ inline void sort_pairs_unspecified_ranges()
                                                                       start_bit,
                                                                       end_bit,
                                                                       stream));
+            }
+
+            // Calculate expected results on host
+            std::vector<key_value> expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                expected[i] = key_value(keys_input[i], values_input[i]);
+            }
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(expected.begin() + begin_offsets[i],
+                                 expected.begin() + end_offsets[i],
+                                 test_utils::key_value_comparator<key_type,
+                                                                  value_type,
+                                                                  descending,
+                                                                  start_bit,
+                                                                  end_bit>());
             }
 
             const auto keys_output   = d_keys_output.load();
@@ -956,16 +954,6 @@ inline void sort_keys_double_buffer()
 
             common::device_ptr<offset_type> d_offsets(offsets);
 
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_input);
-            for(size_t i = 0; i < segments_count; i++)
-            {
-                std::stable_sort(
-                    expected.begin() + offsets[i],
-                    expected.begin() + offsets[i + 1],
-                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-            }
-
             rocprim::double_buffer<key_type> d_keys(d_keys_input.get(), d_keys_output.get());
 
             size_t temporary_storage_bytes = 0;
@@ -1010,6 +998,16 @@ inline void sort_keys_double_buffer()
                                                                      end_bit,
                                                                      stream,
                                                                      debug_synchronous));
+            }
+
+            // Calculate expected results on host
+            std::vector<key_type> expected(keys_input);
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + offsets[i],
+                    expected.begin() + offsets[i + 1],
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
             }
 
             std::vector<key_type> keys_output(size);
@@ -1092,30 +1090,6 @@ inline void sort_pairs_double_buffer()
 
             using key_value = std::pair<key_type, value_type>;
 
-            // Calculate expected results on host
-            std::vector<key_value> expected(size);
-            for(size_t i = 0; i < size; i++)
-            {
-                expected[i] = key_value(keys_input[i], values_input[i]);
-            }
-            for(size_t i = 0; i < segments_count; i++)
-            {
-                std::stable_sort(expected.begin() + offsets[i],
-                                 expected.begin() + offsets[i + 1],
-                                 test_utils::key_value_comparator<key_type,
-                                                                  value_type,
-                                                                  descending,
-                                                                  start_bit,
-                                                                  end_bit>());
-            }
-            std::vector<key_type>   keys_expected(size);
-            std::vector<value_type> values_expected(size);
-            for(size_t i = 0; i < size; i++)
-            {
-                keys_expected[i]   = expected[i].first;
-                values_expected[i] = expected[i].second;
-            }
-
             rocprim::double_buffer<key_type>   d_keys(d_keys_input.get(), d_keys_output.get());
             rocprim::double_buffer<value_type> d_values(d_values_input.get(),
                                                         d_values_output.get());
@@ -1166,6 +1140,30 @@ inline void sort_pairs_double_buffer()
                                                                       end_bit,
                                                                       stream,
                                                                       debug_synchronous));
+            }
+
+            // Calculate expected results on host
+            std::vector<key_value> expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                expected[i] = key_value(keys_input[i], values_input[i]);
+            }
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(expected.begin() + offsets[i],
+                                 expected.begin() + offsets[i + 1],
+                                 test_utils::key_value_comparator<key_type,
+                                                                  value_type,
+                                                                  descending,
+                                                                  start_bit,
+                                                                  end_bit>());
+            }
+            std::vector<key_type>   keys_expected(size);
+            std::vector<value_type> values_expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                keys_expected[i]   = expected[i].first;
+                values_expected[i] = expected[i].second;
             }
 
             std::vector<key_type> keys_output(size);

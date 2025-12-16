@@ -462,6 +462,77 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
     return status;
 }
 
+hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
+                                           int64_t                rows,
+                                           int64_t                cols,
+                                           int64_t                nnz,
+                                           int64_t                sellValuesSize,
+                                           int64_t                sliceSize,
+                                           void*                  sellSliceOffsets,
+                                           void*                  sellColInd,
+                                           void*                  sellValues,
+                                           hipsparseIndexType_t   sellSliceOffsetsType,
+                                           hipsparseIndexType_t   sellColIndType,
+                                           hipsparseIndexBase_t   idxBase,
+                                           hipDataType            valueType)
+{
+    if(spMatDescr == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    spMatDescr[0] = new hipsparseSpMatDescr_st();
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_create_sell_descr(spMatDescr[0]->get_spmat_descr_reference(),
+                                    rows,
+                                    cols,
+                                    nnz,
+                                    sliceSize,
+                                    sellValuesSize,
+                                    sellSliceOffsets,
+                                    sellColInd,
+                                    sellValues,
+                                    hipsparse::hipIndexTypeToHCCIndexType(sellSliceOffsetsType),
+                                    hipsparse::hipIndexTypeToHCCIndexType(sellColIndType),
+                                    hipsparse::hipBaseToHCCBase(idxBase),
+                                    hipsparse::hipDataTypeToHCCDataType(valueType)));
+}
+
+hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMatDescr,
+                                                int64_t                     rows,
+                                                int64_t                     cols,
+                                                int64_t                     nnz,
+                                                int64_t                     sellValuesSize,
+                                                int64_t                     sliceSize,
+                                                const void*                 sellSliceOffsets,
+                                                const void*                 sellColInd,
+                                                const void*                 sellValues,
+                                                hipsparseIndexType_t        sellSliceOffsetsType,
+                                                hipsparseIndexType_t        sellColIndType,
+                                                hipsparseIndexBase_t        idxBase,
+                                                hipDataType                 valueType)
+{
+    if(spMatDescr == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+    spMatDescr[0] = new hipsparseSpMatDescr_st();
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_create_const_sell_descr(
+        spMatDescr[0]->get_const_spmat_descr_reference(),
+        rows,
+        cols,
+        nnz,
+        sliceSize,
+        sellValuesSize,
+        sellSliceOffsets,
+        sellColInd,
+        sellValues,
+        hipsparse::hipIndexTypeToHCCIndexType(sellSliceOffsetsType),
+        hipsparse::hipIndexTypeToHCCIndexType(sellColIndType),
+        hipsparse::hipBaseToHCCBase(idxBase),
+        hipsparse::hipDataTypeToHCCDataType(valueType)));
+}
+
 hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
                                         int64_t                rows,
                                         int64_t                cols,

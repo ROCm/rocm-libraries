@@ -1871,10 +1871,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.scaleA == hipblaslt_scaling_format::Block)
         {
             if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float)
+               && arg.initialization != hipblaslt_initialization::trig_float
+               && arg.initialization != hipblaslt_initialization::uniform_01)
             {
                 hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl and trig_float not "
+                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
@@ -1922,10 +1923,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.scaleB == hipblaslt_scaling_format::Block)
         {
             if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float)
+               && arg.initialization != hipblaslt_initialization::trig_float
+               && arg.initialization != hipblaslt_initialization::uniform_01)
             {
                 hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl and trig_float not "
+                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
@@ -3647,31 +3649,25 @@ void testing_matmul_with_bias(const Arguments& arg,
         double flush_time_used = 0;
         if(arg.flush)
         {
-            for(int i = 0; i < flush_iter; i++)
-                hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-
-            if(arg.use_gpu_timer)
-                CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-            else
+            static std::unordered_map<std::string, double> flush_times_cache;
+            static std::mutex mtx;
+            std::lock_guard<std::mutex> lock(mtx);
+            std::string device_uuid(deviceProps.uuid.bytes);
+            if(!flush_times_cache.count(device_uuid))
             {
-                flush_time_used = get_time_us_sync(stream);
-            }
-            for(int i = 0; i < flush_iter; i++)
-                hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-            if(arg.use_gpu_timer)
-            {
-                CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
-                CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
-                float gpu_time_ms;
-                CHECK_HIP_ERROR(
-                    hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
-                flush_time_used = gpu_time_ms * 1000; // ms to us
+                for(int i = 0; i < flush_iter; i++)
+                    hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
+                pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, flush_time_used, stream);
+                for(int i = 0; i < flush_iter; i++)
+                    hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
+                post_gpu_time(arg.use_gpu_timer, event_gpu_time_start, event_gpu_time_end, flush_time_used, stream);
+                flush_time_used /= flush_iter;
+                flush_times_cache[device_uuid] = flush_time_used;
             }
             else
             {
-                flush_time_used = get_time_us_sync(stream) - flush_time_used;
+                flush_time_used = flush_times_cache[device_uuid];
             }
-            flush_time_used /= flush_iter;
         }
 
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)

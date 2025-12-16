@@ -3,10 +3,7 @@
 
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
-{
-
-namespace miopen_utils
+namespace miopen_legacy_plugin::miopen_utils
 {
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
@@ -79,7 +76,7 @@ size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr
     return attr.dims()->size() - 2;
 }
 
-std::optional<ActivationParams>
+ActivationParams
     mapPointwiseModeToMiopenActivation(const hipdnn_sdk::data_objects::PointwiseAttributes& attrs)
 {
     using PM = hipdnn_sdk::data_objects::PointwiseMode;
@@ -92,6 +89,7 @@ std::optional<ActivationParams>
         if(attrs.relu_lower_clip() && attrs.relu_upper_clip())
         {
             // CLAMP
+            // act(x) = max(\alpha, min(\beta, x))
             return ActivationParams{miopenActivationCLAMP,
                                     static_cast<double>(*attrs.relu_lower_clip()),
                                     static_cast<double>(*attrs.relu_upper_clip()),
@@ -100,6 +98,7 @@ std::optional<ActivationParams>
         if(attrs.relu_upper_clip())
         {
             // Clipped ReLU
+            // act(x) = max(0, min(\alpha, x))
             return ActivationParams{miopenActivationCLIPPEDRELU,
                                     static_cast<double>(*attrs.relu_upper_clip()),
                                     0.0,
@@ -113,6 +112,13 @@ std::optional<ActivationParams>
                                     0.0,
                                     0.0};
         }
+        if(attrs.relu_lower_clip().has_value() && attrs.relu_lower_clip().value() != 0.f)
+        {
+            throw hipdnn_plugin::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Standard relu with a non-zero lower_clip is not supported");
+        }
+
         // Standard ReLU
         return ActivationParams{miopenActivationRELU, 0.0, 0.0, 0.0};
     }
@@ -139,7 +145,8 @@ std::optional<ActivationParams>
             // Only support beta=1
             if(static_cast<double>(*attrs.softplus_beta()) != 1.0)
             {
-                return std::nullopt;
+                throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           "Softplus only supports beta = 1.0");
             }
         }
         return ActivationParams{miopenActivationSOFTRELU, 0.0, 0.0, 0.0};
@@ -148,10 +155,9 @@ std::optional<ActivationParams>
     case PM::IDENTITY:
         return ActivationParams{miopenActivationPASTHRU, 0.0, 0.0, 0.0};
     default:
-        return std::nullopt;
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "Unsupported activation operation");
     }
-}
-
 }
 
 }

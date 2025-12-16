@@ -176,7 +176,8 @@ struct SolverBaseNonTunable : SolverInterfaceNonTunable<Context, Problem>
     InvokerFactory GetInvokerFactory(const Context& ctx, const Problem& problem) const
     {
         const auto solution = this->GetSolution(ctx, problem);
-        return *solution.invoker_factory;
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        return solution.invoker_factory.value();
     }
 };
 
@@ -225,7 +226,8 @@ struct SolverBaseTunable : SolverInterfaceTunable<Context, Problem>, TunableSolv
                                      const Problem& problem,
                                      const PerformanceConfig& config) const
     {
-        return *GetSolution(ctx, problem, config).invoker_factory;
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        return GetSolution(ctx, problem, config).invoker_factory.value();
     }
 };
 
@@ -242,12 +244,6 @@ struct IsTunable : std::is_base_of<TunableSolverTrait, Solver>
 {
     static_assert(!std::is_same_v<Solver, TunableSolverTrait>,
                   "Raw trait shouldn't be passed, explicit type is needed");
-};
-
-// Use struct as a syntactic sugar to make the intent as clear as possible.
-struct ThisSolverIsDeprecatedStatic
-{
-    MIOPEN_INTERNALS_EXPORT static bool IsDisabled(const ExecutionContext& ctx);
 };
 
 } // namespace solver

@@ -207,6 +207,37 @@ public:
                                 0,
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionFpropNode: Post-padding must be non-negative");
+
+            if(!yDims.empty())
+            {
+                auto inputSize = xDims[i + 2];
+                auto kernelSize = wDims[i + 2];
+                auto outputSize = yDims[i + 2];
+
+                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+
+                HIPDNN_RETURN_IF_LT(numerator,
+                                    0,
+                                    ErrorCode::INVALID_VALUE,
+                                    "ConvolutionFpropNode: Input spatial dimension at index "
+                                        + std::to_string(i) + " (" + std::to_string(inputSize)
+                                        + ") is too small for the kernel size ("
+                                        + std::to_string(kernelSize) + ") and dilation ("
+                                        + std::to_string(dilationVal) + ")");
+
+                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+
+                HIPDNN_RETURN_IF_NE(
+                    outputSize,
+                    expectedOutputSize,
+                    ErrorCode::INVALID_VALUE,
+                    "ConvolutionFpropNode: Output tensor spatial dimension at index "
+                        + std::to_string(i) + " (" + std::to_string(outputSize)
+                        + ") does not match expected dimension ("
+                        + std::to_string(expectedOutputSize)
+                        + ") given input dimensions, kernel size, padding, stride, and dilation");
+            }
         }
 
         return {};
@@ -355,6 +386,7 @@ public:
         return hipdnn_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
+            toSdkType(attributes.compute_data_type),
             hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
             attributes.pack_attributes(builder).Union());
     }

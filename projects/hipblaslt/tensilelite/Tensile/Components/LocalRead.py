@@ -197,7 +197,7 @@ class LocalReadMFMA(LocalRead):
         module.add(VCvtPkF32toBF16(dst=dst0, src0=v0, src1=v1))
         commentStr = ""
         if (index % 8) == 4:
-            commentStr = "__TF32_1_"+tct
+            commentStr = "__TF32_1_" + tct
         module.add(VCvtPkF32toBF16(dst=dst1, src0=v2, src1=v3, comment=commentStr))
 
 
@@ -259,6 +259,9 @@ class LocalReadMFMA(LocalRead):
         numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else (int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
         inputPerThread   = kernel["LocalReadVectorWidth"] if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
 
+        abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
+        perpStride   = abmatrixinfo.gNLCPerpStride
+
         # pack register
         if writer.states.archCaps["HasEccHalf"] or not writer.states.asmCaps["HasWMMA_V1"]:
             needPack = tP["bpeDS"] < 4 and not kernel["UnrollMajorLDS%s"%tc] and not tP["isM"]
@@ -305,16 +308,27 @@ class LocalReadMFMA(LocalRead):
                 LocalReadX = instruction.getInst(highBits)
 
                 offset_val = (tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"] + tP["localReadSwapByteOffset"]
-                if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
-                    offset_val = offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
+
+                def applyPad(offset_val):
+                    if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
+                        offset_val = offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
+                    return offset_val
 
                 for oIdx in range(0,numOffsetsPerLoad):
+
                     offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)
+                    offset = applyPad(offset)
                     ds = DSModifiers(na=1, offset=offset)
                     destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, 4*tIdx, oIdx * 2), 2)
                     localReadCode = Module("LocalRead%s Valu%u"%(tc,valuiIdx))
                     localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
-                    offset_val += UnrollStride*inputPerThread
+                    if perpStride == 1:
+                        offset_val += UnrollStride*inputPerThread
+                    else:
+                        permBlock = kernel["MatrixInstK"]
+                        perpStrideInv = permBlock // perpStride
+                        inv4K = perpStrideInv * (4 % perpStride) + 4 // perpStride
+                        offset_val += inv4K * kernel["MacroTile%s"%tc] * tP["bpeDS"]
                     if ((subTileIdx == 0 and subIterLoadCount < totalLoads // numSubTiles) \
                         or (subTileIdx == 1 and subIterLoadCount >= totalLoads // numSubTiles) \
                         or numSubTiles == 1) or writer.states.inTailLoop:
@@ -439,10 +453,10 @@ class LocalReadMFMA(LocalRead):
                                         v5 = vgpr("Valu%s_X%u_I%u+%u+5"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v6 = vgpr("Valu%s_X%u_I%u+%u+6"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v7 = vgpr("Valu%s_X%u_I%u+%u+7"%(tc, bufferIdx, iui, baseValuiIdx))
-                                        packCodeT.add(VCvtPkF32toBF16(dst=v7, src0=v6, src1=v7, comment="pack tail begin"))
+                                        packCodeT.add(VCvtPkF32toBF16(dst=v7, src0=v6, src1=v7, comment="pack final begin"))
                                         packCodeT.add(VCvtPkF32toBF16(dst=v6, src0=v4, src1=v5))
                                         packCodeT.add(VCvtPkF32toBF16(dst=v5, src0=v2, src1=v3))
-                                        commentStr ="__TF32_2_" + tc + " pack tail end"
+                                        commentStr = "__TF32_2_" + tc + " pack final end"
                                         packCodeT.add(VCvtPkF32toBF16(dst=v4, src0=v0, src1=v1, comment=commentStr))
                                         if kernel["UseDirect32XEmulation"]:
                                             index = len(tmpvgprFP32) - 1
@@ -762,7 +776,12 @@ class LocalReadMFMA(LocalRead):
                         paramList = []
 
                         for oIdx in range(0, numOffsets):
-                            offset_val = (eIdx + (vIdx * numOffsets+oIdx) * MIWaveGroupShape[tile01]) * tileStride
+                            if perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0:
+                                permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
+                                perpStrideInv = permBlock // perpStride
+                                offset_val = (eIdx * (perpStrideInv) + ((vIdx) * numOffsets+oIdx) * MIWaveGroupShape[tile01]) * tileStride
+                            else:
+                                offset_val = (eIdx + (vIdx * numOffsets+oIdx) * MIWaveGroupShape[tile01]) * tileStride
 
                             if kernel["ProblemType"]["Sparse"] != 0:
                                 if blocksPerTGroupSMFMA > 1:
@@ -815,8 +834,9 @@ class LocalReadMFMA(LocalRead):
                             if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                                 offset_val = offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
                             offset_val = offset_val + tP["localReadSwapByteOffset"]
+                            # TODO: Add NLC>1 offset calcs here? 
                             if (kernel["DirectToLds%s" % tc] and  \
-                                kernel["GlobalReadVectorWidth%c"%tc] * tP["bpeDS"] > 4):
+                                kernel["GlobalReadVectorWidth%c"%tc] * tP["bpeDS"] > 4) and not kernel["UseGeneralizedNLCOne%s"%tc]:
                               # another address conversion for DirectToLds + NumLoadsCoalesced > 1
                               dummy, offset_val = writer.lraOffsetConversionForDTLandNLC(kernel, tP, offset_val)
 

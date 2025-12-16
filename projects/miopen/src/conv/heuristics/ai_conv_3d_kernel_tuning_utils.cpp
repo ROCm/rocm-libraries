@@ -26,16 +26,15 @@
  * general AI-related code for kernel tuning and heuristics. To be called in the
  * solver-specific code.
  *******************************************************************************/
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
-#include <sstream>
 #include <algorithm>
+#include <iterator>
+#include <map>
+#include <sstream>
+#include <string>
+
+#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/solver/problem_description_interpreter.hpp>
-#include <miopen/conv/problem_description.hpp>
-#include <map>
-#include <string>
-#include <iterator>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
@@ -208,8 +207,9 @@ std::vector<int> GenerateSplitK(int max_split_k)
 }
 
 // Explicit template instantiations for common types
+// Note: We instantiate with a generic lambda type for the validation function
 template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<float>(
+RunParameterPredictionModel<float, bool (*)(int, int)>(
     const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -217,10 +217,11 @@ RunParameterPredictionModel<float>(
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
+    std::string,
+    bool (*&&)(int, int));
 
 template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<int8_t>(
+RunParameterPredictionModel<int8_t, bool (*)(int, int)>(
     const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -228,11 +229,12 @@ RunParameterPredictionModel<int8_t>(
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
+    std::string,
+    bool (*&&)(int, int));
 #if MIOPEN_USE_COMPOSABLEKERNEL
 
 template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::half_t>(
+RunParameterPredictionModel<ck::half_t, bool (*)(int, int)>(
     const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -240,10 +242,11 @@ RunParameterPredictionModel<ck::half_t>(
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
+    std::string,
+    bool (*&&)(int, int));
 
 template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::bhalf_t>(
+RunParameterPredictionModel<ck::bhalf_t, bool (*)(int, int)>(
     const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -251,8 +254,9 @@ RunParameterPredictionModel<ck::bhalf_t>(
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
-#endif
+    std::string,
+    bool (*&&)(int, int));
+#endif // MIOPEN_USE_COMPOSABLEKERNEL
 
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()

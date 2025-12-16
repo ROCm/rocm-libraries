@@ -138,7 +138,7 @@ namespace rocRoller
             if(!m_tileDimensions.empty())
             {
                 AssertFatal(m_tileDimensions.size() == 3, ShowValue(m_tileDimensions));
-                AssertFatal(m_tileDimensions[0] == 64 && m_tileDimensions[1] == 4
+                AssertFatal(m_tileDimensions[0] * m_tileDimensions[1] == 256
                                 && (m_tileDimensions[2] == 2 || m_tileDimensions[2] == 4),
                             ShowValue(m_tileDimensions));
             }

@@ -54,7 +54,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [1]
         - WavefrontSize: [32]
-        - LocalReadVectorWidth: [8]
+        - LocalReadVectorWidth: [8,16]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - GlobalReadVectorWidthA: [-1,8] #[1, 2, 4, 8, 16]
@@ -191,7 +191,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16,16,16, 1, 1, 1,1, 1,1]  # 16x16
           - [16,16,16, 1, 1, 2,2, 1,1]  # 16x16
-        - DepthU: [ 64 ]
+        - DepthU: [16,64]
           #- AssertFree0ElementMultiple: [1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]

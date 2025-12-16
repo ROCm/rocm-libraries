@@ -95,7 +95,7 @@ namespace TensileLite
                 (*iter)->postProblem();
         }
 
-        void MetaRunListener::preSolution(ContractionSolution const& solution)
+        void MetaRunListener::preSolution(ContractionSolution* const solution)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
                 (*iter)->preSolution(solution);

@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #include "hipdnn_sdk/plugin/PluginApiDataTypes.h"
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 

@@ -97,62 +97,6 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void init_d
     }
 }
 
-template<typename Config,
-         lookback_scan_determinism Determinism,
-         bool                      Exclusive,
-         typename KeyInputIterator,
-         typename InputIterator,
-         typename OutputIterator,
-         typename InitialValueType,
-         typename CompareFunction,
-         typename BinaryFunction,
-         typename LookbackScanState,
-         typename AccType,
-         typename WrappedBlockId>
-inline hipError_t launch_device_scan_by_key(
-    detail::target_arch                          arch,
-    const KeyInputIterator                       keys,
-    const InputIterator                          values,
-    const OutputIterator                         output,
-    const InitialValueType                       initial_value,
-    const CompareFunction                        compare,
-    const BinaryFunction                         scan_op,
-    const LookbackScanState                      scan_state,
-    const size_t                                 size,
-    const size_t                                 starting_block,
-    const size_t                                 number_of_blocks,
-    const ::rocprim::tuple<AccType, bool>* const previous_last_value,
-    bool                                         use_last_keys,
-    const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__ last_keys,
-    WrappedBlockId ordered_bid,
-    dim3                           grid,
-    dim3                           block,
-    size_t                         shmem,
-    hipStream_t                    stream)
-{
-
-    auto kernel = [=](auto arch_config)
-    {
-        device_scan_by_key_kernel_impl<decltype(arch_config), Determinism, Exclusive>(
-            keys,
-            values,
-            output,
-            static_cast<AccType>(get_input_value(initial_value)),
-            compare,
-            scan_op,
-            scan_state,
-            size,
-            starting_block,
-            number_of_blocks,
-            previous_last_value,
-            use_last_keys,
-            last_keys,
-            ordered_bid);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 /// \return 0 if in-place is not detected
 template<bool Exclusive,
          typename KeysInputIterator,
@@ -374,26 +318,30 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                 {
                     start = std::chrono::steady_clock::now();
                 }
-                ROCPRIM_RETURN_ON_ERROR(launch_device_scan_by_key<config, Determinism, Exclusive>(
-                    target_arch,
-                    keys + offset,
-                    input + offset,
-                    output + offset,
-                    initial_value,
-                    compare,
-                    scan_op,
-                    scan_state,
-                    size,
-                    i * number_of_blocks,
-                    total_number_of_blocks,
-                    i > 0 ? as_const_ptr(previous_last_value) : nullptr,
-                    last_keys_of_each_block_size_byte != 0,
-                    last_keys_of_each_block,
-                    ordered_bid,
-                    dim3(scan_blocks),
-                    dim3(block_size),
-                    0,
-                    stream));
+                auto device_scan_by_key_kernel = [=](auto arch_config)
+                {
+                    device_scan_by_key_kernel_impl<decltype(arch_config), Determinism, Exclusive>(
+                        keys + offset,
+                        input + offset,
+                        output + offset,
+                        static_cast<AccType>(get_input_value(initial_value)),
+                        compare,
+                        scan_op,
+                        scan_state,
+                        size,
+                        i * number_of_blocks,
+                        total_number_of_blocks,
+                        i > 0 ? as_const_ptr(previous_last_value) : nullptr,
+                        last_keys_of_each_block_size_byte != 0,
+                        last_keys_of_each_block,
+                        ordered_bid);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    device_scan_by_key_kernel,
+                                                                    dim3(scan_blocks),
+                                                                    dim3(block_size),
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
                                                             current_size,
                                                             start);

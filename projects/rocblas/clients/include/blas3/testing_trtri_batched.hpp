@@ -234,6 +234,32 @@ void testing_trtri_batched(const Arguments& arg)
     gpu_time_used = cpu_time_used = 0.0;
     double rocblas_error_out, rocblas_error_in;
 
+    if(!ROCBLAS_REALLOC_ON_DEMAND)
+    {
+        // Compute size
+        CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+
+        CHECK_ALLOC_QUERY(rocblas_trtri_batched_fn(handle,
+                                                   uplo,
+                                                   diag,
+                                                   N,
+                                                   dA.ptr_on_device(),
+                                                   lda,
+                                                   dinvA.ptr_on_device(),
+                                                   lda,
+                                                   batch_count));
+
+        // Test in place
+        CHECK_ALLOC_QUERY(rocblas_trtri_batched_fn(
+            handle, uplo, diag, N, dA.ptr_on_device(), lda, dA.ptr_on_device(), lda, batch_count));
+
+        size_t size;
+        CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
+
+        // Allocate memory
+        CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, size));
+    }
+
     /* =====================================================================
            ROCBLAS
     =================================================================== */

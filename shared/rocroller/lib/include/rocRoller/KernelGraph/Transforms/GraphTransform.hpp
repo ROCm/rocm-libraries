@@ -51,9 +51,11 @@
  * - LowerTile
  * - OrderEpilogueBlocks
  * - OrderMemory
+ * - RemapOutputTiles
  * - Simplify
  * - UnrollLoops
  * - UpdateParameters
+ * - WorkgroupRemapXCC
  */
 
 #pragma once

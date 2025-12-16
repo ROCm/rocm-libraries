@@ -5,6 +5,10 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.36 (unreleased)
 
+### Added
+
+* Added support for per precision and architecture kernel configuration entries in the library.
+
 ### Optimized
 
 * Removed a potential unnecessary global transpose operation from MPI 3D multi-GPU pencil decompositions.
@@ -13,7 +17,14 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Fixed potential division by zero when constructing plans using dimensions of length 1.
-* Fixed result scaling to work properly with multi-device transforms.
+* Fixed result scaling on multi-device transforms.
+* Fixed callbacks on multi-device transforms.
+* Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
+* Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
+* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
+* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides with small lengths on the two fastest dimensions.
+* Fixed potential launch failure of data generation kernels in test and benchmark programs.
+* Fixed incorrect results on some strided real-complex FFTs on gfx90a.
 
 ## rocFFT 1.0.35 for ROCM 7.1.0
 

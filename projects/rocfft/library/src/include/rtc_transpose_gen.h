@@ -29,20 +29,20 @@
 
 struct TransposeSpecs
 {
-    unsigned int      tileX;
-    unsigned int      tileY;
-    size_t            dim;
-    rocfft_precision  precision;
-    rocfft_array_type inArrayType;
-    rocfft_array_type outArrayType;
-    size_t            largeTwdSteps;
-    int               largeTwdDirection;
-    bool              diagonal;
-    bool              tileAligned;
-    CallbackType      cbtype;
-    LoadOps           loadOps;
-    StoreOps          storeOps;
-    bool              grid3D;
+    unsigned int            tileX;
+    unsigned int            tileY;
+    size_t                  dim;
+    rocfft_precision        precision;
+    rocfft_array_type       inArrayType;
+    rocfft_array_type       outArrayType;
+    size_t                  largeTwdSteps;
+    int                     largeTwdDirection;
+    bool                    diagonal;
+    bool                    tileAligned;
+    CallbackType            cbtype;
+    std::optional<LoadOps>  loadOps;
+    std::optional<StoreOps> storeOps;
+    bool                    grid3D;
 };
 
 // generate name for RTC transpose kernel

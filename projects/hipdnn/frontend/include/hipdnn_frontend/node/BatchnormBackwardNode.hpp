@@ -58,6 +58,19 @@ public:
                     "BatchnormBackwardNode missing dbias for pre-validation"};
         }
 
+        bool hasMean = (attributes.get_mean() != nullptr);
+        bool hasInvVariance = (attributes.get_inv_variance() != nullptr);
+        if(hasMean != hasInvVariance)
+        {
+            return {
+                ErrorCode::INVALID_VALUE,
+                "BatchnormBackwardNode requires both mean and inv_variance to be set, or neither"};
+        }
+
+        // Validate backward spatial dimension constraints
+        HIPDNN_CHECK_ERROR(validateBatchNormTrainingSpatialDimensions(
+            attributes.get_x(), attributes.get_scale(), "Batch normalization backward"));
+
         return {};
     }
 
@@ -144,6 +157,7 @@ public:
         return hipdnn_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
+            toSdkType(attributes.compute_data_type),
             hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
             attributes.pack_attributes(builder).Union());
     }
