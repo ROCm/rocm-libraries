@@ -160,7 +160,7 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     tar zxvf ck.tar.gz &&\
     cd composable_kernel-${CK_COMMIT} && \
     mkdir build && cd build && \
-    num_threads=64 && \
+    num_threads=128 && \
     echo Building CK with ${num_threads} threads && \
     CXX=/opt/rocm/bin/amdclang++ cmake \
     -D CMAKE_PREFIX_PATH=/opt/rocm \
