@@ -28,6 +28,11 @@
 #include <DataGenerator.hpp>
 #include <cblas.h>
 
+#ifdef HIPBLASLT_USE_ROCROLLER
+#include <rocRoller/TensorDescriptor.hpp>
+#include <client/PreSwizzle.hpp>
+#endif
+
 template <typename DT>
 std::vector<uint8_t> unpackData(std::vector<uint8_t> const& dataBytes)
 {
@@ -212,16 +217,17 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&       dataBytes,
 }
 
 template <typename T, typename DT>
-std::vector<float> generateData(T                           dgen,
-                                void*                       data,
-                                void*                       scale,
-                                std::vector<DGen::index_t>  sizes,
-                                std::vector<DGen::index_t>  strides,
-                                uint32_t                    seed,
-                                DGen::DataGeneratorOptions& opt,
-                                int                         elementsPerMXBlock,
-                                bool                        isTranspose,
-                                bool                        isMatrixA)
+std::vector<float> generateData(T                              dgen,
+                                void*                          data,
+                                void*                          scale,
+                                std::vector<DGen::index_t>     sizes,
+                                std::vector<DGen::index_t>     strides,
+                                uint32_t                       seed,
+                                DGen::DataGeneratorOptions&    opt,
+                                int                            elementsPerMXBlock,
+                                bool                           isTranspose,
+                                bool                           isMatrixA,
+                                std::vector<size_t> const&     shuffleTile)
 {
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
@@ -230,6 +236,24 @@ std::vector<float> generateData(T                           dgen,
     std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    // Apply pre-swizzle to scale data if shuffleTile is provided
+    if(shuffleTile.size() == 3)
+    {
+        // Calculate scale tensor dimensions
+        // For matrix A (non-transpose): scale has shape (K/blockSize, M)
+        // For matrix B (transpose): scale has shape (K/blockSize, N)
+        size_t scaleRows = sizes[1] / elementsPerMXBlock; // K dimension / block size
+        size_t scaleCols = sizes[0];                      // M or N dimension
+
+        // Create a TensorDescriptor for the scale data
+        rocRoller::TensorDescriptor scaleDesc(rocRoller::DataType::UInt8, {scaleRows, scaleCols});
+
+        scaleBytes = rocRoller::Client::preSwizzle(scaleBytes, scaleDesc, shuffleTile);
+    }
+#endif
+
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
 
     if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
@@ -333,7 +357,8 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  shuffleTile);
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -347,7 +372,8 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  shuffleTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3_EXT)
     {
@@ -361,7 +387,8 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  shuffleTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2_EXT)
     {
@@ -375,7 +402,8 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  shuffleTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
     {
@@ -389,7 +417,8 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   opt,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
-                                                                  isMatrixA);
+                                                                  isMatrixA,
+                                                                  shuffleTile);
     }
     else
     {

@@ -37,7 +37,10 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
         endif()
     endif()
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
-    target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
+    target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator roc::rocRoller)
+    target_include_directories(hipblaslt-clients-common PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/rocroller/client/include"
+    )
     target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
 endif()
 
