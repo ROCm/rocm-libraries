@@ -36,6 +36,7 @@
  #define HIPCUB_ROCPRIM_BLOCK_RADIX_RANK_SORT_OPERATIONS_HPP_
 
 #include "../../../config.hpp"
+#include "../../../libcxx.hpp"
 #include "../util_type.hpp"
 
 #include <rocprim/config.hpp> // IWYU pragma: export
@@ -94,7 +95,9 @@ struct RadixSortTwiddle
 
         enum
         {
-            FLOAT_KEY = std::is_floating_point<KeyT>::value,
+            FLOAT_KEY = _HIPCUB_STD::is_floating_point_v<KeyT>
+                        || std::is_same_v<KeyT, rocprim::half>
+                        || std::is_same_v<KeyT, rocprim::bfloat16>,
         };
 
         static __device__ __forceinline__ UnsignedBits ProcessFloatMinusZero(UnsignedBits key)
