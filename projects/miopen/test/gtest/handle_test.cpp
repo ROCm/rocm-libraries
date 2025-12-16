@@ -61,23 +61,9 @@ enum kernel_type_t
     miopenOpenCLKernelType
 };
 
-std::ostream& operator<<(std::ostream& os, kernel_type_t kernelType)
-{
-    switch(kernelType)
-    {
-    case miopenHIPKernelType: os << "miopenHIPKernelType"; break;
-
-    case miopenOpenCLKernelType: os << "miopenOpenCLKernelType"; break;
-
-    default: break;
-    }
-
-    return os;
-}
-
 using TestCase = NamedParameter<bool>;
 
-std::string Write2s(kernel_type_t kern_type)
+static std::string Write2s(kernel_type_t kern_type)
 {
     if(kern_type == miopenHIPKernelType)
     {
@@ -118,7 +104,7 @@ std::string Write2s(kernel_type_t kern_type)
     }
 }
 
-void run2s(const miopen::Handle& h, std::size_t n, kernel_type_t kern_type)
+static void run2s(const miopen::Handle& h, std::size_t n, kernel_type_t kern_type)
 {
     std::vector<int> data_in(n, 1);
     auto data_dev = h.Write(data_in);
@@ -156,7 +142,7 @@ void run2s(const miopen::Handle& h, std::size_t n, kernel_type_t kern_type)
     EXPECT_EQ(data_out, data_in);
 }
 
-void test_multithreads(kernel_type_t kern_type, const bool with_stream = false)
+static void test_multithreads(kernel_type_t kern_type, const bool with_stream = false)
 {
     auto&& h1 = get_handle();
     auto&& h2 = get_handle_with_stream(h1);
@@ -168,7 +154,7 @@ void test_multithreads(kernel_type_t kern_type, const bool with_stream = false)
     run2s(with_stream ? h2 : h1, 4, kern_type);
 }
 
-std::string WriteError(kernel_type_t kern_type)
+static std::string WriteError(kernel_type_t kern_type)
 {
     if(kern_type == miopenOpenCLKernelType)
     {
@@ -191,7 +177,7 @@ std::string WriteError(kernel_type_t kern_type)
     }
 }
 
-void test_errors(kernel_type_t kern_type)
+static void test_errors(kernel_type_t kern_type)
 {
     auto&& h = get_handle();
     if(kern_type == miopenOpenCLKernelType)
@@ -254,7 +240,7 @@ void test_errors(kernel_type_t kern_type)
     }
 }
 
-std::string WriteNop(kernel_type_t kern_type)
+static std::string WriteNop(kernel_type_t kern_type)
 {
     if(kern_type == miopenOpenCLKernelType)
     {
@@ -276,10 +262,10 @@ std::string WriteNop(kernel_type_t kern_type)
     }
 }
 
-void test_warnings(kernel_type_t kern_type)
+static void test_warnings(kernel_type_t kern_type)
 {
-    auto&& h = get_handle();
 #if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
+    auto&& h = get_handle();
     if(kern_type == miopenOpenCLKernelType)
     {
         EXPECT_ANY_THROW(h.AddKernel(
@@ -299,11 +285,10 @@ void test_warnings(kernel_type_t kern_type)
     }
 #else
     (void)kern_type;
-    (void)h; // To silence warnings.
 #endif
 }
 
-void test_arch_name()
+static void test_arch_name()
 {
     auto&& h = get_handle();
 
@@ -329,9 +314,9 @@ void test_arch_name()
         known_arch.begin(), known_arch.end(), [&](std::string arch) { return arch == this_arch; }));
 }
 
-inline auto GenCases() { return MakeNamedParameterValues<bool>("with_stream", false, true); }
+static inline auto GenCases() { return MakeNamedParameterValues<bool>("with_stream", false, true); }
 
-inline auto GetCases()
+static inline auto GetCases()
 {
     static const auto cases = GenCases();
     return cases;
