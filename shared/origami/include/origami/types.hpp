@@ -332,6 +332,9 @@ struct config_t {
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
 
+  /// Custom mainloop scheduling flag
+  bool custom_mainloop_scheduling = false;
+
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
@@ -363,14 +366,19 @@ struct config_t {
   bool cms_kernel = false;
 
   constexpr bool operator==(const config_t& o) const noexcept {
-    return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && workgroup_mapping == o.workgroup_mapping &&
+    return mt == o.mt && 
+           mi == o.mi && 
+           custom_mainloop_scheduling == o.custom_mainloop_scheduling &&
+           cache_hints_a == o.cache_hints_a &&
+           cache_hints_b == o.cache_hints_b && 
+           workgroup_mapping == o.workgroup_mapping &&
            prediction_mode == o.prediction_mode && target == o.target;
   }
 
   std::size_t hash() const {
     return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
+           std::hash<int>()(custom_mainloop_scheduling) ^ std::hash<int>()(occupancy) ^
            std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
            std::hash<int>()(workgroup_mapping) ^
            std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
