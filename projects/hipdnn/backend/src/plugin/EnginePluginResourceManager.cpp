@@ -561,5 +561,31 @@ hipdnnEnginePluginExecutionContext_t EngineExecutionContextWrapper::get() const
     return _executionContext;
 }
 
+std::string EnginePluginResourceManager::toString() const
+{
+    std::string str = "EnginePluginResourceManager: [";
+    if(_pm)
+    {
+        str += "loadedPlugins=" + std::to_string(_pm->getLoadedPluginFiles().size());
+        str += ", loadedPluginPaths=[";
+        auto paths = _pm->getLoadedPluginFiles();
+        for(auto it = paths.begin(); it != paths.end(); ++it)
+        {
+            str += it->string();
+            if(std::next(it) != paths.end())
+            {
+                str += ", ";
+            }
+        }
+        str += "]";
+    }
+    else
+    {
+        str += "loadedPlugins=0";
+    }
+    str += "]";
+    return str;
+}
+
 } // namespace plugin
 } // namespace hipdnn_backend
