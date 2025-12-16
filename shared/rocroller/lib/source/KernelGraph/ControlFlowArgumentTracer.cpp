@@ -145,14 +145,17 @@ namespace rocRoller::KernelGraph
             auto dest = m_graph.mapper.get(node, NaryArgument::DEST);
             if(dest > 0)
             {
-                // Register the expression in m_tagManager before incorporate,
-                // so DataFlowTags referencing this tag can be resolved.
-                if(op.expression)
-                    m_tagManager.addExpression(dest, op.expression, {});
-
-                // Trace the coordinate's size/stride for kernel argument references.
-                incorporate(node, m_tracer.trace(dest, false));
                 incorporate(node, m_tracer.trace(dest, true));
+                incorporate(node, m_tracer.trace(dest, false));
+                if(op.strideExpressionAttributes)
+                {
+                    incorporate(node, op.strideExpressionAttributes->elementBlockStride);
+                    incorporate(node, op.strideExpressionAttributes->trLoadPairStride);
+
+                    // Register the stride expression in the TagManager so that other nodes
+                    // referencing this stride coordinate (via DataFlowTag) can trace dependencies.
+                    m_tagManager.addExpression(dest, op.expression, {});
+                }
             }
 
             incorporate(node, op.expression);
