@@ -59,18 +59,15 @@ namespace rocRoller
                     const auto storeLDSTags{
                         getAssociatedOps<LoadTiled, StoreLDSTile>(kgraph, loadGlobal)};
 
+                    AssertFatal(storeLDSTags.size() > 0,
+                                "LoadTiled must be associated with a StoreLDSTile");
+
                     if(storeLDSTags.size() == 1)
                     {
                         result.push_back({loadGlobal, storeLDSTags[0]});
                     }
                     else
                     {
-                        AssertFatal(
-                            storeLDSTags.size() >= 2,
-                            "AddDirect2LDS: At least 2 ComputeIndex operations required for "
-                            "StoreLDSTile.",
-                            ShowValue(loadGlobal),
-                            ShowValue(storeLDSTags.size()));
                         for(const auto& storeLDS : storeLDSTags)
                         {
                             auto maybeForLoopOfLoad
@@ -92,6 +89,9 @@ namespace rocRoller
                                 result.push_back({loadGlobal, storeLDS});
                             }
                         }
+                        AssertFatal(result.back().first == loadGlobal,
+                                    "Couldn't match the associated StoreLDSTile",
+                                    ShowValue(loadGlobal));
                     }
                 }
                 return result;

@@ -657,15 +657,12 @@ namespace GEMMTests
 
         problem.macM = 128;
         problem.macN = 128;
-        problem.macK = 256;
+        problem.macK = 128;
 
         problem.m = problem.macM * 4;
         problem.n = problem.macN * problem.numWGs / 2 + problem.macN * 2;
 
         ASSERT_GE(problem.m * problem.n / problem.macM / problem.macN, problem.numWGs);
-        std::cout << problem.m * problem.n / problem.macM / problem.macN << std::endl;
-        std::cout << problem.numWGs << std::endl;
-        std::cout << mode << std::endl;
 
         problem.streamK = mode;
         problem.k       = problem.macK * 8;
@@ -675,7 +672,10 @@ namespace GEMMTests
         problem.loadPathA = loadPathA;
         problem.loadPathB = loadPathB;
 
-        problem.unrollK = 2;
+        problem.unrollK           = 2;
+        problem.prefetch          = true;
+        problem.prefetchInFlight  = 2;
+        problem.prefetchLDSFactor = 0;
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
