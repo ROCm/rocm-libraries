@@ -88,7 +88,7 @@ TYPED_TEST_SUITE_P(HipcubDeviceRadixSort);
 
 template<class T>
 auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<std::is_floating_point<T>::value, std::vector<T>>
+    -> std::enable_if_t<_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
 {
     auto result = test_utils::get_random_data<T>(size,
                                                  test_utils::numeric_limits<T>::min(),
@@ -100,7 +100,7 @@ auto generate_key_input(size_t size, unsigned int seed_value)
 
 template<class T>
 auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<!std::is_floating_point<T>::value, std::vector<T>>
+    -> std::enable_if_t<!_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
 {
     using inner_t = typename test_utils::inner_type<T>::type;
     return test_utils::get_random_data<T>(size,
