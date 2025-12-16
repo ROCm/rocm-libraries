@@ -153,10 +153,10 @@ endif()
 
 # Include sources
 if(HIPSPARSE_ENABLE_HIP)
-  add_subdirectory(rocm)
+  include(rocm)
 elseif(HIPSPARSE_ENABLE_CUDA)
   if(CUDAToolkit_VERSION MATCHES "12.8")
-    add_subdirectory(cuda/12.8)
+    include(cuda/12.8)
     message("Building hipsparse-test executable using CUDA_VERSION ${CUDAToolkit_VERSION}")
   else()
     message("ERROR: Testing on CUDA_VERSION ${CUDAToolkit_VERSION} not supported.")
