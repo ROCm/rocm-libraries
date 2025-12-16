@@ -1015,10 +1015,11 @@ def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
     """
     Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
     """
-    if context.get("kernel", {}).get("UseF32XEmulation", False):
-        message = "CMS validation is currently disabled for F32X emulation"
+    if context.get("kernel", {}).get("UseF32XEmulation", False) or context.get("kernel", {}).get("ForceUnrollSubIter", False):
+        message = "LR completion before vmfma validation is disabled for F32X emulation or ForceUnrollSubIter"
         printWarning(f"{message}")
         return True, message
+    
     if len(schedule_info.mfmaReorder) != 0:
         printWarning("CMS Validation does not currently support mfmaReorder, cannot guarantee that LRs will be correct.")
         return True, ""
