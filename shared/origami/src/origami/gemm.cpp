@@ -934,19 +934,21 @@ double compute_total_latency(const problem_t& problem,
       total_latency = total_latency * 10;
     }
 
-    // TODO is Origami missing something for the "Large N, very small M and K" case?
-    // In BBS NN gfx950, MT192x336x32 performs poorly on "Large N, very small M and K".
-    if(MT_M == 192 && MT_N == 336 && MT_K == 32 && !a_trans && !b_trans && problem.a_dtype == data_type_t::BFloat16) {
-      total_latency = total_latency * 10;
-    }
-    // In HHS TN gfx950, MT128x512x32 performs poorly on "Large N, very small M and K".
-    if(MT_M == 128 && MT_N == 512 && MT_K == 32 && a_trans && !b_trans && problem.a_dtype == data_type_t::Half) {
-      total_latency = total_latency * 10;
-    }
-    // In HHS NT gfx950, DP kernel with MT16x16x64 was added as a fallback kernel (VWA1 and VWB1),
-    // but it performs very poorly, especially on "Large K, very small M and N".
-    if(MT_M == 16 && MT_N == 16 && MT_K == 64 && !a_trans && b_trans && problem.a_dtype == data_type_t::Half) {
-      total_latency = total_latency * 10;
+    if(hardware.arch == hardware_t::architecture_t::gfx950) {
+      // TODO is Origami missing something for the "Large N, very small M and K" case?
+      // In BBS NN gfx950, MT192x336x32 performs poorly on "Large N, very small M and K".
+      if(MT_M == 192 && MT_N == 336 && MT_K == 32 && !a_trans && !b_trans && problem.a_dtype == data_type_t::BFloat16) {
+        total_latency = total_latency * 10;
+      }
+      // In HHS TN gfx950, MT128x512x32 performs poorly on "Large N, very small M and K".
+      if(MT_M == 128 && MT_N == 512 && MT_K == 32 && a_trans && !b_trans && problem.a_dtype == data_type_t::Half) {
+        total_latency = total_latency * 10;
+      }
+      // In HHS NT gfx950, DP kernel with MT16x16x64 was added as a fallback kernel (VWA1 and VWB1),
+      // but it performs very poorly, especially on "Large K, very small M and N".
+      if(MT_M == 16 && MT_N == 16 && MT_K == 64 && !a_trans && b_trans && problem.a_dtype == data_type_t::Half) {
+        total_latency = total_latency * 10;
+      }
     }
 
     bool tf32_emu = ((problem.mi_dtype == data_type_t::XFloat32) &&
