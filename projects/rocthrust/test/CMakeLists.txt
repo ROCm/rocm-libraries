@@ -357,9 +357,9 @@ rocm_install(
     RENAME "CTestTestfile.cmake"
 )
 
-# Generate the resource spec file at install time
+# Install the resource spec file
 rocm_install(
-    CODE "execute_process(COMMAND cmake -P ${CMAKE_SOURCE_DIR}/cmake/GenerateResourceSpec.cmake
-                          WORKING_DIRECTORY  \"${ROCM_PATH}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}\")"
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/../resources.json"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
 )
