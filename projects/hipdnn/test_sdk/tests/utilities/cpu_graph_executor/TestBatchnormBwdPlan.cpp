@@ -47,9 +47,11 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     BatchnormBwdParams params;
     initTensorValues(params.dyTensor, DataType::FLOAT, planTensorBundle.dyTensor, 1);
     initTensorValues(params.xTensor, DataType::FLOAT, planTensorBundle.xTensor, 2);
-    initTensorValues(params.meanTensor, DataType::FLOAT, planTensorBundle.meanTensor, 3);
+    params.meanTensor.emplace();
+    initTensorValues(*params.meanTensor, DataType::FLOAT, planTensorBundle.meanTensor, 3);
+    params.invVarianceTensor.emplace();
     initTensorValues(
-        params.invVarianceTensor, DataType::FLOAT, planTensorBundle.invVarianceTensor, 4);
+        *params.invVarianceTensor, DataType::FLOAT, planTensorBundle.invVarianceTensor, 4);
     initTensorValues(params.scaleTensor, DataType::FLOAT, planTensorBundle.scaleTensor, 5);
     initTensorValues(params.dxTensor, DataType::FLOAT, planTensorBundle.dxTensor, 6);
     initTensorValues(params.dscaleTensor, DataType::FLOAT, planTensorBundle.dscaleTensor, 7);
@@ -69,12 +71,12 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
     CpuFpReferenceBatchnorm::backward(directTensorBundle.dyTensor,
                                       directTensorBundle.xTensor,
-                                      directTensorBundle.meanTensor,
-                                      directTensorBundle.invVarianceTensor,
                                       directTensorBundle.scaleTensor,
                                       directTensorBundle.dxTensor,
                                       directTensorBundle.dscaleTensor,
-                                      directTensorBundle.dbiasTensor);
+                                      directTensorBundle.dbiasTensor,
+                                      &directTensorBundle.meanTensor,
+                                      &directTensorBundle.invVarianceTensor);
 
     bwdPlan.execute(variantPack);
 
@@ -116,6 +118,53 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
         = dynamic_cast<BatchnormBwdPlan<float, float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
+}
+
+TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
+{
+    std::vector<int64_t> dims = {6, 3, 32, 32};
+    unsigned int seed = getGlobalTestSeed();
+    BatchnormBwdTensorBundle<float, float, float> planTensorBundle(dims, seed, TensorLayout::NHWC);
+    BatchnormBwdTensorBundle<float, float, float> directTensorBundle(
+        dims, seed, TensorLayout::NHWC);
+
+    BatchnormBwdParams params;
+    initTensorValues(params.dyTensor, DataType::FLOAT, planTensorBundle.dyTensor, 1);
+    initTensorValues(params.xTensor, DataType::FLOAT, planTensorBundle.xTensor, 2);
+    // Do NOT set meanTensor or invVarianceTensor - testing NoStats case
+    initTensorValues(params.scaleTensor, DataType::FLOAT, planTensorBundle.scaleTensor, 5);
+    initTensorValues(params.dxTensor, DataType::FLOAT, planTensorBundle.dxTensor, 6);
+    initTensorValues(params.dscaleTensor, DataType::FLOAT, planTensorBundle.dscaleTensor, 7);
+    initTensorValues(params.dbiasTensor, DataType::FLOAT, planTensorBundle.dbiasTensor, 8);
+
+    BatchnormBwdPlan<float, float, float, float, float, float> bwdPlan(std::move(params));
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = planTensorBundle.dyTensor.memory().hostData();
+    variantPack[2] = planTensorBundle.xTensor.memory().hostData();
+    variantPack[5] = planTensorBundle.scaleTensor.memory().hostData();
+    variantPack[6] = planTensorBundle.dxTensor.memory().hostData();
+    variantPack[7] = planTensorBundle.dscaleTensor.memory().hostData();
+    variantPack[8] = planTensorBundle.dbiasTensor.memory().hostData();
+
+    CpuFpReferenceBatchnorm::backward(directTensorBundle.dyTensor,
+                                      directTensorBundle.xTensor,
+                                      directTensorBundle.scaleTensor,
+                                      directTensorBundle.dxTensor,
+                                      directTensorBundle.dscaleTensor,
+                                      directTensorBundle.dbiasTensor);
+
+    bwdPlan.execute(variantPack);
+
+    CpuFpReferenceValidation<float> cpuRefOutputValidation(
+        batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
+
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dscaleTensor,
+                                                planTensorBundle.dscaleTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dbiasTensor,
+                                                planTensorBundle.dbiasTensor));
 }
 
 TEST(TestBatchnormBwdPlanBuilder, IsApplicable)

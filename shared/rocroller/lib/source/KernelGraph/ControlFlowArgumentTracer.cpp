@@ -110,7 +110,6 @@ namespace rocRoller::KernelGraph
         void incorporate(int node, std::unordered_set<std::string> const& args)
         {
             auto& dest = m_referencedArgs[node];
-
             for(auto const& arg : args)
             {
                 incorporate(node, arg);
@@ -120,7 +119,6 @@ namespace rocRoller::KernelGraph
         void incorporate(int node, std::string const& arg)
         {
             auto& dest = m_referencedArgs[node];
-
             dest.insert(m_kernel->findArgument(arg).name);
         }
 
@@ -171,12 +169,14 @@ namespace rocRoller::KernelGraph
                         std::unordered_set<std::string> targetCoords;
                         for(auto coord : coords)
                         {
-                            mergeSets(targetCoords, m_tracer.trace(coord, false));
+                            if(m_traceSizesInComputeIndex)
+                                mergeSets(targetCoords, m_tracer.trace(coord, false));
                             mergeSets(targetCoords, m_tracer.trace(coord, true));
                         }
                         for(auto coord : path)
                         {
-                            mergeSets(targetCoords, m_tracer.trace(coord, false));
+                            if(m_traceSizesInComputeIndex)
+                                mergeSets(targetCoords, m_tracer.trace(coord, false));
                             mergeSets(targetCoords, m_tracer.trace(coord, true));
                         }
 
@@ -304,11 +304,14 @@ namespace rocRoller::KernelGraph
             incorporate(node, std::unordered_set<std::string>{});
         }
 
-        ControlFlowArgumentVisitor(KernelGraph const& graph, AssemblyKernelPtr kernel)
+        ControlFlowArgumentVisitor(KernelGraph const& graph,
+                                   AssemblyKernelPtr  kernel,
+                                   bool               traceSizesInComputeIndex = false)
             : TopoControlGraphVisitor(graph)
             , m_tracer{graph}
             , m_tagManager(nullptr)
             , m_kernel(std::move(kernel))
+            , m_traceSizesInComputeIndex(traceSizesInComputeIndex)
         {
         }
 
@@ -357,6 +360,17 @@ namespace rocRoller::KernelGraph
 
             Log::debug("-=-=-=-=-=-=-=-=-=-=");
 
+            // Collect directly referenced args before propagation
+            // These are args actually used in control flow operations
+            for(auto const& [node, args] : m_referencedArgs)
+            {
+                for(auto const& arg : args)
+                {
+                    m_directlyReferencedArgs.insert(arg);
+                }
+            }
+
+            // Now propagate indirect references (args referenced by other args' expressions)
             do
             {
                 any = false;
@@ -383,6 +397,14 @@ namespace rocRoller::KernelGraph
                 }
             } while(any);
         }
+
+        // Arguments directly used in control flow (before propagation)
+        std::set<std::string> m_directlyReferencedArgs;
+
+        // Whether to trace sizes (not just strides) in ComputeIndex operations.
+        // Default is false because index computation depends only on unroll-iteration and stride,
+        // which doesn't need sizes (see LoadStoreTileGenerator.cpp:getOffsetExpr).
+        bool m_traceSizesInComputeIndex = false;
 
         CoordinateArgumentTracer m_tracer;
 
@@ -416,10 +438,24 @@ namespace rocRoller::KernelGraph
         for(auto arg : kernel->arguments())
             m_neverReferencedArguments.insert(arg.name);
 
+        // Collect all referenced args and compute launch-time-only args
+        std::set<std::string> allReferenced;
         for(auto const& [node, args] : m_referencedArguments)
         {
             for(auto const& arg : args)
+            {
                 m_neverReferencedArguments.erase(arg);
+                allReferenced.insert(arg);
+            }
+        }
+
+        // Launch-time-only args: referenced but not directly referenced
+        // These were added via propagation from other argument expressions
+        // which are evaluated at kernel launch time, not execute time
+        for(auto const& arg : allReferenced)
+        {
+            if(!visitor.m_directlyReferencedArgs.contains(arg))
+                m_launchTimeOnlyArguments.insert(arg);
         }
 
         if(m_neverReferencedArguments.size() > 0)
@@ -428,7 +464,22 @@ namespace rocRoller::KernelGraph
             msg << "Argument(s) ";
             streamJoin(msg, m_neverReferencedArguments, ", ");
             msg << " are never referenced!";
+            Log::debug(msg.str());
+        }
 
+        if(visitor.m_directlyReferencedArgs.size() > 0)
+        {
+            std::ostringstream msg;
+            msg << "Directly referenced args (" << visitor.m_directlyReferencedArgs.size() << "): ";
+            streamJoin(msg, visitor.m_directlyReferencedArgs, ", ");
+            Log::debug(msg.str());
+        }
+
+        if(m_launchTimeOnlyArguments.size() > 0)
+        {
+            std::ostringstream msg;
+            msg << "Launch-time-only argument(s) (skip loading): ";
+            streamJoin(msg, m_launchTimeOnlyArguments, ", ");
             Log::debug(msg.str());
         }
     }
@@ -451,5 +502,10 @@ namespace rocRoller::KernelGraph
     std::set<std::string> const& ControlFlowArgumentTracer::neverReferencedArguments() const
     {
         return m_neverReferencedArguments;
+    }
+
+    std::set<std::string> const& ControlFlowArgumentTracer::launchTimeOnlyArguments() const
+    {
+        return m_launchTimeOnlyArguments;
     }
 }

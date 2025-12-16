@@ -1065,7 +1065,7 @@ void SBCCNode::InitIntrinsicMode()
         return;
     }
 
-    // case 1: is runing tuning or a tuned solution, then use the setting in the config
+    // case 1: is running tuning or a tuned solution, then use the setting in the config
     if(specified_key != nullptr)
     {
         auto& config  = (*specified_key.get()).kernel_config;
@@ -1354,7 +1354,7 @@ void SBCRNode::InitIntrinsicMode()
         return;
     }
 
-    // case 1: is runing tuning or a tuned solution, then use the setting in the config
+    // case 1: is running tuning or a tuned solution, then use the setting in the config
     if(specified_key != nullptr)
     {
         auto& config  = (*specified_key.get()).kernel_config;

@@ -45,9 +45,6 @@ include: test_csrmm.yaml
 include: test_csrsm2.yaml
 include: test_gemmi.yaml
 
-# reorder
-include: test_csrcolor.yaml
-
 # precond
 include: test_csric02.yaml
 include: test_csrilu02.yaml
@@ -58,6 +55,13 @@ include: test_gtsv2_nopivot.yaml
 include: test_gtsv2_strided_batch.yaml
 include: test_gtsv_interleaved_batch.yaml
 include: test_gpsv_interleaved_batch.yaml
+
+# extra
+include: test_csrgeam.yaml
+include: test_csrgeam2.yaml
+include: test_csrgemm.yaml
+include: test_csrgemm2_a.yaml
+include: test_csrgemm2_b.yaml
 
 # reorder
 include: test_csrcolor.yaml

@@ -205,6 +205,11 @@ def findConfigs(rootDir=None):
     params = []
     for (dirpath, dirnames, filenames) in os.walk(rootDir):
         for filename in filenames:
+            # Conditionally skip icache_flush.yaml on rocm 7.1 due to ROCm bug.
+            if filename == "icache_flush.yaml" and rocm_version and rocm_version.startswith("7.1"):
+                print(f"INFO: Skipping '{filename}' on ROCm {rocm_version}.")
+                continue
+
             # Skip build client script
             if filename == "build_client.yaml":
                 continue

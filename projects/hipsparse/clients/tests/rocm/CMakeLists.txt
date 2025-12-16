@@ -39,12 +39,6 @@ set(HIPSPARSE_TEST_SOURCES
     test_bsrsm2.cpp
     test_csrsm2.cpp
     test_gemmi.cpp
-    # Extra    
-    test_csrgeam2.cpp
-    test_csrgemm2_a.cpp
-    test_csrgemm2_b.cpp
-    # Rorder
-    test_csrcolor.cpp
     # Precond 
     test_bsric02.cpp
     test_bsrilu02.cpp
@@ -55,6 +49,14 @@ set(HIPSPARSE_TEST_SOURCES
     test_gtsv2_nopivot.cpp
     test_gtsv2_strided_batch.cpp
     test_gtsv_interleaved_batch.cpp
+    # Extra    
+    test_csrgeam.cpp
+    test_csrgeam2.cpp
+    test_csrgemm.cpp
+    test_csrgemm2_a.cpp
+    test_csrgemm2_b.cpp
+    # Reorder
+    test_csrcolor.cpp
     # Conversion
     test_bsr2csr.cpp
     test_coo2csr.cpp
@@ -157,6 +159,12 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_gtsv2_nopivot.yaml
     rocm/test_gtsv2_strided_batch.yaml
     rocm/test_gtsv_interleaved_batch.yaml
+    # Extra
+    rocm/test_csrgeam.yaml
+    rocm/test_csrgeam2.yaml
+    rocm/test_csrgemm.yaml
+    rocm/test_csrgemm2_a.yaml
+    rocm/test_csrgemm2_b.yaml
     # Reorder
     rocm/test_csrcolor.yaml
     # Conversion

@@ -6,14 +6,14 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -142,23 +142,23 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         // Step 1: Compute convolution output
         utilities::Tensor<InputType> convRefTensor(convOutAttr->get_dim(), layout);
-        test_utilities::CpuFpReferenceConvolution::fprop(
+        hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, convRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
-        test_utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
             hipdnn_sdk::data_objects::PointwiseMode::ADD, biasRefTensor, convRefTensor, biasTensor);
 
         // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
-        test_utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
             hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, biasRefTensor);
 
-        auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
+        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
 
         auto outValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool outValid = outValidator.allClose(yRefTensor, yTensor);
 
