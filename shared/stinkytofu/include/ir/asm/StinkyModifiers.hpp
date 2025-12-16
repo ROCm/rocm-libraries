@@ -317,6 +317,20 @@ namespace stinkytofu
         int8_t tlcnt;
     };
 
+    inline std::ostream& operator<<(std::ostream& os, const SWaitCntData& waitCntData)
+    {
+        os << "vlcnt=" << (int)waitCntData.vlcnt << ", vscnt=" << (int)waitCntData.vscnt
+           << ", dlcnt=" << (int)waitCntData.dlcnt << ", dscnt=" << (int)waitCntData.dscnt
+           << ", kmcnt=" << (int)waitCntData.kmcnt;
+        return os;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const SWaitTensorCntData& waitTensorCntData)
+    {
+        os << "tlcnt=" << (int)waitTensorCntData.tlcnt;
+        return os;
+    }
+
     // clang-format off
     // Helper template for type mapping
     template<typename T> constexpr Modifier::Type getModifierType();

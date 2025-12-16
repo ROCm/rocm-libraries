@@ -119,6 +119,10 @@ namespace stinkytofu
             }
         }
         os << ")";
+        if(auto waitCntData = inst.getModifier<SWaitCntData>())
+        {
+            os << " (" << *waitCntData << ")";
+        }
 
         // Print attributes
         os << " { ";
