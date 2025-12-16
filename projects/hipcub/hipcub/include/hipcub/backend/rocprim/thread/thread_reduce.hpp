@@ -68,46 +68,6 @@ AccumType ThreadReduceSequential(const InputType& input, ReductionOp reduction_o
     return retval;
 }
 
-// This function is not used, it is just here for compatibility
-template<typename AccumType, typename InputType, typename ReductionOp>
-[[nodiscard]] [[deprecated("This function is an internal API, using it directly is not "
-                           "recommended.")]]
-__device__ __forceinline__
-AccumType ThreadReduceBinaryTree(const InputType& input, ReductionOp reduction_op)
-{
-    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
-#pragma unroll
-    for(int i = 1; i < length; i *= 2)
-    {
-#pragma unroll
-        for(int j = 0; j + i < length; j += i * 2)
-        {
-            input[j] = reduction_op(input[j], input[j + i]);
-        }
-    }
-    return input[0];
-}
-
-template<typename AccumType, typename InputType, typename ReductionOp>
-[[nodiscard]] [[deprecated("This function is an internal API, using it directly is not "
-                           "recommended.")]]
-__device__ __forceinline__
-AccumType ThreadReduceTernaryTree(const InputType& input, ReductionOp reduction_op)
-{
-    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
-#pragma unroll
-    for(int i = 1; i < length; i *= 3)
-    {
-#pragma unroll
-        for(int j = 0; j + i < length; j += i * 3)
-        {
-            auto value = reduction_op(input[j], input[j + i]);
-            input[j]   = (j + i * 2 < length) ? reduction_op(value, input[j + i * 2]) : value;
-        }
-    }
-    return input[0];
-}
-
 // TODO: we should also implement ThreadReduceSimd after simd intrinsics are available.
 
 } // namespace internal

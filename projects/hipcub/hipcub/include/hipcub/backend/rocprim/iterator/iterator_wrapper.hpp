@@ -186,14 +186,6 @@ public:
     {
         return iterator_ >= other.iterator_;
     }
-
-    [[deprecated]]
-    friend std::ostream&
-        operator<<(std::ostream& os, const DerivedIterator& iter)
-    {
-        os << iter.iterator_;
-        return os;
-    }
 };
 
 } // namespace detail
