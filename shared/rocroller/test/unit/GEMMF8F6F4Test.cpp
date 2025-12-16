@@ -675,6 +675,8 @@ namespace GEMMTests
         problem.loadPathA = loadPathA;
         problem.loadPathB = loadPathB;
 
+        problem.unrollK = 2;
+
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
