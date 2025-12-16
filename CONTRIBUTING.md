@@ -217,7 +217,7 @@ pre-commit run --all-files
 By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project, follow this incremental approach to avoid pre-commit failures:
 
 1.  **Apply Fixes**:
-    Remove your project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml) on your local machine (**do not commit this change yet**) and run the checks:
+    Remove your project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml) on your local machine (**do not commit this change yet**) and run pre-commit:
     ```bash
     pre-commit run --files $(git ls-files projects/<your-project>)
     ```
@@ -232,10 +232,8 @@ By default, most projects are excluded from pre-commit checks in [`.pre-commit-c
         ```
     *   Submit a PR with the config change and any remaining fixes.
 
-3.  **Handle Optional Dependencies in CI**: If your project requires specific system dependencies to run pre-commit hooks in CI:
-    > [!IMPORTANT]
-    > This is only needed if you are adding custom pre-commit hooks that rely on external tools, and they can't be installed by the hook itself.
-
+3.  **(Optional) Install Dependencies in CI**:
+    Only applicable if you're adding custom pre-commit hooks whose dependencies aren't self-contained in the hook:
     *   Edit [`.github/workflows/pre-commit.yml`](.github/workflows/pre-commit.yml).
     *   Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Detect project changes" step (add it on a new line):
         ```yaml
