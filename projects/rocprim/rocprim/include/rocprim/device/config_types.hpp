@@ -356,28 +356,32 @@ struct target_arch_descriptor
     const char *arch_name;
 };
 
-#define X(ID) target_arch_descriptor{target_arch::ID, #ID}
+#define ROCPRIM_DEF_ARCH(ID) \
+    target_arch_descriptor   \
+    {                        \
+        target_arch::ID, #ID \
+    }
 constexpr auto target_arch_descriptors = std::array{
-    X(gfx803),
-    X(gfx900),
-    X(gfx906),
-    X(gfx908),
-    X(gfx90a),
-    X(gfx942),
-    X(gfx950),
-    X(gfx1030),
-    X(gfx1100),
-    X(gfx1101),
-    X(gfx1102),
-    X(gfx1103),
-    X(gfx1150),
-    X(gfx1151),
-    X(gfx1152),
-    X(gfx1153),
-    X(gfx1200),
-    X(gfx1201),
+    ROCPRIM_DEF_ARCH(gfx803),
+    ROCPRIM_DEF_ARCH(gfx900),
+    ROCPRIM_DEF_ARCH(gfx906),
+    ROCPRIM_DEF_ARCH(gfx908),
+    ROCPRIM_DEF_ARCH(gfx90a),
+    ROCPRIM_DEF_ARCH(gfx942),
+    ROCPRIM_DEF_ARCH(gfx950),
+    ROCPRIM_DEF_ARCH(gfx1030),
+    ROCPRIM_DEF_ARCH(gfx1100),
+    ROCPRIM_DEF_ARCH(gfx1101),
+    ROCPRIM_DEF_ARCH(gfx1102),
+    ROCPRIM_DEF_ARCH(gfx1103),
+    ROCPRIM_DEF_ARCH(gfx1150),
+    ROCPRIM_DEF_ARCH(gfx1151),
+    ROCPRIM_DEF_ARCH(gfx1152),
+    ROCPRIM_DEF_ARCH(gfx1153),
+    ROCPRIM_DEF_ARCH(gfx1200),
+    ROCPRIM_DEF_ARCH(gfx1201),
 };
-#undef X
+#undef ROCPRIM_DEF_ARCH
 
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
