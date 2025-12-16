@@ -120,13 +120,7 @@ namespace rocRoller::KernelGraph
         {
             auto& dest = m_referencedArgs[node];
 
-            // If the arg is a kernel argument name, use it directly.
-            // Otherwise it may be a CommandArgument name - store it as-is
-            // and fixup() will resolve it via m_subReferencedArgs.
-            if(m_kernel->hasArgument(arg))
-                dest.insert(m_kernel->findArgument(arg).name);
-            else
-                dest.insert(arg);
+            dest.insert(m_kernel->findArgument(arg).name);
         }
 
         void operator()(int node, CG::SetCoordinate const& op)
