@@ -242,6 +242,10 @@ def verify_global_reads_not_too_early(scheduleInfo, context: dict, code_path: in
     constraints between LRA0 and GRB, or between LRB0 and GRA, because the LDS
     used for A and B are completely separate.
     """
+    if context.get("kernel", {}).get("UseF32XEmulation", False):
+        message = "CMS validation is currently disabled for F32X emulation"
+        printWarning(f"{message}")
+        return True, message
 
     # Get the relative order of the relevant operations within a vmfma index.
     positions = {
@@ -975,6 +979,10 @@ def verify_grs_finish_before_lr1s(schedule_info: 'ScheduleInfo', context: dict, 
     """
     Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
     """
+    if context.get("kernel", {}).get("UseF32XEmulation", False):
+        message = "CMS validation is currently disabled for F32X emulation"
+        printWarning(f"{message}")
+        return True, message
     available_keys = schedule_info.optSchedule.keys()
     if "LRA1" not in available_keys and "LRA3" in available_keys:
         printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
@@ -1002,6 +1010,10 @@ def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
     """
     Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
     """
+    if context.get("kernel", {}).get("UseF32XEmulation", False):
+        message = "CMS validation is currently disabled for F32X emulation"
+        printWarning(f"{message}")
+        return True, message
     if len(schedule_info.mfmaReorder) != 0:
         printWarning("CMS Validation does not currently support mfmaReorder, cannot guarantee that LRs will be correct.")
         return True, ""
@@ -1083,13 +1095,6 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     Note 2: if False is returned, this is not proof that the schedule
     is invalid. It may be a false positive.
     """
-
-    # Cases where validation is not currently possible.
-    if context.get("kernel", {}).get("UseF32XEmulation", False):
-        message = "CMS validation is currently disabled for F32X emulation"
-        printWarning(f"{message}")
-        return True, message
-
     # Case where there was an explicit request to skip validation.
     if scheduleInfo.__skipValidation__:
         mt0 = context.get("kernel", {}).get("MacroTile0", "?")
