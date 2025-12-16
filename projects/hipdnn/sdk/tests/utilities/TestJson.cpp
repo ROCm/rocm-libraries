@@ -81,6 +81,24 @@ TEST(TestJson, GraphToJsonAndBack)
 
         toJsonAndBackTestSuite(graph, "(valid pointwise graph)");
     }
+    {
+        auto graphBuilder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+
+        toJsonAndBackTestSuite(graph, "(valid convolution forward graph)");
+    }
+    {
+        auto graphBuilder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+
+        toJsonAndBackTestSuite(graph, "(valid convolution backward graph)");
+    }
+    {
+        auto graphBuilder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+
+        toJsonAndBackTestSuite(graph, "(valid convolution weight gradient graph)");
+    }
 }
 
 void vectorTestSuite(std::vector<int> const& vec, const std::string& context)
