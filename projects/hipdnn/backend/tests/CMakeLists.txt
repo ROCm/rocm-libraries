@@ -3,6 +3,11 @@
 
 include(GoogleTest)
 
+if(HIP_DNN_SKIP_TESTS)
+    message(STATUS "Skipping HIP-DNN Backend Unit tests")
+    return()
+endif()
+
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -11,11 +16,6 @@ find_package(Threads REQUIRED)
 enable_language(HIP)
 # Verify that we're using AMD/ROCm HIP compiler.
 verifyamdrocmcompiler(${CMAKE_HIP_COMPILER} "HIP")
-
-if(HIP_DNN_SKIP_TESTS)
-    message(STATUS "Skipping HIP-DNN Backend Unit tests")
-    return()
-endif()
 
 set(TEST_PLUGIN1_NAME "hipdnn_test_plugin1")
 set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
