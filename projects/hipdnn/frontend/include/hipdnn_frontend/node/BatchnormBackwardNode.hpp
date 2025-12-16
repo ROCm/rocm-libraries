@@ -29,7 +29,7 @@ public:
     {
         // ====================================================================
         // BATCH NORMALIZATION BACKWARD VALIDATION
-        // (Spatial Mode: per-channel statistics over N×H×W)
+        // (Spatial Mode: per-channel statistics over N×H×W for 4D, N×D×H×W for 5D)
         // ====================================================================
         // Algorithm Overview:
         // Given dy (gradient of loss w.r.t. y), compute gradients w.r.t. inputs:
@@ -124,8 +124,8 @@ public:
         auto invVar = attributes.get_inv_variance();
 
         auto& xDims = x->get_dim();
-        // NOTE: Defensive check - dimensions already validated in SECTION 2, but we verify again
-        // before accessing xDims[1] to ensure robustness against future code changes.
+        // NOTE: Defensive check - minimum 2D requirement already validated via
+        // validateMinimumTensorDimensions above, but we verify again before accessing xDims[1].
         if(!xDims.empty() && xDims.size() >= 2)
         {
             int64_t channels = xDims[1];
@@ -154,7 +154,7 @@ public:
             }
         }
 
-        // SECTION 4.5: Validate Mean and Inverse Variance Consistency
+        // SECTION 5: Validate Mean and Inverse Variance Consistency
         // Why: Backward computation uses saved statistics (mean_c, invStd_c) from forward pass.
         // These must be provided together (both or neither). If neither is provided, they will
         // be recomputed during backward pass (less efficient but valid).
@@ -167,7 +167,7 @@ public:
                     "neither"};
         }
 
-        // SECTION 5: Validate Spatial Mode Constraints
+        // SECTION 6: Validate Spatial Mode Constraints
         HIPDNN_CHECK_ERROR(
             validateBatchNormTrainingSpatialDimensions(x, scale, "Batch normalization backward"));
 

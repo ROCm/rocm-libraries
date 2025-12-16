@@ -27,7 +27,7 @@ public:
     {
         // ====================================================================
         // BATCH NORMALIZATION INFERENCE VALIDATION
-        // (Spatial Mode: per-channel statistics over N×H×W)
+        // (Spatial Mode: per-channel statistics over N×H×W for 4D, N×D×H×W for 5D)
         // ====================================================================
         // Algorithm Overview:
         // During inference, BN uses PRE-COMPUTED running statistics from training.

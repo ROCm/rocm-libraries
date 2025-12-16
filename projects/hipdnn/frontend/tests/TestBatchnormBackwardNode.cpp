@@ -753,3 +753,66 @@ TEST(TestBatchnormBackwardNode, PackNodeWithoutMeanAndInvVariance)
     EXPECT_EQ(packedAttributes->dscale_tensor_uid(), dscaleTensor->get_uid());
     EXPECT_EQ(packedAttributes->dbias_tensor_uid(), dbiasTensor->get_uid());
 }
+
+// ============================================================================
+// 5D Tensor (NCDHW) Validation Tests
+// ============================================================================
+
+TEST(TestBatchnormBackwardNode, PreValidateAcceptsValid5DSpatialDimensions)
+{
+    BatchnormBackwardAttributes batchnormAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 8, 8, 8}).set_stride({32768, 512, 64, 8, 1});
+    batchnormAttributes.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 8, 8, 8})
+        .set_stride({32768, 512, 64, 8, 1}); // Valid: N*D*H*W = 2*8*8*8 = 1024
+    batchnormAttributes.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalid5DSpatialDimensions)
+{
+    BatchnormBackwardAttributes batchnormAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 1, 1, 1}).set_stride({64, 1, 1, 1, 1});
+    batchnormAttributes.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 64, 1, 1, 1})
+        .set_stride({64, 1, 1, 1, 1}); // Invalid: N*D*H*W = 1*1*1*1 = 1
+    batchnormAttributes.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("Batch normalization backward") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
+}

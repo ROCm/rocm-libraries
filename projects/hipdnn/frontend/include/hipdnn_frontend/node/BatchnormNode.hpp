@@ -27,7 +27,7 @@ public:
     {
         // ====================================================================
         // BATCH NORMALIZATION FORWARD TRAINING VALIDATION
-        // (Spatial Mode: per-channel statistics over N×H×W)
+        // (Spatial Mode: per-channel statistics over N×H×W for 4D, N×D×H×W for 5D)
         // ====================================================================
         // Algorithm Overview:
         // For each channel c, BN computes batch statistics over (N,H,W):

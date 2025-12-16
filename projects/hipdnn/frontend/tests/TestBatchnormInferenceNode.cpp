@@ -504,3 +504,60 @@ TEST(TestBatchnormInferenceNode, PreValidateAcceptsValidSpatialDimensions)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
+
+// ============================================================================
+// 5D Tensor (NCDHW) Validation Tests
+// ============================================================================
+
+TEST(TestBatchnormInferenceNode, PreValidateAcceptsValid5DSpatialDimensions)
+{
+    BatchnormInferenceAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 8, 8, 8})
+        .set_stride({32768, 512, 64, 8, 1}); // Valid: N*D*H*W = 2*8*8*8 = 1024
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormInferenceNode, PreValidateAccepts5DSpatialDimensionEqualsOne)
+{
+    BatchnormInferenceAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 64, 1, 1, 1})
+        .set_stride({64, 1, 1, 1, 1}); // Valid for inference: N*D*H*W = 1*1*1*1 = 1
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK)
+        << "Inference mode should accept N*D*H*W=1 for 5D tensors (matches PyTorch behavior)";
+}

@@ -579,3 +579,59 @@ TEST(TestBatchnormNode, PreValidateAcceptsCompleteRunningStats)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
+
+// ============================================================================
+// 5D Tensor (NCDHW) Validation Tests
+// ============================================================================
+
+TEST(TestBatchnormNode, PreValidateAcceptsValid5DSpatialDimensions)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 8, 8, 8})
+        .set_stride({32768, 512, 64, 8, 1}); // Valid: N*D*H*W = 2*8*8*8 = 1024
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsInvalid5DSpatialDimensions)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 64, 1, 1, 1})
+        .set_stride({64, 1, 1, 1, 1}); // Invalid: N*D*H*W = 1*1*1*1 = 1
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
+}
