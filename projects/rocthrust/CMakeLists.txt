@@ -263,11 +263,15 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   set(DEFAULT_GPU_RESOURCE "gpus")
   
   # Generate the resource spec file. This will contain a description of the GPUs available on the current machine.
-  execute_process(COMMAND cmake -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateResourceSpec.cmake
+  execute_process(COMMAND cmake --trace --log-level=TRACE -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateResourceSpec.cmake
                   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                   RESULT_VARIABLE GEN_RES_SPEC_RESULT
-                  ERROR_VARIABLE  GEN_RES_SPEC_ERROR)
-  if(NOT (GEN_RES_SPEC_RESULT STREQUAL "0" AND GEN_RES_SPEC_ERROR STREQUAL ""))
+                  ERROR_VARIABLE  GEN_RES_SPEC_ERROR
+                  OUTPUT_VARIABLE GEN_RES_SPEC_OUTPUT)
+  if(NOT (GEN_RES_SPEC_RESULT STREQUAL "0"))
+    message(STATUS "OUTPUT_VARIABLE: ${GEN_RES_SPEC_OUTPUT}")
+    message(STATUS "ERROR_VARIABLE: ${GEN_RES_SPEC_ERROR}")
+    message(STATUS "RESULT_VARIABLE: ${GEN_RES_SPEC_RESULT}")
     message(WARNING "Warning: Unable to generate the ctest resource spec file - tests may fail when run in parallel.")
   else()
     message(STATUS "Successfully generated the ctest resource spec file.")
