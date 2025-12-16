@@ -42,8 +42,7 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle       handle,
     const bool sleep     = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
     const auto block_dim = A->block_dim;
 
-    if(sleep || (handle->wavefront_size == 32)
-       || ((block_dim > 64) && (A->data_type != rocsparse_datatype_f64_c))
+    if(sleep || (handle->wavefront_size == 32) || (block_dim > 64)
        || ((block_dim > 32) && (A->data_type == rocsparse_datatype_f64_c)))
     {
         launch = find_bsrilu0_kernel_general_launch(handle, bsrilu0_info, A);
