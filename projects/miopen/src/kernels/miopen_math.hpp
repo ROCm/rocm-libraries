@@ -350,6 +350,13 @@ __forceinline__ __device__ FpVecType fma(FpVecType a, FpVecType b, FpVecType c)
         out.w = detail::fma(a.w, b.w, c.w);
         return out;
     }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::fma(a.x, b.x, c.x);
+        out.y = detail::fma(a.y, b.y, c.y);
+        return out;
+    }
     else if constexpr(VecSize == 1)
     {
         return detail::fma(a, b, c);
