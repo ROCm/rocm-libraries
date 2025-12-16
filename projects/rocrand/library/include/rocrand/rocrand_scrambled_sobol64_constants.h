@@ -28,8 +28,10 @@
     #define SCRAMBLED_SOBOL_DIM 20000
 #endif
 
-namespace rocrand_device {
-namespace detail {
+namespace rocrand_device
+{
+namespace detail
+{
 
 // clang-format off
 static const unsigned long long int h_scrambled_sobol64_constants[SCRAMBLED_SOBOL_DIM] = {

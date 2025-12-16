@@ -31,11 +31,12 @@
 #endif // SOBOL_DIM
 #define SOBOL32_N 640000
 
-namespace rocrand_device {
-namespace detail {
+namespace rocrand_device
+{
+namespace detail
+{
 
-extern "C" ROCRANDAPI const unsigned int
-    rocrand_h_sobol32_direction_vectors[SOBOL32_N];
+extern "C" ROCRANDAPI const unsigned int rocrand_h_sobol32_direction_vectors[SOBOL32_N];
 
 } // end namespace detail
 } // end namespace rocrand_device

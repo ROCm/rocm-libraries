@@ -26,8 +26,10 @@
 
 #include "rocrand/rocrandapi.h"
 
-namespace rocrand_device {
-namespace detail {
+namespace rocrand_device
+{
+namespace detail
+{
 
 #ifndef SCRAMBLED_SOBOL_DIM
     #define SCRAMBLED_SOBOL_DIM 20000

@@ -23,8 +23,10 @@
 
 #include "rocrand/rocrandapi.h"
 
-namespace rocrand_device {
-namespace detail {
+namespace rocrand_device
+{
+namespace detail
+{
 
 // clang-format off
 extern "C" ROCRANDAPI const unsigned int rocrand_h_sobol32_direction_vectors[640000] =

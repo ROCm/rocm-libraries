@@ -31,8 +31,10 @@
 #endif // SCRAMBLED_SOBOL_DIM
 #define SCRAMBLED_SOBOL64_N 1280000
 
-namespace rocrand_device {
-namespace detail {
+namespace rocrand_device
+{
+namespace detail
+{
 
 extern "C" ROCRANDAPI const unsigned long long
     rocrand_h_scrambled_sobol64_direction_vectors[SCRAMBLED_SOBOL64_N];
