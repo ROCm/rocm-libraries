@@ -8,6 +8,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Support for 'BF16' input with 'FP32' output data type for gfx90a.
 * Support for hipBLASLtExt operation APIs on gfx11XX and gfx12XX.
+* Support for Sigmoid Activation function.
 
 ## hipBLASLt 1.1.0 for ROCm 7.1.0
 
