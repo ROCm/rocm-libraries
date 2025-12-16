@@ -638,24 +638,10 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
         }
     }
 
-#if MIOPEN_BACKEND_HIP
-    use_hip_graph = (inflags.GetValueInt("use_hip_graph") == 1);
-
-    if(time_enabled)
-    {
-        if(use_hip_graph)
-        {
-            miopenEnableProfiling(GetHandle(), false);
-        }else{
-            miopenEnableProfiling(GetHandle(), true);
-        }
-    }
-#else
     if(time_enabled)
     {
             miopenEnableProfiling(GetHandle(), true);
     }
-#endif
 
     is_fwd = (inflags.GetValueInt("forw") == 0 || inflags.GetValueInt("forw") & 1);
     is_bwd = (inflags.GetValueInt("forw") == 0 || inflags.GetValueInt("forw") & 2);
@@ -1048,14 +1034,7 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
     // TODO:(LYM) change back to 0
     inflags.AddInputFlag("math_type", 'M', "1", "math type of compute (Default=1)", "int");
 
-#if MIOPEN_BACKEND_HIP
-    inflags.AddInputFlag("use_hip_graph",
-                         'Q',
-                         "0",
-                         "Use HIP stream capture/graph replay for steady-state iterations (HIP only). "
-                         "0: disabled (default), 1: enabled.",
-                         "int");
-#endif
+    AddHipGraphFlag(inflags);
 
     return 0;
 }
@@ -2122,25 +2101,10 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
     ResizeWorkspaceDev(ctx, ws_size);
     wall.start(wall_enabled);
 
-#if MIOPEN_BACKEND_HIP
-    if(use_hip_graph)
-    {
-        auto& q_stream = GetStream();
-
-        // Warm-up run outside capture to avoid capturing JIT compilation or setup
+    int return_code = HipGraphCapture([&]() -> int {
         if(init_output_nan)
         {
             out.FillGpuBufferWithNans(handle, outputTensor);
-        }
-
-        // Use HIP events for timing instead of MIOpen profiling
-        hipEvent_t evt_start = nullptr, evt_stop = nullptr;
-        float evt_ms = 0.0f;
-        if(time_enabled)
-        {
-            hipEventCreate(&evt_start);
-            hipEventCreate(&evt_stop);
-            hipEventRecord(evt_start, q_stream);
         }
 
         rc = miopenConvolutionForward(GetHandle(),
@@ -2156,184 +2120,34 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
                                       out.GetDevicePtr(),
                                       workspace_dev != nullptr ? workspace_dev->GetMem() : nullptr,
                                       ws_size);
-        if(rc != miopenStatusSuccess)
-        {
-            if(time_enabled)
-            {
-                hipEventDestroy(evt_start);
-                hipEventDestroy(evt_stop);
-            }
-            return rc;
-        }
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
 
-        if(wall_enabled)
+    for(int i = 0; i < num_iterations; i++)
+    {
+        HipGraphExecute();
+
+        if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
-        {
-            hipEventRecord(evt_stop, q_stream);
-            hipEventSynchronize(evt_stop);
-            hipEventElapsedTime(&evt_ms, evt_start, evt_stop);
-            kernel_total_time += evt_ms;
-            kernel_first_time = evt_ms;
-        }
-
-        // Temporarily disable MIOpen profiling during capture to avoid invalidation
-        const bool restore_prof = time_enabled;
-        if(restore_prof)
-            miopenEnableProfiling(GetHandle(), false);
-
-        // Begin capture
-        hipGraph_t graph = nullptr;
-        hipGraphExec_t graphExec = nullptr;
-        hipError_t he = hipStreamBeginCapture(q_stream, hipStreamCaptureModeGlobal);
-        if(he != hipSuccess)
-        {
-            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
-            if(time_enabled)
+        {   
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time = 0.0;
+            if (use_hip_graph)
             {
-                hipEventDestroy(evt_start);
-                hipEventDestroy(evt_stop);
-            }
-            return miopenStatusInternalError;
-        }
-
-        // Record one iteration body
-        if(init_output_nan)
-        {
-            out.FillGpuBufferWithNans(handle, outputTensor);
-        }
-        rc = miopenConvolutionForward(GetHandle(),
-                                      &alpha,
-                                      in_tens,
-                                      in_buff,
-                                      wei_tens,
-                                      wei_buff,
-                                      convDesc,
-                                      algo,
-                                      &beta,
-                                      outputTensor,
-                                      out.GetDevicePtr(),
-                                      workspace_dev != nullptr ? workspace_dev->GetMem() : nullptr,
-                                      ws_size);
-        if(rc != miopenStatusSuccess)
-        {
-            hipStreamEndCapture(q_stream, &graph);
-            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
-            if(time_enabled)
-            {
-                hipEventDestroy(evt_start);
-                hipEventDestroy(evt_stop);
-            }
-            return rc;
-        }
-
-        he = hipStreamEndCapture(q_stream, &graph);
-        if(he != hipSuccess)
-        {
-            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
-            if(time_enabled)
-            {
-                hipEventDestroy(evt_start);
-                hipEventDestroy(evt_stop);
-            }
-            return miopenStatusInternalError;
-        }
-
-        he = hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0);
-        if(he != hipSuccess)
-        {
-            hipGraphDestroy(graph);
-            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
-            if(time_enabled)
-            {
-                hipEventDestroy(evt_start);
-                hipEventDestroy(evt_stop);
-            }
-            return miopenStatusInternalError;
-        }
-
-        // Replay remaining iterations with HIP event timing
-        for(int i = 1; i < num_iterations; ++i)
-        {
-            if(time_enabled) hipEventRecord(evt_start, q_stream);
-
-            he = hipGraphLaunch(graphExec, q_stream);
-            if(he != hipSuccess)
-            {
-                hipGraphExecDestroy(graphExec);
-                hipGraphDestroy(graph);
-                if(restore_prof) miopenEnableProfiling(GetHandle(), true);
-                if(time_enabled)
-                {
-                    hipEventDestroy(evt_start);
-                    hipEventDestroy(evt_stop);
-                }
-                return miopenStatusInternalError;
-            }
-
-            if(time_enabled)
-            {
-                hipEventRecord(evt_stop, q_stream);
-                hipEventSynchronize(evt_stop);
-                hipEventElapsedTime(&evt_ms, evt_start, evt_stop);
-                kernel_total_time += evt_ms;
-            }
-        }
-
-        hipStreamSynchronize(q_stream);
-        hipGraphExecDestroy(graphExec);
-        hipGraphDestroy(graph);
-
-        // Restore profiling on handle
-        if(restore_prof)
-            miopenEnableProfiling(GetHandle(), true);
-
-        if(time_enabled)
-        {
-            hipEventDestroy(evt_start);
-            hipEventDestroy(evt_stop);
-        }
-    }
-    else
-#endif
-    {
-        for(int i = 0; i < num_iterations; i++)
-        {
-            if(init_output_nan)
-            {
-                out.FillGpuBufferWithNans(handle, outputTensor);
-            }
-
-            rc = miopenConvolutionForward(GetHandle(),
-                                          &alpha,
-                                          in_tens,
-                                          in_buff,
-                                          wei_tens,
-                                          wei_buff,
-                                          convDesc,
-                                          algo,
-                                          &beta,
-                                          outputTensor,
-                                          out.GetDevicePtr(),
-                                          workspace_dev != nullptr ? workspace_dev->GetMem() : nullptr,
-                                          ws_size);
-            if(rc != miopenStatusSuccess)
-                return rc;
-
-            if(wall_enabled && i == 0)
-                wall_first_time = wall.interim_time_ms();
-
-            if(time_enabled)
-            {
-                float time = 0.0;
+                time = GetHipGraphExecutionTime();
+            } else {
                 miopenGetKernelTime(GetHandle(), &time);
-                kernel_total_time += time;
-                if(i == 0)
-                    kernel_first_time = time;
             }
+            kernel_total_time += time;
+            if(i == 0)
+                kernel_first_time = time;
         }
     }
+    HipGraphFinalize();
 
     if(wall_enabled)
     {
@@ -2460,16 +2274,13 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
 
     wall.start(wall_enabled);
 
-#if MIOPEN_BACKEND_HIP
-    if(use_hip_graph)
+    for(int i = 0; i < num_iterations; i++)
     {
-        auto& q_stream = GetStream();
-
-        // Warm-up run outside capture
         if(init_output_nan)
         {
             out.FillGpuBufferWithNans(handle, outputTensor);
         }
+
         rc = miopenConvolutionForwardImmediate(
             handle,
             (is_transform ? weightTensor_vect4 : weightTensor),
@@ -2485,7 +2296,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
         if(rc != miopenStatusSuccess)
             return rc;
 
-        if(wall_enabled)
+        if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
@@ -2493,104 +2304,11 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
             float time = 0.0;
             miopenGetKernelTime(GetHandle(), &time);
             kernel_total_time += time;
-            kernel_first_time = time;
-        }
-
-        // Begin capture
-        hipGraph_t graph = nullptr;
-        hipGraphExec_t graphExec = nullptr;
-        hipError_t he = hipStreamBeginCapture(q_stream, hipStreamCaptureModeGlobal);
-        if(he != hipSuccess)
-            return miopenStatusInternalError;
-
-        // Record one iteration body
-        if(init_output_nan)
-        {
-            out.FillGpuBufferWithNans(handle, outputTensor);
-        }
-        rc = miopenConvolutionForwardImmediate(
-            handle,
-            (is_transform ? weightTensor_vect4 : weightTensor),
-            (is_transform ? wei_vect4_dev->GetMem() : wei.GetDevicePtr()),
-            (is_transform ? inputTensor_vect4 : inputTensor),
-            (is_transform ? in_vect4_dev->GetMem() : in.GetDevicePtr()),
-            convDesc,
-            outputTensor,
-            out.GetDevicePtr(),
-            ws ? ws->GetMem() : nullptr,
-            ws_size,
-            selected->solution_id);
-        if(rc != miopenStatusSuccess)
-        {
-            hipStreamEndCapture(q_stream, &graph);
-            return rc;
-        }
-
-        he = hipStreamEndCapture(q_stream, &graph);
-        if(he != hipSuccess)
-            return miopenStatusInternalError;
-
-        he = hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0);
-        if(he != hipSuccess)
-        {
-            hipGraphDestroy(graph);
-            return miopenStatusInternalError;
-        }
-
-        // Replay remaining iterations
-        for(int i = 1; i < num_iterations; ++i)
-        {
-            he = hipGraphLaunch(graphExec, q_stream);
-            if(he != hipSuccess)
-            {
-                hipGraphExecDestroy(graphExec);
-                hipGraphDestroy(graph);
-                return miopenStatusInternalError;
-            }
-        }
-        hipStreamSynchronize(q_stream);
-        hipGraphExecDestroy(graphExec);
-        hipGraphDestroy(graph);
-    }
-    else
-#endif
-    {
-        for(int i = 0; i < num_iterations; i++)
-        {
-            if(init_output_nan)
-            {
-                out.FillGpuBufferWithNans(handle, outputTensor);
-            }
-
-            rc = miopenConvolutionForwardImmediate(
-                handle,
-                (is_transform ? weightTensor_vect4 : weightTensor),
-                (is_transform ? wei_vect4_dev->GetMem() : wei.GetDevicePtr()),
-                (is_transform ? inputTensor_vect4 : inputTensor),
-                (is_transform ? in_vect4_dev->GetMem() : in.GetDevicePtr()),
-                convDesc,
-                outputTensor,
-                out.GetDevicePtr(),
-                ws ? ws->GetMem() : nullptr,
-                ws_size,
-                selected->solution_id);
-            if(rc != miopenStatusSuccess)
-                return rc;
-
-            if(wall_enabled && i == 0)
-                wall_first_time = wall.interim_time_ms();
-
-            if(time_enabled)
-            {
-                float time = 0.0;
-                miopenGetKernelTime(GetHandle(), &time);
-                kernel_total_time += time;
-                if(i == 0)
-                    kernel_first_time = time;
-            }
+            if(i == 0)
+                kernel_first_time = time;
         }
     }
-
+    
     if(wall_enabled)
     {
         wall.stop();

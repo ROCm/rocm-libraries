@@ -40,6 +40,21 @@ void Driver::AddGpuBufferCheckFlag(InputFlags& inflags)
                          "int");
 }
 
+void Driver::AddHipGraphFlag(InputFlags& inflags)
+{
+#if MIOPEN_BACKEND_HIP
+    inflags.AddInputFlag("use_hip_graph",
+                         'Q',
+                         "0",
+                         "Use HIP stream capture/graph replay for steady-state iterations (HIP only). "
+                         "0: disabled (default), 1: enabled.",
+                         "int");
+#else
+    // Suppress unused parameter warning for non-HIP backends
+    (void)inflags;
+#endif
+}
+
 GPUMem::Check Driver::GetGpuBufferCheck(const InputFlags& inflags) const
 {
     auto check = inflags.GetValueInt("gpubuffer_check");
@@ -56,20 +71,37 @@ GPUMem::Check Driver::GetGpuBufferCheck(const InputFlags& inflags) const
 }
 
 #if MIOPEN_BACKEND_HIP
-int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr) {
 
-    // warm up:
-    int rc = functPtr();
-    if(rc != miopenStatusSuccess)
-    {
+int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr) {
+    bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") != 0;
+    if(use_hip_graph) {
+        hipGraphIsProfilingToRestore = miopen::deref(GetHandle()).IsProfilingEnabled();
+        miopenEnableProfiling(GetHandle(), false);
+        int rc = HipGraphCaptureCapturing(functPtr);
         return rc;
+    } else {
+        hipGraphFuncPtr = functPtr; // just memorize to execute later
+        return miopenStatusSuccess;
     }
+}
+
+int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr) {
+
+    // // warm up:
+    // int rc = functPtr();
+    // if(rc != miopenStatusSuccess)
+    // {
+    //     return rc;
+    // }
 
     hipError_t he = hipStreamBeginCapture(q, hipStreamCaptureModeGlobal);
     if(he != hipSuccess)
+    {
         return miopenStatusInternalError;
+    }
 
-    rc = functPtr();
+    int rc = functPtr();
+
     if(rc != miopenStatusSuccess)
     {
         hipStreamEndCapture(q, &hipGraph);
@@ -78,7 +110,9 @@ int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr) {
 
     he = hipStreamEndCapture(q, &hipGraph);
     if(he != hipSuccess)
+    {
         return miopenStatusInternalError;
+    }
 
     he = hipGraphInstantiate(&hipGraphExec, hipGraph, nullptr, nullptr, 0);
     if(he != hipSuccess)
@@ -88,22 +122,52 @@ int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr) {
     }
 
     return miopenStatusSuccess;
+
 }
 
 int Driver::HipGraphExecute(){
-    hipError_t he = hipGraphLaunch(hipGraphExec, q);
-    if(he != hipSuccess)
-    {
-        hipGraphExecDestroy(hipGraphExec);
-        hipGraphDestroy(hipGraph);
-        return miopenStatusInternalError;
+
+    bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") == 1;
+
+    if(use_hip_graph) {
+        hipEventCreate(&hipGraphStartEvent);
+        hipEventCreate(&hipGraphStopEvent);
+        hipEventRecord(hipGraphStartEvent, q);
+        hipError_t he = hipGraphLaunch(hipGraphExec, q);
+        hipEventRecord(hipGraphStopEvent, q);
+        hipEventSynchronize(hipGraphStopEvent);
+        hipEventElapsedTime(&hipGraphLastExecutionTime, hipGraphStartEvent, hipGraphStopEvent);
+        if(he == hipSuccess){
+            return miopenStatusSuccess;
+        } else {
+            hipGraphExecDestroy(hipGraphExec);
+            hipGraphDestroy(hipGraph);
+            return miopenStatusInternalError;
+        }
+    } else {
+        int rc = hipGraphFuncPtr(); // run without HIP graph
+        return rc;
     }
 }
 
 void Driver::HipGraphFinalize(){
-    hipStreamSynchronize(q);
-    hipGraphExecDestroy(hipGraphExec);
-    hipGraphDestroy(hipGraph);
+
+    bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") == 1;
+
+    if(use_hip_graph) {
+        hipStreamSynchronize(q);
+        hipGraphExecDestroy(hipGraphExec);
+        hipGraphDestroy(hipGraph);
+        if(hipGraphStartEvent != nullptr) {
+            hipEventDestroy(hipGraphStartEvent);
+            hipGraphStartEvent = nullptr;
+        }
+        if(hipGraphStopEvent != nullptr) {
+            hipEventDestroy(hipGraphStopEvent);
+            hipGraphStopEvent = nullptr;
+        }
+        miopenEnableProfiling(GetHandle(), hipGraphIsProfilingToRestore);
+    }
 }
 
 #endif

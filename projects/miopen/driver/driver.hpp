@@ -38,6 +38,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/bfloat16.hpp>
+#include <miopen/handle.hpp>
 #include <../test/tensor_holder.hpp>
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
@@ -534,9 +535,16 @@ public:
     using hipGraphFuncPtrType = std::function<int()>;
     hipGraph_t hipGraph = nullptr;
     hipGraphExec_t hipGraphExec = nullptr;
+    hipGraphFuncPtrType hipGraphFuncPtr;
+    bool hipGraphIsProfilingToRestore;
+    hipEvent_t hipGraphStartEvent = nullptr;
+    hipEvent_t hipGraphStopEvent = nullptr;
+    float hipGraphLastExecutionTime = 0.0f;
     int HipGraphCapture(hipGraphFuncPtrType functPtr);
+    int HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr);
     int HipGraphExecute();
     void HipGraphFinalize();
+    float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
 #endif
     virtual ~Driver() { miopenDestroy(handle); }
 
@@ -556,6 +564,7 @@ protected:
     void InitDataType();
     void AddGpuBufferCheckFlag(InputFlags& inflags);
     GPUMem::Check GetGpuBufferCheck(const InputFlags& inflags) const;
+    void AddHipGraphFlag(InputFlags& inflags);
     miopenHandle_t handle;
     miopenDataType_t data_type;
 
