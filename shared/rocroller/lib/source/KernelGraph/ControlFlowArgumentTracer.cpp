@@ -246,13 +246,11 @@ namespace rocRoller::KernelGraph
         }
 
         ControlFlowArgumentVisitor(KernelGraph const& graph,
-                                   AssemblyKernelPtr  kernel,
-                                   bool               traceSizesInComputeIndex = false)
+                                   AssemblyKernelPtr  kernel)
             : TopoControlGraphVisitor(graph)
             , m_tracer{graph}
             , m_tagManager(nullptr)
             , m_kernel(std::move(kernel))
-            , m_traceSizesInComputeIndex(traceSizesInComputeIndex)
         {
         }
 
@@ -341,11 +339,6 @@ namespace rocRoller::KernelGraph
 
         // Arguments directly used in control flow (before propagation)
         std::set<std::string> m_directlyReferencedArgs;
-
-        // Whether to trace sizes (not just strides) in ComputeIndex operations.
-        // Default is false because index computation depends only on unroll-iteration and stride,
-        // which doesn't need sizes (see LoadStoreTileGenerator.cpp:getOffsetExpr).
-        bool m_traceSizesInComputeIndex = false;
 
         CoordinateArgumentTracer m_tracer;
 
