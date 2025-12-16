@@ -285,19 +285,20 @@ std::vector<float> generateData(T                           dgen,
  *
  * @return float values of generated MX type data
  */
-std::vector<float> generateMXInput(hipDataType            dataType,
-                                   void*                  data,
-                                   void*                  scale,
-                                   DGen::index_t          rowSize,
-                                   DGen::index_t          colSize,
-                                   DGen::index_t          stride,
-                                   bool                   isTranspose,
-                                   int const              scaleBlockRowSize,
-                                   int const              scaleBlockColSize,
-                                   bool                   isMatrixA,
-                                   std::string_view const initMethod,
-                                   float                  min_val,
-                                   float                  max_val)
+std::vector<float> generateMXInput(hipDataType             dataType,
+                                   void*                   data,
+                                   void*                   scale,
+                                   DGen::index_t           rowSize,
+                                   DGen::index_t           colSize,
+                                   DGen::index_t           stride,
+                                   bool                    isTranspose,
+                                   const std::vector<size_t>& shuffleTile,
+                                   int const               scaleBlockRowSize,
+                                   int const               scaleBlockColSize,
+                                   bool                    isMatrixA,
+                                   std::string_view const  initMethod,
+                                   float                   min_val,
+                                   float                   max_val)
 {
     using namespace DGen;
 

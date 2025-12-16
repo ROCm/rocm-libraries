@@ -121,11 +121,6 @@ void Arguments::init()
     gradient          = false;
     norm_check_assert = true;
 
-    scaleABlockRowSize = 0;
-    scaleABlockColSize = 0;
-    scaleBBlockRowSize = 0;
-    scaleBBlockColSize = 0;
-
     use_ext                  = false;
     use_ext_setproblem       = false;
     algo_method              = 0;

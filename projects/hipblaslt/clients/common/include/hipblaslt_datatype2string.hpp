@@ -64,8 +64,39 @@ typedef enum class _hipblaslt_scaling_format
     none   = 0,
     Scalar = 1,
     Vector = 2,
-    Block  = 3,
+    Block_32_UE8M0  = 3,
+    Block_32_UE8M0_64_4_4 = 1000,
 } hipblaslt_scaling_format;
+
+inline bool isBlockScaling(hipblaslt_scaling_format s)
+{
+    return !(s == hipblaslt_scaling_format::none ||
+             s == hipblaslt_scaling_format::Scalar ||
+             s == hipblaslt_scaling_format::Vector);
+}
+
+inline int blockSize(hipblaslt_scaling_format s)
+{
+    switch (s)
+    {
+        case hipblaslt_scaling_format::Block_32_UE8M0:
+        case hipblaslt_scaling_format::Block_32_UE8M0_64_4_4:
+            return 32;
+        default:
+            return 1;
+    }
+}
+
+inline std::vector<size_t> scaleShuffleTile(hipblaslt_scaling_format s)
+{
+    switch (s)
+    {
+        case hipblaslt_scaling_format::Block_32_UE8M0_64_4_4:
+            return {64, 4, 4};
+        default:
+            return {};
+    }
+}
 
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
                                               hipblaslt_activation_type   act)

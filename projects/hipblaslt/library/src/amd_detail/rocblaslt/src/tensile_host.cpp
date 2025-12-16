@@ -122,10 +122,6 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          const void*            scaleAlphaVec,
                                                          ScalingFormat          scaleAType,
                                                          ScalingFormat          scaleBType,
-                                                         size_t                 scaleABlockRowSize,
-                                                         size_t                 scaleABlockColSize,
-                                                         size_t                 scaleBBlockRowSize,
-                                                         size_t                 scaleBBlockColSize,
                                                          hipDataType            bias_type,
                                                          hipDataType            aux_type,
                                                          rocblaslt_epilogue     epilogue,
@@ -189,10 +185,6 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , scaleAlphaVec(scaleAlphaVec)
     , scaleAType(scaleAType)
     , scaleBType(scaleBType)
-    , scaleABlockRowSize(scaleABlockRowSize)
-    , scaleABlockColSize(scaleABlockColSize)
-    , scaleBBlockRowSize(scaleBBlockRowSize)
-    , scaleBBlockColSize(scaleBBlockColSize)
     , bias_type(bias_type)
     , aux_type(aux_type)
     , epilogue(epilogue)
@@ -2527,8 +2519,7 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 {
     return handle->useRocRoller == 1
            || (handle->useRocRoller == -1
-               && (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
-                   || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block));
+               && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
 }
 #endif
 

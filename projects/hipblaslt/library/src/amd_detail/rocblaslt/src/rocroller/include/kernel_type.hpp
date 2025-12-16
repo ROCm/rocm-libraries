@@ -36,6 +36,7 @@ struct ScaleType
     size_t blockRowSize = 32u;
     size_t blockColSize = 1u;
     rocRoller::DataType type = rocRoller::DataType::E8M0;
+    std::vector<size_t> shuffleTile;
 
     auto operator<=>(const ScaleType& other) const = default;
 };

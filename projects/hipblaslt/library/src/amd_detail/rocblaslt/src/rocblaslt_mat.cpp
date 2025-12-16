@@ -206,10 +206,6 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         scaleAlphaVec,
                                         matmul_descr->scaleAType,
                                         matmul_descr->scaleBType,
-                                        matmul_descr->scaleABlockRowSize,
-                                        matmul_descr->scaleABlockColSize,
-                                        matmul_descr->scaleBBlockRowSize,
-                                        matmul_descr->scaleBBlockColSize,
                                         bias_type,
                                         aux_type,
                                         epilogue,
@@ -369,10 +365,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         scaleAlphaVec,
                                         matmul_descr->scaleAType,
                                         matmul_descr->scaleBType,
-                                        matmul_descr->scaleABlockRowSize,
-                                        matmul_descr->scaleABlockColSize,
-                                        matmul_descr->scaleBBlockRowSize,
-                                        matmul_descr->scaleBBlockColSize,
                                         bias_type,
                                         aux_type,
                                         epilogue,
@@ -521,10 +513,6 @@ rocblaslt_status
                                                       alpha[i],
                                                       matmul_descr[i]->scaleAType,
                                                       matmul_descr[i]->scaleBType,
-                                                      matmul_descr[i]->scaleABlockRowSize,
-                                                      matmul_descr[i]->scaleABlockColSize,
-                                                      matmul_descr[i]->scaleBBlockRowSize,
-                                                      matmul_descr[i]->scaleBBlockColSize,
                                                       E,
                                                       aux_type,
                                                       lde,
@@ -666,10 +654,6 @@ rocblaslt_status
                                                        scaleAlpha_vec[i],
                                                        matmul_descr[i]->scaleAType,
                                                        matmul_descr[i]->scaleBType,
-                                                       matmul_descr[i]->scaleABlockRowSize,
-                                                       matmul_descr[i]->scaleABlockColSize,
-                                                       matmul_descr[i]->scaleBBlockRowSize,
-                                                       matmul_descr[i]->scaleBBlockColSize,
                                                        bias_type_vec[i],
                                                        aux_type_vec[i],
                                                        epilogue_vec[i],
@@ -920,11 +904,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                                                inputs.alpha,
                                                rocEpilogue.scaling_a_type,
                                                rocEpilogue.scaling_b_type,
-                                               // TODO: these scale block sizes might need to be set
-                                               0, /* scaleABlockRowSize */
-                                               0, /* scaleABlockColSize */
-                                               0, /* scaleBBlockRowSize */
-                                               0, /* scaleBBlockColSize */
                                                E,
                                                aux_type,
                                                lde,
@@ -1003,11 +982,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         scaleAlphaVec,
         static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_a_type),
         static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_b_type),
-        // TODO: these scale block sizes might need to be set
-        0, /* scaleABlockRowSize */
-        0, /* scaleABlockColSize */
-        0, /* scaleBBlockRowSize */
-        0, /* scaleBBlockColSize */
         bias_type,
         aux_type,
         epilogue,
@@ -1216,11 +1190,6 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                     rocEpilogue[iIdx].scaling_a_type),
                 static_cast<RocblasltContractionProblem::ScalingFormat>(
                     rocEpilogue[iIdx].scaling_b_type),
-                // TODO: these scale block sizes might need to be set
-                0, /* scaleABlockRowSize */
-                0, /* scaleABlockColSize */
-                0, /* scaleBBlockRowSize */
-                0, /* scaleBBlockColSize */
                 E,
                 aux_type,
                 lde,
@@ -1332,11 +1301,6 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                             rocEpilogue[iIdx].scaling_a_type),
                                         static_cast<RocblasltContractionProblem::ScalingFormat>(
                                             rocEpilogue[iIdx].scaling_b_type),
-                                        // TODO: these scale block sizes might need to be set
-                                        0, /* scaleABlockRowSize */
-                                        0, /* scaleABlockColSize */
-                                        0, /* scaleBBlockRowSize */
-                                        0, /* scaleBBlockColSize */
                                         bias_type_vec[i],
                                         aux_type_vec[i],
                                         epilogue_vec[i],

@@ -85,8 +85,10 @@ inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat sc
         return "1";
     case RocblasltContractionProblem::ScalingFormat::Vector:
         return "2";
-    case RocblasltContractionProblem::ScalingFormat::Block:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         return "3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
+        return "1000";
     default:
         return "";
     }
@@ -379,6 +381,11 @@ rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_t
     }
 }
 
+rocRoller::DataType getScaleDataType(RocblasltContractionProblem::ScalingFormat s)
+{
+    return rocRoller::DataType::E8M0;
+}
+
 /**
  * @brief Generate a KernelType from a RocblasltContractionProblem
  *
@@ -397,16 +404,24 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
     kernelType.typeAcc    = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
     kernelType.transA     = prob.trans_a == HIPBLAS_OP_T;
     kernelType.transB     = prob.trans_b == HIPBLAS_OP_T;
-    kernelType.scaleTypeA.mode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
-                                ? rocRoller::Operations::ScaleMode::Separate
-                                : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleTypeB.mode = prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block
-                                ? rocRoller::Operations::ScaleMode::Separate
-                                : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleTypeA.blockRowSize = prob.scaleABlockRowSize;
-    kernelType.scaleTypeA.blockColSize = prob.scaleABlockColSize;
-    kernelType.scaleTypeB.blockRowSize = prob.scaleBBlockRowSize;
-    kernelType.scaleTypeB.blockColSize = prob.scaleBBlockColSize;
+
+    if (isBlockScaling(prob.scaleAType))
+    {
+        kernelType.scaleTypeA.mode = rocRoller::Operations::ScaleMode::Separate;
+        kernelType.scaleTypeA.blockRowSize = blockSize(prob.scaleAType);
+        kernelType.scaleTypeA.blockColSize = 1;
+        kernelType.scaleTypeA.type = getScaleDataType(prob.scaleAType);
+        kernelType.scaleTypeA.shuffleTile = scaleShuffleTile(prob.scaleAType);
+    }
+
+    if (isBlockScaling(prob.scaleBType))
+    {             
+        kernelType.scaleTypeB.mode = rocRoller::Operations::ScaleMode::Separate;         
+        kernelType.scaleTypeB.blockRowSize = 1;
+        kernelType.scaleTypeB.blockColSize = blockSize(prob.scaleBType);
+        kernelType.scaleTypeB.type = getScaleDataType(prob.scaleBType);
+        kernelType.scaleTypeB.shuffleTile = scaleShuffleTile(prob.scaleBType);
+    }
 
     return kernelType;
 }

@@ -398,6 +398,36 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     }
 };
 
+inline bool isBlockScaling(RocblasltContractionProblem::ScalingFormat s)
+{
+    return !(s == RocblasltContractionProblem::ScalingFormat::None ||
+             s == RocblasltContractionProblem::ScalingFormat::Scalar ||
+             s == RocblasltContractionProblem::ScalingFormat::Vector);
+}
+
+inline size_t blockSize(RocblasltContractionProblem::ScalingFormat s)
+{
+    switch(s)
+    {
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
+            return 32;
+        default:
+            return 1;
+    }
+}
+
+inline std::vector<size_t> scaleShuffleTile(RocblasltContractionProblem::ScalingFormat s)
+{
+    switch (s)
+    {
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
+            return {64, 4, 4};
+        default:
+            return {};
+    }
+}
+
 template <typename T>
 struct floating_traits
 {

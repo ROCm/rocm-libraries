@@ -3220,10 +3220,6 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         scaleAlphaVec,
                                         matmul_descr->scaleAType,
                                         matmul_descr->scaleBType,
-                                        1, // scaleABlockRowSize
-                                        1, // scaleABlockColSize
-                                        1, // scaleBBlockRowSize
-                                        1, // scaleBBlockColSize
                                         arg.bias_type,
                                         arg.aux_type,
                                         matmul_descr->epilogue,

@@ -1466,16 +1466,16 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_scaleAVec[i] = 1;
         else if(arg.scaleA == hipblaslt_scaling_format::Vector)
             size_scaleAVec[i] = M[i];
-        else if(arg.scaleA == hipblaslt_scaling_format::Block)
-            size_scaleAVec[i] = (M[i] * K[i]) / (arg.scaleABlockRowSize * arg.scaleABlockColSize);
+        else if(isBlockScaling(arg.scaleA))
+            size_scaleAVec[i] = (M[i] * K[i]) / blockSize(arg.scaleA);
         else
             size_scaleAVec[i] = 0;
         if(arg.scaleB == hipblaslt_scaling_format::Scalar)
             size_scaleBVec[i] = 1;
         else if(arg.scaleB == hipblaslt_scaling_format::Vector)
             size_scaleBVec[i] = N[i];
-        else if(arg.scaleB == hipblaslt_scaling_format::Block)
-            size_scaleBVec[i] = (K[i] * N[i]) / (arg.scaleBBlockRowSize * arg.scaleBBlockColSize);
+        else if(isBlockScaling(arg.scaleB))
+            size_scaleBVec[i] = (K[i] * N[i]) / blockSize(arg.scaleB);
         else
             size_scaleBVec[i] = 0;
         if(arg.bias_vector)
@@ -1767,7 +1767,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             dScaleA.emplace_back(Talpha, size_scaleAVec[i] * block_count, HMM);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
-        else if(arg.scaleA == hipblaslt_scaling_format::Block)
+        else if(isBlockScaling(arg.scaleA))
         {
             // For MX format, use uin8_t for the scale (E8M0)
             dScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * block_count, HMM);
@@ -1779,7 +1779,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             dScaleB.emplace_back(Talpha, size_scaleBVec[i] * block_count, HMM);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
-        else if(arg.scaleB == hipblaslt_scaling_format::Block)
+        else if(isBlockScaling(arg.scaleB))
         {
             // For MX format, use uin8_t for the scale (E8M0)
             dScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * block_count, HMM);
@@ -1831,7 +1831,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             hScaleA.emplace_back(Talpha, size_scaleAVec[i]);
         }
-        else if(arg.scaleA == hipblaslt_scaling_format::Block)
+        else if(isBlockScaling(arg.scaleA))
         {
             hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i]);
         }
@@ -1840,7 +1840,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             hScaleB.emplace_back(Talpha, size_scaleBVec[i]);
         }
-        else if(arg.scaleB == hipblaslt_scaling_format::Block)
+        else if(isBlockScaling(arg.scaleB))
         {
             hScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i]);
         }
@@ -1868,7 +1868,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_seedrand();
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-        if(arg.scaleA == hipblaslt_scaling_format::Block)
+        if(isBlockScaling(arg.scaleA))
         {
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
@@ -1896,8 +1896,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               A_col[i],
                                               lda[i],
                                               transA == HIPBLAS_OP_T,
-                                              arg.scaleABlockRowSize,
-                                              arg.scaleABlockColSize,
+                                              scaleShuffleTile(arg.scaleA),
+                                              blockSize(arg.scaleA),
+                                              1,
                                               true,
                                               hipblaslt_initialization2string(arg.initialization)));
             // Copy data and scale to device buffers
@@ -1920,7 +1921,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   num_batches[i]);
 #ifdef HIPBLASLT_USE_ROCROLLER
         }
-        if(arg.scaleB == hipblaslt_scaling_format::Block)
+        if(isBlockScaling(arg.scaleB))
         {
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
@@ -1948,8 +1949,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               B_col[i],
                                               ldb[i],
                                               transB == HIPBLAS_OP_T,
-                                              arg.scaleBBlockRowSize,
-                                              arg.scaleBBlockColSize,
+                                              scaleShuffleTile(arg.scaleA),
+                                              1,
+                                              blockSize(arg.scaleB),
                                               false,
                                               hipblaslt_initialization2string(arg.initialization)));
             // Copy data and scale to device buffers
@@ -2241,17 +2243,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             // For MX format (SCALE_POINTER_BLOCK), set the scale mode
             // Set the row and col sizes of scale block for matrix A
-            if(arg.scaleA == hipblaslt_scaling_format::Block)
+            else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0)
             {
-                if(arg.scaleABlockRowSize == 32 && arg.scaleABlockColSize == 1)
-                {
-                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-                }
-                else
-                {
-                    hipblaslt_cout << "Only a block size scaling of 32 is supported" << std::endl;
-                    return;
-                }
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+            }
+            else if (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_64_4_4)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT;
             }
 
             if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
@@ -2277,18 +2275,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             // For MX format (SCALE_POINTER_BLOCK), set the scale mode
             // Set the row and col sizes of scale block for matrix B
-            if(arg.scaleB == hipblaslt_scaling_format::Block)
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0)
             {
-                if(arg.scaleBBlockRowSize == 1 && arg.scaleBBlockColSize == 32)
-                {
-                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-                }
-                else
-                {
-                    hipblaslt_cout << "Only a block size scaling of 32 is supported" << std::endl;
-                    return;
-                }
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
             }
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_64_4_4)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT;
+            }
+
             if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
             {
                 auto attr = HIPBLASLT_MATMUL_DESC_B_SCALE_MODE;
@@ -3247,8 +3242,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             void* scaleDValue = arg.scaleD ? hScaleD[gemmIdx].buf() : (void*)(&scale);
             void* scaleEValue = arg.scaleE ? hScaleE[gemmIdx].buf() : (void*)(&scale);
 
-            bool const isScaleAMXFormat = (arg.scaleA == hipblaslt_scaling_format::Block);
-            bool const isScaleBMXFormat = (arg.scaleB == hipblaslt_scaling_format::Block);
+            bool const isScaleAMXFormat = isBlockScaling(arg.scaleA);
+            bool const isScaleBMXFormat = isBlockScaling(arg.scaleB);
 
             for(int batchIdx = 0; batchIdx < num_batches[gemmIdx]; batchIdx++)
             {
@@ -3292,8 +3287,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
                         false,
-                        (arg.scaleA == hipblaslt_scaling_format::Block),
-                        (arg.scaleB == hipblaslt_scaling_format::Block));
+                        isBlockScaling(arg.scaleA),
+                        isBlockScaling(arg.scaleB));
 
                     auto                        pos    = stride_d[gemmIdx] * batchIdx;
                     std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
@@ -3484,8 +3479,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
                         false,
-                        (arg.scaleA == hipblaslt_scaling_format::Block),
-                        (arg.scaleB == hipblaslt_scaling_format::Block));
+                        isBlockScaling(arg.scaleA),
+                        isBlockScaling(arg.scaleB));
                 }
             }
         }

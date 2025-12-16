@@ -176,10 +176,6 @@ struct _rocblaslt_matmul_desc
     RocblasltContractionProblem::ScalingFormat scaleBType
         = RocblasltContractionProblem::ScalingFormat::None;
 
-    uint32_t scaleABlockRowSize = 0;
-    uint32_t scaleABlockColSize = 0;
-    uint32_t scaleBBlockRowSize = 0;
-    uint32_t scaleBBlockColSize = 0;
     float act0 = 0.f;
     float act1 = 0.f;
 
@@ -198,10 +194,6 @@ struct _rocblaslt_matmul_desc
         this->scaleE                = src.scaleE;
         this->scaleAType            = src.scaleAType;
         this->scaleBType            = src.scaleBType;
-        this->scaleABlockRowSize    = src.scaleABlockRowSize;
-        this->scaleABlockColSize    = src.scaleABlockColSize;
-        this->scaleBBlockRowSize    = src.scaleBBlockRowSize;
-        this->scaleBBlockColSize    = src.scaleBBlockColSize;
         this->pointermode           = src.pointermode;
         this->amaxD                 = src.amaxD;
         this->bias_type             = src.bias_type;
