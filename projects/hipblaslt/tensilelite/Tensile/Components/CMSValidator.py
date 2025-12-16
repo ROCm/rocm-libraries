@@ -242,11 +242,6 @@ def verify_global_reads_not_too_early(scheduleInfo, context: dict, code_path: in
     constraints between LRA0 and GRB, or between LRB0 and GRA, because the LDS
     used for A and B are completely separate.
     """
-    if context.get("kernel", {}).get("UseF32XEmulation", False):
-        message = "CMS validation is currently disabled for F32X emulation"
-        printWarning(f"{message}")
-        return True, message
-
     # Get the relative order of the relevant operations within a vmfma index.
     positions = {
         "SYNC": -1,
