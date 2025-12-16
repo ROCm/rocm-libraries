@@ -108,10 +108,10 @@ inline std::string get_filename(const std::string& matrix_filename)
         matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
     }
 
-    fs::path r;
+    fs::path matrix_path;
     if(matrices_dir != nullptr)
     {
-        r = fs::path(matrices_dir) / matrix_filename_with_ext;
+        matrix_path = fs::path(matrices_dir) / matrix_filename_with_ext;
     }
     else
     {
@@ -122,29 +122,28 @@ inline std::string get_filename(const std::string& matrix_filename)
             "../clients/matrices",
         };
 
-        bool found = false;
         for(const auto& rel_path : possible_relative_paths)
         {
             fs::path test_path = fs::path(hipsparse_exepath()) / rel_path;
             if(fs::exists(test_path))
             {
-                r     = test_path / matrix_filename_with_ext;
-                found = true;
+                matrix_path = test_path / matrix_filename_with_ext;
                 break;
             }
         }
 
-        if(!found)
+        if(matrix_path.empty())
         {
             // Fallback to default relative path
-            r = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
+            matrix_path
+                = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
         }
     }
 
-    FILE* tmpf = fopen(r.string().c_str(), "r");
+    FILE* tmpf = fopen(matrix_path.string().c_str(), "r");
     if(!tmpf)
     {
-        missing_file_error_message(r.string().c_str());
+        missing_file_error_message(matrix_path.string().c_str());
         std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
         exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
     }
@@ -152,7 +151,7 @@ inline std::string get_filename(const std::string& matrix_filename)
     {
         fclose(tmpf);
     }
-    return r.string();
+    return matrix_path.string();
 }
 
 /*!\file

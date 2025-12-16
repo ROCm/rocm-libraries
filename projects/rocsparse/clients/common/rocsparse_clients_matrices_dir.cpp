@@ -57,19 +57,17 @@ private:
             "../clients/matrices",
         };
 
-        bool found = false;
         for(const auto& rel_path : possible_relative_paths)
         {
             fs::path test_path = default_path / rel_path;
             if(fs::exists(test_path))
             {
                 this->m_default_path = test_path.string() + "/";
-                found                = true;
                 break;
             }
         }
 
-        if(!found)
+        if(this->m_default_path.empty())
         {
             // Fallback if none of the paths exist
             this->m_default_path = (default_path / ".." / "matrices").string() + "/";
