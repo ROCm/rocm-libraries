@@ -35,7 +35,7 @@ jobs:
     outputs:
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
       windows_projects: ${{ steps.windows_projects.outputs.windows_projects }}
-      test_type: ${{ steps.projects.outputs.test_type }}
+      test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
     steps:
