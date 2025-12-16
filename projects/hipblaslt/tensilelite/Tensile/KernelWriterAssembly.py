@@ -14026,9 +14026,6 @@ class KernelWriterAssembly(KernelWriter):
 
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
-    # Wait for all LR in pre-loop to complete before we start main loop
-    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
-
     if numCodePath == 1:
       module.add(MacroInstruction(name="MAINLOOP", args=[0]))
       module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
