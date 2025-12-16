@@ -467,6 +467,16 @@ class Timeline:
             num_iterations:             Number of iterations to consider for cross-iteration effects (default 2).
         """
         
+        available_keys = schedule_info.optSchedule.keys()
+        if "LRA1" in available_keys:
+            assert "LRA3" not in available_keys, "LRA1 and LRA3 cannot both be present in the schedule."
+        if "LRA3" in available_keys:
+            assert "LRA1" not in available_keys, "LRA1 and LRA3 cannot both be present in the schedule."
+        if "LRB1" in available_keys:
+            assert "LRB3" not in available_keys, "LRB1 and LRB3 cannot both be present in the schedule."
+        if "LRB3" in available_keys:
+            assert "LRB1" not in available_keys, "LRB1 and LRB3 cannot both be present in the schedule."
+
         self.num_vmfma = schedule_info.numMfma
         self.vlcnt_shift = defaultdict(int)
         self.vlcnt_shift[NO_GLOBAL_LOAD_LOOP] = schedule_info.nglshift
@@ -733,19 +743,24 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution') -> None:
                 lr.needed_by = base_needed_by + loop_offset
 
 
-def set_gr_needed_by_from_lr1s(timeline: Timeline, swap_global_read_order: bool) -> None:
+def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) -> None:
     """
-    Set the needed_by field of GlobalReads based on the LRA1/LRB1 instructions.
+    Set the needed_by field of GlobalReads based on the LR1/3 instructions.
     If GRA or GRB is missing, this function will NOT error out.
-    If either GRA or GRB is present, the corresponding LR1 instruction must be present.
+    If either GRA or GRB is present, the corresponding LR1/3 instruction must be present.
     
     Args:
         timeline: The Timeline object containing the instructions.
         swap_global_read_order: Whether global read order is swapped.
     """
     # If the global read order is swapped, we need to swap the target indices since GRAs actually load B and GRBs actually load A.
-    # TODO: Hardcoded for now, can't support LRA3/LRB3 yet.
     target_names = {"GRA": "LRA1", "GRB": "LRB1"}
+    
+    if "LRA1" not in timeline.get_instruction_names():
+        assert "LRA3" in timeline.get_instruction_names(), "LRA3 must be present if LRA1 is not"
+        target_names["GRA"] = "LRA3"
+        target_names["GRB"] = "LRB3"
+    
     if swap_global_read_order:
         target_names["GRA"], target_names["GRB"] = target_names["GRB"], target_names["GRA"]
 
@@ -975,28 +990,16 @@ def verify_gr_inc_order(scheduleInfo, context: dict, code_path: int) -> tuple[bo
 
     return True, ""
 
-def verify_grs_finish_before_lr1s(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+def verify_grs_finish_before_lrs(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
+    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LR1/3 of this iteration.
     """
-    if context.get("kernel", {}).get("UseF32XEmulation", False):
-        message = "CMS validation is currently disabled for F32X emulation"
-        printWarning(f"{message}")
-        return True, message
-    available_keys = schedule_info.optSchedule.keys()
-    if "LRA1" not in available_keys and "LRA3" in available_keys:
-        printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
-        return True, ""
-    if "LRB1" not in available_keys and "LRB3" in available_keys:
-        printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
-        return True, ""
-
-    relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "SYNC"]
+    relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
     kernel = context["kernel"]
     timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
     
     # Apply standalone functions to populate timeline fields
-    set_gr_needed_by_from_lr1s(timeline, kernel["SwapGlobalReadOrder"])
+    set_gr_needed_by_from_lrs(timeline, kernel["SwapGlobalReadOrder"])
     apply_swaits(timeline)
     apply_barriers(timeline)
 
@@ -1116,7 +1119,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         verify_ascending_order,
         verify_lrs_finished_before_vmfma,
         verify_global_reads_not_too_early,
-        verify_grs_finish_before_lr1s,
+        verify_grs_finish_before_lrs,
         verify_scc_overlap,
         verify_gr_inc_order
     ]

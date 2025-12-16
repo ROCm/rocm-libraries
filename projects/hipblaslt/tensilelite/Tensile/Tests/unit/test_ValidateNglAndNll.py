@@ -22,12 +22,12 @@
 
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CMSValidator import verify_grs_finish_before_lr1s, verify_lrs_finished_before_vmfma
+from Tensile.Components.CMSValidator import verify_grs_finish_before_lrs, verify_lrs_finished_before_vmfma
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateNgl(CMSValidationTestBase):
     def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_grs_finish_before_lr1s(sched, kernel_dict, codePathIdx)
+        return verify_grs_finish_before_lrs(sched, kernel_dict, codePathIdx)
 
     def make_simple_schedule_and_sync(self) -> tuple[dict[str, list[list[int]]], list[SWaitCnt | SBarrier]]:
         """
