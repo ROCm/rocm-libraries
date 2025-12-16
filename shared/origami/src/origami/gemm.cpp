@@ -604,7 +604,7 @@ double compute_memory_latency(const problem_t& problem,
 
   H_mem1 = std::min(H_mem1, H_mem1_global);
 
-  if (H_mem1 == 0) { H_mem1 = 0.5; }
+  // if (H_mem1 == 0) { H_mem1 = 0.5; }
 
   // 2) Estimate mall hit-rate
   double H_mem2 = estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor);
@@ -674,7 +674,7 @@ double compute_memory_latency(const problem_t& problem,
       break;
     }
   }
-  double concurrent_tiles = std::min(static_cast<double>(problem.batch /** splitting_factor*/),
+  double concurrent_tiles = std::min(static_cast<double>(problem.batch * splitting_factor),
       std::max(static_cast<double>(num_active_cus) / (mall_m * mall_n), 1.));
   // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
   double min_load = static_cast<double>((mall_m * Ld_A_value * static_cast<size_t>(a_bytes)) +
@@ -747,7 +747,7 @@ double compute_tile_latency(const problem_t& problem,
   double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
   size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
 
-  double L_epilogue = (static_cast<double>(num_active_cus /*/ splitting_factor*/) *
+  double L_epilogue = (static_cast<double>(num_active_cus / splitting_factor) *
                        MT_M_rounded_128bytes * MT_N * d_bytes) /
                       mem_bw_occ_limited;
   // One compute iteration happens in the prologue
@@ -766,11 +766,7 @@ double compute_tile_latency(const problem_t& problem,
   // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N
   // tiles to coherent memory
   if (splitting_factor > 1) {
-    double mem_bw_occ            = compute_mem_bw_from_occupancy(hardware, num_active_cus / splitting_factor);
-    double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
-
-    double n_partials = std::ceil(std::log2(static_cast<double>(splitting_factor))); //splitting_factor - 1;
-    // size_t n_partials = splitting_factor - 1;
+    size_t n_partials = splitting_factor - 1;
 
     // Only the reduction CU reads from all splits.
     double partial_read_bytes =
@@ -785,8 +781,7 @@ double compute_tile_latency(const problem_t& problem,
     // 64 Threads active in a SIMD. Exposed to at least latency of reducing splitting_factor
     // tiles.
     double partial_adds =
-        // (static_cast<double>(config.mt.mn()) * static_cast<double>(splitting_factor)) / (64);
-        (static_cast<double>(config.mt.mn()) * n_partials) / (64);
+        (static_cast<double>(config.mt.mn()) * static_cast<double>(splitting_factor)) / (64);
 
     double L_reduce = partial_readwrite_bytes / (mem_bw_occ_limited);
     L_epilogue += L_reduce + partial_adds + 10000;
