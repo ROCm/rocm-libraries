@@ -45,8 +45,5 @@ void tensor_bindings(nb::module_& m)
         .def("get_volume", &TensorAttributes::get_volume)
         .def("has_uid", &TensorAttributes::has_uid)
         .def("clear_uid", &TensorAttributes::clear_uid, nb::rv_policy::reference_internal)
-        .def("validate", &TensorAttributes::validate)
-        .def("validate_dims_set_and_positive", &TensorAttributes::validate_dims_set_and_positive)
-        .def("validate_dims_and_strides_set_and_positive",
-             &TensorAttributes::validate_dims_and_strides_set_and_positive);
+        .def("validate", &TensorAttributes::validate);
 }

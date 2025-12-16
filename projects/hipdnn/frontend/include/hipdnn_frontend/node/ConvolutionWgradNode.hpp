@@ -48,7 +48,6 @@ public:
         auto& xDims = x->get_dim();
         auto& dyDims = dy->get_dim();
         auto& dwDims = dw->get_dim();
-        auto& dwStrides = dw->get_stride();
 
         auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
         auto& prePadding = attributes.get_pre_padding();
@@ -154,14 +153,6 @@ public:
                         + ") does not match expected dimension (" + std::to_string(expectedDyDim)
                         + ") given x dimensions, kernel size, padding, stride, and dilation");
             }
-        }
-
-        if(!dwStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(dw->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionWgradNode: dw tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         HIPDNN_RETURN_IF_NE(
