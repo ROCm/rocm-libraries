@@ -603,7 +603,7 @@ class TestCustomScheduleValidation:
         # Create what should be an invalid schedule:
         invalid_schedule = {"P": [[3, 2, 1]]}
         scheduleInfo = ScheduleInfo(
-            None, None, invalid_schedule, None, None, None, None
+            1, None, invalid_schedule, None, None, None, None
         )
         # Verify that this invalid schedule passes when this specific flag is true.
         # Currently a warning message is printed.
