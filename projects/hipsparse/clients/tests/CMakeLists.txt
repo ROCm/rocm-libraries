@@ -153,10 +153,10 @@ endif()
 
 # Include sources
 if(HIPSPARSE_ENABLE_HIP)
-  include(rocm/CMakeLists.txt)
+  add_subdirectory(rocm)
 elseif(HIPSPARSE_ENABLE_CUDA)
   if(CUDAToolkit_VERSION MATCHES "12.8")
-    include(cuda/12.8/CMakeLists.txt)
+    add_subdirectory(cuda/12.8)
     message("Building hipsparse-test executable using CUDA_VERSION ${CUDAToolkit_VERSION}")
   else()
     message("ERROR: Testing on CUDA_VERSION ${CUDAToolkit_VERSION} not supported.")
@@ -207,7 +207,7 @@ else()
     # POST_BUILD ensures matrices are downloaded first (via hipsparse-common dependency)
     add_custom_command(
         TARGET hipsparse-test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
+        COMMAND ${CMAKE_COMMAND} -E create_symlink # replace with copy
             "${PROJECT_BINARY_DIR}/matrices"
             "${PROJECT_BINARY_DIR}/clients/matrices"
         COMMENT "Creating symlink for test matrices"
@@ -231,8 +231,10 @@ set_target_properties(mtx2csr PROPERTIES
 )
 
 set(HIPSPARSE_CLIENTMATRICES "${PROJECT_SOURCE_DIR}/cmake/hipsparse_clientmatrices.cmake")
+set(HIPSPARSE_CLIENTMATRICES "${HIPSPARSE_CLIENTMATRICES}" PARENT_SCOPE)
 
 set(HIPSPARSE_CONVERT "${PROJECT_BINARY_DIR}/hipsparse_mtx2csr")
+set(HIPSPARSE_CONVERT "${HIPSPARSE_CONVERT}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_CONVERT}"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:mtx2csr> "${HIPSPARSE_CONVERT}"
@@ -241,6 +243,7 @@ add_custom_command(
 )
 
 set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_common.yaml")
+set(HIPSPARSE_COMMON "${HIPSPARSE_COMMON}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_COMMON}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" "${HIPSPARSE_COMMON}"
@@ -249,6 +252,7 @@ add_custom_command(
 )
 
 set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_template.yaml")
+set(HIPSPARSE_TEMPLATE "${HIPSPARSE_TEMPLATE}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_TEMPLATE}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_template.yaml" "${HIPSPARSE_TEMPLATE}"
@@ -257,6 +261,7 @@ add_custom_command(
 )
 
 set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_gentest.py")
+set(HIPSPARSE_GENTEST "${HIPSPARSE_GENTEST}" PARENT_SCOPE)
 add_custom_command(
     OUTPUT "${HIPSPARSE_GENTEST}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${HIPSPARSE_GENTEST}"
