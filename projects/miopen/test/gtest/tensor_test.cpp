@@ -116,7 +116,6 @@ public:
         const std::string stderr_output = testing::internal::GetCapturedStderr();
         EXPECT_TRUE(stderr_output.find("MIOpen Error") != std::string::npos &&
                     stderr_output.find("Dereferencing nullptr") != std::string::npos);
-
     }
 
 protected:
