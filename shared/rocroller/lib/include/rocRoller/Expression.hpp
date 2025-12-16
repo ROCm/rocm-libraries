@@ -503,6 +503,22 @@ namespace rocRoller
             DataType destinationType = DataType::None;
         };
 
+        struct Reinterpret : Unary
+        {
+            inline Reinterpret& copyParams(const Reinterpret& other)
+            {
+                destinationType = other.destinationType;
+
+                return *this;
+            }
+
+            constexpr static inline auto Type       = Category::Conversion;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 0;
+
+            DataType destinationType = DataType::None;
+        };
+
         struct LogicalNot : Unary
         {
             constexpr static inline auto Type       = Category::Logical;
@@ -675,6 +691,8 @@ namespace rocRoller
 
         template <DataType DATATYPE>
         ExpressionPtr convert(ExpressionPtr a);
+
+        ExpressionPtr reinterpret(DataType dt, ExpressionPtr a);
 
         ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
         ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
@@ -938,19 +956,6 @@ namespace rocRoller
          */
         CommandArgumentValue evaluate(ExpressionPtr const& expr, RuntimeArguments const& args);
         CommandArgumentValue evaluate(Expression const& expr, RuntimeArguments const& args);
-
-        /**
-         * Reinterpret cast a value to a target DataType.
-         *
-         * @tparam FromType The input value type
-         * @param value The value to reinterpret
-         * @param targetDataType The target DataType to cast to
-         * @return CommandArgumentValue containing the reinterpreted value
-         */
-        template <CCommandArgumentValue FromType, int Idx = 0>
-        CommandArgumentValue reinterpret(FromType const& value, DataType targetDataType);
-        CommandArgumentValue reinterpret(CommandArgumentValue const& value,
-                                         DataType                    targetDataType);
 
         /**
          * Splits an expression and returns its operands in a tuple.

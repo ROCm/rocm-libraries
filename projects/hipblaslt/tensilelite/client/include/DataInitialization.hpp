@@ -422,7 +422,11 @@ namespace TensileLite
                 case rocisa::DataType::Int64:
                 case rocisa::DataType::XFloat32:
                 case rocisa::DataType::ComplexFloat:
+                    initArray<std::complex<float>>(initMode, static_cast<std::complex<float>*>(array), descriptor);
+                    break;
                 case rocisa::DataType::ComplexDouble:
+                    initArray<std::complex<double>>(initMode, static_cast<std::complex<double>*>(array), descriptor);
+                    break;
                 case rocisa::DataType::Int8x4:
                 case rocisa::DataType::Count:
                 case rocisa::DataType::Float8BFloat8:

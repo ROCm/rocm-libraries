@@ -51,7 +51,6 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentValueTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AssemblerTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/BufferDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElimTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp"
