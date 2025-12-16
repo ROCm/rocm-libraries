@@ -33,6 +33,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_half.hpp"
 
+#include <hipcub/libcxx.hpp>
 #include <hipcub/tuple.hpp>
 
 #include <cstring>
@@ -42,10 +43,20 @@ namespace test_utils
 namespace detail
 {
 
+template<class Key>
+constexpr bool is_extended_int
+    = std::is_same_v<Key, __int128> || std::is_same_v<Key, unsigned __int128>;
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         std::enable_if_t<std::is_integral<Key>::value, int> = 0>
+         std::enable_if_t<
+             // Catch integral types and extended integral types.
+             // The std::is_same_v<...> clauses can be removed once
+             // libhipcxx is a hard depedency and test types half_t
+             // and bfloat_t are removed.
+             _HIPCUB_STD::is_integral_v<Key> || is_extended_int<Key>,
+             int>
+         = 0>
 Key to_bits(const Key key)
 {
     using Bits                             = typename hipcub::Traits<Key>::UnsignedBits;
@@ -58,13 +69,25 @@ Key to_bits(const Key key)
     return key & radix_mask;
 }
 
+template<class Key>
+constexpr bool is_extended_fp
+    = std::is_same_v<Key, __half> || std::is_same_v<Key, hip_bfloat16>
+      || std::is_same_v<Key, native_half> || std::is_same_v<Key, native_bfloat16>;
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         std::enable_if_t<std::is_floating_point<Key>::value, int> = 0>
+         std::enable_if_t<
+             // Catch floating types and extended floating types.
+             // The std::is_same_v<...> clauses can be removed once
+             // libhipcxx is a hard depedency and test types half_t
+             // and bfloat_t are removed.
+             _HIPCUB_STD::is_floating_point_v<Key> || is_extended_fp<Key>,
+             int>
+         = 0>
 auto to_bits(const Key key)
 {
     using unsigned_bits_type = typename hipcub::NumericTraits<Key>::UnsignedBits;
+    static_assert(sizeof(unsigned_bits_type) == sizeof(Key));
 
     unsigned_bits_type bit_key;
     std::memcpy(&bit_key, &key, sizeof(unsigned_bits_type));
@@ -124,53 +147,6 @@ auto to_bits(const Key& key)
 
     // The last call to to_bits mask the result to the specified bit range
     return to_bits<StartBit, EndBit>(bit_key);
-}
-
-template<unsigned int StartBit, unsigned int EndBit>
-auto to_bits(const hip_bfloat16& key)
-{
-    float f = static_cast<float>(key);
-    return to_bits<StartBit, EndBit>(f);
-}
-
-template<unsigned int StartBit, unsigned int EndBit>
-auto to_bits(const __half& key)
-{
-    float f = static_cast<float>(key);
-    return to_bits<StartBit, EndBit>(f);
-}
-
-template<unsigned int StartBit, unsigned int EndBit>
-auto to_bits(const __int128 key)
-{
-    using U = unsigned __int128;
-    U bits  = static_cast<U>(key);
-    bits ^= (U(1) << 127);
-    constexpr unsigned width = EndBit - StartBit;
-    if constexpr(width == 128)
-    {
-        return bits;
-    }
-    else
-    {
-        const U mask = (static_cast<U>(1) << width) - 1;
-        return (bits >> StartBit) & mask;
-    }
-}
-
-template<unsigned int StartBit, unsigned int EndBit>
-auto to_bits(const unsigned __int128 key)
-{
-    constexpr unsigned width = EndBit - StartBit;
-    if constexpr(width == 128)
-    {
-        return key;
-    }
-    else
-    {
-        const unsigned __int128 mask = (static_cast<unsigned __int128>(1) << width) - 1;
-        return (key >> StartBit) & mask;
-    }
 }
 
 } // namespace detail
