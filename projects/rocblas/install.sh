@@ -155,6 +155,8 @@ install_aocl_from_source( )
       cd aocl
       CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON  -DENABLE_ILP64=ON  -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
       elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
+      printf "\033[32m✓ AOCL 5.1 successfully built with ILP64 support\033[0m\n"
+      printf "\033[32m  Location: \033[33m${build_dir}/deps/aocl/install_package/lib/libaocl.so\033[0m\n"
       popd
     else
       printf "\033[32mAOCL already built at \033[33m${build_dir}/deps/aocl\033[32m (use --clean-deps to force rebuild)\033[0m\n"
@@ -509,6 +511,20 @@ install_blis()
       rm -rf "${build_dir}/deps/blis"
     fi
 
+    # Check for existing AOCL installations
+    printf "\033[36m==== BLAS Library Detection ====\033[0m\n"
+    if [[ -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]]; then
+        printf "\033[32mFound existing AOCL 4.2.0 (GCC) in /opt/AMD/aocl/\033[0m\n"
+    elif [[ -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]]; then
+        printf "\033[32mFound existing AOCL 4.1.0 (AOCC) in /opt/AMD/aocl/\033[0m\n"
+    elif [[ -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a" ]]; then
+        printf "\033[32mFound existing AOCL 4.0 (AOCC) in /opt/AMD/aocl/\033[0m\n"
+    elif [[ -e "/usr/local/lib/libblis.a" ]]; then
+        printf "\033[32mFound existing BLIS in /usr/local/lib/\033[0m\n"
+    else
+        printf "\033[33mNo existing AOCL installation found in /opt or /usr/local\033[0m\n"
+    fi
+    
     if [[ ! -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a"  ]] &&
@@ -516,6 +532,7 @@ install_blis()
         pushd .
         #Download prebuilt AMD multithreaded blis
         if [[ ! -e "./blis/lib/libblis.a" ]]; then
+          printf "\033[32mDownloading bundled BLIS library (fallback)...\033[0m\n"
           case "${ID}" in
               centos|rhel|sles|opensuse-leap)
                   wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-centos-2.0.tar.gz
@@ -535,9 +552,13 @@ install_blis()
           rm blis.tar.gz
           cd blis/lib
           ln -sf libblis-mt.a libblis.a
+          printf "\033[32mBundled BLIS installed to ${build_dir}/deps/blis/\033[0m\n"
+        else
+          printf "\033[32mBundled BLIS already present at ${build_dir}/deps/blis/\033[0m\n"
         fi
         popd
     fi
+    printf "\033[36m================================\033[0m\n"
 }
 
 # #################################################
