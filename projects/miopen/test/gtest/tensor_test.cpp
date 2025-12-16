@@ -114,9 +114,9 @@ public:
         ASSERT_NE(miopenSet4dTensorDescriptor(nullptr, miopenHalf, 100, 32, 8, 8),
                   miopenStatusSuccess);
         const std::string stderr_output = testing::internal::GetCapturedStderr();
-        EXPECT_THAT(stderr_output, ::testing::AllOf(
-            ::testing::HasSubstr("MIOpen Error"),
-            ::testing::HasSubstr("Dereferencing nullptr")));
+        EXPECT_TRUE(stderr_output.find("MIOpen Error") != std::string::npos &&
+                    stderr_output.find("Dereferencing nullptr") != std::string::npos);
+
     }
 
 protected:
