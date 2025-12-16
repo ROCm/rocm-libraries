@@ -65,6 +65,7 @@ def create_base_kernel():
         "ForceUnrollSubIter": False,
         "SwapGlobalReadOrder": False, # For asserting it gets set
         "UsePLRPack": False, # For asserting it gets set
+        "UseF32XEmulation": False,
         "MIWaveTileA": 2,
         "MIWaveTileB": 2,
     }
