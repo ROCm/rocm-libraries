@@ -560,24 +560,20 @@ rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_9_16_launch(
 {
     auto          trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
     const int64_t max_nnzb = trm_info->get_max_nnz();
-
-    switch(max_nnzb)
-    {
-    case 32:
+    if(max_nnzb <= 32)
     {
         return rocsparse::transform_t_type<32>(A->data_type, A->row_type, A->col_type);
     }
-    case 64:
+    else if(max_nnzb <= 64)
     {
         return rocsparse::transform_t_type<64>(A->data_type, A->row_type, A->col_type);
     }
-    case 128:
+    else if(max_nnzb <= 128)
     {
         return rocsparse::transform_t_type<128>(A->data_type, A->row_type, A->col_type);
     }
-    default:
+    else
     {
         THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
-    }
     }
 }

@@ -50,8 +50,8 @@ namespace rocsparse
                                                   double               boost_tol,
                                                   T                    boost_val)
     {
-        constexpr static uint32_t DIMX = BBDIM;
-        constexpr static uint32_t DIMY = BLOCKSIZE / BBDIM;
+        static constexpr uint32_t DIMX = BBDIM;
+        static constexpr uint32_t DIMY = BLOCKSIZE / BBDIM;
 
         // Current row this wavefront is working on
         J row = map[blockIdx.x];
@@ -439,9 +439,6 @@ namespace rocsparse
             reinterpret_cast<char* __restrict__>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            done_array, 0, sizeof(int32_t) * A->rows * A->batch_count, handle->stream));
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_9_32<BLOCKSIZE, WFSIZE, BBDIM>),
             dim3(A->rows, A->batch_count),
@@ -471,82 +468,119 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WF_SIZE,
-              uint32_t BBDIM,
-              typename T,
-              typename I,
-              typename... P>
-    static rocsparse::bsrilu0_kernel_9_32_launch_t transform_j_type(const rocsparse_indextype j,
-                                                                    P... p)
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t BBDIM, typename T, typename I>
+    static rocsparse::bsrilu0_kernel_launch_t transform_j_type(const rocsparse_indextype value)
     {
-        return (j == rocsparse_indextype_i32) //
-                   ? rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE,
-                                                           WF_SIZE,
-                                                           BBDIM,
-                                                           T,
-                                                           I,
-                                                           int32_t> //
-                   : (j == rocsparse_indextype_i64) //
-                         ? rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE,
-                                                                 WF_SIZE,
-                                                                 BBDIM,
-                                                                 T,
-                                                                 I,
-                                                                 int64_t> //
-                         : nullptr;
+
+        switch(value)
+        {
+        case rocsparse_indextype_i32:
+        {
+            return rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE, WF_SIZE, BBDIM, T, I, int32_t>;
+        }
+        case rocsparse_indextype_i64:
+        {
+            return rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE, WF_SIZE, BBDIM, T, I, int64_t>;
+        }
+        case rocsparse_indextype_u16:
+        {
+            THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                  "rocsparse_indextype_u16 not supported");
+        }
+        }
+
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t BBDIM, typename T, typename... P>
-    static rocsparse::bsrilu0_kernel_9_32_launch_t transform_i_type(const rocsparse_indextype i,
-                                                                    P... p)
+    static rocsparse::bsrilu0_kernel_launch_t transform_i_type(const rocsparse_indextype value,
+                                                               P... p)
     {
-        return //
-            (i == rocsparse_indextype_i32) //
-                ? rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int32_t>(p...) //
-                : (i == rocsparse_indextype_i64) //
-                      ? rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int64_t>(p...) //
-                      : nullptr;
+        switch(value)
+        {
+        case rocsparse_indextype_i32:
+        {
+            return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int32_t>(
+                std::forward<P>(p)...);
+        }
+        case rocsparse_indextype_i64:
+        {
+            return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int64_t>(
+                std::forward<P>(p)...);
+        }
+        case rocsparse_indextype_u16:
+        {
+            THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                  "rocsparse_indextype_u16 not supported");
+        }
+        }
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t BBDIM, typename... P>
-    static rocsparse::bsrilu0_kernel_9_32_launch_t transform_t_type(const rocsparse_datatype i,
-                                                                    P... p)
+    static rocsparse::bsrilu0_kernel_launch_t transform_t_type(const rocsparse_datatype value,
+                                                               P... p)
     {
-        return //
-            (i == rocsparse_datatype_f32_r) //
-                ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, BBDIM, float>(p...) //
-                : (i == rocsparse_datatype_f32_c) //
-                      ? rocsparse::
-                          transform_i_type<BLOCKSIZE, WF_SIZE, BBDIM, rocsparse_float_complex>(
-                              p...) //
-                      : (i == rocsparse_datatype_f64_c) //
-                            ? rocsparse::transform_i_type<BLOCKSIZE,
-                                                          WF_SIZE,
-                                                          BBDIM,
-                                                          rocsparse_double_complex>(p...) //
-                            : (i == rocsparse_datatype_f64_r) //
-                                  ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, BBDIM, double>(
-                                      p...) //
-                                  : nullptr;
-    }
+        switch(value)
+        {
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename... P>
-    static rocsparse::bsrilu0_kernel_9_32_launch_t transform_block_dim(const int32_t bdim, P... p)
-    {
-        return //
-            (bdim <= 16) //
-                ? rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 16>(p...) //
-                : (bdim <= 32) //
-                      ? rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 32>(p...) //
-                      : nullptr;
+        case rocsparse_datatype_f32_r:
+        {
+            return rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, BBDIM, float>(
+                std::forward<P>(p)...);
+        }
+
+        case rocsparse_datatype_f32_c:
+        {
+            return rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, BBDIM, rocsparse_float_complex>(
+                std::forward<P>(p)...);
+        }
+
+        case rocsparse_datatype_f64_r:
+        {
+            return rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, BBDIM, double>(
+                std::forward<P>(p)...);
+        }
+
+        case rocsparse_datatype_f64_c:
+        {
+            return rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, BBDIM, rocsparse_double_complex>(
+                std::forward<P>(p)...);
+        }
+
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
+        {
+            std::stringstream sstr;
+            sstr << rocsparse::enum_utils::to_string(value) << " not supported";
+            THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                  sstr.str().c_str());
+        }
+        }
+
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
 }
 
-rocsparse::bsrilu0_kernel_9_32_launch_t rocsparse::find_bsrilu0_kernel_9_32_launch(
+rocsparse::bsrilu0_kernel_launch_t rocsparse::find_bsrilu0_kernel_9_32_launch(
     rocsparse_handle handle, rocsparse_bsrilu0_info bsrilu0_info, rocsparse_const_spmat_descr A)
 {
-    return rocsparse::transform_block_dim<64, 64>(
-        A->block_dim, A->data_type, A->row_type, A->col_type);
+    if(A->block_dim <= 16)
+    {
+        return rocsparse::transform_t_type<64, 64, 16>(A->data_type, A->row_type, A->col_type);
+    }
+    else if(A->block_dim <= 32)
+    {
+        return rocsparse::transform_t_type<64, 64, 32>(A->data_type, A->row_type, A->col_type);
+    }
+    else
+    {
+        THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                              "block_dim > 32 not supported");
+    }
 }

@@ -23,8 +23,7 @@
  * ************************************************************************ */
 #pragma once
 
-#include "rocsparse-types.h"
-#include "rocsparse_bsrilu0_info.hpp"
+#include "rocsparse_bsrilu0_kernel_launch_t.hpp"
 
 namespace rocsparse
 {

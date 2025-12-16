@@ -23,11 +23,16 @@
  * ************************************************************************ */
 #pragma once
 
-#include "rocsparse_bsrilu0_kernel_launch_t.hpp"
+#include "rocsparse-types.h"
+#include "rocsparse_bsrilu0_info.hpp"
 
 namespace rocsparse
 {
-    bsrilu0_kernel_launch_t find_bsrilu0_kernel_2_8_launch(rocsparse_handle            handle,
-                                                           rocsparse_bsrilu0_info      bsrilu0_info,
-                                                           rocsparse_const_spmat_descr A);
+
+    typedef rocsparse_status (*bsrilu0_kernel_launch_t)(rocsparse_handle       handle,
+                                                        rocsparse_bsrilu0_info bsrilu0_info,
+                                                        rocsparse_spmat_descr  A,
+                                                        size_t                 buffer_size,
+                                                        void* __restrict__ buffer);
+
 }
