@@ -64,6 +64,14 @@ void SaveBinary(const std::vector<char>& hsaco,
                 const std::string& args);
 #endif
 
+#ifdef MIOPEN_BUILD_TESTING
+namespace testing {
+/// Reset cached paths for testing purposes
+/// This allows tests to reinitialize paths with different mocks/env vars
+MIOPEN_INTERNALS_EXPORT void ResetCachedPaths();
+} // namespace testing
+#endif
+
 } // namespace miopen
 
 #endif

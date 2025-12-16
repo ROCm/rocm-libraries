@@ -31,6 +31,7 @@
 #include <miopen/env.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/expanduser.hpp>
+#include <miopen/filesystem_checker.hpp>
 #include <miopen/miopen.h>
 #include <miopen/version.h>
 #if MIOPEN_ENABLE_SQLITE
@@ -65,24 +66,20 @@ static fs::path ComputeUserCachePath()
     /// If MIOPEN_CUSTOM_CACHE_DIR is set in the environment, then
     /// use exactly that path.
     const auto& custom = env::value(MIOPEN_CUSTOM_CACHE_DIR);
-    if(!custom.empty())
-    {
-        p = ExpandUser(custom);
-    }
-    else
-    {
-        const std::string cache_dir = MIOPEN_CACHE_DIR;
-        const std::string version   = std::to_string(MIOPEN_VERSION_MAJOR)       //
-                                    + "." + std::to_string(MIOPEN_VERSION_MINOR) //
-                                    + "." + std::to_string(MIOPEN_VERSION_PATCH) //
-                                    + "." + MIOPEN_STRINGIZE(MIOPEN_VERSION_TWEAK);
-        p = miopen::ExpandUser(cache_dir) / version;
+
+    const std::string cache_dir = !custom.empty() ? custom : MIOPEN_CACHE_DIR;
+    const std::string version   = std::to_string(MIOPEN_VERSION_MAJOR)       //
+                                + "." + std::to_string(MIOPEN_VERSION_MINOR) //
+                                + "." + std::to_string(MIOPEN_VERSION_PATCH) //
+                                + "." + MIOPEN_STRINGIZE(MIOPEN_VERSION_TWEAK);
+    p = miopen::ExpandUser(cache_dir) / version;
 #if !MIOPEN_BUILD_DEV
-        /// \ref nfs-detection
-        if(IsNetworkedFilesystem(p))
-            p = fs::temp_directory_path() / ".cache" / "miopen" / version;
+    /// \ref nfs-detection
+    if(GetFilesystemChecker().IsNetworkedFilesystem(p) &&
+       custom.empty()) // Only if env variable isn't set
+        p = fs::temp_directory_path() / ".cache" / "miopen" / version;
 #endif
-    }
+
     if(!fs::exists(p) && !MIOPEN_DISABLE_USERDB)
         fs::create_directories(p);
     return p;
@@ -91,25 +88,55 @@ static fs::path ComputeUserCachePath()
 #endif
 }
 
+namespace {
+// Use pointers to allow resetting for testing
+fs::path* g_user_cache_path = nullptr;
+fs::path* g_sys_cache_path  = nullptr;
+
+const fs::path& GetUserCachePathInternal()
+{
+    if(!g_user_cache_path)
+        g_user_cache_path = new fs::path(ComputeUserCachePath());
+    return *g_user_cache_path;
+}
+
+const fs::path& GetSysCachePathInternal()
+{
+    if(!g_sys_cache_path)
+        g_sys_cache_path = new fs::path(ComputeSysCachePath());
+    return *g_sys_cache_path;
+}
+} // namespace
+
 fs::path GetCachePath(bool is_system)
 {
-    static const fs::path user_path = ComputeUserCachePath();
-    static const fs::path sys_path  = ComputeSysCachePath();
     if(is_system)
     {
         if(MIOPEN_DISABLE_SYSDB)
             return {};
         else
-            return sys_path;
+            return GetSysCachePathInternal();
     }
     else
     {
         if(MIOPEN_DISABLE_USERDB)
             return {};
         else
-            return user_path;
+            return GetUserCachePathInternal();
     }
 }
+
+#ifdef MIOPEN_BUILD_TESTING
+namespace testing {
+void ResetCachedPaths()
+{
+    delete g_user_cache_path;
+    delete g_sys_cache_path;
+    g_user_cache_path = nullptr;
+    g_sys_cache_path  = nullptr;
+}
+} // namespace testing
+#endif
 
 bool IsCacheDisabled()
 {
