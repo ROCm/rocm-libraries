@@ -9,7 +9,7 @@ file(WRITE "${INSTALL_TEST_FILE}"
 # It differs slightly from the default testfile, and you may encounter issues because of that.
 ]=]
 
-"set(CTEST_RESOURCE_SPEC_FILE \"${ROCM_PATH}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/resources.json\")\n"
+"set(CTEST_RESOURCE_SPEC_FILE \"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/resources.json\")\n"
 )
 
 if(NOT CMAKE_VERSION VERSION_LESS 3.12)
@@ -360,6 +360,6 @@ rocm_install(
 # Generate the resource spec file at install time
 rocm_install(
     CODE "execute_process(COMMAND cmake -P ${CMAKE_SOURCE_DIR}/cmake/GenerateResourceSpec.cmake
-                          WORKING_DIRECTORY  \"${ROCM_PATH}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}\")"
+                          WORKING_DIRECTORY  \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}\")"
     COMPONENT tests
 )

@@ -263,8 +263,8 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   set(DEFAULT_GPU_RESOURCE "gpus")
   
   # Generate the resource spec file. This will contain a description of the GPUs available on the current machine.
-  execute_process(COMMAND cmake -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateResourceSpec.cmake
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  execute_process(COMMAND cmake -P ${CMAKE_SOURCE_DIR}/cmake/GenerateResourceSpec.cmake
+                  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
                   RESULT_VARIABLE GEN_RES_SPEC_RESULT
                   ERROR_VARIABLE  GEN_RES_SPEC_ERROR)
   if(NOT (GEN_RES_SPEC_RESULT STREQUAL "0" AND GEN_RES_SPEC_ERROR STREQUAL ""))
