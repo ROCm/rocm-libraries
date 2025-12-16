@@ -170,4 +170,21 @@ hipdnnBackendDescriptorType_t VariantDescriptor::getStaticType()
     return HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR;
 }
 
+std::string VariantDescriptor::toString() const
+{
+    std::string str = "VariantDescriptor: [";
+    str += "numDataPointers=" + std::to_string(_dataPointers.size());
+    str += ", numUniqueIds=" + std::to_string(_uniqueIds.size());
+    if(_workspace != nullptr)
+    {
+        str += ", workspace=" + fmt::format("{:p}", _workspace);
+    }
+    else
+    {
+        str += ", workspace=null";
+    }
+    str += "]";
+    return str;
+}
+
 }

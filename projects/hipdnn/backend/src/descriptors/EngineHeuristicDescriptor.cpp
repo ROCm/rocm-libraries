@@ -287,4 +287,27 @@ hipdnnBackendDescriptorType_t EngineHeuristicDescriptor::getStaticType()
     return HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR;
 }
 
+std::string EngineHeuristicDescriptor::toString() const
+{
+    std::string str = "EngineHeuristicDescriptor: [";
+    if(_heuristicModeSet)
+    {
+        str += "heuristicMode=" + std::to_string(_heuristicMode);
+    }
+    else
+    {
+        str += "heuristicMode=unset";
+    }
+    if(_graph)
+    {
+        str += ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()));
+    }
+    else
+    {
+        str += ", graph=null";
+    }
+    str += "]";
+    return str;
+}
+
 } // namespace hipdnn_backend

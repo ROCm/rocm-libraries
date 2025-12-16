@@ -121,4 +121,27 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
     return _handle;
 }
 
+std::string GraphDescriptor::toString() const
+{
+    std::string str = "GraphDescriptor: [";
+    if(_handle != nullptr)
+    {
+        str += "handle=" + fmt::format("{:p}", static_cast<const void*>(_handle));
+    }
+    else
+    {
+        str += "handle=null";
+    }
+    if(_graphSerializedBuffer.size() > 0)
+    {
+        str += ", serializedGraphSize=" + std::to_string(_graphSerializedBuffer.size());
+    }
+    else
+    {
+        str += ", serializedGraphSize=0";
+    }
+    str += "]";
+    return str;
+}
+
 } // namespace hipdnn_backend
