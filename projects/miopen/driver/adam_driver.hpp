@@ -49,7 +49,7 @@
 #define MLO_ADAMHOST_H_
 
 template <typename Tref>
-void mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
+int64_t mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
                     Tref* params,
                     Tref* grads,
                     Tref* exp_avgs,
@@ -66,10 +66,12 @@ void mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
                     bool adamw,
                     bool is_amp,
                     int32_t grad_scale,
-                    bool found_inf)
+                    bool found_inf,
+                    bool multi_threaded)
 {
+    const auto t0 = std::chrono::high_resolution_clock::now();
     if(is_amp && found_inf)
-        return;
+        return 0;
 
     const size_t numel = miopen::deref(paramDesc).GetElementSize();
 
@@ -78,89 +80,12 @@ void mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
     const float k                            = lr / bias_correction1;
     const float one_minus_lr_by_weight_decay = adamw ? 1.0f - lr * weight_decay : 0.0f;
     const float inv_sqrt_bias_correction2    = 1.0f / sqrt(bias_correction2);
-    const float inv_grad_scale               = 1.0 / static_cast<float>(grad_scale);
-    const float one_minus_beta1              = 1.0 - beta1;
-    const float one_minus_beta2              = 1.0 - beta2;
+    const float inv_grad_scale               = 1.0f / static_cast<float>(grad_scale);
+    const float one_minus_beta1              = 1.0f - beta1;
+    const float one_minus_beta2              = 1.0f - beta2;
+    const size_t min_grain                   = multi_threaded ? 8 : numel;
 
-    for(size_t i = 0; i < numel; ++i)
-    {
-        Tref exp_avg    = exp_avgs[i];
-        Tref exp_avg_sq = exp_avg_sqs[i];
-
-        Tref param = params[i];
-        Tref grad  = grads[i];
-        if(maximize)
-            grad = -grad;
-        if(is_amp)
-            grad *= inv_grad_scale;
-
-        if(weight_decay != 0)
-        {
-            if(adamw)
-                param *= one_minus_lr_by_weight_decay;
-            else
-                grad += param * weight_decay;
-        }
-
-        exp_avg    = exp_avg * beta1 + grad * one_minus_beta1;
-        exp_avg_sq = exp_avg_sq * beta2 + grad * grad * one_minus_beta2;
-
-        float denom;
-        if(amsgrad)
-        {
-            Tref max_exp_avg_sq = max_exp_avg_sqs[i];
-            if(exp_avg_sq > max_exp_avg_sq)
-            {
-                max_exp_avg_sq     = exp_avg_sq;
-                max_exp_avg_sqs[i] = max_exp_avg_sq;
-            }
-
-            denom = sqrt(max_exp_avg_sq) * inv_sqrt_bias_correction2 + eps;
-        }
-        else
-        {
-            denom = sqrt(exp_avg_sq) * inv_sqrt_bias_correction2 + eps;
-        }
-
-        params[i] = param - k * exp_avg / denom;
-    }
-}
-
-template <typename Tref>
-void mloAdamRunHost_mt(miopenTensorDescriptor_t paramDesc,
-                       Tref* params,
-                       Tref* grads,
-                       Tref* exp_avgs,
-                       Tref* exp_avg_sqs,
-                       Tref* max_exp_avg_sqs,
-                       int32_t step,
-                       float lr,
-                       float beta1,
-                       float beta2,
-                       float weight_decay,
-                       float eps,
-                       bool amsgrad,
-                       bool maximize,
-                       bool adamw,
-                       bool is_amp,
-                       int32_t grad_scale,
-                       bool found_inf)
-{
-    if(is_amp && found_inf)
-        return;
-
-    const size_t numel = miopen::deref(paramDesc).GetElementSize();
-
-    const float bias_correction1             = 1.0 - pow(beta1, step);
-    const float bias_correction2             = 1.0 - pow(beta2, step);
-    const float k                            = lr / bias_correction1;
-    const float one_minus_lr_by_weight_decay = adamw ? 1.0f - lr * weight_decay : 0.0f;
-    const float inv_sqrt_bias_correction2    = 1.0f / sqrt(bias_correction2);
-    const float inv_grad_scale               = 1.0 / static_cast<float>(grad_scale);
-    const float one_minus_beta1              = 1.0 - beta1;
-    const float one_minus_beta2              = 1.0 - beta2;
-
-    miopen::par_ford(numel)([&](int32_t i) {
+    miopen::par_for(numel, min_grain, [&](int i) {
         Tref exp_avg    = exp_avgs[i];
         Tref exp_avg_sq = exp_avg_sqs[i];
 
@@ -201,6 +126,10 @@ void mloAdamRunHost_mt(miopenTensorDescriptor_t paramDesc,
 
         params[i] = param - k * exp_avg / denom;
     });
+
+    const auto t1 = std::chrono::high_resolution_clock::now();
+
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
 }
 
 #endif
@@ -605,48 +534,29 @@ int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardGPU()
 template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
 {
-    if(use_multithread)
-    {
-        mloAdamRunHost_mt<Tref>(paramDesc,
-                                param_host.data(),
-                                grad_host.data(),
-                                exp_avg_host.data(),
-                                exp_avg_sq_host.data(),
-                                max_exp_avg_sq_host.data(),
-                                iter,
-                                lr,
-                                beta1,
-                                beta2,
-                                weight_decay,
-                                eps,
-                                amsgrad,
-                                maximize,
-                                adamw,
-                                is_amp,
-                                grad_scale,
-                                found_inf);
-    }
-    else
-    {
-        mloAdamRunHost<Tref>(paramDesc,
-                             param_host.data(),
-                             grad_host.data(),
-                             exp_avg_host.data(),
-                             exp_avg_sq_host.data(),
-                             max_exp_avg_sq_host.data(),
-                             iter,
-                             lr,
-                             beta1,
-                             beta2,
-                             weight_decay,
-                             eps,
-                             amsgrad,
-                             maximize,
-                             adamw,
-                             is_amp,
-                             grad_scale,
-                             found_inf);
-    }
+    const auto ns =
+    mloAdamRunHost<Tref>(paramDesc,
+                         param_host.data(),
+                         grad_host.data(),
+                         exp_avg_host.data(),
+                         exp_avg_sq_host.data(),
+                         max_exp_avg_sq_host.data(),
+                         iter,
+                         lr,
+                         beta1,
+                         beta2,
+                         weight_decay,
+                         eps,
+                         amsgrad,
+                         maximize,
+                         adamw,
+                         is_amp,
+                         grad_scale,
+                         found_inf,
+                         use_multithread);
+
+    std::ofstream ofs("/data/Dev/MIOpenDriverStats-" + this->name + ".csv", std::ofstream::app);
+    ofs << ns;
 
     return miopenStatusSuccess;
 }
@@ -684,35 +594,17 @@ int AdamDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
     RunForwardCPU();
     const Tref tolerance = GetTolerance();
+    const auto error     = miopen::rms_range(param_host, param);
+    const char* ref_type = use_multithread ? "multi-threaded" : "single-threaded";
 
-    if(use_multithread)
+    if(!std::isfinite(error) || error > tolerance)
     {
-        const auto error = miopen::rms_range(param_host, param);
-
-        if(!std::isfinite(error) || error > tolerance)
-        {
-            std::cout << "Forward Adam FAILED on updated multi-threaded CPU reference: " << error
-                      << std::endl;
-            return EC_VerifyFwd;
-        }
-
-        std::cout << "Forward Adam Verifies OK on updated multi-threaded CPU reference"
+        std::cout << "Forward Adam FAILED on " << ref_type << " CPU reference: " << error
                   << std::endl;
+        return EC_VerifyFwd;
     }
-    else
-    {
-        const auto error = miopen::rms_range(param_host, param);
 
-        if(!std::isfinite(error) || error > tolerance)
-        {
-            std::cout << "Forward Adam FAILED on updated single-threaded CPU reference: " << error
-                      << std::endl;
-            return EC_VerifyFwd;
-        }
-
-        std::cout << "Forward Adam Verifies OK on updated single-threaded CPU reference"
-                  << std::endl;
-    }
+    std::cout << "Forward Adam Verifies OK on " << ref_type << " CPU reference" << std::endl;
 
     return miopenStatusSuccess;
 }

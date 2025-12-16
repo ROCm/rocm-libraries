@@ -544,6 +544,8 @@ public:
     virtual int RunBackwardGPU()                         = 0;
     virtual int VerifyBackward()                         = 0;
 
+    std::string name;
+
 protected:
     template <typename Tgpu>
     void InitDataType();

@@ -78,7 +78,6 @@ public:
 
     int RunForwardGPU() override;
     int RunForwardCPU();
-    int RunForwardCPUUpdated();
     int RunForwardCPU_MT();
 
     int RunBackwardGPU() override;
@@ -421,60 +420,9 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
     const float inv_grad_scale  = 1.0 / static_cast<float>(grad_scale);
     const float one_minus_beta1 = 1.0 - beta1;
     const float one_minus_beta2 = 1.0 - beta2;
+    const size_t min_grain      = use_multithread ? 8 : numel;
 
-    for(size_t i = 0; i < numel; ++i)
-    {
-        Tref exp_avg_val    = exp_avgs[i];
-        Tref exp_avg_sq_val = exp_avg_sqs[i];
-
-        Tref param_val = params[i];
-        Tref grad_val  = grads[i];
-        if(is_amp)
-            grad_val *= inv_grad_scale;
-
-        exp_avg_val    = exp_avg_val * beta1 + grad_val * one_minus_beta1;
-        exp_avg_sq_val = exp_avg_sq_val * beta2 + grad_val * grad_val * one_minus_beta2;
-
-        const float denorm = sqrt(exp_avg_sq_val) + eps;
-
-        param_val -= exp_avg_val / denorm * step_size;
-
-        if(weight_decay > 0.0)
-        {
-            param_val *= k;
-        }
-
-        params[i] = param_val;
-    }
-
-    return miopenStatusSuccess;
-}
-
-template <typename Tgpu, typename Tref, typename Tgrad>
-int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU_MT()
-{
-    if(is_amp && found_inf)
-        return miopenStatusSuccess;
-
-    const auto params      = param_host.data();
-    const auto grads       = grad_host.data();
-    const auto exp_avgs    = exp_avg_host.data();
-    const auto exp_avg_sqs = exp_avg_sq_host.data();
-    const auto step        = iter;
-
-    const size_t numel = miopen::deref(paramDesc).GetElementSize();
-
-    const float bias_correction1 = 1.0 - pow(beta1, step);
-    const float bias_correction2 = 1.0 - pow(beta2, step);
-    const float corrected_step_size =
-        correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
-    const float step_size       = correct_bias ? corrected_step_size : lr;
-    const float k               = 1.0 - (lr * weight_decay);
-    const float inv_grad_scale  = 1.0 / static_cast<float>(grad_scale);
-    const float one_minus_beta1 = 1.0 - beta1;
-    const float one_minus_beta2 = 1.0 - beta2;
-
-    miopen::par_ford(numel)([&](size_t i) {
+    miopen::par_for(numel, min_grain, [&](int i) {
         Tref exp_avg_val    = exp_avgs[i];
         Tref exp_avg_sq_val = exp_avg_sqs[i];
 
@@ -533,39 +481,26 @@ template <typename Tgpu, typename Tref, typename Tgrad>
 int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
     const Tref tolerance = GetTolerance();
+    const char* ref_type = use_multithread ? "multi-threaded" : "single-threaded";
 
-    if(use_multithread)
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    RunForwardCPU();
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    std::ofstream ofs("/data/Dev/MIOpenDriverStats-" + this->name + ".csv", std::ofstream::app);
+    ofs << ns;
+
+    const auto error = miopen::rms_range(param_host, param);
+
+    if(!std::isfinite(error) || error > tolerance)
     {
-        RunForwardCPU_MT();
-
-        const auto error = miopen::rms_range(param_host, param);
-
-        if(!std::isfinite(error) || error > tolerance)
-        {
-            std::cout << "Forward Transformers Adam FAILED on multi-threaded CPU reference: "
-                      << error << std::endl;
-            return EC_VerifyFwd;
-        }
-
-        std::cout << "Forward Transformers Adam Verifies OK on multi-threaded CPU reference"
-                  << std::endl;
+        std::cout << "Forward Transformers Adam FAILED on " << ref_type
+                  << " CPU reference: " << error << std::endl;
+        return EC_VerifyFwd;
     }
-    else
-    {
-        RunForwardCPU();
 
-        const auto error = miopen::rms_range(param_host, param);
-
-        if(!std::isfinite(error) || error > tolerance)
-        {
-            std::cout << "Forward Transformers Adam FAILED on single-threaded CPU reference: "
-                      << error << std::endl;
-            return EC_VerifyFwd;
-        }
-
-        std::cout << "Forward Transformers Adam Verifies OK on single-threaded CPU reference"
-                  << std::endl;
-    }
+    std::cout << "Forward Transformers Adam Verifies OK on " << ref_type << " CPU reference"
+              << std::endl;
 
     return miopenStatusSuccess;
 }

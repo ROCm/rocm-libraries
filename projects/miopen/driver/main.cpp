@@ -66,6 +66,8 @@ int main(int argc, char* argv[])
         exit(0); // NOLINT (concurrency-mt-unsafe)
     }
 
+    drv->name = base_arg;
+
     drv->AddCmdLineArgs();
     int rc = drv->ParseCmdLineArgs(argc, argv);
     if(rc != 0)
