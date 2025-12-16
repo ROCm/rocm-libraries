@@ -2614,8 +2614,6 @@ namespace TensileLite
             sk.reduction = getSKReduction(problem, hardware);
             auto tiles = problem.getNumTiles(sizeMapping, 1);
             sk.grid = getSKGrid(problem, hardware, tiles, sk.reduction);
-            if(sk.grid / tiles < 2)
-                sk.reduction = ReductionType::Tree;
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             if(sk.grid > 0 && (sk.reduction == ReductionType::Parallel || (tiles % sk.grid != 0 && !streamKDP)))
             {
@@ -3015,8 +3013,6 @@ namespace TensileLite
             {
                 ReductionType reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGrid(problem, hardware, tiles, reductionStrat);
-                if(skGrid / tiles < 2)
-                    reductionStrat = ReductionType::Tree;
                 // Get space required for partial tiles=
                 if(skGrid > 0 && (reductionStrat == ReductionType::Parallel || (tiles % skGrid != 0 && !streamKDP)))
                 {
