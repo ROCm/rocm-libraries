@@ -35,7 +35,7 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
                                                  rocsparse_bsric0_info bsric0_info,
                                                  rocsparse_spmat_descr A,
                                                  size_t                buffer_size,
-                                                 void* __restrict__ buffer)
+                                                 void*                 buffer)
 {
 
     ROCSPARSE_ROUTINE_TRACE;

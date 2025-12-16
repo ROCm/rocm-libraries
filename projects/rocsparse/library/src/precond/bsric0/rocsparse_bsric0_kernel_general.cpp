@@ -331,18 +331,18 @@ namespace rocsparse
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void bsric0_kernel_general(rocsparse_direction dir,
-                               J                   mb,
-                               const I* __restrict__ bsr_row_ptr,
-                               const J* __restrict__ bsr_col_ind,
-                               T* __restrict__ bsr_val,
-                               int64_t bsr_val_stride,
-                               const I* __restrict__ bsr_diag_ind,
-                               J bsr_dim,
-                               J* __restrict__ done_array,
-                               int64_t done_array_stride,
-                               const J* __restrict__ map,
-                               J* __restrict__ zero_pivot,
+    void bsric0_kernel_general(rocsparse_direction  dir,
+                               J                    mb,
+                               const I*             bsr_row_ptr,
+                               const J*             bsr_col_ind,
+                               T*                   bsr_val,
+                               int64_t              bsr_val_stride,
+                               const I*             bsr_diag_ind,
+                               J                    bsr_dim,
+                               J*                   done_array,
+                               int64_t              done_array_stride,
+                               const J*             map,
+                               J*                   zero_pivot,
                                int64_t              zero_pivot_stride,
                                rocsparse_index_base idx_base)
     {
@@ -366,12 +366,11 @@ namespace rocsparse
                                                   rocsparse_bsric0_info bsric0_info,
                                                   rocsparse_spmat_descr A,
                                                   size_t                buffer_size,
-                                                  void* __restrict__ buffer)
+                                                  void*                 buffer)
     {
         auto trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-        J* __restrict__ done_array
-            = reinterpret_cast<J* __restrict__>(reinterpret_cast<char* __restrict__>(buffer) + 256);
+        J*            done_array = reinterpret_cast<J*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -382,16 +381,16 @@ namespace rocsparse
             handle->stream,
             A->block_dir,
             static_cast<J>(A->rows),
-            reinterpret_cast<const I* __restrict__>(A->const_row_data),
-            reinterpret_cast<const J* __restrict__>(A->const_col_data),
-            reinterpret_cast<T* __restrict__>(A->val_data),
+            reinterpret_cast<const I*>(A->const_row_data),
+            reinterpret_cast<const J*>(A->const_col_data),
+            reinterpret_cast<T*>(A->val_data),
             A->batch_stride,
-            reinterpret_cast<const I* __restrict__>(trm_info->get_diag_ind()),
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
             static_cast<J>(A->block_dim),
             done_array,
             done_array_stride,
-            reinterpret_cast<const J* __restrict__>(trm_info->get_row_map()),
-            reinterpret_cast<J* __restrict__>(bsric0_info->get_zero_pivot()),
+            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<J*>(bsric0_info->get_zero_pivot()),
             bsric0_info->get_zero_pivot_stride(),
             A->descr->base);
 

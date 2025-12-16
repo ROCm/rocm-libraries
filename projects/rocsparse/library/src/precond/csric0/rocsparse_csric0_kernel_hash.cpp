@@ -246,18 +246,18 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csric0_kernel_hash(J m,
-                            const I* __restrict__ csr_row_ptr,
-                            const J* __restrict__ csr_col_ind,
-                            T* __restrict__ csr_val,
-                            int64_t csr_val_stride,
-                            const I* __restrict__ csr_diag_ind,
-                            J* __restrict__ done,
-                            int64_t done_stride,
-                            const J* __restrict__ map,
-                            J* __restrict__ zero_pivot,
-                            int64_t zero_pivot_stride,
-                            J* __restrict__ singular_pivot,
+    void csric0_kernel_hash(J                    m,
+                            const I*             csr_row_ptr,
+                            const J*             csr_col_ind,
+                            T*                   csr_val,
+                            int64_t              csr_val_stride,
+                            const I*             csr_diag_ind,
+                            J*                   done,
+                            int64_t              done_stride,
+                            const J*             map,
+                            J*                   zero_pivot,
+                            int64_t              zero_pivot_stride,
+                            J*                   singular_pivot,
                             int64_t              singular_pivot_stride,
                             double               tol,
                             rocsparse_index_base idx_base)
@@ -287,39 +287,37 @@ namespace rocsparse
                                                       rocsparse_csric0_info csric0_info,
                                                       rocsparse_spmat_descr A,
                                                       size_t                buffer_size,
-                                                      void* __restrict__ buffer)
+                                                      void*                 buffer)
     {
         auto trm_info = csric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         // done array
-        J* __restrict__ done_array
-            = reinterpret_cast<J* __restrict__>(reinterpret_cast<char* __restrict__>(buffer) + 256);
+        J*            done_array = reinterpret_cast<J*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
         const dim3    csric0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
                                  A->batch_count);
         const dim3    csric0_threads(BLOCKSIZE);
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csric0_kernel_hash<BLOCKSIZE, WFSIZE, HASH>),
-            csric0_blocks,
-            csric0_threads,
-            0,
-            handle->stream,
-            static_cast<J>(A->rows),
-            reinterpret_cast<const I* __restrict__>(A->const_row_data),
-            reinterpret_cast<const J* __restrict__>(A->const_col_data),
-            reinterpret_cast<T* __restrict__>(A->val_data),
-            A->batch_stride,
-            reinterpret_cast<const I* __restrict__>(trm_info->get_diag_ind()),
-            done_array,
-            done_array_stride,
-            reinterpret_cast<const J* __restrict__>(trm_info->get_row_map()),
-            reinterpret_cast<J* __restrict__>(csric0_info->get_zero_pivot()),
-            csric0_info->get_zero_pivot_stride(),
-            reinterpret_cast<J* __restrict__>(csric0_info->get_singular_pivot()),
-            csric0_info->get_singular_pivot_stride(),
-            csric0_info->get_singular_tol(),
-            A->descr->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csric0_kernel_hash<BLOCKSIZE, WFSIZE, HASH>),
+                                           csric0_blocks,
+                                           csric0_threads,
+                                           0,
+                                           handle->stream,
+                                           static_cast<J>(A->rows),
+                                           reinterpret_cast<const I*>(A->const_row_data),
+                                           reinterpret_cast<const J*>(A->const_col_data),
+                                           reinterpret_cast<T*>(A->val_data),
+                                           A->batch_stride,
+                                           reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+                                           done_array,
+                                           done_array_stride,
+                                           reinterpret_cast<const J*>(trm_info->get_row_map()),
+                                           reinterpret_cast<J*>(csric0_info->get_zero_pivot()),
+                                           csric0_info->get_zero_pivot_stride(),
+                                           reinterpret_cast<J*>(csric0_info->get_singular_pivot()),
+                                           csric0_info->get_singular_pivot_stride(),
+                                           csric0_info->get_singular_tol(),
+                                           A->descr->base);
 
         return rocsparse_status_success;
     }

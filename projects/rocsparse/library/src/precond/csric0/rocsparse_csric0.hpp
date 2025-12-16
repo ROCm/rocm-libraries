@@ -46,6 +46,6 @@ namespace rocsparse
                             rocsparse_csric0_info csric0_info,
                             rocsparse_spmat_descr A,
                             size_t                buffer_size,
-                            void* __restrict__ buffer);
+                            void*                 buffer);
 
 }

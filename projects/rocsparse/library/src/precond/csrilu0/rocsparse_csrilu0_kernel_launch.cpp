@@ -32,10 +32,10 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle       handle,
                                                   rocsparse_spmat_descr  A, // 2
                                                   int32_t                boost_enable, // 3
                                                   size_t                 boost_tol_size, // 4
-                                                  const void* __restrict__ boost_tol, // 5
-                                                  const void* __restrict__ boost_val, // 6
-                                                  size_t buffer_size, // 7
-                                                  void* __restrict__ buffer) // 8
+                                                  const void*            boost_tol, // 5
+                                                  const void*            boost_val, // 6
+                                                  size_t                 buffer_size, // 7
+                                                  void*                  buffer) // 8
 {
 
     ROCSPARSE_ROUTINE_TRACE;

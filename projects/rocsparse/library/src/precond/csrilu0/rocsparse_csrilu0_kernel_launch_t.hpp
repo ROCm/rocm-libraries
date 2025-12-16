@@ -34,9 +34,9 @@ namespace rocsparse
                                                         rocsparse_spmat_descr  A,
                                                         int32_t                boost_enable,
                                                         size_t                 boost_tol_size,
-                                                        const void* __restrict__ boost_tol,
-                                                        const void* __restrict__ boost_val,
-                                                        size_t buffer_size,
-                                                        void* __restrict__ buffer);
+                                                        const void*            boost_tol,
+                                                        const void*            boost_val,
+                                                        size_t                 buffer_size,
+                                                        void*                  buffer);
 
 }

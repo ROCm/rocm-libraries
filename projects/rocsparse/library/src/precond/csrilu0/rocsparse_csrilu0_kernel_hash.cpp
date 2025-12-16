@@ -257,18 +257,18 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrilu0_kernel_hash(J m,
-                             const I* __restrict__ csr_row_ptr,
-                             const J* __restrict__ csr_col_ind,
-                             T* __restrict__ csr_val,
-                             int64_t csr_val_stride,
-                             const I* __restrict__ csr_diag_ind,
-                             J* __restrict__ done,
-                             int64_t done_stride,
-                             const J* __restrict__ map,
-                             J* __restrict__ zero_pivot,
-                             int64_t zero_pivot_stride,
-                             J* __restrict__ singular_pivot,
+    void csrilu0_kernel_hash(J                    m,
+                             const I*             csr_row_ptr,
+                             const J*             csr_col_ind,
+                             T*                   csr_val,
+                             int64_t              csr_val_stride,
+                             const I*             csr_diag_ind,
+                             J*                   done,
+                             int64_t              done_stride,
+                             const J*             map,
+                             J*                   zero_pivot,
+                             int64_t              zero_pivot_stride,
+                             J*                   singular_pivot,
                              int64_t              singular_pivot_stride,
                              double               tol,
                              rocsparse_index_base idx_base,
@@ -312,25 +312,24 @@ namespace rocsparse
                                                        rocsparse_spmat_descr  A,
                                                        int32_t                boost_enable,
                                                        size_t                 boost_tol_size,
-                                                       const void* __restrict__ gboost_tol,
-                                                       const void* __restrict__ gboost_val,
-                                                       size_t buffer_size,
-                                                       void* __restrict__ buffer)
+                                                       const void*            gboost_tol,
+                                                       const void*            gboost_val,
+                                                       size_t                 buffer_size,
+                                                       void*                  buffer)
     {
 
         auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         // done array
-        J* __restrict__ done_array
-            = reinterpret_cast<J* __restrict__>(reinterpret_cast<char* __restrict__>(buffer) + 256);
+        J* done_array = reinterpret_cast<J*>(reinterpret_cast<char*>(buffer) + 256);
 
         const int64_t done_array_stride = A->rows;
 
-        const T* __restrict__ boost_val = reinterpret_cast<const T* __restrict__>(gboost_val);
-        const float* __restrict__ boost_tol_32
-            = reinterpret_cast<const float* __restrict__>((boost_enable) ? gboost_tol : nullptr);
-        const double* __restrict__ boost_tol_64
-            = reinterpret_cast<const double* __restrict__>((boost_enable) ? gboost_tol : nullptr);
+        const T*     boost_val = reinterpret_cast<const T*>(gboost_val);
+        const float* boost_tol_32
+            = reinterpret_cast<const float*>((boost_enable) ? gboost_tol : nullptr);
+        const double* boost_tol_64
+            = reinterpret_cast<const double*>((boost_enable) ? gboost_tol : nullptr);
 
         dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
         dim3 csrilu0_threads(BLOCKSIZE);
@@ -342,17 +341,17 @@ namespace rocsparse
             0,
             handle->stream,
             static_cast<J>(A->rows),
-            reinterpret_cast<const I* __restrict__>(A->const_row_data),
-            reinterpret_cast<const J* __restrict__>(A->const_col_data),
-            reinterpret_cast<T* __restrict__>(A->val_data),
+            reinterpret_cast<const I*>(A->const_row_data),
+            reinterpret_cast<const J*>(A->const_col_data),
+            reinterpret_cast<T*>(A->val_data),
             A->batch_stride,
-            reinterpret_cast<const I* __restrict__>(trm_info->get_diag_ind()),
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
             done_array,
             done_array_stride,
-            reinterpret_cast<const J* __restrict__>(trm_info->get_row_map()),
-            reinterpret_cast<J* __restrict__>(csrilu0_info->get_zero_pivot()),
+            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<J*>(csrilu0_info->get_zero_pivot()),
             csrilu0_info->get_zero_pivot_stride(),
-            reinterpret_cast<J* __restrict__>(csrilu0_info->get_singular_pivot()),
+            reinterpret_cast<J*>(csrilu0_info->get_singular_pivot()),
             csrilu0_info->get_singular_pivot_stride(),
             csrilu0_info->get_singular_tol(),
             A->descr->base,

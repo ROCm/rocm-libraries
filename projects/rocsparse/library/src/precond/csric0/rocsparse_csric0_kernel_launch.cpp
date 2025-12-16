@@ -31,7 +31,7 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
                                                  rocsparse_csric0_info csric0_info,
                                                  rocsparse_spmat_descr A,
                                                  size_t                buffer_size,
-                                                 void* __restrict__ buffer)
+                                                 void*                 buffer)
 {
 
     const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908

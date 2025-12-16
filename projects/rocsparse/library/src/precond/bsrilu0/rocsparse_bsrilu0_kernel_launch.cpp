@@ -34,7 +34,7 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle       handle,
                                                   rocsparse_bsrilu0_info bsrilu0_info,
                                                   rocsparse_spmat_descr  A,
                                                   size_t                 buffer_size,
-                                                  void* __restrict__ buffer)
+                                                  void*                  buffer)
 {
     rocsparse::bsrilu0_kernel_launch_t launch        = nullptr;
     const std::string                  gcn_arch_name = rocsparse::handle_get_arch_name(handle);
