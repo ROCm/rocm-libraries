@@ -29,6 +29,7 @@ Documentation for rocRAND is available at
 ### Changed
 
 * Optimized `xorwow` generator performance for `gfx908` and `gfx942` architectures.
+* Changed `h_scrambled_sobol(32|64)_constants`, `rocrand_h_scrambled_sobol(32|64)_direction_vectors`, `rocrand_h_sobol(32|64)_direction_vectors` to private namespace.\
 
 ## rocRAND 4.2.0 for ROCm 7.2
 
