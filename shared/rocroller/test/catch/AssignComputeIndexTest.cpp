@@ -56,6 +56,7 @@ TEST_CASE("AssignComputeIndex", "[kernel-graph]")
         std::make_shared<AddLDS>(params, context.get()),
         std::make_shared<LowerLinear>(context.get()),
         std::make_shared<LowerTile>(params, context.get()),
+        std::make_shared<CleanArguments>(context.get(), example.getCommand()),
         std::make_shared<AddComputeIndex>(),
         std::make_shared<UpdateWavefrontParameters>(params),
         std::make_shared<AssignComputeIndex>(context.get()),
