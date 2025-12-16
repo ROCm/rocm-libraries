@@ -56,7 +56,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
+          - Exact: [2048, 65536, 1, 16384]
         - BiasTypeArgs: ['b']
         - ActivationArgs:
           - [Enum: relu]
