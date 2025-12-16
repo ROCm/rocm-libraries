@@ -52,7 +52,9 @@ namespace GEMMTests
         : public BaseGEMMContextFixture<std::tuple<int, /* workgroupMapping dim */
                                                    int, /* workgroupMapping value */
                                                    bool, /* workgroupRemapXCC */
-                                                   StreamKMode>>
+                                                   StreamKMode,
+                                                   SolutionParams::LoadPath, /* loadPathA */
+                                                   SolutionParams::LoadPath /* loadPathB */>>
     {
     };
 
@@ -146,7 +148,9 @@ namespace GEMMTests
         std::tie(gemm.workgroupMappingDim,
                  gemm.workgroupMappingValue,
                  gemm.workgroupRemapXCC,
-                 gemm.streamK)
+                 gemm.streamK,
+                 gemm.loadPathA,
+                 gemm.loadPathB)
             = std::get<1>(GetParam());
 
         basicGEMM<float>(gemm);
@@ -225,7 +229,11 @@ namespace GEMMTests
                                ::testing::Values(true, false), /* remapWorkgroupXCC */
                                ::testing::Values(StreamKMode::Standard,
                                                  StreamKMode::TwoTile,
-                                                 StreamKMode::TwoTileDPFirst))));
+                                                 StreamKMode::TwoTileDPFirst),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMTest,
@@ -247,9 +255,13 @@ namespace GEMMTests
                 ::testing::Values(
                     StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathA */
+                                  SolutionParams::LoadPath::BufferToVGPR,
+                                  SolutionParams::LoadPath::GlobalToVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR), /* loadPathA */
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathB */
+                                  SolutionParams::LoadPath::BufferToVGPR,
+                                  SolutionParams::LoadPath::GlobalToVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR), /* loadPathB */
                 ::testing::Values(true, false) /* storeLDSD */
                 )));
 
