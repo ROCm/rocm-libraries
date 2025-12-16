@@ -105,16 +105,18 @@ public:
     static void SetUpTestSuite()
     {
         miopenTensorDescriptor_t tensor;
-        testing::internal::CaptureStderr();
-        auto status        = miopenSet4dTensorDescriptor(nullptr, miopenHalf, 100, 32, 8, 8);
-        std::string output = testing::internal::GetCapturedStderr();
-
         ASSERT_EQ(miopenCreateTensorDescriptor(&tensor), miopenStatusSuccess);
         ASSERT_EQ(miopenSet4dTensorDescriptor(tensor, miopenHalf, 100, 32, 8, 8),
                   miopenStatusSuccess);
         ASSERT_EQ(miopenDestroyTensorDescriptor(tensor), miopenStatusSuccess);
 
-        ASSERT_NE(status, miopenStatusSuccess);
+        testing::internal::CaptureStderr();
+        ASSERT_NE(miopenSet4dTensorDescriptor(nullptr, miopenHalf, 100, 32, 8, 8),
+                  miopenStatusSuccess);
+        const std::string stderr_output = testing::internal::GetCapturedStderr();
+        EXPECT_THAT(stderr_output, ::testing::AllOf(
+            ::testing::HasSubstr("MIOpen Error"),
+            ::testing::HasSubstr("Dereferencing nullptr")));
     }
 
 protected:
