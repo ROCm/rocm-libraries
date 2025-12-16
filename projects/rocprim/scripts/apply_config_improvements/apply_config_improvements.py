@@ -68,12 +68,29 @@ def get_gen_from_architecture(arch):
             return "gen::cdna3"
         case "target_arch::gfx950":
             return "gen::cdna4"
+        case (
+            "target_arch::gfx1010"
+            | "target_arch::gfx1011"
+            | "target_arch::gfx1012"
+        ):
+            return "gen::rdna1"
         case "target_arch::gfx1030":
             return "gen::rdna2"
-        case "target_arch::gfx1100" | "target_arch::gfx1102":
+        case (
+            "target_arch::gfx1100"
+            | "target_arch::gfx1101"
+            | "target_arch::gfx1102"
+            | "target_arch::gfx1103"
+            | "target_arch::gfx1150"
+            | "target_arch::gfx1151"
+            | "target_arch::gfx1152"
+            | "target_arch::gfx1153"
+        ):
             return "gen::rdna3"
         case "target_arch::gfx1200" | "target_arch::gfx1201":
             return "gen::rdna4"
+        case "target_arch::unknown" | "target_arch::invalid":
+            return "gen::unknown"
         case _:
             return "gen::unknown"
 

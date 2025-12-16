@@ -172,10 +172,16 @@ enum class target_arch : unsigned int
     gfx90a  = 910,
     gfx942  = 942,
     gfx950  = 950,
+    gfx1010 = 1010,
+    gfx1011 = 1011,
+    gfx1012 = 1012,
     gfx1030 = 1030,
     gfx1100 = 1100,
     gfx1101 = 1101,
     gfx1102 = 1102,
+    gfx1103 = 1103,
+    gfx1150 = 1150,
+    gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
     gfx1200 = 1200,
@@ -199,9 +205,9 @@ enum class gen
     cdna2,
     cdna3,
     cdna4,
+    rdna1,
     rdna2,
     rdna3,
-    rdna3_5,
     rdna4,
 };
 
@@ -234,12 +240,18 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx90a: return gen::cdna2;
         case target_arch::gfx942: return gen::cdna3;
         case target_arch::gfx950: return gen::cdna4;
+        case target_arch::gfx1010:
+        case target_arch::gfx1011:
+        case target_arch::gfx1012: return gen::rdna1;
         case target_arch::gfx1030: return gen::rdna2;
         case target_arch::gfx1100:
         case target_arch::gfx1101:
-        case target_arch::gfx1102: return gen::rdna3;
+        case target_arch::gfx1102:
+        case target_arch::gfx1103:
+        case target_arch::gfx1150:
+        case target_arch::gfx1151:
         case target_arch::gfx1152:
-        case target_arch::gfx1153: return gen::rdna3_5;
+        case target_arch::gfx1153: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
         case target_arch::unknown:
@@ -357,6 +369,9 @@ constexpr auto target_arch_descriptors = std::array{
     X(gfx1100),
     X(gfx1101),
     X(gfx1102),
+    X(gfx1103),
+    X(gfx1150),
+    X(gfx1151),
     X(gfx1152),
     X(gfx1153),
     X(gfx1200),
@@ -400,9 +415,9 @@ constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
         case gen::cdna2:
         case gen::cdna3:
         case gen::cdna4: return arch::wavefront::target::size64;
+        case gen::rdna1:
         case gen::rdna2:
         case gen::rdna3:
-        case gen::rdna3_5:
         case gen::rdna4: return arch::wavefront::target::size32;
     }
 }

@@ -41,7 +41,30 @@ from collections import defaultdict
 from typing import Dict, List, Callable, Optional, Tuple
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-TARGET_ARCHITECTURES = ['gfx803', 'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx942', 'gfx1030', 'gfx1100', 'gfx1102', 'gfx1201']
+TARGET_ARCHITECTURES = [
+    "gfx803",
+    "gfx900",
+    "gfx906",
+    "gfx908",
+    "gfx90a",
+    "gfx942",
+    "gfx950",
+    "gfx1010",
+    "gfx1011",
+    "gfx1012",
+    "gfx1030",
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201",
+]
+
 TARGET_GPUS_DICT = {
     "MI350X": "mi350x",
     "MI325X": "mi325x",
@@ -896,12 +919,29 @@ class BenchmarkDataManager:
                 return "gen::cdna3"
             case "target_arch::gfx950":
                 return "gen::cdna4"
+            case (
+                "target_arch::gfx1010"
+                | "target_arch::gfx1011"
+                | "target_arch::gfx1012"
+            ):
+                return "gen::rdna1"
             case "target_arch::gfx1030":
                 return "gen::rdna2"
-            case "target_arch::gfx1100" | "target_arch::gfx1102":
+            case (
+                "target_arch::gfx1100"
+                | "target_arch::gfx1101"
+                | "target_arch::gfx1102"
+                | "target_arch::gfx1103"
+                | "target_arch::gfx1150"
+                | "target_arch::gfx1151"
+                | "target_arch::gfx1152"
+                | "target_arch::gfx1153"
+            ):
                 return "gen::rdna3"
             case "target_arch::gfx1200" | "target_arch::gfx1201":
                 return "gen::rdna4"
+            case "target_arch::unknown" | "target_arch::invalid":
+                return "gen::unknown"
             case _:
                 return "gen::unknown"
             
