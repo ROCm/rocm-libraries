@@ -41,6 +41,9 @@ try
     auto       csrilu0_info = info->get_csrilu0_info();
     const auto status       = csrilu0_info->copy_zero_pivot_async(
         handle->pointer_mode, rocsparse::get_indextype<rocsparse_int>(), position, handle->stream);
+
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+
     if(status == rocsparse_status_zero_pivot)
     {
         return status;

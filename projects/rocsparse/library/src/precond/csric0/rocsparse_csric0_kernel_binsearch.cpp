@@ -34,7 +34,7 @@ namespace rocsparse
                                                       const J* __restrict__ csr_col_ind,
                                                       T* __restrict__ csr_val,
                                                       const I* __restrict__ csr_diag_ind,
-                                                      int* __restrict__ done,
+                                                      J* __restrict__ done,
                                                       const J* __restrict__ map,
                                                       J* __restrict__ zero_pivot,
                                                       J* __restrict__ singular_pivot,
@@ -210,7 +210,7 @@ namespace rocsparse
                                  T* __restrict__ csr_val,
                                  int64_t csr_val_stride,
                                  const I* __restrict__ csr_diag_ind,
-                                 int32_t* __restrict__ done,
+                                 J* __restrict__ done,
                                  int64_t done_stride,
                                  const J* __restrict__ map,
                                  J* __restrict__ zero_pivot,
@@ -244,8 +244,8 @@ namespace rocsparse
     {
         auto trm_info = csric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-        int32_t* __restrict__ done_array = reinterpret_cast<int32_t* __restrict__>(
-            reinterpret_cast<char* __restrict__>(buffer) + 256);
+        J* __restrict__ done_array
+            = reinterpret_cast<J* __restrict__>(reinterpret_cast<char* __restrict__>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
 
         const dim3 csric0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,

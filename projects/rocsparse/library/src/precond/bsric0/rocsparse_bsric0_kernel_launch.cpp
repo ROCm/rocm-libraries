@@ -80,9 +80,11 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
                                                "No suitable kernel detected from bsric0");
     }
 
-    int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
     RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(done_array, 0, sizeof(int32_t) * A->rows * A->batch_count, handle->stream));
+        hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                       0,
+                       rocsparse::indextype_sizeof(A->col_type) * A->rows * A->batch_count,
+                       handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsric0_info, A, buffer_size, buffer));
 

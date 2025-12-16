@@ -2338,10 +2338,10 @@ namespace rocsparse
         }
     }
 
-    template <bool SLEEP>
-    __device__ __forceinline__ int spin_loop(int* __restrict__ done, int scope)
+    template <bool SLEEP, typename I>
+    __device__ __forceinline__ I spin_loop(I* __restrict__ done, int scope)
     {
-        int      local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+        I        local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
         uint32_t times_through = 0;
         while(!local_done)
         {

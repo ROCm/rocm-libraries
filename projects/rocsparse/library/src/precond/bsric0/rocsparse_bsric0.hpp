@@ -44,7 +44,7 @@ namespace rocsparse
                                      rocsparse_analysis_policy analysis,
                                      rocsparse_solve_policy    solve,
                                      rocsparse_bsric0_info*    p_bsric0_info,
-                                     void*                     temp_buffer);
+                                     void*                     buffer);
 
     rocsparse_status bsric0(rocsparse_handle      handle,
                             rocsparse_bsric0_info bsric0_info,

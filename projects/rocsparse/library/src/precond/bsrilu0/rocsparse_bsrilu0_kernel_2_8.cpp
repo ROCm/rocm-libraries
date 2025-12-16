@@ -42,7 +42,7 @@ namespace rocsparse
                                                  T* __restrict__ bsr_val,
                                                  const I* __restrict__ bsr_diag_ind,
                                                  J block_dim,
-                                                 int* __restrict__ done_array,
+                                                 J* __restrict__ done_array,
                                                  const J* __restrict__ map,
                                                  J* __restrict__ zero_pivot,
                                                  rocsparse_index_base idx_base,
@@ -345,7 +345,7 @@ namespace rocsparse
                             int64_t bsr_val_stride,
                             const I* __restrict__ bsr_diag_ind,
                             J bsr_dim,
-                            int32_t* __restrict__ done_array,
+                            J* __restrict__ done_array,
                             int64_t done_array_stride,
                             const J* __restrict__ map,
                             J* __restrict__ zero_pivot,
@@ -407,8 +407,8 @@ namespace rocsparse
 
         auto trm_info = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-        int32_t* __restrict__ done_array = reinterpret_cast<int32_t* __restrict__>(
-            reinterpret_cast<char* __restrict__>(buffer) + 256);
+        J* __restrict__ done_array
+            = reinterpret_cast<J* __restrict__>(reinterpret_cast<char* __restrict__>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
