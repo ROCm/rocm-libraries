@@ -65,7 +65,7 @@ namespace rocRoller
         throw T_Exception(fullMessage);
     }
 
-    // Overload for direct Throw<FatalError>("msg") etc.
+    // Implementation for direct Throw<FatalError>("msg") etc.
     template <typename T_Exception, typename... Ts>
     [[noreturn]] void ThrowWithLocation(std::source_location location, Ts const&... message)
     {
@@ -82,5 +82,11 @@ namespace rocRoller
         }
 
         throw T_Exception(fullMessage);
+    }
+
+    template <typename T_Exception, typename... Ts>
+    [[noreturn]] void Throw(MessageWithLocation leadingMessage, Ts const&... messageParts)
+    {
+        ThrowWithLocation<T_Exception>(leadingMessage.loc, leadingMessage.message, messageParts...);
     }
 }

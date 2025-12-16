@@ -191,8 +191,8 @@ namespace rocRollerTest
                 << output;
 
             std::string filePortion = output.substr(0, firstColon);
-            EXPECT_NE(filePortion.rfind("Error.hpp"), std::string::npos)
-                << "Expected error message to originate from Error.hpp, but got:\n"
+            EXPECT_NE(filePortion.rfind("ErrorTest.cpp"), std::string::npos)
+                << "Expected error message to originate from ErrorTest.cpp, but got:\n"
                 << output;
 
             EXPECT_NE(output.find("Throw location test"), std::string::npos)
@@ -217,12 +217,93 @@ namespace rocRollerTest
         catch(const RecoverableError& e)
         {
             std::string output = e.what();
-            EXPECT_NE(output.find("Recoverable throw test"), std::string::npos);
-            EXPECT_NE(output.find("Error.hpp"), std::string::npos);
+
+            EXPECT_NE(output.find("ErrorTest.cpp"), std::string::npos)
+                << "Expected error message to originate from ErrorTest.cpp, but got:\n"
+                << output;
+
+            EXPECT_NE(output.find("Recoverable throw test"), std::string::npos)
+                << "Expected user message in error output, but got:\n"
+                << output;
         }
         catch(...)
         {
             FAIL() << "Caught unexpected exception type, expected RecoverableError";
+        }
+    }
+
+    TEST_F(ErrorTest, ThrowMultiPieceMessageIncludesSourceLocation)
+    {
+        Settings::getInstance()->set(Settings::BreakOnThrow, false);
+
+        int x = 7;
+
+        try
+        {
+            Throw<FatalError>("Multi piece: ", ShowValue(x));
+            FAIL() << "Expected FatalError to be thrown";
+        }
+        catch(const FatalError& e)
+        {
+            std::string output = e.what();
+
+            EXPECT_NE(output.find("ErrorTest.cpp"), std::string::npos)
+                << "Expected call-site file name in error output, but got:\n"
+                << output;
+
+            EXPECT_NE(output.find("Multi piece: "), std::string::npos)
+                << "Expected prefix message, but got:\n"
+                << output;
+
+            EXPECT_NE(output.find("x = 7"), std::string::npos)
+                << "Expected ShowValue expansion, but got:\n"
+                << output;
+        }
+    }
+    TEST_F(ErrorTest, ThrowDoesNotReportErrorHppLocation)
+    {
+        Settings::getInstance()->set(Settings::BreakOnThrow, false);
+
+        try
+        {
+            Throw<FatalError>("Location sanity check");
+            FAIL() << "Expected FatalError to be thrown";
+        }
+        catch(const FatalError& e)
+        {
+            std::string output = e.what();
+
+            EXPECT_EQ(output.find("Error.hpp"), std::string::npos)
+                << "Direct Throw<> should not report Error.hpp, but got:\n"
+                << output;
+
+            EXPECT_NE(output.find("ErrorTest.cpp"), std::string::npos)
+                << "Expected call-site file name, but got:\n"
+                << output;
+        }
+    }
+    namespace
+    {
+        [[noreturn]] void HelperThatThrows()
+        {
+            Throw<rocRoller::FatalError>("Helper throw test");
+        }
+    }
+
+    TEST_F(ErrorTest, ThrowReportsHelperCallSiteWhenWrappedInHelper)
+    {
+        Settings::getInstance()->set(Settings::BreakOnThrow, false);
+
+        try
+        {
+            HelperThatThrows();
+            FAIL() << "Expected FatalError to be thrown";
+        }
+        catch(const FatalError& e)
+        {
+            std::string output = e.what();
+            EXPECT_NE(output.find("ErrorTest.cpp"), std::string::npos);
+            EXPECT_NE(output.find("Helper throw test"), std::string::npos);
         }
     }
 }

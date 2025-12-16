@@ -31,6 +31,8 @@
 #include <stdexcept>
 #include <string.h>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <cassert>
@@ -66,6 +68,19 @@ namespace rocRoller
         using Error::Error;
     };
 
+    struct MessageWithLocation
+    {
+        std::string          message;
+        std::source_location loc;
+
+        template <typename T>
+        MessageWithLocation(T&& msg, std::source_location l = std::source_location::current())
+            : message(std::forward<T>(msg))
+            , loc(l)
+        {
+        }
+    };
+
     // Used by AssertError / AssertFatal / AssertRecoverable:
     template <typename T_Exception, typename... Ts>
     [[noreturn]] void ThrowTagged(std::source_location location,
@@ -79,20 +94,14 @@ namespace rocRoller
 
     // Captures call–site location and forwards to ThrowWithLocation.
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] inline void Throw(Ts const&... message)
-    {
-        ThrowWithLocation<T_Exception>(std::source_location::current(), message...);
-    }
+    [[noreturn]] void Throw(MessageWithLocation leadingMessage, Ts const&... messageParts);
 
-    /**
-     * Initiates a segfault.  This can be useful for debugging purposes.
-     */
+    // Initiates a segfault.  This can be useful for debugging purposes.
     [[noreturn]] void Crash();
 
     int* GetNullPointer();
 
-    // Get path
-    // Strips all "../" and "./"
+    // Get path, strips all "../" and "./"
     constexpr const char* GetBaseFileName(const char* file)
     {
         if(strnlen(file, 3) >= 3 && file[0] == '.' && file[1] == '.' && file[2] == '/')
