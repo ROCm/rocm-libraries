@@ -36,7 +36,6 @@
 #include <type_traits>
 #include <unordered_map>
 
-#include "origami/log.hpp"
 #include "origami/math.hpp"
 
 namespace origami {
@@ -321,9 +320,6 @@ struct config_t {
 
   /// Runtime options (if null, uses global singleton)
   const runtime_options* runtime_opts{nullptr};
-
-  /// Logger for analytical metrics
-  mutable logger_t logger;
 
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&

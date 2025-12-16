@@ -228,8 +228,6 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
       }
 
       if (get_runtime_options(config).debug_enabled) {
-        config.logger.log("WGM", wgm);
-        config.logger.log("L2Estimate", wgmL2Estimate);
       }
     }
 
