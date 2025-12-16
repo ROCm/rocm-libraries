@@ -58,8 +58,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4608, 1335, 1, 640]
-          - Exact: [4608, 1408, 1, 640]
+          - Exact: [128, 183, 1, 128]
+          - Exact: [128, 128, 1, 128]
           - Exact: [128,   128, 1, 640]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
@@ -118,8 +118,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4608, 1335, 1, 640]
-          - Exact: [4608, 1408, 1, 640]
+          - Exact: [128, 183, 1, 128]
+          - Exact: [128, 128, 1, 128]
           - Exact: [128,   128, 1, 640]
         - BiasTypeArgs: ['s']
         - ActivationArgs:

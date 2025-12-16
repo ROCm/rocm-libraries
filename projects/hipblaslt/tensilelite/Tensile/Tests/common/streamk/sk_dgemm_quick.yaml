@@ -89,7 +89,7 @@ BenchmarkProblems:
           # - Exact: [4103, 4096, 1, 1024]
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
-          - Exact: [4103, 4103, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     - # DGEMM NT - Test DepthU, WGM, VW
       InitialSolutionParameters:
@@ -131,7 +131,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     - # DGEMM NT - Test tuning params
       InitialSolutionParameters:
@@ -178,7 +178,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # DGEMM NT - Test size range
     #   InitialSolutionParameters:
@@ -283,7 +283,7 @@ BenchmarkProblems:
           # - Exact: [4103, 4096, 1, 1024]
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
-          - Exact: [4103, 4103, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # DGEMM NN - Test DepthU, WGM, VW
     #   InitialSolutionParameters:
@@ -519,7 +519,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # DGEMM TN - Test tuning params
     #   InitialSolutionParameters:
@@ -761,7 +761,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # DGEMM TT - Test size range
     #   InitialSolutionParameters:

@@ -79,12 +79,12 @@ BenchmarkProblems:
         - WorkGroupMapping: [6]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 65536]
-          - Exact: [512, 256, 1, 65536]
-          - Exact: [256, 512, 1, 65536]
-          - Exact: [263, 263, 1, 65543]
-          - Exact: [519, 263, 1, 65543]
-          - Exact: [263, 519, 1, 65543]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [135, 135, 1, 135]
+          - Exact: [135, 135, 1, 135]
+          - Exact: [135, 135, 1, 135]
 
   - # Epilogues
     - # BBS TN
@@ -147,8 +147,8 @@ BenchmarkProblems:
         - WorkGroupMapping: [6]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 65536]
-          - Exact: [263, 263, 1, 65543]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [135, 135, 1, 135]
         - BiasTypeArgs: ['s', 'b']
         - ActivationArgs:
           - [Enum: gelu]

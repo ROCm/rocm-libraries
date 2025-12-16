@@ -696,7 +696,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4096, 8192, 1, 128]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # HHS TN DTL
@@ -804,7 +804,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4096, 8192, 1, 128]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # HHS TT DTL

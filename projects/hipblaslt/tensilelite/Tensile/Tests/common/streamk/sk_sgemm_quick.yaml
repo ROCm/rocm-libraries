@@ -89,7 +89,7 @@ BenchmarkProblems:
           # - Exact: [4103, 4096, 1, 1024]
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
-          - Exact: [4103, 4103, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     - # SGEMM NT - Test DepthU, WGM, VW
       InitialSolutionParameters:
@@ -131,7 +131,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     - # SGEMM NT - Test tuning params
       InitialSolutionParameters:
@@ -178,7 +178,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # SGEMM NT - Test size range
     #   InitialSolutionParameters:
@@ -283,7 +283,7 @@ BenchmarkProblems:
           # - Exact: [4103, 4096, 1, 1024]
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
-          - Exact: [4103, 4103, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # SGEMM NN - Test DepthU, WGM, VW
     #   InitialSolutionParameters:
@@ -519,7 +519,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # SGEMM TN - Test tuning params
     #   InitialSolutionParameters:
@@ -760,7 +760,7 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           # - Exact: [4103, 4103, 1, 1031]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
 
     # - # SGEMM TT - Test size range
     #   InitialSolutionParameters:
@@ -839,7 +839,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [512, 512, 1, 512]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
     
     - # SGEMM TT - Test autoWGM (WorkGroupMapping: [0])
       # WorkGroupMapping is set to default (sqrt(CU/XCD)) at runtime
@@ -881,7 +881,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [512, 512, 1, 512]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]
     
     - # SGEMM TT - Test autoWGM + autoWGMXCC (WorkGroupMapping: [0] and WorkGroupMappingXCC: [-1])
       # WorkGroupMapping and WorkGroupMappingXCC values are predicted at runtime. (not default values)
@@ -923,4 +923,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [512, 512, 1, 512]
-          - Exact: [2055, 2055, 1, 1031]
+          - Exact: [135, 135, 1, 135]

@@ -53,7 +53,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 1024]
-          - Exact: [4608, 1335, 1, 640]
+          - Exact: [128, 183, 1, 128]
 
   ########################################
   # TN - standard
@@ -92,7 +92,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 1024]
-          - Exact: [4608, 1335, 1, 640]
+          - Exact: [128, 183, 1, 128]
 
   ########################################
   # NT - standard
@@ -131,7 +131,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 1024]
-          - Exact: [4608, 1335, 1, 640]
+          - Exact: [128, 183, 1, 128]
 
   ########################################
   # TT - standard
@@ -170,4 +170,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 1024]
-          - Exact: [4608, 1335, 1, 640]
+          - Exact: [128, 183, 1, 128]

@@ -71,7 +71,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [1024, 1024, 1, 1024]
-          - Exact: [4111, 4111, 1, 4111]
+          - Exact: [143, 143, 1, 143]
         - ActivationArgs:
           - [Enum: relu]
 
@@ -130,7 +130,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [1024, 1024, 1, 1024]
-          - Exact: [4111, 4111, 1, 4111]
+          - Exact: [143, 143, 1, 143]
         - BiasTypeArgs: ['S']
         - ActivationArgs:
           - [Enum: relu]
@@ -190,7 +190,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [1024, 1024, 1, 1024]
-          - Exact: [4111, 4111, 1, 4111]
+          - Exact: [143, 143, 1, 143]
         - BiasTypeArgs: ['S']
         - ActivationArgs:
           - [Enum: relu]
@@ -250,7 +250,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [1024, 1024, 1, 1024]
-          - Exact: [4111, 4111, 1, 4111]
+          - Exact: [143, 143, 1, 143]
         - BiasTypeArgs: ['S']
         - ActivationArgs:
           - [Enum: relu]

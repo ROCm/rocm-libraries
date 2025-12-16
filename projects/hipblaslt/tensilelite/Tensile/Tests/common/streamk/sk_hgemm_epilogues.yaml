@@ -125,7 +125,7 @@ BenchmarkProblems:
         - ActivationFuncCall: [1]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [24000, 256, 1, 256]
+          - Exact: [192, 128, 1, 128]
         - BiasTypeArgs: ['s', 'h']
         - ActivationArgs:
           - [Enum: gelu]

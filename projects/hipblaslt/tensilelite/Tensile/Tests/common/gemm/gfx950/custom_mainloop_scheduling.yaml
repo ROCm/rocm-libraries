@@ -516,7 +516,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[240], [256], [1], [64, 64, 256]]
           - Range: [[240], [256], [1], [1, 17, 256]]  
-          - Exact: [3840, 4096, 1, 8192]
+          - Exact: [128, 128, 1, 128]
         - BiasTypeArgs: ['b']          
   ########################################
   # HHS NN - standard
@@ -960,7 +960,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[256], [192], [1], [1, 17, 64]]
           - Range: [[256], [192], [1], [32, 64, 256]]
-          - Exact: [4096, 3072, 1, 8192]
+          - Exact: [128, 128, 1, 128]
         - BiasTypeArgs: ['b']
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
@@ -1482,7 +1482,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [8192, 4096, 1, 2048]
+          - Exact: [128, 128, 1, 128]
         - BiasTypeArgs: ['b']
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:

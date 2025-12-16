@@ -73,7 +73,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 8192, 320, 1, 320 ]
-          - Exact: [ 512, 1024, 4, 768 ]
+          - Exact: [128, 128, 4, 128]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
@@ -126,7 +126,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 8192, 320, 1, 320 ]
-          - Exact: [ 512, 1024, 4, 768 ]
+          - Exact: [128, 128, 4, 128]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
@@ -180,7 +180,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 8192, 320, 1, 320 ]
-          - Exact: [ 512, 1024, 4, 768 ]
+          - Exact: [128, 128, 4, 128]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]

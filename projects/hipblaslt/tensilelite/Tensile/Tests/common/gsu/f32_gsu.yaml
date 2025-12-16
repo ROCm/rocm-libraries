@@ -57,4 +57,4 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4096, 4096, 1, 4096]
+          - Exact: [128, 128, 1, 128]

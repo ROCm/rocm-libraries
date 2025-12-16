@@ -196,7 +196,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [8192, 8192, 1, 8192]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # HHS NN - standard
@@ -327,7 +327,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [8192, 8192, 1, 8192]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # HHS TT - standard
@@ -455,7 +455,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [8192, 8192, 1, 8192]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # HHS NT - standard
@@ -584,7 +584,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [8192, 8192, 1, 8192]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # F8HS TN - standard

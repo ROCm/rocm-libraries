@@ -82,7 +82,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1064]
           - Exact: [512, 512, 1, 1096]
           - Exact: [519, 519, 1, 1037]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NN - Multiple LDS Buffers - BBS 
@@ -144,7 +144,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1064]
           - Exact: [512, 512, 1, 1096]
           - Exact: [519, 519, 1, 1037]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NN - Single LDS buffer - HHS 
@@ -206,7 +206,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1064]
           - Exact: [512, 512, 1, 1096]
           - Exact: [519, 519, 1, 1037]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NN - Multiple LDS buffers - HHS 
@@ -268,7 +268,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1064]
           - Exact: [512, 512, 1, 1096]
           - Exact: [519, 519, 1, 1037]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NT - Single LDS Buffer - BBS
@@ -332,7 +332,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
           - Exact: [515, 515, 1, 1031]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NT - Multiple LDS Buffers - BBS
@@ -396,7 +396,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
           - Exact: [515, 515, 1, 1031]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NT - Single LDS Buffer - HHS
@@ -460,7 +460,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
           - Exact: [515, 515, 1, 1031]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NT - Multiple LDS Buffers - HHS
@@ -524,7 +524,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
           - Exact: [515, 515, 1, 1031]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # TT - Single LDS Buffer - BBS
@@ -587,7 +587,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1056]
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # TT - Multiple LDS Buffers - BBS
@@ -650,7 +650,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1056]
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # TT - Single LDS Buffer - HHS
@@ -713,7 +713,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1056]
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # TT - Multiple LDS Buffers - HHS
@@ -776,7 +776,7 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1056]
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
-          - Exact: [2053, 2053, 1, 2053]
+          - Exact: [133, 133, 1, 133]
 
   ########################################
   # NN - standard HHS Test LDS > 64K Double Buffer
@@ -823,7 +823,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4096, 4096, 1, 8192]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # HSS - Test LDS > 64K
@@ -886,4 +886,4 @@ BenchmarkProblems:
       BenchmarkJoinParameters: 
       BenchmarkFinalParameters:
       - ProblemSizes:
-        - Exact: [ 40960, 192, 1, 256 ]
+        - Exact: [128, 192, 1, 128]

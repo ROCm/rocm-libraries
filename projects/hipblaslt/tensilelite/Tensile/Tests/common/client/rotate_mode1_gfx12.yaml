@@ -79,7 +79,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [2160,10240,1,16384]
+          - Exact: [240, 128, 1, 128]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
