@@ -129,7 +129,8 @@ namespace rocRoller
                 for(OpsAndTilesType& elem : opsAndTiles)
                 {
                     auto memType = std::get<1>(elem).second.memoryType;
-                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE)
+                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE
+                       || memType == MemoryType::WAVE_FROM_GLOBAL)
                     {
                         return elem;
                     }
