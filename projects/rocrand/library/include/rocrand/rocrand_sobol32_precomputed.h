@@ -31,8 +31,13 @@
 #endif // SOBOL_DIM
 #define SOBOL32_N 640000
 
-extern "C" [[deprecated(
-    "Use 'rocrand_get_direction_vectors32(...)' instead.")]] ROCRANDAPI const unsigned int
+namespace rocrand_device {
+namespace detail {
+
+extern "C" ROCRANDAPI const unsigned int
     rocrand_h_sobol32_direction_vectors[SOBOL32_N];
+
+} // end namespace detail
+} // end namespace rocrand_device
 
 #endif // ROCRAND_SOBOL32_PRECOMPUTED_H_

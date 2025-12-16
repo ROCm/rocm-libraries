@@ -28,8 +28,10 @@
     #define SCRAMBLED_SOBOL_DIM 20000
 #endif
 
+namespace rocrand_device {
+namespace detail {
+
 // clang-format off
-[[deprecated("Use 'rocrand_get_scramble_constants64(...)' instead.")]]
 static const unsigned long long int h_scrambled_sobol64_constants[SCRAMBLED_SOBOL_DIM] = {
     0xd091bb5c22ae9ef6, 0xe7e1faeed5c31f79, 0x2082352cf807b7df, 0xe9d300053895afe1,
     0xa1e24bba4ee4092b, 0x18f868638c16a625, 0x474ba8c43039cd1a, 0x8c006d5ffe2d7810,
@@ -5034,5 +5036,8 @@ static const unsigned long long int h_scrambled_sobol64_constants[SCRAMBLED_SOBO
 
 };
 // clang-format on
+
+} // end namespace detail
+} // end namespace rocrand_device
 
 #endif // ROCRAND_SCRAMBLED_SOBOL64_CONSTANTS_H_

@@ -595,10 +595,10 @@ rocrand_status ROCRANDAPI rocrand_get_direction_vectors32(const unsigned int**  
     switch(set)
     {
         case ROCRAND_DIRECTION_VECTORS_32_JOEKUO6:
-            *vectors = rocrand_h_sobol32_direction_vectors;
+            *vectors = rocrand_device::detail::rocrand_h_sobol32_direction_vectors;
             return ROCRAND_STATUS_SUCCESS;
         case ROCRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6:
-            *vectors = rocrand_h_scrambled_sobol32_direction_vectors;
+            *vectors = rocrand_device::detail::rocrand_h_scrambled_sobol32_direction_vectors;
             return ROCRAND_STATUS_SUCCESS;
         default: return ROCRAND_STATUS_OUT_OF_RANGE;
     }
@@ -613,10 +613,10 @@ rocrand_status ROCRANDAPI rocrand_get_direction_vectors64(const unsigned long lo
     switch(set)
     {
         case ROCRAND_DIRECTION_VECTORS_64_JOEKUO6:
-            *vectors = rocrand_h_sobol64_direction_vectors;
+            *vectors = rocrand_device::detail::rocrand_h_sobol64_direction_vectors;
             return ROCRAND_STATUS_SUCCESS;
         case ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6:
-            *vectors = rocrand_h_scrambled_sobol64_direction_vectors;
+            *vectors = rocrand_device::detail::rocrand_h_scrambled_sobol64_direction_vectors;
             return ROCRAND_STATUS_SUCCESS;
         default: return ROCRAND_STATUS_OUT_OF_RANGE;
     }
@@ -627,7 +627,7 @@ rocrand_status ROCRANDAPI rocrand_get_scramble_constants32(const unsigned int** 
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    *constants = h_scrambled_sobol32_constants;
+    *constants = rocrand_device::detail::h_scrambled_sobol32_constants;
     return ROCRAND_STATUS_SUCCESS;
 #pragma clang diagnostic pop
 }
@@ -636,7 +636,7 @@ rocrand_status ROCRANDAPI rocrand_get_scramble_constants64(const unsigned long l
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    *constants = h_scrambled_sobol64_constants;
+    *constants = rocrand_device::detail::h_scrambled_sobol64_constants;
     return ROCRAND_STATUS_SUCCESS;
 #pragma clang diagnostic pop
 }

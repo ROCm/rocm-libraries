@@ -31,8 +31,13 @@
 #endif // SCRAMBLED_SOBOL_DIM
 #define SCRAMBLED_SOBOL64_N 1280000
 
-extern "C" [[deprecated(
-    "Use 'rocrand_get_direction_vectors64(...)' instead.")]] ROCRANDAPI const unsigned long long
+namespace rocrand_device {
+namespace detail {
+
+extern "C" ROCRANDAPI const unsigned long long
     rocrand_h_scrambled_sobol64_direction_vectors[SCRAMBLED_SOBOL64_N];
+
+} // end namespace detail
+} // end namespace rocrand_device
 
 #endif // ROCRAND_SCRAMBLED_SOBOL64_PRECOMPUTED_H_

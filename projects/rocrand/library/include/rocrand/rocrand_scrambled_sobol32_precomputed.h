@@ -26,13 +26,18 @@
 
 #include "rocrand/rocrandapi.h"
 
+namespace rocrand_device {
+namespace detail {
+
 #ifndef SCRAMBLED_SOBOL_DIM
     #define SCRAMBLED_SOBOL_DIM 20000
 #endif // SCRAMBLED_SOBOL_DIM
 #define SCRAMBLED_SOBOL32_N 640000
 
-extern "C" [[deprecated(
-    "Use 'rocrand_get_direction_vectors32(...)' instead.")]] ROCRANDAPI const unsigned int
+extern "C" ROCRANDAPI const unsigned int
     rocrand_h_scrambled_sobol32_direction_vectors[SCRAMBLED_SOBOL32_N];
+
+} // end namespace detail
+} // end namespace rocrand_device
 
 #endif // ROCRAND_SCRAMBLED_SOBOL32_PRECOMPUTED_H_
