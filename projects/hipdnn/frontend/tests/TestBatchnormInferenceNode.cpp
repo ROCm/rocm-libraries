@@ -453,12 +453,13 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsInvalidInvVarianceTensorShape
 // Spatial Dimension Validation Tests
 // ============================================================================
 
-TEST(TestBatchnormInferenceNode, PreValidateRejectsSpatialDimensionViolations)
+TEST(TestBatchnormInferenceNode, PreValidateAcceptsSpatialDimensionEqualsOne)
 {
     BatchnormInferenceAttributes batchnormAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({1, 256, 1, 1}).set_stride({256, 1, 1, 1}); // Invalid: N*H*W = 1*1*1 = 1
+    xTensor->set_dim({1, 256, 1, 1})
+        .set_stride({256, 1, 1, 1}); // Valid: PyTorch accepts N*H*W = 1 for inference
     batchnormAttributes.set_x(xTensor);
 
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
@@ -475,10 +476,8 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsSpatialDimensionViolations)
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("Batch normalization inference") != std::string::npos);
-    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
-                != std::string::npos);
+    EXPECT_EQ(error.code, ErrorCode::OK)
+        << "Inference mode should accept N*spatial=1 (matches PyTorch behavior)";
 }
 
 TEST(TestBatchnormInferenceNode, PreValidateAcceptsValidSpatialDimensions)

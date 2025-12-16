@@ -115,13 +115,9 @@ public:
                 validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
         }
 
-        // SECTION 5: Validate Spatial Mode Constraints
-        // Why: Inference uses running stats computed during training with spatial mode.
-        // While inference technically doesn't compute statistics from the current batch,
-        // we validate spatial consistency to ensure the saved stats were computed with
-        // the same assumptions (N*H*W > 1 during training).
-        HIPDNN_CHECK_ERROR(
-            validateBatchNormTrainingSpatialDimensions(x, scale, "Batch normalization inference"));
+        // NOTE: Unlike training, inference does NOT require m > 1 (where m = N*H*W for 4D
+        // or m = N*D*H*W for 5D) since it uses pre-computed statistics rather than
+        // computing batch statistics.
 
         return {ErrorCode::OK, ""};
     }
