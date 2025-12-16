@@ -97,7 +97,18 @@ install_zypper_packages( )
 {
     package_dependencies="$@"
     printf "\033[32mInstalling following packages from distro package manager: \033[33m${package_dependencies}\033[32m \033[0m\n"
-    elevate_if_not_root zypper install -y ${package_dependencies}
+    local uid=$(id -u)
+    local exit_code=0
+    if (( ${uid} )); then
+        sudo zypper -n install -y ${package_dependencies} || exit_code=$?
+    else
+        zypper -n install -y ${package_dependencies} || exit_code=$?
+    fi
+    # Exit code 106 means some repos failed to refresh, but packages may still be available
+    # Only fail if it's a different error
+    if (( ${exit_code} != 0 && ${exit_code} != 106 )); then
+        exit ${exit_code}
+    fi
 }
 
 install_msgpack_from_source( )
@@ -107,7 +118,7 @@ install_msgpack_from_source( )
       printf "\033[33mRemoving existing msgpack build (--clean-deps specified)\033[0m\n"
       rm -rf "${build_dir}/deps/msgpack-c"
     fi
-    
+
     if [[ ! -d "${build_dir}/deps/msgpack-c" ]]; then
       pushd .
       mkdir -p ${build_dir}/deps
@@ -128,13 +139,13 @@ install_aocl_from_source( )
       printf "\033[33mRemoving existing AOCL build (--clean-deps specified)\033[0m\n"
       rm -rf "${build_dir}/deps/aocl"
     fi
-    
+
     # Skip AOCL installation if requested
     if [[ "${skip_aocl}" == true ]]; then
       printf "\033[33mSkipping AOCL installation (--skip-aocl specified)\033[0m\n"
       return
     fi
-    
+
     if [[ ! -d "${build_dir}/deps/aocl" ]]; then
       pushd .
       mkdir -p ${build_dir}/deps
@@ -186,10 +197,14 @@ install_packages( )
                                       "make" "rpm-build"
                                       "python39" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
+  local library_dependencies_rhel_10=( "epel-release" "openssl-devel"
+                                      "make" "rpm-build"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
+                                      "gcc-c++" )
   local library_dependencies_fedora=( "make" "rpm-build"
                                       "python34" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" "libcxx-devel" )
-  local library_dependencies_sles=(   "make" "python3-PyYAML" "python3-virtualenv"
+  local library_dependencies_sles=(   "make" "python311" "python311-PyYAML" "python311-pip"
                                       "gcc-c++" "rpm-build" )
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
@@ -212,6 +227,7 @@ install_packages( )
       library_dependencies_centos_8+=("wget")
       library_dependencies_rhel_8+=("wget")
       library_dependencies_rhel_9+=("wget")
+      library_dependencies_rhel_10+=("wget")
       library_dependencies_fedora+=("wget")
       library_dependencies_sles+=("wget")
     fi
@@ -224,6 +240,7 @@ install_packages( )
     library_dependencies_centos_8+=( "gcc-gfortran" "libgomp" )
     library_dependencies_rhel_8+=( "gcc-gfortran" "libgomp" )
     library_dependencies_rhel_9+=( "gcc-gfortran" "libgomp" )
+    library_dependencies_rhel_10+=( "gcc-gfortran" "libgomp" )
     library_dependencies_fedora+=( "gcc-gfortran" "libgomp" )
     library_dependencies_sles+=( "gcc-fortran" "libgomp1" )
 
@@ -234,6 +251,7 @@ install_packages( )
       library_dependencies_centos_8+=("wget")
       library_dependencies_rhel_8+=("wget")
       library_dependencies_rhel_9+=("wget")
+      library_dependencies_rhel_10+=("wget")
       library_dependencies_fedora+=("wget")
       library_dependencies_sles+=("wget")
     fi
@@ -257,7 +275,9 @@ install_packages( )
       ;;
 
     rhel)
-      if (( "${VERSION_ID%%.*}" >= "9" )); then
+      if (( "${VERSION_ID%%.*}" >= "10" )); then
+        install_yum_packages "${library_dependencies_rhel_10[@]}"
+      elif (( "${VERSION_ID%%.*}" >= "9" )); then
         install_yum_packages "${library_dependencies_rhel_9[@]}"
       elif (( "${VERSION_ID%%.*}" >= "8" )); then
         install_yum_packages "${library_dependencies_rhel_8[@]}"
@@ -426,7 +446,7 @@ while true; do
   case "${1}" in
     -h|--help)
         display_help
-        python3 ./rmake.py --help
+        ${python_executable} ./rmake.py --help
         exit 0
         ;;
     -i|--install)
@@ -488,7 +508,7 @@ install_blis()
       printf "\033[33mRemoving existing BLIS build (--clean-deps specified)\033[0m\n"
       rm -rf "${build_dir}/deps/blis"
     fi
-    
+
     if [[ ! -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a"  ]] &&
@@ -530,6 +550,13 @@ cxx="g++"
 cc="gcc"
 fc="gfortran"
 
+# Set Python executable based on distro
+if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
+  python_executable=python3.11
+else
+  python_executable=python3
+fi
+
 # #################################################
 # dependencies
 # #################################################
@@ -547,7 +574,7 @@ if [[ "${install_dependencies}" == true ]]; then
         CMAKE_ARCH="linux-x86_64"
         CMAKE_TARGZ="cmake-${CMAKE_MIN_VERSION}-${CMAKE_ARCH}.tar.gz"
         CMAKE_INSTALL_DIR="${build_dir}/deps/cmake-${CMAKE_MIN_VERSION}"
-        
+
         # Check if already installed
         if [[ -f "${CMAKE_INSTALL_DIR}/bin/cmake" ]]; then
           printf "\033[32mCMake ${CMAKE_MIN_VERSION} already installed at \033[33m${CMAKE_INSTALL_DIR}\033[0m\n"
@@ -555,22 +582,22 @@ if [[ "${install_dependencies}" == true ]]; then
           mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
           printf "\033[32mDownloading CMake pre-built binary from \033[33m${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}\033[0m\n"
           wget -nv ${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}
-          
+
           printf "\033[32mExtracting CMake to \033[33m${CMAKE_INSTALL_DIR}\033[0m\n"
           tar -xzf ${CMAKE_TARGZ}
           rm ${CMAKE_TARGZ}
-          
+
           # Move extracted directory to standard location
           mv cmake-${CMAKE_MIN_VERSION}-${CMAKE_ARCH} cmake-${CMAKE_MIN_VERSION}
           printf "\033[32mCMake ${CMAKE_MIN_VERSION} successfully installed!\033[0m\n"
         fi
-        
+
         # Update cmake_executable to use the newly installed version
         cmake_executable="${CMAKE_INSTALL_DIR}/bin/cmake"
         export PATH="${CMAKE_INSTALL_DIR}/bin:$PATH"
         printf "\033[32mUsing cmake from: \033[33m${cmake_executable}\033[0m\n"
         ${cmake_executable} --version
-        
+
         popd
       else
           echo "rocBLAS requires CMake version >= ${CMAKE_MIN_VERSION} and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_MIN_VERSION} will be installed to ${build_dir}/deps"
@@ -631,7 +658,13 @@ if [[ "${rmake_invoked}" == false ]]; then
   #rmake.py at top level same as install.sh
   # Filter out install.sh-only flags from args passed to rmake.py
   filtered_args=$(filter_rmake_args "${input_args}")
-  python3 ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
+
+  # On SLES, explicitly set Python3_EXECUTABLE to use python3.11
+  if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
+    ${python_executable} ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH} --cmake-darg Python3_EXECUTABLE=/usr/bin/python3.11
+  else
+    ${python_executable} ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
+  fi
   check_exit_code "$?"
 
   popd
