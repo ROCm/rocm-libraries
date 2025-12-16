@@ -712,7 +712,7 @@ def apply_swaits(timeline: Timeline) -> None:
             apply(timeline.combined_timeline[i_swait-1::-1], swait, GlobalRead, swait.vlcnt)
 
 
-def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution') -> None:
+def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
     Set the needed_by field of LocalReads based on the VMFMA index they are required for.
     Timeline is modified in place.
@@ -723,6 +723,13 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution') -> None:
     Args:
         timeline: The Timeline object containing the instructions.
     """
+
+    if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
+        return False, f"Incorrect number of VMFMA indices in mfmaReorder. Expected {timeline.num_vmfma}, given {len(mfma_reorder)}."
+
+    n_local_reads_a = len(timeline.get_instructions("LRA0", MAIN_LOOP))
+    n_local_reads_b = len(timeline.get_instructions("LRB0", MAIN_LOOP))
+
     for i_loop, loop in enumerate(timeline.loops):
         loop_offset = timeline.num_vmfma * i_loop
         for instruction_name in timeline.get_instruction_names():
@@ -730,8 +737,15 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution') -> None:
                 continue
             local_reads = timeline.get_instructions(instruction_name, loop)
             for lr_idx, (_, lr) in enumerate(local_reads):
-                base_needed_by = lr_needed_by_mfma(lr, lr_idx, timeline, kernel)
-                lr.needed_by = base_needed_by + loop_offset
+                needed_by = lr_needed_by_mfma(
+                    local_read=lr,
+                    lr_idx=lr_idx,
+                    num_vmfma=timeline.num_vmfma,
+                    mfma_reorder=mfma_reorder,
+                    n_tiles_a=kernel["MIWaveTileA"], n_tiles_b=kernel["MIWaveTileB"],
+                    n_local_reads_a=n_local_reads_a,
+                    n_local_reads_b=n_local_reads_b)                
+                lr.needed_by = needed_by + loop_offset
 
 
 def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) -> None:
@@ -813,50 +827,61 @@ def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> li
     return schedules[0] if len(schedules) == 1 else schedules[code_path]
 
 
-def lr_needed_by_mfma(local_read: LocalRead, lr_idx: int, timeline: Timeline, kernel: 'Solution') -> int:
+def lr_needed_by_mfma(
+    local_read: LocalRead,
+    lr_idx: int,
+    num_vmfma: int,
+    mfma_reorder: list[int],
+    n_tiles_a: int,
+    n_tiles_b: int,
+    n_local_reads_a: int,
+    n_local_reads_b: int,
+    ) -> int:
     """
     Helper function to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
 
     Args:
         lr_idx: The index of the LRA/LRB in the list of LRAs/LRBs for the given code path.
-        offset: The offset from the halfway point of the main loop.
-        schedule_info: The schedule information (ScheduleInfo object)
-        kernel: The kernel (Solution object)
+        num_vmfma: The number of MFMA indices.
+        mfma_reorder: The reordering of the MFMA indices.
+        n_tiles_a: The number of tiles in the A dimension.
+        n_tiles_b: The number of tiles in the B dimension.
+        n_local_reads_a: The number of local reads in the A dimension.
+        n_local_reads_b: The number of local reads in the B dimension.
 
     Returns:
         The index of the MFMA at which the given LRA/LRB will be needed by.
     """
-    offset = local_read.num_vmfma
-    if "0" in local_read.name:
-        offset //= 2
-
-    n_tiles_a = kernel['MIWaveTileA']
-    n_tiles_b = kernel['MIWaveTileB']
-    # NOTE: This calculation will produce incorrect results if the user provided the wrong number of LRs.
-    n_lr_a = len(timeline.get_instructions("LRA0", MAIN_LOOP))
-    n_lr_b = len(timeline.get_instructions("LRB0", MAIN_LOOP))
-
     # How many MFMA worth of data is loaded by each LRA/LRB
-    n_tiles_per_lra = n_tiles_a / n_lr_a
-    n_tiles_per_lrb = n_tiles_b / n_lr_b
+    n_tiles_per_lra = n_tiles_a / n_local_reads_a
+    n_tiles_per_lrb = n_tiles_b / n_local_reads_b
 
-    # NOTE: This is based on the current bahaviour where we iterate through A faster than B.
-    def index_lra_needed_by_mfma(lra_idx: int, offset: int) -> int:
-        """
-        Calculate the index of the MFMA at which the given LRA will be needed by.
-        """
-        return int(lra_idx * n_tiles_per_lra) + offset
-
-    def index_lrb_needed_by_mfma(lrb_idx: int, offset: int) -> int:
-        """
-        Calculate the index of the MFMA at which the given LRB will be needed by.
-        """
-        return n_tiles_a * int(lrb_idx * n_tiles_per_lrb) + offset
+    # NOTE: This is based on the current bahaviour where we iterate through MFMAs in column-major order (A faster than B).
+    def index_lra_needed_by_mfma(lra_idx: int) -> int:
+        return int(lra_idx * n_tiles_per_lra)
+    def index_lrb_needed_by_mfma(lrb_idx: int) -> int:
+        return n_tiles_a * int(lrb_idx * n_tiles_per_lrb)
 
     if local_read.name.startswith("LRA"):
-        return index_lra_needed_by_mfma(lr_idx, offset)
+        needed_by = index_lra_needed_by_mfma(lr_idx)
     else:
-        return index_lrb_needed_by_mfma(lr_idx, offset)
+        needed_by = index_lrb_needed_by_mfma(lr_idx)
+    
+    # Account for mfmaReorder.
+    is_lr0 = local_read.name == "LRA0" or local_read.name == "LRB0"
+    if is_lr0:
+        # LR0: reading data for 2nd half of this iteration.
+        needed_by += num_vmfma // 2
+    else:
+        # LR1/3: will add after reordering to since we need index in next iteration 
+        pass
+    if mfma_reorder:
+        needed_by = mfma_reorder[needed_by]
+    if not is_lr0:
+        # LR1/3 is reading data for next iteration.
+        needed_by += num_vmfma
+    
+    return needed_by
 
 
 @dataclass
@@ -1004,20 +1029,17 @@ def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
     """
     Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
     """
-    if context.get("kernel", {}).get("UseF32XEmulation", False) or context.get("kernel", {}).get("ForceUnrollSubIter", False):
-        message = "LR completion before vmfma validation is disabled for F32X emulation or ForceUnrollSubIter"
+    if context.get("kernel", {}).get("UseF32XEmulation", False):
+        message = "LR completion before vmfma validation is disabled for F32X emulation"
         printWarning(f"{message}")
         return True, message
     
-    if len(schedule_info.mfmaReorder) != 0:
-        printWarning("CMS Validation does not currently support mfmaReorder, cannot guarantee that LRs will be correct.")
-        return True, ""
+    kernel = context["kernel"]
 
     relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
-    kernel = context["kernel"]
     timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
 
-    set_lr_needed_by_for_VMFMA(timeline, kernel)
+    set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
     apply_swaits(timeline)
     apply_barriers(timeline)
 
