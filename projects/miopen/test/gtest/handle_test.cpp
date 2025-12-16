@@ -366,8 +366,6 @@ struct HandleTest : testing::TestWithParam<TestCase>
 
     void RunCL()
     {
-        auto&& h = get_handle();
-
         test_multithreads(miopenOpenCLKernelType, with_stream);
         test_errors(miopenOpenCLKernelType);
         test_arch_name();
