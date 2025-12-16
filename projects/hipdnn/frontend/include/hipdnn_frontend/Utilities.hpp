@@ -10,7 +10,6 @@
 #include <hipdnn_sdk/logging/CallbackTypes.h>
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/test_utilities/LoggingUtils.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <numeric>
@@ -83,6 +82,13 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
 {
     return TensorAttributes().set_name(name).set_data_type(dataType).set_dim(dims).set_stride(
         strides);
+}
+
+inline TensorAttributes makeTensorAttributes(const std::string& name,
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
 }
 
 inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>

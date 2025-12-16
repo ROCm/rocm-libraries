@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include <map>
 #include <vector>
 
 #include <rocRoller/CommandSolution.hpp>
@@ -39,6 +40,7 @@
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 
 #include <common/GEMMProblem.hpp>
 
@@ -228,6 +230,9 @@ namespace rocRollerTest
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
             rocRoller::Operations::OperationTag m_tagNumWGs;
+
+            std::map<rocRoller::Operations::ScratchPolicy, rocRoller::Operations::OperationTag>
+                m_scratchTags;
 
             CommandPtr m_command;
         };

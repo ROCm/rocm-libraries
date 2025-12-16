@@ -4,8 +4,8 @@
 #include "hipdnn_backend.h"
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <vector>
 
 namespace fs = std::filesystem;

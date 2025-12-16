@@ -2403,3 +2403,98 @@ TEST(TestConvolutionNode, PreValidateGroupedConvInvalidOutputChannels)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
+
+TEST(TestConvolutionNode, PreValidateNodeInvalidOutputDimensions)
+{
+    ConvFpropAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim({64, 3, 3, 3});
+    wTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_w(wTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({1, 64, 30, 30}); // Incorrect output size (should be 32x32)
+    yTensor->set_stride({57600, 900, 30, 1});
+    convAttributes.set_y(yTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionNode, PreValidateNodeWithDroppedPixels)
+{
+    ConvFpropAttributes convAttributes;
+
+    // For each spatial dim Index (0, 1, 2) & (2, 3, 4) are the two 3x3 kernels
+    // applied with stride 2 on 6x6 dx 5th is dropped / unused due to stride
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 6, 6});
+    xTensor->set_stride({108, 36, 6, 1});
+    convAttributes.set_x(xTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim({64, 3, 3, 3});
+    wTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_w(wTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({1, 64, 2, 2});
+    yTensor->set_stride({256, 4, 2, 1});
+    convAttributes.set_y(yTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestConvolutionNode, PreValidateNodeInputTooSmall)
+{
+    ConvFpropAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 2, 2}); // Input smaller than kernel
+    xTensor->set_stride({12, 4, 2, 1});
+    convAttributes.set_x(xTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim({64, 3, 3, 3}); // 3x3 kernel
+    wTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_w(wTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({1, 64, 1, 1}); // Even if output is 1x1, it's invalid
+    yTensor->set_stride({64, 1, 1, 1});
+    convAttributes.set_y(yTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
