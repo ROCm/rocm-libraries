@@ -1994,6 +1994,12 @@ namespace TensileLite
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
 
+        if(sizeMapping.streamK > 0 && gsu < 2)
+        {
+            std::cerr << "\nhipblasLT Error: Trying to launch kernel " << rv.kernelName << " with StreamK and gsu < 2\n";
+            assert(!(sizeMapping.streamK > 0 && gsu < 2));
+        }
+
         rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
         rv.numWorkGroups.y = 1;
         rv.numWorkGroups.z = 1;
