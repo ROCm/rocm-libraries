@@ -23,21 +23,44 @@
 cmake_minimum_required( VERSION 3.16.8 )
 
 function( apply_omp_settings lib_target_ )
+  # Collect RPATH entries for both BUILD and INSTALL
+  set(build_rpath_list "")
+  set(install_rpath_list "")
+  
+  # Add OpenMP library paths
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
-    set_target_properties( ${lib_target_} PROPERTIES
-      BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
-    )
-    set_target_properties( ${lib_target_} PROPERTIES
-      INSTALL_RPATH "$ORIGIN/../llvm/lib"
-    )
-  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
-    set_target_properties( ${lib_target_} PROPERTIES
-      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
-    )
-    set_target_properties( ${lib_target_} PROPERTIES
-      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
-    )
+    list(APPEND build_rpath_list "${HIP_CLANG_ROOT}/lib")
+    list(APPEND install_rpath_list "$ORIGIN/../llvm/lib")
     target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}> )
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+    list(APPEND build_rpath_list "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
+    list(APPEND install_rpath_list "$ORIGIN/../llvm/${openmp_LIB_DIR}")
+    target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}> )
+  endif()
+  
+  # Add AOCL library path if it's a shared library (.so)
+  if (BLAS_LIBRARY MATCHES "\\.so$")
+    get_filename_component(blas_lib_dir "${BLAS_LIBRARY}" DIRECTORY)
+    list(APPEND build_rpath_list "${blas_lib_dir}")
+    # For install RPATH, use relative path to deps if BLAS is in build deps
+    if (BLAS_LIBRARY MATCHES "${BUILD_DIR}/deps/")
+      list(APPEND install_rpath_list "$ORIGIN/../deps/aocl/install_package/lib")
+    else()
+      list(APPEND install_rpath_list "${blas_lib_dir}")
+    endif()
+  endif()
+  
+  # Apply collected RPATH entries if any
+  if (build_rpath_list)
+    list(REMOVE_DUPLICATES build_rpath_list)
+    string(REPLACE ";" ":" build_rpath_str "${build_rpath_list}")
+    set_target_properties( ${lib_target_} PROPERTIES BUILD_RPATH "${build_rpath_str}" )
+  endif()
+  
+  if (install_rpath_list)
+    list(REMOVE_DUPLICATES install_rpath_list)
+    string(REPLACE ";" ":" install_rpath_str "${install_rpath_list}")
+    set_target_properties( ${lib_target_} PROPERTIES INSTALL_RPATH "${install_rpath_str}" )
   endif()
 endfunction()
 
