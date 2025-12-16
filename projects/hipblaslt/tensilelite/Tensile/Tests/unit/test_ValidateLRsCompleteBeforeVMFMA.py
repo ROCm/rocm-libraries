@@ -338,3 +338,60 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             "SYNC": [[3, 7]],
         }
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+
+class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+
+    def test_simple_bf16(self):
+        """
+        Simple test when the indices are fully reversed. 
+        """
+        assert self.num_vmfma == 8
+        
+        mfmaReorder = list(range(self.num_vmfma-1, -1, -1))
+        optSchedule = { 
+            # LR0s needed for first half
+            "LRA0": [[-1, -1]],
+            "LRB0": [[-1, -1]],
+            # LR1s needed for second half
+            "LRA1": [[0, 0]],
+            "LRB1": [[0, 0]],
+            "SYNC": [[-1, self.num_vmfma // 2 - 1]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1s"),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None, mfmaReorder=mfmaReorder)
+
+    def test_complex_bf16(self):
+        """
+        Change from column-major to row-major.
+
+        | 0 2 | -> | 0 1 |
+        | 1 3 | -> | 2 3 |
+        """
+        assert self.num_vmfma == 8
+
+        mfmaReorder = [0, 2, 1, 3, 4, 6, 5, 7]
+        optSchedule = {
+            "LRB0": [[3, 4]],
+            "LRA0": [[3, 5]],
+            "LRB1": [[5, 6]],
+            "LRA1": [[5, 7]],
+            "SYNC": [[0, 1, 3, 4, 5, 7]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="2/2 LRB1"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="2/2 LRA1"),
+
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="1/2 LRB0 and 1/2 LRA0."),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="2/2 LRB0"),
+            SWaitCnt(dscnt=0+1, vlcnt=-1, vscnt=-1, comment="2/2 LRA0"),
+
+            SWaitCnt(dscnt=2,vlcnt=-1, vscnt=-1, comment="1/2 LRB1 and 1/2 LRA1."),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None, nllZeroDscnt=True, mfmaReorder=mfmaReorder)

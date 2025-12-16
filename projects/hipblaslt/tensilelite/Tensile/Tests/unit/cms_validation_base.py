@@ -70,7 +70,9 @@ class CMSValidationTestBase(unittest.TestCase):
         nllshift: int,
         codePathIdx: int,
         expected_message: str | None,
-        nllZeroDscnt: bool = False
+        nllZeroDscnt: bool = False,
+        mfmaReorder: list[int] = None,
+        snopCode: list[Any] = None,
     ):
         """
         Creates a ScheduleInfo and validates it using the validation function from the subclass.
@@ -84,8 +86,15 @@ class CMSValidationTestBase(unittest.TestCase):
             codePathIdx: Code path index to validate
             expected_message: Expected error message (None if validation should pass, str if validation should fail)
             nllZeroDscnt: Whether to use zero dscnt for NLL loop (default: False)
+            mfmaReorder: List of MFMA reorder indices
+            snopCode: List of SNOP instructions
         """
-        sched = ScheduleInfo(numCodePaths, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt)
+        if mfmaReorder is None:
+            mfmaReorder = []
+        if snopCode is None:
+            snopCode = []
+        
+        sched = ScheduleInfo(numCodePaths, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt, mfmaReorder, snopCode)
 
         status, message = self.validation_function(sched, {"kernel": self.kernel}, codePathIdx)
         
