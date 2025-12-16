@@ -26,18 +26,17 @@
 #include "rocsparse-types.h"
 #include "rocsparse_csrilu0_info.hpp"
 
-
 namespace rocsparse
 {
 
-  typedef rocsparse_status (*csrilu0_kernel_launch_t)(rocsparse_handle         handle,
-						      rocsparse_csrilu0_info   csrilu0_info,
-						      rocsparse_spmat_descr    A,
-						      int32_t                  boost_enable,
-						      size_t                   boost_tol_size,
-						      const void*__restrict__  boost_tol,
-						      const void*__restrict__  boost_val,
-						      size_t                   buffer_size,
-						      void*__restrict__        buffer);
-  
+    typedef rocsparse_status (*csrilu0_kernel_launch_t)(rocsparse_handle       handle,
+                                                        rocsparse_csrilu0_info csrilu0_info,
+                                                        rocsparse_spmat_descr  A,
+                                                        int32_t                boost_enable,
+                                                        size_t                 boost_tol_size,
+                                                        const void* __restrict__ boost_tol,
+                                                        const void* __restrict__ boost_val,
+                                                        size_t buffer_size,
+                                                        void* __restrict__ buffer);
+
 }

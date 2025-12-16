@@ -25,9 +25,7 @@
 #include "internal/precond/rocsparse_bsric0.h"
 #include "rocsparse_utility.hpp"
 
-
-extern "C" rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle,
-						   rocsparse_mat_info info)
+extern "C" rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_info info)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -46,4 +44,3 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-
