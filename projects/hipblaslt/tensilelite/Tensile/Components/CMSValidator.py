@@ -465,12 +465,18 @@ class Timeline:
         available_keys = schedule_info.optSchedule.keys()
         if "LRA1" in available_keys:
             assert "LRA3" not in available_keys, "LRA1 and LRA3 cannot both be present in the schedule."
-        if "LRA3" in available_keys:
+        elif "LRA3" in available_keys:
             assert "LRA1" not in available_keys, "LRA1 and LRA3 cannot both be present in the schedule."
+
         if "LRB1" in available_keys:
             assert "LRB3" not in available_keys, "LRB1 and LRB3 cannot both be present in the schedule."
-        if "LRB3" in available_keys:
+        elif "LRB3" in available_keys:
             assert "LRB1" not in available_keys, "LRB1 and LRB3 cannot both be present in the schedule."
+        
+        if "LRA1" in available_keys:
+            assert "LRB3" not in available_keys, "Can't mix LR1s and LR3s."
+        if "LRB1" in available_keys:
+            assert "LRA3" not in available_keys, "Can't mix LR1s and LR3s."
 
         self.num_vmfma = schedule_info.numMfma
         self.vlcnt_shift = defaultdict(int)
