@@ -35,14 +35,11 @@ struct ConverterLoader
     }
 };
 
-template <typename DstDataType,
-          index_t UnaryOpSize,
-          bool LoadTranspose = false,
-          typename WarpTile,
-          typename WarpWindow>
+template <index_t UnaryOpSize, bool LoadTranspose = false, typename WarpTile, typename WarpWindow>
 CK_TILE_DEVICE void load_and_convert_tile(WarpTile& dst, const WarpWindow& src)
 {
     using SrcDataType = typename WarpWindow::Base::DataType;
+    using DstDataType = typename WarpTile::DataType;
 
     if constexpr(is_packed_type_v<SrcDataType>)
     {
