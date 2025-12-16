@@ -70,8 +70,8 @@ private:
         if(this->m_default_path.empty())
         {
             std::cerr
-                << "Could not find matrices directory. Please set ROCSPARSE_CLIENTS_MATRICES_DIR "
-                   "environment variable"
+                << "rocsparse: could not find matrices directory. Please set ROCSPARSE_CLIENTS_MATRICES_DIR "
+                   "environment variable, or use the option --matrices-dir"
                 << std::endl;
 
             throw rocsparse_status_internal_error;
