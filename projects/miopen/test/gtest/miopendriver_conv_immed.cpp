@@ -71,11 +71,25 @@ void RunMIOpenDriver(const std::vector<TestCase>& testCases)
     envs["MIOPEN_LOG_LEVEL"]           = "5";
     envs["MIOPEN_USER_DB_PATH"]        = test_dir_path;
 
+    // AI workspace warning
     testing::internal::CaptureStderr();
 
     RunMIOpenDriverTestCommand(testCases, envs);
 
     auto output = testing::internal::GetCapturedStderr();
+
+    EXPECT_THAT(output, Not(testing::HasSubstr("Warning [IsEnoughWorkspace]")));
+
+    miopen::fs::remove_all(test_dir_path);
+
+    // WTI workspace warning
+    envs["MIOPEN_SYSTEM_DB_PATH"] = test_dir_path;
+
+    testing::internal::CaptureStderr();
+
+    RunMIOpenDriverTestCommand(testCases, envs);
+
+    output = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(output, Not(testing::HasSubstr("Warning [IsEnoughWorkspace]")));
 
