@@ -35,14 +35,15 @@ struct ConverterLoader
     }
 };
 
-template <typename SrcDataType,
-          typename DstDataType,
+template <typename DstDataType,
           index_t UnaryOpSize,
           bool LoadTranspose = false,
           typename WarpTile,
           typename WarpWindow>
 CK_TILE_DEVICE void load_and_convert_tile(WarpTile& dst, const WarpWindow& src)
 {
+    using SrcDataType = typename WarpWindow::Base::DataType;
+
     if constexpr(is_packed_type_v<SrcDataType>)
     {
         static_assert(!LoadTranspose, "LoadTranspose not supported with pk_int4_t or pk_fp4_t");
