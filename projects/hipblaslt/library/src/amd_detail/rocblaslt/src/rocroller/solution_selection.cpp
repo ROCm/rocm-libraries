@@ -242,7 +242,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             size_t numTilesN = prob.n / wgt.n;
             size_t numTiles = numTilesM * numTilesN * prob.batch_count;
             auto isF6 = (kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6 || kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6);
-            if(numTiles < analytical_hardware.N_CU && !isF6)
+            if(numTiles < analaytical_hardware.N_CU && !isF6)
             {
                 params.back().streamK = true;
             }
