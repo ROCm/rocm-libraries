@@ -640,7 +640,7 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
 
     if(time_enabled)
     {
-            miopenEnableProfiling(GetHandle(), true);
+        miopenEnableProfiling(GetHandle(), true);
     }
 
     is_fwd = (inflags.GetValueInt("forw") == 0 || inflags.GetValueInt("forw") & 1);
