@@ -9,6 +9,8 @@ find_package(Threads REQUIRED)
 # TODO Do not enable HIP language globally, use HIP RTC instead. The library does not contain any
 # HIP code (or any other device code). It is required only for hipdnn_test_engine_plugin1.
 enable_language(HIP)
+# Verify that we're using AMD/ROCm HIP compiler.
+verifyamdrocmcompiler(${CMAKE_HIP_COMPILER} "HIP")
 
 if(HIP_DNN_SKIP_TESTS)
     message(STATUS "Skipping HIP-DNN Backend Unit tests")
