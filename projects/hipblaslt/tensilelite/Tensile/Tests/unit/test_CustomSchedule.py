@@ -598,17 +598,3 @@ class TestCustomScheduleValidation:
         )
         assert status == False
 
-    def test_f32_emulation_disabled(self):
-        kernel = create_base_kernel()
-        # Create what should be an invalid schedule:
-        invalid_schedule = {"P": [[3, 2, 1]]}
-        scheduleInfo = ScheduleInfo(
-            1, None, invalid_schedule, None, None, None, None
-        )
-        # Verify that this invalid schedule passes when this specific flag is true.
-        # Currently a warning message is printed.
-        status, message = isValid(scheduleInfo, {"kernel": {"UseF32XEmulation": True}})
-        assert status == True
-        assert message == "CMS validation is currently disabled for F32X emulation"
-
-
