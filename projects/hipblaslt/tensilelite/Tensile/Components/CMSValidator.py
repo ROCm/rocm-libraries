@@ -242,6 +242,7 @@ def verify_global_reads_not_too_early(scheduleInfo, context: dict, code_path: in
     constraints between LRA0 and GRB, or between LRB0 and GRA, because the LDS
     used for A and B are completely separate.
     """
+
     # Get the relative order of the relevant operations within a vmfma index.
     positions = {
         "SYNC": -1,
