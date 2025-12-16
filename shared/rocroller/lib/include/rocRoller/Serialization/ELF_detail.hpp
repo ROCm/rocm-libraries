@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,36 +24,23 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/AssemblyKernel.hpp>
+#pragma once
 
-#include <rocRoller/CodeGen/ArgumentLoader.hpp>
-
-#include <rocRoller/Serialization/AssemblyKernel.hpp>
-#include <rocRoller/Serialization/ELF.hpp>
-#include <rocRoller/Serialization/YAML.hpp>
+#include <amd_comgr/amd_comgr.h>
 
 namespace rocRoller
 {
-    std::string AssemblyKernel::amdgpu_metadata_yaml()
+    namespace Serialization
     {
-        AssemblyKernels tmp;
-        tmp.kernels = {*this};
+        namespace ELFDetail
+        {
+            /**
+             * Parses ELF as amd_comgr_metadata_node_t into a T.
+             */
+            template <typename T>
+            T fromELFData(amd_comgr_metadata_node_t metadata);
+        } // namespace ELFDetail
+    } // namespace Serialization
+} // namespace rocRoller
 
-        return Serialization::toYAML(tmp);
-    }
-
-    std::string AssemblyKernel::args_string()
-    {
-        return Serialization::toYAML(m_arguments);
-    }
-
-    AssemblyKernels AssemblyKernels::fromYAML(std::string const& str)
-    {
-        return Serialization::fromYAML<AssemblyKernels>(str);
-    }
-
-    AssemblyKernels AssemblyKernels::fromELF(std::string const& filename)
-    {
-        return Serialization::fromELFFile<AssemblyKernels>(filename);
-    }
-}
+#include <rocRoller/Serialization/ELF_impl.hpp>
