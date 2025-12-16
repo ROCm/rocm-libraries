@@ -173,12 +173,8 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         {
             using Selector = scan_by_key_config_selector<key_type, AccType>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            detail::gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+            const target current_target(stream);
 
-            const target current_target(target_arch, target_gpu);
             const auto   params = get_config<Selector>(Config{}, current_target);
 
             using wrapped_type     = ::rocprim::tuple<AccType, bool>;

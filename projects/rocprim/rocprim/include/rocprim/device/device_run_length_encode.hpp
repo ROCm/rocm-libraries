@@ -133,13 +133,7 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const auto params = get_config<Selector>(non_trivial_config{}, current_target);
 

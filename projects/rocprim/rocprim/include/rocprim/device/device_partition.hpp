@@ -164,12 +164,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                           bool>::type;
             using selector = partition_config_selector<SubAlgo, key_type, value_type, flag_type>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            detail::gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+            const target current_target(stream);
 
-            const target       current_target(target_arch, target_gpu);
             const auto         params           = get_config<selector>(Config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;

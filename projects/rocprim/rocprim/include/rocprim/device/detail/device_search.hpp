@@ -292,11 +292,7 @@ hipError_t search_impl(void*          temporary_storage,
 
     using selector = search_config_selector<input_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params           = get_config<selector>(Config{}, current_target);
     const unsigned int block_size       = params.kernel_config.block_size;

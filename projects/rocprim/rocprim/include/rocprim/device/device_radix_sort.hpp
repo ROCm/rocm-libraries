@@ -101,13 +101,7 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
 
     using Selector = radix_sort_onesweep_config_selector<key_type, value_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
@@ -223,13 +217,7 @@ hipError_t radix_sort_onesweep_iteration(
 
     using Selector = radix_sort_onesweep_config_selector<key_type, value_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
@@ -401,13 +389,7 @@ hipError_t radix_sort_onesweep_impl(
         {
             using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
 
-            target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const radix_sort_onesweep_config_params params
                 = get_config<Selector>(Config{}, current_target);

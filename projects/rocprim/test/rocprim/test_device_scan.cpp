@@ -310,13 +310,7 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
 
     hipStream_t stream = hipStreamDefault;
 
-    rocprim::detail::target_arch target_arch;
-    HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-
-    rocprim::detail::gpu target_gpu;
-    HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
-
-    const rocprim::detail::target current_target(target_arch, target_gpu);
+    const rocprim::detail::target current_target(stream);
 
     const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 
@@ -564,13 +558,7 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
 
     hipStream_t stream = hipStreamDefault;
 
-    rocprim::detail::target_arch target_arch;
-    HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-
-    rocprim::detail::gpu target_gpu;
-    HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
-
-    const rocprim::detail::target current_target(target_arch, target_gpu);
+    const rocprim::detail::target current_target(stream);
 
     const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 

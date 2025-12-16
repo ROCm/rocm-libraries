@@ -187,13 +187,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
     using find_first_of_kernels
         = find_first_of_impl_kernels<InputIterator1, InputIterator2, BinaryFunction>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 

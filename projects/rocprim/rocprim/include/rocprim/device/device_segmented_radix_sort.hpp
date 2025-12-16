@@ -156,13 +156,7 @@ inline hipError_t segmented_radix_sort_impl(
 
     using Selector = segmented_radix_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 

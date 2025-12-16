@@ -145,12 +145,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     using sample_type = typename std::iterator_traits<SampleIterator>::value_type;
     using selector    = histogram_config_selector<sample_type, Channels, ActiveChannels>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params               = get_config<selector>(Config{}, current_target);
     const unsigned int block_size           = params.histogram_config.block_size;
@@ -185,7 +180,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     }
 
     const bool use_shared_mem        = total_shared_bins <= shared_impl_max_bins;
-    const bool use_private_histogram = target_arch == target_arch::gfx942;
+    const bool use_private_histogram = current_target.i == target_arch::gfx942;
 
     Counter*      private_histograms         = nullptr;
     unsigned int* block_id_count             = nullptr;

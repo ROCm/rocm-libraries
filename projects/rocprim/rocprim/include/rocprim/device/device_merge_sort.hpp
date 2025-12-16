@@ -74,12 +74,7 @@ inline hipError_t merge_sort_block_merge_impl(
 
     using selector = merge_sort_block_merge_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params                   = get_config<selector>(Config{}, current_target);
     const unsigned int merge_oddeven_block_size = params.merge_oddeven_config.block_size;
@@ -380,12 +375,7 @@ inline hipError_t merge_sort_block_merge(
 
     using selector = merge_sort_block_merge_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params                     = get_config<selector>(Config{}, current_target);
     const unsigned int merge_mergepath_block_size = params.merge_mergepath_config.block_size;
@@ -472,12 +462,7 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
 
     using selector = merge_sort_block_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params    = get_config<selector>(Config{}, current_target);
     sort_items_per_block = params.kernel_config.block_size * params.kernel_config.items_per_thread;
@@ -777,12 +762,7 @@ inline hipError_t merge_sort_impl(
 
     unsigned int sort_items_per_block = 1; // We will get this later from the block_sort algorithm
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params = get_config<selector_bm>(block_merge_config{}, current_target);
     const bool         use_mergepath = size > params.merge_oddeven_config.size_limit;

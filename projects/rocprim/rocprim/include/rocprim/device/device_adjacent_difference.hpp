@@ -79,13 +79,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 
     using Selector = adjacent_difference_config_selector<InPlace, larger_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(detail::host_target_arch(stream, target_arch));
-
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 

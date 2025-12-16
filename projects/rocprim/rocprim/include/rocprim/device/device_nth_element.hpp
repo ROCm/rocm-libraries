@@ -69,11 +69,7 @@ hipError_t
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_atomic_block_id)
         {
-            target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const auto             params         = get_config<selector>(Config{}, current_target);
             constexpr unsigned int num_partitions = 3;
