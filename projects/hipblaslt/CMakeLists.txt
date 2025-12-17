@@ -128,7 +128,7 @@ if(HIPBLASLT_ENABLE_HOST)
 endif()
 
 if(HIPBLASLT_ENABLE_AMD_SMI)
-    find_package(amd_smi REQUIRED)
+    find_package(amd_smi REQUIRED CONFIG PATHS /opt/rocm/cmake/amd_smi/)
 else()
     find_package(amd_smi)
 endif()
