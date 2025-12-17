@@ -368,12 +368,6 @@ public:
 
         HIPDNN_CHECK_ERROR(validateSubtree());
 
-        for(const auto& tensor : outputTensors)
-        {
-            tensor->fill_from_context(graph_attributes);
-            HIPDNN_CHECK_ERROR(tensor->validate());
-        }
-
         return {ErrorCode::OK, ""};
     }
 
