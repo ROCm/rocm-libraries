@@ -2359,4 +2359,3 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
-    
