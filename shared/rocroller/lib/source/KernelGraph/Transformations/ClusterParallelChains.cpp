@@ -1169,6 +1169,11 @@ namespace rocRoller
         {
             auto rv = original;
 
+            auto theEdge = rv.control.findEdge(288, 31024);
+            AssertFatal(theEdge);
+            rv.control.deleteElement(*theEdge);
+            rv.control.chain<ControlGraph::Sequence>(30473, 31024);
+
             auto something = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
 
             for(auto chainSet : something)
