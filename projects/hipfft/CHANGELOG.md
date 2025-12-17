@@ -5,6 +5,9 @@ Documentation for hipFFT is available at
 
 ## hipFFT 1.0.22 (unreleased)
 
+### Added
+* Support for gfx1150 architecture.
+
 ### Resolved issues
 
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
