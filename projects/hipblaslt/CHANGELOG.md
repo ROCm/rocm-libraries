@@ -6,7 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 
-* Enumeration value update to the Sigmoid Activation Function feature.
+* Enumeration value update for the Sigmoid Activation Function feature.
 
 ## hipBLASLt 1.2.1 for ROCm 7.2.1
 
