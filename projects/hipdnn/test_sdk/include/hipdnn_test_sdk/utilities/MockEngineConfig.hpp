@@ -7,10 +7,10 @@
 
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineConfigWrapper.hpp>
 
-namespace hipdnn_plugin
+namespace hipdnn_test_sdk::utilities
 {
 
-class MockEngineConfig : public IEngineConfig
+class MockEngineConfig : public hipdnn_plugin::IEngineConfig
 {
 public:
     MOCK_METHOD(const hipdnn_sdk::data_objects::EngineConfig&,

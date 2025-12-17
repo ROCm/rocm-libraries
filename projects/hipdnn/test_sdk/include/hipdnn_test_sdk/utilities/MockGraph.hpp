@@ -7,10 +7,10 @@
 
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 
-namespace hipdnn_plugin
+namespace hipdnn_test_sdk::utilities
 {
 
-class MockGraph : public IGraph
+class MockGraph : public hipdnn_plugin::IGraph
 {
 public:
     MOCK_METHOD(const hipdnn_sdk::data_objects::Graph&, getGraph, (), (const, override));
@@ -24,13 +24,16 @@ public:
                 getNode,
                 (uint32_t index),
                 (const, override));
-    MOCK_METHOD(const INodeWrapper&, getNodeWrapper, (uint32_t index), (const, override));
+    MOCK_METHOD(const hipdnn_plugin::INodeWrapper&,
+                getNodeWrapper,
+                (uint32_t index),
+                (const, override));
     MOCK_METHOD(
         (const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&),
         getTensorMap,
         (),
         (const, override));
-    MOCK_METHOD(const std::vector<std::unique_ptr<INodeWrapper>>&,
+    MOCK_METHOD(const std::vector<std::unique_ptr<hipdnn_plugin::INodeWrapper>>&,
                 nodeWrappers,
                 (),
                 (const, override));

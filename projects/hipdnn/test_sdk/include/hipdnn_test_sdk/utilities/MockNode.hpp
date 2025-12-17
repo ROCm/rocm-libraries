@@ -7,10 +7,10 @@
 
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 
-namespace hipdnn_plugin
+namespace hipdnn_test_sdk::utilities
 {
 
-class MockNode : public INodeWrapper
+class MockNode : public hipdnn_plugin::INodeWrapper
 {
 public:
     MOCK_METHOD(bool, isValid, (), (const, override));
