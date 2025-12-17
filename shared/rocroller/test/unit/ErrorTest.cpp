@@ -284,8 +284,10 @@ namespace rocRollerTest
     }
     namespace
     {
-        [[noreturn]] void HelperThatThrows()
+        [[noreturn]] void HelperThatThrows(std::source_location loc
+                                           = std::source_location::current())
         {
+            (void)loc;
             Throw<rocRoller::FatalError>("Helper throw test");
         }
     }
@@ -302,8 +304,40 @@ namespace rocRollerTest
         catch(const FatalError& e)
         {
             std::string output = e.what();
-            EXPECT_NE(output.find("ErrorTest.cpp"), std::string::npos);
-            EXPECT_NE(output.find("Helper throw test"), std::string::npos);
+
+            EXPECT_NE(output.find("ErrorTest.cpp"), std::string::npos)
+                << "Expected file name in error output, but got:\n"
+                << output;
+
+            auto firstColon = output.find(':');
+            ASSERT_NE(firstColon, std::string::npos) << output;
+
+            auto secondColon = output.find(':', firstColon + 1);
+            ASSERT_NE(secondColon, std::string::npos) << output;
+
+            std::string lineStr = output.substr(firstColon + 1, secondColon - (firstColon + 1));
+            ASSERT_FALSE(lineStr.empty()) << output;
+
+            int line = 0;
+            try
+            {
+                line = std::stoi(lineStr);
+            }
+            catch(...)
+            {
+                FAIL() << "Failed to parse line number from error output. Got:\n" << output;
+            }
+
+            EXPECT_GT(line, 0) << "Expected positive line number, got " << line << " from:\n"
+                               << output;
+
+            EXPECT_NE(output.find("Helper throw test"), std::string::npos)
+                << "Expected user message in error output, but got:\n"
+                << output;
+        }
+        catch(...)
+        {
+            FAIL() << "Caught unexpected exception type, expected FatalError";
         }
     }
 }

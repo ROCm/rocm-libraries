@@ -37,12 +37,11 @@ namespace rocRoller
     {
     }
 
-    // Implementation for AssertError / AssertFatal / AssertRecoverable.
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void ThrowTagged(std::source_location location,
-                                  const char*          exceptionTag,
-                                  const char*          conditionText,
-                                  Ts const&... message)
+    [[noreturn]] void Throw(std::source_location location,
+                            const char*          exceptionTag,
+                            const char*          conditionText,
+                            Ts const&... message)
     {
         auto prefix = concatenate(GetBaseFileName(location.file_name()),
                                   ":",
@@ -65,14 +64,13 @@ namespace rocRoller
         throw T_Exception(fullMessage);
     }
 
-    // Implementation for direct Throw<FatalError>("msg") etc.
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void ThrowWithLocation(std::source_location location, Ts const&... message)
+    [[noreturn]] void Throw(MessageWithLocation leadingMessage, Ts const&... messageParts)
     {
-        auto prefix
-            = concatenate(GetBaseFileName(location.file_name()), ":", location.line(), ": ");
+        auto prefix = concatenate(
+            GetBaseFileName(leadingMessage.loc.file_name()), ":", leadingMessage.loc.line(), ": ");
 
-        auto fullMessage = concatenate(prefix, message...);
+        auto fullMessage = concatenate(prefix, leadingMessage.message, messageParts...);
 
         bool var = Error::BreakOnThrow();
         if(var)
@@ -82,11 +80,5 @@ namespace rocRoller
         }
 
         throw T_Exception(fullMessage);
-    }
-
-    template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(MessageWithLocation leadingMessage, Ts const&... messageParts)
-    {
-        ThrowWithLocation<T_Exception>(leadingMessage.loc, leadingMessage.message, messageParts...);
     }
 }

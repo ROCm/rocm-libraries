@@ -81,18 +81,14 @@ namespace rocRoller
         }
     };
 
-    // Used by AssertError / AssertFatal / AssertRecoverable:
+    // Overload for AssertError / AssertFatal / AssertRecoverable
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void ThrowTagged(std::source_location location,
-                                  const char*          exceptionTag,
-                                  const char*          conditionText,
-                                  Ts const&... message);
+    [[noreturn]] void Throw(std::source_location location,
+                            const char*          exceptionTag,
+                            const char*          conditionText,
+                            Ts const&... message);
 
-    // Used for plain Throw<FatalError>("msg", ...) calls:
-    template <typename T_Exception, typename... Ts>
-    [[noreturn]] void ThrowWithLocation(std::source_location location, Ts const&... message);
-
-    // Captures call–site location and forwards to ThrowWithLocation.
+    // Overload for direct Throw<>(...)
     template <typename T_Exception, typename... Ts>
     [[noreturn]] void Throw(MessageWithLocation leadingMessage, Ts const&... messageParts);
 
@@ -101,7 +97,6 @@ namespace rocRoller
 
     int* GetNullPointer();
 
-    // Get path, strips all "../" and "./"
     constexpr const char* GetBaseFileName(const char* file)
     {
         if(strnlen(file, 3) >= 3 && file[0] == '.' && file[1] == '.' && file[2] == '/')
@@ -123,7 +118,7 @@ namespace rocRoller
         bool condition_val = static_cast<bool>(condition);                             \
         if(!(condition_val))                                                           \
         {                                                                              \
-            ThrowTagged<T_Exception>(                                                  \
+            Throw<T_Exception>(                                                        \
                 std::source_location::current(), #T_Exception, #condition, ##message); \
         }                                                                              \
     } while(0)
