@@ -5,6 +5,7 @@
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "../lib_env_var.hpp"
+#include "../tensor_holder.hpp"
 #include "../workspace.hpp"
 
 #include <miopen/miopen.h>
