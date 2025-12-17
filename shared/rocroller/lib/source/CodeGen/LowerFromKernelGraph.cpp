@@ -669,8 +669,8 @@ namespace rocRoller
                         if(assign.regType == Register::Type::Accumulator
                            || assign.regType == Register::Type::Vector)
                         {
-                            auto const& typeInfo = DataTypeInfo::Get(varType);
-                            int physicalRegisterCount = valueCount * typeInfo.registerCount;
+                            auto const& typeInfo              = DataTypeInfo::Get(varType);
+                            int         physicalRegisterCount = valueCount * typeInfo.registerCount;
 
                             dest = m_context->registerTagManager()->getRegister(
                                 dimTag,
