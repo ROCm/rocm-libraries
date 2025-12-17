@@ -112,12 +112,9 @@ public:
         HIPDNN_CHECK_ERROR(
             validateTensorShapesMatch(x, dy, "Input tensor (x)", "Gradient input tensor (dy)"));
 
-        // dx not validated yet, check if dimensions set before validating
-        if(areTensorDimensionsSet(dx))
-        {
-            HIPDNN_CHECK_ERROR(validateTensorShapesMatch(
-                x, dx, "Input tensor (x)", "Gradient output tensor (dx)"));
-        }
+        // dx may not have dimensions set yet (will be inferred)
+        HIPDNN_CHECK_ERROR(validateTensorShapesMatchIfSet(
+            x, dx, "Input tensor (x)", "Gradient output tensor (dx)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: Parameter gradients (dscale, dbias) are accumulated per-channel over (N,H,W):
@@ -137,31 +134,16 @@ public:
         // Validate scale has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
-        // Validate dscale has correct channel-only shape (gradient output - if dimensions set)
-        if(areTensorDimensionsSet(dscale))
-        {
-            HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(dscale, channels, "Scale gradient tensor (dscale)"));
-        }
+        // Validate gradient outputs (only if dimensions set, will be inferred otherwise)
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyShapeIfSet(dscale, channels, "Scale gradient tensor (dscale)"));
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyShapeIfSet(dbias, channels, "Bias gradient tensor (dbias)"));
 
-        // Validate dbias has correct channel-only shape (gradient output - if dimensions set)
-        if(areTensorDimensionsSet(dbias))
-        {
-            HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(dbias, channels, "Bias gradient tensor (dbias)"));
-        }
-
-        // Validate optional tensor shapes (if ready)
-        if(areTensorDimensionsSet(mean))
-        {
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
-        }
-
-        if(areTensorDimensionsSet(invVar))
-        {
-            HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
-        }
+        // Validate optional saved statistics from forward pass (only if dimensions set)
+        HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(mean, channels, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyShapeIfSet(invVar, channels, "Inverse variance tensor"));
 
         // SECTION 5: Validate Mean and Inverse Variance Consistency
         // Why: Backward computation uses saved statistics (mean_c, invStd_c) from forward pass.

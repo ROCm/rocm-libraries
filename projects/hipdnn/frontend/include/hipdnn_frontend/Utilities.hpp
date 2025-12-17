@@ -213,7 +213,7 @@ inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttribu
 }
 
 // Validates two tensors have matching shapes
-// NOTE: This function expects both tensors to have dimensions set (use areTensorDimensionsSet() before calling)
+// NOTE: This function expects both tensors to have dimensions set - it will fail if not set
 inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& tensor1,
                                        const std::shared_ptr<TensorAttributes>& tensor2,
                                        const std::string& tensor1Name,
@@ -254,8 +254,24 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
     return {ErrorCode::OK, ""};
 }
 
+// Validates two tensors have matching shapes (only validates if second tensor has dimensions set)
+// Returns OK if tensor2 dimensions not yet set (will be inferred in infer_properties_node)
+// Use this for validating input vs output tensor consistency when output may not be set yet
+inline Error validateTensorShapesMatchIfSet(const std::shared_ptr<TensorAttributes>& tensor1,
+                                            const std::shared_ptr<TensorAttributes>& tensor2,
+                                            const std::string& tensor1Name,
+                                            const std::string& tensor2Name)
+{
+    if(!areTensorDimensionsSet(tensor2))
+    {
+        return {ErrorCode::OK, ""}; // tensor2 dimensions not set yet, will be inferred
+    }
+
+    return validateTensorShapesMatch(tensor1, tensor2, tensor1Name, tensor2Name);
+}
+
 // Validates tensor has channel-only shape [1, C, 1, 1, ...] for batch normalization parameters
-// NOTE: This function expects tensor to be ready (use isTensorReadyForValidation() before calling)
+// NOTE: This function expects tensor dimensions to be set - it will fail if not set
 inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttributes>& tensor,
                                             int64_t expectedChannels,
                                             const std::string& tensorName)
@@ -299,6 +315,22 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
     }
 
     return {ErrorCode::OK, ""};
+}
+
+// Validates channel-only shape for optional tensors (only validates if dimensions are set)
+// Returns OK if tensor dimensions not yet set (will be inferred in infer_properties_node)
+// Use this for optional output tensors that may not have dimensions set during pre_validate_node
+inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<TensorAttributes>& tensor,
+                                           int64_t expectedChannels,
+                                           const std::string& tensorName)
+{
+    if(!areTensorDimensionsSet(tensor))
+    {
+        return {ErrorCode::OK, ""}; // Dimensions not set yet, will be inferred
+    }
+
+    // Dimensions are set, validate strictly
+    return validateChannelOnlyTensorShape(tensor, expectedChannels, tensorName);
 }
 
 // Validates scalar parameter tensor is properly configured

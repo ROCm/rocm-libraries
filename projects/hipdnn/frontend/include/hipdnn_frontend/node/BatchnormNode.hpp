@@ -91,13 +91,8 @@ public:
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape - it only transforms values, not dimensions.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
-
-        // x validated in SECTION 2, only check if y dimensions are set
-        if(areTensorDimensionsSet(y))
-        {
-            HIPDNN_CHECK_ERROR(
-                validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
-        }
+        HIPDNN_CHECK_ERROR(
+            validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: All BN parameters (scale, bias, mean, variance) are per-channel with
@@ -117,20 +112,11 @@ public:
         // Validate bias has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
 
-        // Validate optional mean tensor (if ready)
-        if(areTensorDimensionsSet(attributes.get_mean()))
-        {
-            auto mean = attributes.get_mean();
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
-        }
-
-        // Validate optional inv_variance tensor (if ready)
-        if(areTensorDimensionsSet(attributes.get_inv_variance()))
-        {
-            auto invVar = attributes.get_inv_variance();
-            HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
-        }
+        // Validate optional mean and inv_variance tensors (only if dimensions set)
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+            attributes.get_inv_variance(), channels, "Inverse variance tensor"));
 
         // SECTION 5: Validate Running Stats Consistency
         // Why: Running statistics are updated together during training:
@@ -159,30 +145,15 @@ public:
                 "(prev_running_mean, prev_running_variance, next_running_mean, "
                 "next_running_variance) must be provided");
 
-            // Validate running stats have correct shapes (if ready)
-            if(areTensorDimensionsSet(prevRunningMean))
-            {
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    prevRunningMean, channels, "Previous running mean tensor"));
-            }
-
-            if(areTensorDimensionsSet(prevRunningVar))
-            {
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    prevRunningVar, channels, "Previous running variance tensor"));
-            }
-
-            if(areTensorDimensionsSet(nextRunningMean))
-            {
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    nextRunningMean, channels, "Next running mean tensor"));
-            }
-
-            if(areTensorDimensionsSet(nextRunningVar))
-            {
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    nextRunningVar, channels, "Next running variance tensor"));
-            }
+            // Validate running stats have correct shapes (only if dimensions set)
+            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+                prevRunningMean, channels, "Previous running mean tensor"));
+            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+                prevRunningVar, channels, "Previous running variance tensor"));
+            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+                nextRunningMean, channels, "Next running mean tensor"));
+            HIPDNN_CHECK_ERROR(validateChannelOnlyShapeIfSet(
+                nextRunningVar, channels, "Next running variance tensor"));
         }
 
         // SECTION 6: Validate Spatial Mode Constraints

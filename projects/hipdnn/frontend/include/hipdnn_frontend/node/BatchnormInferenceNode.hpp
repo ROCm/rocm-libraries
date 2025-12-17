@@ -93,13 +93,8 @@ public:
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape during inference just as in training.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
-
-        // x validated in SECTION 2, only check if y dimensions are set
-        if(areTensorDimensionsSet(y))
-        {
-            HIPDNN_CHECK_ERROR(
-                validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
-        }
+        HIPDNN_CHECK_ERROR(
+            validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: All parameters are per-channel with shape [1, C, 1, 1]:
