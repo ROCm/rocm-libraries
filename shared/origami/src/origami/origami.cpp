@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <execution>
 #include <iomanip>
 #include <iostream>
 
@@ -244,8 +243,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
   std::vector<prediction_result_t> results(configs.size());
 
-  std::transform(std::execution::seq,
-                 configs.begin(),
+  std::transform(configs.begin(),
                  configs.end(),
                  results.begin(),
                  [&](const config_t& config) -> prediction_result_t {
