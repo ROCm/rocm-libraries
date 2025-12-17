@@ -225,6 +225,7 @@ class StateValues:
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
   startVgprCvt: int                      = -1
+  startVgprIdentityMatrix: int           = -1 
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -2866,6 +2867,48 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return module
 
   ##############################################################################
+  # Creates a negative identity matrix for 4x4x4_16b MFMA
+  # Each 4x4 block is set to this:
+  # -1  0  0
+  #  0 -1  0 
+  #  0  0 -1
+  ##############################################################################
+  def createNegIdentityMatrix(self, kernel):
+    module = Module("NegIdentityMatrix")
+    tmp = self.vgprPool.checkOut(1)
+    lane4 = self.vgprPool.checkOut(1)
+    mfmaHigh = vgpr(self.states.startVgprIdentityMatrix)
+    mfmaLow = vgpr(self.states.startVgprIdentityMatrix+1)
+
+    module.addComment0("Create a negative identity matrix used by TF32 MFMA emulation.")
+    module.add(VAndB32(dst=vgpr(lane4),src0=3, src1=vgpr("Serial"), comment="lane % 4"))
+    module.add(VMovB32(dst=mfmaHigh,src=0))
+    module.add(VMovB32(dst=mfmaLow,src=0))
+    module.add(VMovB32(dst=vgpr(tmp), src="0xbf80", comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=0, src1=vgpr(lane4), comment="Lane %4 == 0 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaHigh, src0=mfmaHigh, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=2, src1=vgpr(lane4), comment="Lane %4 == 2 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaLow, src0=mfmaLow, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    module.add(VMovB32(dst=vgpr(tmp), src="0xbf800000", comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=1, src1=vgpr(lane4), comment="Lane %4 == 1 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaHigh, src0=mfmaHigh, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=3, src1=vgpr(lane4), comment="Lane %4 == 3 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaLow, src0=mfmaLow, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    self.vgprPool.checkIn(tmp)
+    self.vgprPool.checkIn(lane4)
+    return module
+
+  ##############################################################################
   # Kernel Body
   ##############################################################################
   def kernelBody( self, kernel, tensorParametersA, tensorParametersB ):
@@ -3028,6 +3071,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if kernel["UsePLRPack"] and self.states.numItersPLR:
                 module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete"))
                 module.add(pack[plrIdx])
+              if kernel["UseMFMAF32XEmulation"]:
+                module.add(self.createNegIdentityMatrix(kernel))
+                
         self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       elif self.states.numItersPLR == 0 and kernel["UseCustomMainLoopSchedule"]:
         # For numItersPLR=0 and CMS we prefetch only half the local reads
@@ -4739,6 +4785,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx = ((vgprIdx+1)//2)*2
         self.states.startVgprCvt = vgprIdx
         vgprIdx += numVgprsEmu # for vgpr 32XEmulation
+
+    if kernel["UseMFMAF32XEmulation"]:
+      self.states.startVgprIdentityMatrix = vgprIdx
+      vgprIdx+=2
 
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
