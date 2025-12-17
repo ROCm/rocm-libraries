@@ -3,7 +3,16 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## rocFFT 1.0.36 (unreleased)
+## (Unreleased) rocFFT 1.0.37
+
+* Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
+* Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
+* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
+* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides with small lengths on the two fastest dimensions.
+* Fixed potential launch failure of data generation kernels in test and benchmark programs.
+* Fixed incorrect results on some strided real-complex FFTs on gfx90a.
+
+## rocFFT 1.0.36 for ROCm 7.2.0
 
 ### Added
 
@@ -19,12 +28,6 @@ Documentation for rocFFT is available at
 * Fixed potential division by zero when constructing plans using dimensions of length 1.
 * Fixed result scaling on multi-device transforms.
 * Fixed callbacks on multi-device transforms.
-* Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
-* Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
-* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
-* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides with small lengths on the two fastest dimensions.
-* Fixed potential launch failure of data generation kernels in test and benchmark programs.
-* Fixed incorrect results on some strided real-complex FFTs on gfx90a.
 
 ## rocFFT 1.0.35 for ROCM 7.1.0
 

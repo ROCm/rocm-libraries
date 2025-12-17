@@ -28,7 +28,7 @@
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/Tensile.hpp>
-#include <origami/hardware.hpp>
+#include <origami/utils.hpp>
 
 #include <hip/hip_runtime.h>
 
