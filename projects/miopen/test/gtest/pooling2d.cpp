@@ -168,26 +168,12 @@ void RunPooling2dTest(const Pooling2dTestCase& test_case)
 
 class GPU_Pooling2d_FP32 : public testing::TestWithParam<Pooling2dTestCase>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
-        {
-            GTEST_SKIP();
-        }
-    }
+    void SetUp() override { prng::reset_seed(); }
 };
 
 class GPU_Pooling2d_FP16 : public testing::TestWithParam<Pooling2dTestCase>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
-        {
-            GTEST_SKIP();
-        }
-    }
+    void SetUp() override { prng::reset_seed(); }
 };
 
 TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { RunPooling2dTest<float>(GetParam()); }
