@@ -225,23 +225,23 @@ By default, most projects are excluded from pre-commit checks in [`.pre-commit-c
 
 2.  **Finalize Opt-in**:
     Once all issues in the project are resolved:
-    *   Permanently remove the project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml).
-    *   Run a final check to ensure everything is clean:
+    1.  Permanently remove the project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml).
+    2.  Run a final check to ensure everything is clean:
         ```bash
         pre-commit run --files $(git ls-files projects/<your-project>)
         ```
-    *   Submit a PR with the config change and any remaining fixes.
+    3.  Submit a PR with the config change and any remaining fixes.
 
 3.  **(Optional) Install Dependencies in CI**:
     Only applicable if you're adding custom pre-commit hooks whose dependencies aren't self-contained in the hook:
-    *   Edit [`.github/workflows/pre-commit.yml`](.github/workflows/pre-commit.yml).
-    *   Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Detect project changes" step (add it on a new line):
+    1.  Edit [`.github/workflows/pre-commit.yml`](.github/workflows/pre-commit.yml).
+    2.  Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Detect project changes" step (add it on a new line):
         ```yaml
         PROJECTS_WITH_OPTIONAL_DEPS: >-
           hipdnn
           your-project
         ```
-    *   Add a new step to install dependencies, conditional on your project changing:
+    3.  Add a new step to install dependencies, conditional on your project changing:
         ```yaml
         - name: Install <your-project> dependencies
           if: steps.changes.outputs.<your-project>_changed == 'true'
