@@ -36,6 +36,7 @@ supported_distro( )
   esac
 }
 
+
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
 check_exit_code( )
 {
@@ -69,6 +70,21 @@ elevate_if_not_root( )
   fi
 }
 
+# Variant that captures exit code without exiting - useful for special error handling
+elevate_if_not_root_capture_exit( )
+{
+  local uid=$(id -u)
+  local exit_code=0
+
+  if (( ${uid} )); then
+    sudo $@ || exit_code=$?
+  else
+    $@ || exit_code=$?
+  fi
+
+  return ${exit_code}
+}
+
 # Take an array of packages as input, and install those packages with 'apt' if they are not already installed
 install_apt_packages( )
 {
@@ -97,13 +113,10 @@ install_zypper_packages( )
 {
     package_dependencies="$@"
     printf "\033[32mInstalling following packages from distro package manager: \033[33m${package_dependencies}\033[32m \033[0m\n"
-    local uid=$(id -u)
+
     local exit_code=0
-    if (( ${uid} )); then
-        sudo zypper -n install -y ${package_dependencies} || exit_code=$?
-    else
-        zypper -n install -y ${package_dependencies} || exit_code=$?
-    fi
+    elevate_if_not_root_capture_exit zypper -n install -y ${package_dependencies} || exit_code=$?
+
     # Exit code 106 means some repos failed to refresh, but packages may still be available
     # Only fail if it's a different error
     if (( ${exit_code} != 0 && ${exit_code} != 106 )); then
@@ -185,7 +198,7 @@ install_packages( )
                                       "python3" "python3-yaml" "python3-venv" "python3*-pip" )
   local library_dependencies_centos_rhel=( "epel-release"
                                       "make" "rpm-build"
-                                      "python34" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
   local library_dependencies_centos_8=( "epel-release"
                                       "make" "rpm-build"
@@ -193,21 +206,21 @@ install_packages( )
                                       "gcc-c++" )
   local library_dependencies_rhel_8=( "epel-release"
                                       "make" "rpm-build"
-                                      "python36" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
   local library_dependencies_rhel_9=( "epel-release" "openssl-devel"
                                       "make" "rpm-build"
-                                      "python39" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
   local library_dependencies_rhel_10=( "epel-release" "openssl-devel"
                                       "make" "rpm-build"
                                       "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
   local library_dependencies_fedora=( "make" "rpm-build"
-                                      "python34" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" "libcxx-devel" )
-  local library_dependencies_sles=(   "make" "python311" "python311-PyYAML" "python311-pip"
-                                      "gcc-c++" "rpm-build" )
+  local library_dependencies_sles=(   "make" "gcc-c++" "rpm-build"
+                                      "python3" "python3-PyYAML" "python3-virtualenv" "python3-pip" )
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
     library_dependencies_ubuntu+=("libmsgpack-dev")
@@ -221,17 +234,17 @@ install_packages( )
     fi
   fi
 
-  # wget is needed for cmake pre-built binary download
+  # wget and openssl are needed for cmake
   if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
     if $update_cmake == true; then
-      library_dependencies_ubuntu+=("wget")
-      library_dependencies_centos_rhel+=("wget")
-      library_dependencies_centos_8+=("wget")
-      library_dependencies_rhel_8+=("wget")
-      library_dependencies_rhel_9+=("wget")
-      library_dependencies_rhel_10+=("wget")
+      library_dependencies_ubuntu+=("wget" "libssl-dev")
+      library_dependencies_centos_rhel+=("wget" "openssl-devel")
+      library_dependencies_centos_8+=("wget" "openssl-devel")
+      library_dependencies_rhel_8+=("wget" "openssl-devel")
+      library_dependencies_rhel_9+=("wget" "openssl-devel")
+      library_dependencies_rhel_10+=("wget" "openssl-devel")
       library_dependencies_fedora+=("wget")
-      library_dependencies_sles+=("wget")
+      library_dependencies_sles+=("wget" "libopenssl-devel")
     fi
   fi
 
@@ -448,7 +461,7 @@ while true; do
   case "${1}" in
     -h|--help)
         display_help
-        ${python_executable} ./rmake.py --help
+        python3 ./rmake.py --help
         exit 0
         ;;
     -i|--install)
@@ -524,7 +537,7 @@ install_blis()
     else
         printf "\033[33mNo existing AOCL installation found in /opt or /usr/local\033[0m\n"
     fi
-    
+
     if [[ ! -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a"  ]] &&
@@ -570,13 +583,6 @@ cmake_executable=cmake
 cxx="g++"
 cc="gcc"
 fc="gfortran"
-
-# Set Python executable based on distro
-if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
-  python_executable=python3.11
-else
-  python_executable=python3
-fi
 
 # #################################################
 # dependencies
@@ -680,12 +686,8 @@ if [[ "${rmake_invoked}" == false ]]; then
   # Filter out install.sh-only flags from args passed to rmake.py
   filtered_args=$(filter_rmake_args "${input_args}")
 
-  # On SLES, explicitly set Python3_EXECUTABLE to use python3.11
-  if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
-    ${python_executable} ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH} --cmake-darg Python3_EXECUTABLE=/usr/bin/python3.11
-  else
-    ${python_executable} ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
-  fi
+
+  python3 ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
   check_exit_code "$?"
 
   popd
