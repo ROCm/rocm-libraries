@@ -794,7 +794,7 @@ TEST(TestBatchnormNode, PreValidateRejectsEpsilonWithNoDimensions)
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(error.get_message().find("Epsilon") != std::string::npos);
-    EXPECT_TRUE(error.get_message().find("must have at least 1 dimension") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("dimensions are not set") != std::string::npos);
 }

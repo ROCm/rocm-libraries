@@ -565,7 +565,8 @@ TEST(TestUtilities, ValidateScalarParameterEmptyDims)
 {
     auto param = std::make_shared<TensorAttributes>();
     auto error = validateScalarParameter(param, "TestParameter");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Dimensions will be inferred, skip for now
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("dimensions are not set") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateScalarParameterValidSingleElement1D)

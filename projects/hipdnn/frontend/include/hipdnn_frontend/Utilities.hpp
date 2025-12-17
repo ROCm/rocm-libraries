@@ -346,7 +346,7 @@ inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& pa
     const auto& dims = param->get_dim();
     if(dims.empty())
     {
-        return {ErrorCode::INVALID_VALUE, paramName + " must have at least 1 dimension"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET, paramName + " dimensions are not set"};
     }
 
     // Scalar parameters should be single-element tensors
