@@ -1,6 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+cmake_minimum_required(VERSION 3.16)
+
 project(stinkytofu)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,7 +10,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_compile_options(-fno-rtti -fno-exceptions)
 
-set(STINKYTOFU_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include" PARENT_SCOPE)
+# Only set PARENT_SCOPE variables if we have a parent scope
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(STINKYTOFU_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include" PARENT_SCOPE)
+endif()
 
 # Note: Stinkytofu library should be built with:
 # (1) No RTTI
@@ -18,13 +23,15 @@ set(STINKYTOFU_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include" PARENT_SCOPE)
 # => MSVC: /GR- /EHs-c-
 set(STINKYTOFU_SOURCE_FILES
     stinkytofu.cpp
-    ir/asm/StinkyClusterDSReadPass.cpp
+    ir/asm/CFGBuilderPass.cpp
     ir/asm/ScheduleLastLRsPass.cpp
     ir/asm/StinkyDAGSchedulerPass.cpp
-    ir/asm/StinkyUnrollInsertWaitCntPass.cpp
+    ir/asm/StinkyConfigurableWaitCntPass.cpp
     ir/asm/ScheduleFirstLRsPass.cpp
     ir/asm/StinkyAsmIR.cpp
     ir/asm/StinkyAsmPrinter.cpp
+    ir/asm/StinkyAsmEmitter.cpp
+    ir/asm/StinkySignature.cpp
     ir/asm/IRLexer.cpp
     ir/asm/IRParser.cpp
 )
@@ -43,14 +50,28 @@ set(ROCISA_TO_STINKYTOFU_SOURCE_FILES
     ir/rocisa/AllHwMappings.cpp
 )
 list(TRANSFORM ROCISA_TO_STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/")
-set(ROCISA_TO_STINKYTOFU_SOURCES ${ROCISA_TO_STINKYTOFU_SOURCE_FILES} PARENT_SCOPE)
+
+# Only set PARENT_SCOPE variables if we have a parent scope
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(ROCISA_TO_STINKYTOFU_SOURCES ${ROCISA_TO_STINKYTOFU_SOURCE_FILES} PARENT_SCOPE)
+endif()
 
 # Add subdirectories first to define gfxisa, tablegen, and tablegen_generated targets
 add_subdirectory(hardware)
 add_subdirectory(tools/tablegen)
 add_subdirectory(tools/stinkytofu-opt)
-if(NOT CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-    add_subdirectory(unittests)
+
+# Option to build unit tests
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ON)
+if(STINKYTOFU_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# Option to build Python bindings
+option(STINKYTOFU_BUILD_PYTHON "Build StinkyTofu Python bindings" ON)
+if(STINKYTOFU_BUILD_PYTHON)
+    add_subdirectory(python_module)
 endif()
 
 # Now create stinkytofu library which depends on tablegen_generated

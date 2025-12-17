@@ -75,7 +75,7 @@ namespace stinkytofu
             return module;
         }
 
-        void run(IRList& irlist, PassContext& passCtx) override;
+        void run(Function& func, PassContext& passCtx) override;
     };
 
     //
@@ -97,7 +97,7 @@ namespace stinkytofu
             return &RocisaStinkyMapping::ID;
         }
 
-        void run(IRList& insts, PassContext& passCtx) override
+        void run(Function& func, PassContext& passCtx) override
         {
             // Do nothing. The map is populated by RocisaToStinkyAsmPass.
             assert(stinkyToRocisaMap.empty()

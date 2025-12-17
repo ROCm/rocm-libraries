@@ -330,6 +330,21 @@ namespace stinkytofu
         return *cast<StinkyInstruction>(it.getNodePtr());
     }
 
+    // Helper function to get the IR list from a Function's entry BasicBlock.
+    // This is useful for passes that work on flat IR lists.
+    // Note: Assumes the Function has at least one BasicBlock.
+    inline IRList& getEntryIR(Function& func)
+    {
+        assert(func.getEntryBlock() && "Function must have an entry BasicBlock");
+        return func.getEntryBlock()->getIR();
+    }
+
+    inline const IRList& getEntryIR(const Function& func)
+    {
+        assert(func.getEntryBlock() && "Function must have an entry BasicBlock");
+        return func.getEntryBlock()->getIR();
+    }
+
     //----------------------------------------------------------------------
     // StinkyInstruction utilities
     //----------------------------------------------------------------------
@@ -414,6 +429,31 @@ namespace stinkytofu
     inline bool isBranch(const StinkyInstruction& inst)
     {
         return inst.is(InstFlag::IF_Branch);
+    }
+
+    inline bool isConditionalBranch(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_ConditionalBranch);
+    }
+
+    inline bool isUnconditionalBranch(const StinkyInstruction& inst)
+    {
+        return isBranch(inst) && !isConditionalBranch(inst);
+    }
+
+    // Get the branch target label name from a branch instruction.
+    // Branch instructions store their target as the first source register (LiteralString type).
+    inline std::string getBranchTarget(const StinkyInstruction& inst)
+    {
+        assert(isBranch(inst) && "Instruction must be a branch");
+        assert(!inst.srcRegs.empty()
+               && "Branch instruction must have at least one source register");
+
+        const StinkyRegister& targetReg = inst.srcRegs[0];
+        assert(targetReg.dataType == StinkyRegister::Type::LiteralString
+               && "Branch target must be a LiteralString");
+
+        return targetReg.regType;
     }
 
     inline bool isWaitCnt(const StinkyInstruction& inst)

@@ -5166,13 +5166,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         * kernel["NumLoadsPerpendicularB"] * kernel["GlobalReadVectorWidthB"] \
         * kernel["GlobalReadVectorWidthB"] * tensorParametersB["bpeGR"]) \
         // (tensorParametersB["globalReadInstruction"].blockWidth * bytesPerVGPR))
-    if kernel["ProblemType"]["Sparse"]:
-      ripo.nGRM = (kernel["NumLoadsCoalescedMetadata"] \
-          * kernel["NumLoadsPerpendicularMetadata"] * kernel["GlobalReadVectorWidthMetadata"] \
-          * kernel["GlobalReadVectorWidthMetadata"] * tensorParametersM["bpeGR"]) \
-          // (tensorParametersM["globalReadInstruction"].blockWidth * bytesPerVGPR)
-    else:
-      ripo.nGRM = 0
+
+    # TODO: handle sparse case
+    ripo.nGRM = 0
 
     if kernel["ProblemType"]["ActivationType"] == "all":
       ripo.removeDupAssign = False

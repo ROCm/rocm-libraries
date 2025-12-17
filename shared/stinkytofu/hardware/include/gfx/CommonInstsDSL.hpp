@@ -166,6 +166,15 @@ namespace stinkytofu
         }
     };
 
+    struct ConditionalBranchInst : GfxInstDef
+    {
+        ConditionalBranchInst()
+        {
+            hwInstDesc.flags.set(IF_Branch);
+            hwInstDesc.flags.set(IF_ConditionalBranch);
+        }
+    };
+
     struct WaitCntInst : GfxInstDef
     {
         WaitCntInst()

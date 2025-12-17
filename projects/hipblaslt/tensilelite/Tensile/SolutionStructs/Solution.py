@@ -3778,9 +3778,6 @@ class Solution(collections.abc.Mapping):
       else:
         state["1LDSBuffer"] = 1
 
-    if state["ScheduleIterAlg"] == 1:
-      state["ScheduleLocalWrite"] = 0
-
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:
         reject(state, printRejectionReason, "PGR=0 already use 1 LDS buffer only")

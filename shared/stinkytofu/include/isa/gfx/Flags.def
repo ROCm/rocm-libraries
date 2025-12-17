@@ -38,6 +38,7 @@ MACRO(IF_DSStore)
 MACRO(IF_DSAtomic)
 MACRO(IF_Barrier)
 MACRO(IF_Branch)
+MACRO(IF_ConditionalBranch)
 MACRO(IF_WaitCnt)
 MACRO(IF_WaitTensorCnt)
 

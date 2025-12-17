@@ -42,6 +42,27 @@ namespace stinkytofu
         return static_cast<GfxArchID>(arch);
     }
 
+    inline uint32_t getWaveFrontSize(GfxArchID archID)
+    {
+        switch(archID)
+        {
+        case GfxArchID::gfx942:
+            return 64;
+        case GfxArchID::gfx950:
+            return 64;
+        case GfxArchID::gfx1250:
+            return 32;
+        default:
+            assert(false && "Unsupported GfxArchID");
+            return 64; // Default fallback
+        }
+    }
+
+    inline uint32_t getWaveFrontSize(uint32_t major, uint32_t minor, uint32_t stepping)
+    {
+        return getWaveFrontSize(getGfxArchID(major, minor, stepping));
+    }
+
     enum InstFlag : uint8_t
     {
 #define MACRO(flag) flag,

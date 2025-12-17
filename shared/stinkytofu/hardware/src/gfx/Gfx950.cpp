@@ -44,6 +44,9 @@ namespace stinkytofu
     {
         defineGfx942Insts(registry);
 
+        // Set wavefront size for gfx950
+        registry.setWaveFrontSize(64);
+
         // gfx950 removes xf32 variants of v_mfma.
         for(auto removed : {"v_mfma_f32_16x16x8_xf32", "v_mfma_f32_32x32x4_xf32"})
             registry.erase(removed);

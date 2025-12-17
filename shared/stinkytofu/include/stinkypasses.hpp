@@ -31,15 +31,23 @@ namespace stinkytofu
 {
     struct WaitCntConfig;
 
-    std::unique_ptr<Pass> createStinkyClusterDSReadPass();
     std::unique_ptr<Pass> createStinkyDAGSchedulerPass();
-    std::unique_ptr<Pass> createStinkyUnrollInsertWaitCntPass();
     std::unique_ptr<Pass> createStinkyConservativeWaitCntPass();
     std::unique_ptr<Pass> createStinkyMinimalWaitCntPass();
     std::unique_ptr<Pass> createStinkyUnrollWaitCntPass();
     std::unique_ptr<Pass> createStinkyCustomWaitCntPass(const WaitCntConfig& config);
     std::unique_ptr<Pass> createScheduleLastLRsPass();
     std::unique_ptr<Pass> createScheduleFirstLRsPass();
+
+    // CFGBuilderPass splits a single flat BasicBlock into multiple BasicBlocks
+    // based on label boundaries and builds CFG edges between them.
+    //
+    // This pass is optional and only needed when the input IR contains
+    // multiple labels and branches (rare case for tensilelite).
+    //
+    // Input:  Function with one BasicBlock containing labels and branches
+    // Output: Function with multiple BasicBlocks connected via CFG edges
+    std::unique_ptr<Pass> createCFGBuilderPass();
 
     // The following passes are used for translation between rocisa and
     // stinkytofu. They are specific to tensilelite rocisa and are therefore not

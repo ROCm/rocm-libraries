@@ -41,21 +41,31 @@ namespace rocisa
         const char* stinkytofuDumpEnv = std::getenv("STINKYTOFU_DUMP");
         bool        stinkytofuDump    = stinkytofuDumpEnv ? true : false;
 
+        bool stinkytofuEnable = true;
+        // TODO: Remove this to enable after everything is stable
+        if(std::getenv("STINKYTOFU_ENABLE") == nullptr)
+        {
+            stinkytofuEnable = false; // Disable for now
+        }
+
         compositeToInstruction(kernel->body);
         // Convert text variables to registers
         convertTextVariablesToRegisters(kernel->body);
 
         auto kernelInfo = rocIsa::getInstance().getKernel();
-        if(option.stinkyOpt)
+        if(stinkytofuEnable && option.stinkyOpt)
         {
             for(auto& item : kernel->body->items())
             {
                 if(auto module = std::dynamic_pointer_cast<Module>(item))
                 {
-                    auto stinkySchedule = [&kernelInfo, &option](std::shared_ptr<Module> module,
-                                                                 const std::string&      pathPrefix,
-                                                                 bool withPGR        = false,
-                                                                 bool stinkytofuDump = false) {
+                    auto stinkySchedule = [&kernelInfo,
+                                           &option](std::shared_ptr<Module> module,
+                                                    const std::string&      pathPrefix,
+                                                    bool                    withPGR        = false,
+                                                    bool                    stinkytofuDump = false,
+                                                    stinkytofu::BasicBlockFilter bbFilter
+                                                    = stinkytofu::BasicBlockFilterBuilder::all()) {
                         std::unique_ptr<stinkytofu::PassManagerDebugConfig> debugConfig;
 
                         if(stinkytofuDump)
@@ -77,6 +87,7 @@ namespace rocisa
                         optInfo.distributeGlobalRead     = true;
 
                         stinkytofu::PassManager passManager;
+                        passManager.setBasicBlockFilter(bbFilter);
                         passManager.setKernelConfig(kernelInfo.isaVersion,
                                                     option.TileA0,
                                                     option.TileB0,
@@ -84,7 +95,6 @@ namespace rocisa
                                                     option.NumGRA,
                                                     option.NumGRB,
                                                     option.NumGRM,
-                                                    option.WavefrontSize,
                                                     option.numWaves);
 
                         if(debugConfig)
@@ -100,16 +110,20 @@ namespace rocisa
 
                         passManager.addPass(
                             stinkytofu::createRocisaToStinkyAsmPass(true /*ignore waitCnt*/));
+
+                        passManager.addPass(stinkytofu::createCFGBuilderPass());
                         passManager.addPass(stinkytofu::createStinkyDAGSchedulerPass());
                         passManager.addPass(stinkytofu::createScheduleLastLRsPass());
-                        passManager.addPass(stinkytofu::createStinkyUnrollInsertWaitCntPass());
+                        passManager.addPass(stinkytofu::createStinkyUnrollWaitCntPass());
                         passManager.addPass(stinkytofu::createStinkyAsmToRocisaPass());
                         passManager.run();
                     };
                     // Convert the module to stinkytofu instructions
                     if(module->name == "loopWithPrefetch")
                     {
-                        stinkySchedule(module, "loopBody-", true, stinkytofuDump);
+                        stinkytofu::BasicBlockFilter bbFilter
+                            = stinkytofu::BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin");
+                        stinkySchedule(module, "loopBody-", true, stinkytofuDump, bbFilter);
                     }
                     else if(module->name == "noLoadLoop")
                     {

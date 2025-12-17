@@ -100,27 +100,11 @@ namespace
 
         IntrusiveListIterator<IRBase> beginIt = insts.begin();
         IntrusiveListIterator<IRBase> endIt   = insts.end();
-        if(passCtx.getProperties().containsLoop)
-        {
-            beginIt = passCtx.getProperties().loopBegin;
-            endIt   = passCtx.getProperties().loopEnd;
-            for(IRList::iterator it = insts.begin(); it != beginIt; ++it)
-            {
-                StinkyInstruction& inst = getStinkyInst(it);
-                scheduled.push_back(&inst);
-            }
-        }
 
         IRList::iterator regionStart = beginIt;
 
         // 1. Find the last barrier
         IRList::reverse_iterator revStartIt = insts.rbegin(), revEndIt = insts.rend();
-
-        if(passCtx.getProperties().containsLoop)
-        {
-            revStartIt = IRList::reverse_iterator(endIt.getNodePtr(), &insts);
-            revEndIt   = IRList::reverse_iterator(beginIt.getNodePtr(), &insts);
-        }
 
         for(auto rit = revStartIt; rit != revEndIt; ++rit)
         {
@@ -231,10 +215,19 @@ namespace
             return &ScheduleLastLRsPass::ID;
         }
 
-        void run(IRList& irlist, PassContext& passCtx) override
+        void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
         {
+            IRList& irlist = bb.getIR();
             scheduleFinalLocalReadWithLatency(irlist, passCtx);
-            return;
+        }
+
+        void run(Function& func, PassContext& passCtx) override
+        {
+            for(BasicBlock& bb : func)
+            {
+                if(passCtx.shouldProcessBasicBlock(bb))
+                    runOnBasicBlock(bb, passCtx);
+            }
         }
     };
 
