@@ -52,7 +52,7 @@ class ProblemSet:
             p.benchType = self.benchType
             yield p
 
-def load_suite(suite):
+def load_suite(suite, problems_dir=None):
     """Load performance suite from suites.py."""
 
     tdef = top / 'suites.py'
@@ -60,13 +60,20 @@ def load_suite(suite):
     code = compile(tdef.read_text(), str(tdef), 'exec')
     ns = {}
     exec(code, ns)
-    return ns[suite]
+    
+    # Return the function itself, not the result of calling it
+    # If we need to pass problems_dir, wrap it in a lambda
+    if suite == 'all' and problems_dir is not None:
+        return lambda: ns[suite](problems_dir)
+    else:
+        return ns[suite]  # Just return the function
 
 @dataclass
 class SuiteProblemGenerator:
     suite_names: List[str]
     suites: Mapping[str, Generator[ProblemSet, None,
                                    None]] = field(default_factory=dict)
+    problems_dir: str = None  # Add problems directory parameter
 
     # default arch is gfx942 when no argument is set and query is failed
     target_arch_static: str = "gfx942"
@@ -88,7 +95,7 @@ class SuiteProblemGenerator:
 
     def __post_init__(self):
         for name in self.suite_names:
-            self.suites[name] = load_suite(name)
+            self.suites[name] = load_suite(name, self.problems_dir)
 
     def generate_problemSet(self):
         for g in self.suites.values():
