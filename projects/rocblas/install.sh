@@ -28,6 +28,49 @@ supported_distro( )
   esac
 }
 
+# Get the Python version as a comparable integer (e.g., "3.9.5" -> 309)
+get_python_version( )
+{
+  local python_cmd=$1
+  if command -v ${python_cmd} &> /dev/null; then
+    ${python_cmd} -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor:02d}')" 2>/dev/null || echo "0"
+  else
+    echo "0"
+  fi
+}
+
+# Determine which Python executable to use based on version requirements
+# Requires Python >= 3.9 (version 309)
+determine_python_executable( )
+{
+  local min_version=309
+  local default_python="python3"
+  local default_version=$(get_python_version ${default_python})
+
+  # Check if default python3 meets minimum version requirement
+  if [[ ${default_version} -ge ${min_version} ]]; then
+    echo "${default_python}"
+    return 0
+  fi
+
+  # Default python3 is too old, look for alternate versions
+  printf "\033[33mWarning: Default python3 version is too old (requires >= 3.9). Looking for alternate Python...\033[0m\n" >&2
+  
+  # Try common alternate Python versions
+  for py_ver in python3.13 python3.12 python3.11 python3.10 python3.9; do
+    local py_version=$(get_python_version ${py_ver})
+    if [[ ${py_version} -ge ${min_version} ]]; then
+      printf "\033[32mFound suitable Python: ${py_ver} (version $(${py_ver} --version 2>&1))\033[0m\n" >&2
+      echo "${py_ver}"
+      return 0
+    fi
+  done
+
+  # No suitable Python found, will need to install one
+  echo ""
+  return 1
+}
+
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
 check_exit_code( )
 {
@@ -150,8 +193,35 @@ install_packages( )
   local library_dependencies_fedora=( "make" "rpm-build"
                                       "python34" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" "libcxx-devel" )
-  local library_dependencies_sles=(   "make" "python311" "python311-PyYAML" "python311-pip"
-                                      "gcc-c++" "rpm-build" )
+  local library_dependencies_sles=(   "make" "gcc-c++" "rpm-build" )
+  
+  # Determine if we need to install alternate Python based on version
+  local need_alt_python=false
+  local alt_python_pkg=""
+  if [[ -z "${python_executable}" ]]; then
+    local default_version=$(get_python_version python3)
+    if [[ ${default_version} -lt 309 ]]; then
+      need_alt_python=true
+      # Determine which alternate Python package to install based on OS
+      case "${ID}" in
+        sles|opensuse-leap)
+          alt_python_pkg="python311"
+          library_dependencies_sles+=( "python311" "python311-PyYAML" "python311-pip" )
+          ;;
+        rhel)
+          if (( "${VERSION_ID%%.*}" >= "9" )); then
+            # RHEL 9 should have python39 or python3 that's new enough
+            alt_python_pkg="python39"
+          fi
+          ;;
+        ubuntu)
+          # Ubuntu typically has python3.9+ in recent versions
+          # If not, user should install manually
+          printf "\033[33mWarning: python3 is too old. Please install python3.9 or newer manually.\033[0m\n"
+          ;;
+      esac
+    fi
+  fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
     library_dependencies_ubuntu+=("libmsgpack-dev")
@@ -472,12 +542,14 @@ cxx="g++"
 cc="gcc"
 fc="gfortran"
 
-# Set Python executable based on distro
-if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
-  python_executable=python3.11
-else
-  python_executable=python3
+# Determine Python executable based on version requirements (>= 3.9)
+python_executable=$(determine_python_executable)
+if [[ -z "${python_executable}" ]]; then
+  printf "\033[31mError: No suitable Python found (requires >= 3.9).\033[0m\n"
+  printf "\033[31mPlease install Python 3.9 or newer before running this script.\033[0m\n"
+  exit 2
 fi
+printf "\033[32mUsing Python: ${python_executable} (version $(${python_executable} --version 2>&1 | cut -d' ' -f2))\033[0m\n"
 
 # #################################################
 # dependencies
@@ -558,9 +630,11 @@ if [[ "${rmake_invoked}" == false ]]; then
   rm -rf ${full_build_dir}
 
   #rmake.py at top level same as install.sh
-  # On SLES, explicitly set Python3_EXECUTABLE to use python3.11
-  if [[ "${ID}" == "sles" ]] || [[ "${ID}" == "opensuse-leap" ]]; then
-    ${python_executable} ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH} --cmake-darg Python3_EXECUTABLE=/usr/bin/python3.11
+  # If using non-default python3, explicitly set Python3_EXECUTABLE for CMake
+  if [[ "${python_executable}" != "python3" ]]; then
+    python_path=$(which ${python_executable})
+    printf "\033[32mSetting CMake Python3_EXECUTABLE to: ${python_path}\033[0m\n"
+    ${python_executable} ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH} --cmake-darg Python3_EXECUTABLE=${python_path}
   else
     ${python_executable} ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
   fi
