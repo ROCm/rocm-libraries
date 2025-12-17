@@ -72,13 +72,16 @@ public:
         auto bias = attributes.get_bias();
         auto epsilon = attributes.get_epsilon();
 
-        // SECTION 2: Validate Required Tensor Dimensions
-        // Why: All required tensors (x, scale, bias, epsilon) must have dimensions set by user.
-        // These are never inferred - validate them upfront.
+        // SECTION 2: Validate Required Parameter Dimensions
+        // Why: All required parameters (x, scale, bias, epsilon) must have dimensions
+        // set by user. Validate them upfront before proceeding with shape checks.
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(epsilon, 1, "Epsilon"));
+
+        // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
+        // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
+        HIPDNN_CHECK_ERROR(validateScalarParameter(epsilon, "Epsilon"));
 
         HIPDNN_RETURN_IF_FALSE(
             x->validate_dims_and_strides_set_and_positive(),
@@ -182,13 +185,7 @@ public:
             }
         }
 
-        // SECTION 6: Validate Parameters
-        // Why: Epsilon (ε) provides numerical stability in the normalization:
-        //   xhat = (x - mean) / sqrt(var + ε)
-        // Without ε, division by zero occurs when var ≈ 0. Must be a positive scalar.
-        HIPDNN_CHECK_ERROR(validateScalarParameter(epsilon, "Epsilon"));
-
-        // SECTION 7: Validate Spatial Mode Constraints
+        // SECTION 6: Validate Spatial Mode Constraints
         // Why: For spatial BN, statistics are computed over N*H*W elements per channel.
         // We need N*H*W > 1 to compute meaningful statistics (mean and variance).
         // With only 1 element, variance is undefined and normalization degenerates.

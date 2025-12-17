@@ -302,6 +302,7 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
 }
 
 // Validates scalar parameter tensor is properly configured
+// Used for required scalar parameters (e.g., epsilon) that must have dimensions set
 inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& param,
                                      const std::string& paramName)
 {
@@ -313,7 +314,7 @@ inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& pa
     const auto& dims = param->get_dim();
     if(dims.empty())
     {
-        return {ErrorCode::OK, ""}; // Dimensions will be inferred, skip for now
+        return {ErrorCode::INVALID_VALUE, paramName + " must have at least 1 dimension"};
     }
 
     // Scalar parameters should be single-element tensors
