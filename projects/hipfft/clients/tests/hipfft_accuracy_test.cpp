@@ -96,12 +96,11 @@ TEST_P(accuracy_test, vs_fftw)
     {
     case fft_params::fft_mp_lib_none:
     {
-#ifdef _CUFFT_BACKEND
         // skipping symptomatic case(s), unless forcefully/knowingly executing normally-disabled
         // test tokens (e.g., by using --gtest_also_run_disabled_tests)
         const char* test_suite_name
             = ::testing::UnitTest::GetInstance()->current_test_info()->test_suite_name();
-        if(!symptomatic_tokens.empty() && std::strstr(test_suite_name, "DISABLED") == nullptr
+        if(std::strstr(test_suite_name, "DISABLED") == nullptr
            && std::find(symptomatic_tokens.begin(), symptomatic_tokens.end(), params.token())
                   != symptomatic_tokens.end())
         {
@@ -110,7 +109,6 @@ TEST_P(accuracy_test, vs_fftw)
                    "CLI arguments '--gtest_also_run_disabled_tests' to force the test execution "
                    "(via another test suite).";
         }
-#endif
         // only do round trip for forward FFTs
         const bool do_round_trip = params.is_forward();
 
