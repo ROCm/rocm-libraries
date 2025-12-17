@@ -242,12 +242,6 @@ struct GemmPipelineAgBgCrImplBase
     CK_TILE_DEVICE constexpr auto MakeALdsWindows(const ALdsTensorView& a_lds_block_view,
                                                   const ALdsLoadTileDistr&) const
     {
-        // with pk_int4_t load transpose the LDS type is always BDataType
-        using ADataTypeLDS =
-            std::conditional_t<std::is_same_v<typename Problem::ADataType, pk_int4_t>,
-                               typename Problem::BDataType,
-                               typename Problem::ADataType>;
-
         auto a_lds_shape = []() {
             if constexpr(is_a_load_tr)
                 return make_tuple(number<KPerBlock>{}, number<MPerBlock>{});
@@ -261,8 +255,9 @@ struct GemmPipelineAgBgCrImplBase
             if constexpr(is_a_load_tr)
             {
                 return make_static_tile_distribution(
-                    typename InputTileDistributionTraits<typename ALdsLoadTileDistr::DstrEncode,
-                                                         ADataTypeLDS>::TransposedDstrEncode{});
+                    typename InputTileDistributionTraits<
+                        typename ALdsLoadTileDistr::DstrEncode,
+                        typename ALdsTensorView::DataType>::TransposedDstrEncode{});
             }
             else
             {
@@ -338,16 +333,13 @@ struct GemmPipelineAgBgCrImplBase
 
         auto b_copy_lds_window = make_tile_window(b_lds_block_view, b_lds_shape, {0, 0});
 
-        using BLdsDataType = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
-                                                typename Problem::ADataType,
-                                                typename Problem::BDataType>;
-
         auto b_lds_load_tile_distr = []() {
             if constexpr(is_b_load_tr)
             {
                 return make_static_tile_distribution(
-                    typename InputTileDistributionTraits<typename BLdsLoadTileDistr::DstrEncode,
-                                                         BLdsDataType>::TransposedDstrEncode{});
+                    typename InputTileDistributionTraits<
+                        typename BLdsLoadTileDistr::DstrEncode,
+                        typename BLdsTensorView::DataType>::TransposedDstrEncode{});
             }
             else
             {
