@@ -92,42 +92,6 @@ struct inequality_wrapper
     }
 };
 
-/// \brief Functor that returns the sum of its arguments.
-struct sum
-{
-    /// \brief Invocation operator
-    template<class T>
-    ROCPRIM_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
-    {
-        return a + b;
-    }
-};
-
-/// \brief Functor that returns the maximum of its arguments.
-struct max
-{
-    /// \brief Invocation operator
-    template<class T>
-    ROCPRIM_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
-    {
-        return a < b ? b : a;
-    }
-};
-
-/// \brief Functor that returns the minimum of its arguments.
-struct min
-{
-    /// \brief Invocation operator
-    template<class T>
-    ROCPRIM_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
-    {
-        return a < b ? a : b;
-    }
-};
-
 /// \brief Functor that returns the "arg max" of the given key-value pairs.
 ///
 /// The "arg max" of a key-value pair is defined as:
