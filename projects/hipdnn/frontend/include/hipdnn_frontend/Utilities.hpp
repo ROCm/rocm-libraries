@@ -105,6 +105,17 @@ inline bool areTensorDimensionsSet(const std::shared_ptr<TensorAttributes>& tens
     return tensor && !tensor->get_dim().empty();
 }
 
+// Helper to get tensor name for error messages (uses tensor's name if set, otherwise fallback)
+inline std::string getTensorNameForError(const std::shared_ptr<TensorAttributes>& tensor,
+                                         const std::string& fallbackName)
+{
+    if(tensor && !tensor->get_name().empty())
+    {
+        return tensor->get_name();
+    }
+    return fallbackName;
+}
+
 // Determines if batch normalization is in spatial mode based on scale tensor shape
 // Following MIOpen's DeriveBNTensorDescriptor convention:
 // Spatial mode: scale has shape [1, C, 1, 1, ...] - batch and spatial dims are 1
@@ -192,10 +203,13 @@ inline Error
 }
 
 // Validates tensor has minimum required dimensions
+// Uses tensor's name if set, otherwise uses fallbackName for error messages
 inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttributes>& tensor,
                                              size_t minDims,
-                                             const std::string& tensorName)
+                                             const std::string& fallbackName = "Tensor")
 {
+    std::string tensorName = getTensorNameForError(tensor, fallbackName);
+
     if(!tensor)
     {
         return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " is not set"};
@@ -213,20 +227,24 @@ inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttribu
 }
 
 // Validates two tensors have matching shapes
+// Uses tensor names if set, otherwise uses fallback names for error messages
 // NOTE: This function expects both tensors to have dimensions set - it will fail if not set
 inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& tensor1,
                                        const std::shared_ptr<TensorAttributes>& tensor2,
-                                       const std::string& tensor1Name,
-                                       const std::string& tensor2Name)
+                                       const std::string& fallbackName1 = "Tensor1",
+                                       const std::string& fallbackName2 = "Tensor2")
 {
+    std::string name1 = getTensorNameForError(tensor1, fallbackName1);
+    std::string name2 = getTensorNameForError(tensor2, fallbackName2);
+
     if(!tensor1)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, tensor1Name + " is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET, name1 + " is not set"};
     }
 
     if(!tensor2)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, tensor2Name + " is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET, name2 + " is not set"};
     }
 
     const auto& dims1 = tensor1->get_dim();
@@ -235,7 +253,7 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
     if(dims1.size() != dims2.size())
     {
         return {ErrorCode::INVALID_VALUE,
-                tensor1Name + " and " + tensor2Name + " must have the same number of dimensions: "
+                name1 + " and " + name2 + " must have the same number of dimensions: "
                     + std::to_string(dims1.size()) + " vs " + std::to_string(dims2.size())};
     }
 
@@ -246,36 +264,39 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
     {
         auto index = static_cast<size_t>(std::distance(dims1.begin(), it1));
         return {ErrorCode::INVALID_VALUE,
-                tensor1Name + " and " + tensor2Name + " dimension mismatch at index "
-                    + std::to_string(index) + ": " + std::to_string(*it1) + " vs "
-                    + std::to_string(*it2)};
+                name1 + " and " + name2 + " dimension mismatch at index " + std::to_string(index)
+                    + ": " + std::to_string(*it1) + " vs " + std::to_string(*it2)};
     }
 
     return {ErrorCode::OK, ""};
 }
 
 // Validates two tensors have matching shapes (only validates if second tensor has dimensions set)
+// Uses tensor names if set, otherwise uses fallback names for error messages
 // Returns OK if tensor2 dimensions not yet set (will be inferred in infer_properties_node)
 // Use this for validating input vs output tensor consistency when output may not be set yet
 inline Error validateTensorShapesMatchIfSet(const std::shared_ptr<TensorAttributes>& tensor1,
                                             const std::shared_ptr<TensorAttributes>& tensor2,
-                                            const std::string& tensor1Name,
-                                            const std::string& tensor2Name)
+                                            const std::string& fallbackName1 = "Tensor1",
+                                            const std::string& fallbackName2 = "Tensor2")
 {
     if(!areTensorDimensionsSet(tensor2))
     {
         return {ErrorCode::OK, ""}; // tensor2 dimensions not set yet, will be inferred
     }
 
-    return validateTensorShapesMatch(tensor1, tensor2, tensor1Name, tensor2Name);
+    return validateTensorShapesMatch(tensor1, tensor2, fallbackName1, fallbackName2);
 }
 
 // Validates tensor has channel-only shape [1, C, 1, 1, ...] for batch normalization parameters
+// Uses tensor's name if set, otherwise uses fallbackName for error messages
 // NOTE: This function expects tensor dimensions to be set - it will fail if not set
 inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttributes>& tensor,
                                             int64_t expectedChannels,
-                                            const std::string& tensorName)
+                                            const std::string& fallbackName = "Tensor")
 {
+    std::string tensorName = getTensorNameForError(tensor, fallbackName);
+
     if(!tensor)
     {
         return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " is not set"};
@@ -318,11 +339,12 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
 }
 
 // Validates channel-only shape for optional tensors (only validates if dimensions are set)
+// Uses tensor's name if set, otherwise uses fallbackName for error messages
 // Returns OK if tensor dimensions not yet set (will be inferred in infer_properties_node)
 // Use this for optional output tensors that may not have dimensions set during pre_validate_node
 inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<TensorAttributes>& tensor,
                                            int64_t expectedChannels,
-                                           const std::string& tensorName)
+                                           const std::string& fallbackName = "Tensor")
 {
     if(!areTensorDimensionsSet(tensor))
     {
@@ -330,14 +352,17 @@ inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<TensorAttribute
     }
 
     // Dimensions are set, validate strictly
-    return validateChannelOnlyTensorShape(tensor, expectedChannels, tensorName);
+    return validateChannelOnlyTensorShape(tensor, expectedChannels, fallbackName);
 }
 
 // Validates scalar parameter tensor is properly configured
+// Uses param's name if set, otherwise uses fallbackName for error messages
 // Used for required scalar parameters (e.g., epsilon) that must have dimensions set
 inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& param,
-                                     const std::string& paramName)
+                                     const std::string& fallbackName = "Parameter")
 {
+    std::string paramName = getTensorNameForError(param, fallbackName);
+
     if(!param)
     {
         return {ErrorCode::ATTRIBUTE_NOT_SET, paramName + " parameter is not set"};
