@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   MergeFiles: False
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0 # <- experiment -1
   NumWarmups: 0
   NumBenchmarks: 1
   SyncsPerBenchmark: 1

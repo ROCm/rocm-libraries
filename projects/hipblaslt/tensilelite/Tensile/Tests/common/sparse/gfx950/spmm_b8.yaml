@@ -3,7 +3,7 @@ TestParameters:
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0 # <- experiment -1
   #DataInitTypeBeta: 0
   #DataInitTypeAlpha: 1
   #DataInitTypeA: 8

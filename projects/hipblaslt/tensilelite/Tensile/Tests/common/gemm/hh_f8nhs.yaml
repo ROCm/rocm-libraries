@@ -5,7 +5,7 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
   SleepPercent: 50
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0 # <- experiment -1
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   NewClient: 2

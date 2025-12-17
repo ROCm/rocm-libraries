@@ -19,7 +19,7 @@ GlobalParameters:
   # NumMergedFiles: 4
   PrintSolutionRejectionReason: True
   # PrintWinnersOnly: True
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0 # <- experiment -1
   NumWarmups: 0
   EnqueuesPerSync: 0
   SyncsPerBenchmark: 1

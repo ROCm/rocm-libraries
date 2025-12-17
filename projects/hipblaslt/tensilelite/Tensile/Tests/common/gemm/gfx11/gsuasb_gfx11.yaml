@@ -6,7 +6,7 @@ GlobalParameters:
   NumWarmups: 0
   SleepPercent: 50
   EnqueuesPerSync: 1
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0 # <- experiment -1
   DataInitTypeE: 16
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1

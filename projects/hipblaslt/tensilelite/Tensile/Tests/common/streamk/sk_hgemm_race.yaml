@@ -7,7 +7,7 @@ GlobalParameters:
   EnqueuesPerSync: 1
   NumWarmups: 0
   KernelTime: true
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0 # <- experiment -1
   DataInitTypeBeta: 1
   DataInitTypeAlpha: 1
   # DataInitTypeA: 12

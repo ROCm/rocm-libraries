@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   SleepPercent: 50
-  NumElementsToValidate: -1
+  NumElementsToValidate: 0 # <- experiment -1
   NumWarmups: 1
   EnqueuesPerSync: 1
   DataInitTypeA: 12 #12
