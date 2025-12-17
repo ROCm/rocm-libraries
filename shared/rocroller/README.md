@@ -1,4 +1,3 @@
-
 # AMD's rocRoller Assembly Kernel Generator
 
 rocRoller is a software library for generating AMDGPU kernels.
