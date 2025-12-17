@@ -51,26 +51,27 @@ def create_base_kernel():
             "TransposeA": False,
             "TransposeB": False,
         },
-        "MacroTile0": 0, "MacroTile1": 0, "DepthU": 0,
+        "MacroTile0": 0, "MacroTile1": 0, "DepthU": 64,
         "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": True,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
         "LocalReadVectorWidth": 0,
         "WaveSeparateGlobalReadA": 0,
         "WaveSeparateGlobalReadB": 0,
         "Use64bShadowLimit" : 1,
-        "MatrixInstruction": [],
+        "MatrixInstruction": [16,16,32,1],
         "MIWaveGroup": [],
         "LDSTrInst": False,
         "TransposeLDS": 0,
         "ForceUnrollSubIter": False,
         "SwapGlobalReadOrder": False, # For asserting it gets set
         "UsePLRPack": False, # For asserting it gets set
+        "UseF32XEmulation": False,
         "MIWaveTileA": 2,
         "MIWaveTileB": 2,
     }
     return kernel
 
-class TestCustomSchedule:
+class TestCustomScheduleBF16:
     def test_no_custom_schedule(self):
         """Test that a kernel that doesn't match any condition returns False."""
         kernel = create_base_kernel()
@@ -546,6 +547,33 @@ class TestCustomSchedule:
         assert valid, message
 
 
+class TestCustomScheduleTF32:
+    def test_schedule_192x256x32_TF32(self):
+        """Tests the 192x256x32 TF32 TN schedule."""
+        kernel = create_base_kernel()
+        kernel["ProblemType"].update({
+            "TransposeA": True, "TransposeB": False
+        })
+        kernel.update({
+            "UseF32XEmulation": True,
+            "MacroTile0": 192, "MacroTile1": 256, "DepthU": 32,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "DirectToLds": True,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
+            "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 6, "MIWaveTileB": 8,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 2
+        assert schedule_info.numMfma == 144
+        assert kernel["UsePLRPack"]
+        valid, message = isValid(schedule_info, {"kernel": kernel})
+        assert valid, message
+
+
 class TestCustomScheduleValidation:
     def test_schedule_validation_disable(self):
         """
@@ -569,18 +597,4 @@ class TestCustomScheduleValidation:
             ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {}
         )
         assert status == False
-
-    def test_f32_emulation_disabled(self):
-        kernel = create_base_kernel()
-        # Create what should be an invalid schedule:
-        invalid_schedule = {"P": [[3, 2, 1]]}
-        scheduleInfo = ScheduleInfo(
-            None, None, invalid_schedule, None, None, None, None
-        )
-        # Verify that this invalid schedule passes when this specific flag is true.
-        # Currently a warning message is printed.
-        status, message = isValid(scheduleInfo, {"kernel": {"UseF32XEmulation": True}})
-        assert status == True
-        assert message == "CMS validation is currently disabled for F32X emulation"
-
 

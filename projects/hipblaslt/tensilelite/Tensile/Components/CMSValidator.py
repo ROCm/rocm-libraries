@@ -463,6 +463,11 @@ class Timeline:
             num_iterations:             Number of iterations to consider for cross-iteration effects (default 2).
         """
         
+        available_keys = schedule_info.optSchedule.keys()
+        has_lr1s = "LRA1" in available_keys or "LRB1" in available_keys
+        has_lr3s = "LRA3" in available_keys or "LRB3" in available_keys
+        assert not (has_lr1s and has_lr3s), "Can't mix LR1s and LR3s."
+
         self.num_vmfma = schedule_info.numMfma
         self.vlcnt_shift = defaultdict(int)
         self.vlcnt_shift[NO_GLOBAL_LOAD_LOOP] = schedule_info.nglshift
@@ -729,19 +734,24 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution') -> None:
                 lr.needed_by = base_needed_by + loop_offset
 
 
-def set_gr_needed_by_from_lr1s(timeline: Timeline, swap_global_read_order: bool) -> None:
+def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) -> None:
     """
-    Set the needed_by field of GlobalReads based on the LRA1/LRB1 instructions.
+    Set the needed_by field of GlobalReads based on the LR1/3 instructions.
     If GRA or GRB is missing, this function will NOT error out.
-    If either GRA or GRB is present, the corresponding LR1 instruction must be present.
+    If either GRA or GRB is present, the corresponding LR1/3 instruction must be present.
     
     Args:
         timeline: The Timeline object containing the instructions.
         swap_global_read_order: Whether global read order is swapped.
     """
     # If the global read order is swapped, we need to swap the target indices since GRAs actually load B and GRBs actually load A.
-    # TODO: Hardcoded for now, can't support LRA3/LRB3 yet.
     target_names = {"GRA": "LRA1", "GRB": "LRB1"}
+    
+    if "LRA1" not in timeline.get_instruction_names():
+        assert "LRA3" in timeline.get_instruction_names(), "LRA3 must be present if LRA1 is not"
+        target_names["GRA"] = "LRA3"
+        target_names["GRB"] = "LRB3"
+    
     if swap_global_read_order:
         target_names["GRA"], target_names["GRB"] = target_names["GRB"], target_names["GRA"]
 
@@ -971,31 +981,43 @@ def verify_gr_inc_order(scheduleInfo, context: dict, code_path: int) -> tuple[bo
 
     return True, ""
 
-def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+def verify_grs_finish_before_lrs(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Ensure several properties are valid of LRs and GRs for a single code path:
-    1. The GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
-    2. The LR1s and LR0s are guaranteed to be complete before the first VMFMA that uses their data.
+    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LR1/3 of this iteration.
     """
-    if len(schedule_info.mfmaReorder) != 0:
-        printWarning("Do not currently support mfmaReorder in CMS validation, cannot guarantee that LR1s will be correct.")
-        return True, ""
-
-    available_keys = schedule_info.optSchedule.keys()
-    if "LRA1" not in available_keys and "LRA3" in available_keys:
-        printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
-        return True, ""
-    if "LRB1" not in available_keys and "LRB3" in available_keys:
-        printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
-        return True, ""
-
-    relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
+    relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
     kernel = context["kernel"]
     timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
     
     # Apply standalone functions to populate timeline fields
+    set_gr_needed_by_from_lrs(timeline, kernel["SwapGlobalReadOrder"])
+    apply_swaits(timeline)
+    apply_barriers(timeline)
+
+    message = validate_timeline(timeline)
+    if message:
+        return False, message
+    return True, ""
+
+
+def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+    """
+    Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
+    """
+    if context.get("kernel", {}).get("UseF32XEmulation", False) or context.get("kernel", {}).get("ForceUnrollSubIter", False):
+        message = "LR completion before vmfma validation is disabled for F32X emulation or ForceUnrollSubIter"
+        printWarning(f"{message}")
+        return True, message
+    
+    if len(schedule_info.mfmaReorder) != 0:
+        printWarning("CMS Validation does not currently support mfmaReorder, cannot guarantee that LRs will be correct.")
+        return True, ""
+
+    relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
+    kernel = context["kernel"]
+    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
+
     set_lr_needed_by_for_VMFMA(timeline, kernel)
-    set_gr_needed_by_from_lr1s(timeline, kernel["SwapGlobalReadOrder"])
     apply_swaits(timeline)
     apply_barriers(timeline)
 
@@ -1068,13 +1090,6 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     Note 2: if False is returned, this is not proof that the schedule
     is invalid. It may be a false positive.
     """
-
-    # Cases where validation is not currently possible.
-    if context.get("kernel", {}).get("UseF32XEmulation", False):
-        message = "CMS validation is currently disabled for F32X emulation"
-        printWarning(f"{message}")
-        return True, message
-
     # Case where there was an explicit request to skip validation.
     if scheduleInfo.__skipValidation__:
         mt0 = context.get("kernel", {}).get("MacroTile0", "?")
@@ -1094,8 +1109,9 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     rules = [
         verify_correct_number_of_instructions,
         verify_ascending_order,
+        verify_lrs_finished_before_vmfma,
         verify_global_reads_not_too_early,
-        verify_lrs_and_grs,
+        verify_grs_finish_before_lrs,
         verify_scc_overlap,
         verify_gr_inc_order
     ]
