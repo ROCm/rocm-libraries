@@ -26,6 +26,18 @@ class TheRockMatrixTest(unittest.TestCase):
         project_to_run = therock_matrix.collect_projects_to_run(subtrees)
         self.assertEqual(len(project_to_run), 1)
 
+    def test_collect_projects_to_run_dependency_graph(self):
+        subtrees = ["projects/miopen", "projects/hipblaslt"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 1)
+
+    def test_collect_projects_to_run_dependency_graph_diff_projects(self):
+        subtrees = ["projects/miopen", "projects/rocwmma"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
