@@ -632,13 +632,13 @@ namespace rocRoller
         m_executableKernel->loadKernelFromCodeObjectFile(
             fileName, kernelName, m_context->targetArchitecture().target());
 
-        auto yaml   = readMetaDataFromCodeObject(fileName);
-        auto kernel = AssemblyKernels::fromYAML(yaml).kernels[0];
-
-        // XXX Instead of adding `setKernel`, should the context load from a code object?
+        auto kernels   = AssemblyKernels::fromELF(fileName).kernels;
+        auto kernel    = kernels.at(0);
         auto kernelPtr = std::make_shared<AssemblyKernel>(kernel);
         m_context->setKernel(kernelPtr);
         return kernelPtr;
+
+        // XXX Instead of adding `setKernel`, should the context load from a code object?
     }
 
     ContextPtr CommandKernel::getContext()
