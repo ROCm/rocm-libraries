@@ -405,17 +405,13 @@ def hasCustomSchedule(kernel):
     Trampoline function that checks if a custom schedule is available.
     Iterates through registered schedule functions and returns the first match.
     """
-    print("Entering hasCustomSchedule")
     if not kernel["UseCustomMainLoopSchedule"]:
         return False, None
     if not kernel["EnableMatrixInstruction"]:
-        print("No EnableMatrixInstruction")
         return False, None
     if not kernel["ISA"] == IsaVersion(9,5,0):
-        print("No ISA")
         return False, None
     if isMixed(kernel):
-        print("is Mixed")
         return False, None
 
     useLDSTr = kernel["LDSTrInst"]
@@ -424,15 +420,12 @@ def hasCustomSchedule(kernel):
     for schedule_func in _SCHEDULE_REGISTRY:
         status, schedule = schedule_func(kernel, useLDSTr, TLDS)
         if status == ScheduleMatchStatus.FOUND:
-            print("Found!!!")
             return True, schedule
         elif status == ScheduleMatchStatus.UNSUPPORTED_VARIANT:
             # Criteria matched but variant unsupported - stop searching
-            print("Unsupported variant")
             return False, None
         # status == NO_MATCH: continue to next schedule
     
-    print("No Match")
     return False, None
 
 
@@ -1545,9 +1538,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     matrix_inst=[16, 16, 32, 1],
     mfma_wave_group=[2, 2]
 )
-
 def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
-    print("USING CMS!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     if not (isTN(kernel) and TLDS):
         return False, None
     kernel["MfmaInitCVgprs"] = True
@@ -1583,7 +1574,13 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
-
+@RegisterSchedule(
+    tile_config=TileConfig(224, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -2362,3 +2359,4 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
+    
