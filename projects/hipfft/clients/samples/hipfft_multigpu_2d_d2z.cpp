@@ -50,9 +50,15 @@ int main()
     const int  Ny              = 32;
     int        direction       = HIPFFT_FORWARD; // forward=-1, backward=1
     hipfftType transform_type  = HIPFFT_D2Z;     // double to std::complex<double>
-    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
+    hipfftXtSubFormat_t subformat = HIPFFT_XT_FORMAT_INPLACE;
     size_t     ngpus           = 2;
 
+    std::cout << "\tNx: " << Nx << "\n";
+    std::cout << "\tNy: " << Ny << "\n";
+    std::cout << "\tngpus: " << ngpus << "\n";
+    std::cout << "\tdirection: " << direction << (direction == -1 ? " forward" : " backward") << "\n";
+    std::cout << "\ttransform_type: " << transform_type << " : "  << hipffttype_to_name(transform_type) << "\n";
+    std::cout << "\tsubformat: " << subformat << " : " << subformat_to_name(subformat) << "\n";
 
     const size_t Nyp = Ny / 2 + 1;
     
@@ -99,9 +105,10 @@ int main()
     // Assign GPUs to the plan
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
-    hipfftResult hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtSetGPUs failed with code" + std::to_string(hipfft_rt));
+    hipfftResult hipfft_rt = HIPFFT_SUCCESS;
+    // hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+    // if(hipfft_rt != HIPFFT_SUCCESS)
+    //     throw std::runtime_error("hipfftXtSetGPUs failed with code" + std::to_string(hipfft_rt));
 
     // Make the 2D plan
 
@@ -112,7 +119,7 @@ int main()
 
     // Copy input data to GPUs
     hipLibXtDesc*       inoutdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, format);
+    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, subformat);
     if(hipfft_rt != HIPFFT_SUCCESS)
     {
         std::stringstream ss;

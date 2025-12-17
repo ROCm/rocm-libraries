@@ -28,6 +28,39 @@
 #include <vector>
 #include <type_traits>
 
+std::string hipffttype_to_name(const hipfftType txtype )
+{
+    switch(txtype)
+    {
+    case HIPFFT_R2C:
+        return "HIPFFT_R2C";
+    case HIPFFT_C2R:
+        return "HIPFFT_C2R";
+    case HIPFFT_C2C:
+        return "HIPFFT_C2C";
+    case HIPFFT_D2Z:
+        return "HIPFFT_D2Z";
+    case HIPFFT_Z2D:
+        return "HIPFFT_Z2D";
+    case HIPFFT_Z2Z:
+        return "HIPFFT_Z2Z";
+    }
+}
+
+std::string subformat_to_name(const hipfftXtSubFormat_t subformat)
+{
+    switch(subformat)
+    {
+    case HIPFFT_XT_FORMAT_INPLACE:
+        return "HIPFFT_XT_FORMAT_INPLACE";
+    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+        return "HIPFFT_XT_FORMAT_INPLACE_SHUFFLED";
+    default:
+        return "";
+    }
+    // FIXME
+}
+
 // An array printer that with bounds on the number of outputs to show
 template<typename Tvalue>
 void printarraylimit(const std::vector<Tvalue> &vals, const size_t Nx, const size_t Ny,
