@@ -82,7 +82,10 @@ protected:
         mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
         auto invVariance = std::make_shared<TensorAttributes>();
-        invVariance->set_uid(3).set_name("InvVariance").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+        invVariance->set_uid(3)
+            .set_name("InvVariance")
+            .set_data_type(DataType::FLOAT)
+            .set_dim({1, 2, 1, 1});
 
         auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
@@ -514,7 +517,10 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
     mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_uid(3).set_name("InvVariance").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    invVariance->set_uid(3)
+        .set_name("InvVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
@@ -593,10 +599,16 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormGraph)
     bias->set_uid(3).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
     auto prevRunningMean = std::make_shared<TensorAttributes>();
-    prevRunningMean->set_uid(4).set_name("PrevRunningMean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    prevRunningMean->set_uid(4)
+        .set_name("PrevRunningMean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     auto prevRunningVariance = std::make_shared<TensorAttributes>();
-    prevRunningVariance->set_uid(5).set_name("PrevRunningVariance").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    prevRunningVariance->set_uid(5)
+        .set_name("PrevRunningVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     auto momentum = std::make_shared<TensorAttributes>();
     momentum->set_uid(6).set_name("Momentum").set_data_type(DataType::FLOAT).set_dim({1});
@@ -694,10 +706,16 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormAndPointwiseGraph)
     bias->set_uid(3).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
     auto prevRunningMean = std::make_shared<TensorAttributes>();
-    prevRunningMean->set_uid(4).set_name("PrevRunningMean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    prevRunningMean->set_uid(4)
+        .set_name("PrevRunningMean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     auto prevRunningVariance = std::make_shared<TensorAttributes>();
-    prevRunningVariance->set_uid(5).set_name("PrevRunningVariance").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    prevRunningVariance->set_uid(5)
+        .set_name("PrevRunningVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     auto momentum = std::make_shared<TensorAttributes>();
     momentum->set_uid(6).set_name("Momentum").set_data_type(DataType::FLOAT).set_dim({1});
@@ -868,7 +886,10 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormInferenceGraph)
     mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_uid(3).set_name("InvVariance").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    invVariance->set_uid(3)
+        .set_name("InvVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
@@ -971,7 +992,10 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormBackwardGraph)
     mean->set_uid(4).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_uid(5).set_name("InvVariance").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    invVariance->set_uid(5)
+        .set_name("InvVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     BatchnormBackwardAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormBackwardNode");
@@ -1206,7 +1230,10 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormBackwardGraph)
     mean->set_uid(3).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_uid(4).set_name("InvVariance").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    invVariance->set_uid(4)
+        .set_name("InvVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1});
 
     BatchnormBackwardAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormBackwardNode");
