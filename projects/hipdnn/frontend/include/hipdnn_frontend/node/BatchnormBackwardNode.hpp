@@ -127,24 +127,33 @@ public:
         auto& xDims = x->get_dim();
         int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        // Validate scale has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(scale))
+        {
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        }
 
-        // Validate dscale has correct channel-only shape
-        HIPDNN_CHECK_ERROR(
-            validateChannelOnlyTensorShape(dscale, channels, "Scale gradient tensor (dscale)"));
+        // Validate dscale has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(dscale))
+        {
+            HIPDNN_CHECK_ERROR(
+                validateChannelOnlyTensorShape(dscale, channels, "Scale gradient tensor (dscale)"));
+        }
 
-        // Validate dbias has correct channel-only shape
-        HIPDNN_CHECK_ERROR(
-            validateChannelOnlyTensorShape(dbias, channels, "Bias gradient tensor (dbias)"));
+        // Validate dbias has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(dbias))
+        {
+            HIPDNN_CHECK_ERROR(
+                validateChannelOnlyTensorShape(dbias, channels, "Bias gradient tensor (dbias)"));
+        }
 
-        // Validate optional tensor shapes (using mean and invVar extracted above)
-        if(mean)
+        // Validate optional tensor shapes (if ready)
+        if(areTensorDimensionsSet(mean))
         {
             HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
         }
 
-        if(invVar)
+        if(areTensorDimensionsSet(invVar))
         {
             HIPDNN_CHECK_ERROR(
                 validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));

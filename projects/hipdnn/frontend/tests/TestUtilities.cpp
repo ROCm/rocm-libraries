@@ -472,14 +472,16 @@ TEST(TestUtilities, ValidateChannelOnlyTensorShapeNullTensor)
 {
     std::shared_ptr<TensorAttributes> nullTensor = nullptr;
     auto error = validateChannelOnlyTensorShape(nullTensor, 64, "TestTensor");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip if tensor not set
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("TestTensor is not set") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateChannelOnlyTensorShapeEmptyDims)
 {
     auto tensor = std::make_shared<TensorAttributes>();
     auto error = validateChannelOnlyTensorShape(tensor, 64, "TestTensor");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip if dimensions not set yet
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must have at least 2 dimensions") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateChannelOnlyTensorShapeValid4D)

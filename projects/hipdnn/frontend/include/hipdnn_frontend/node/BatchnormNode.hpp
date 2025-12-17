@@ -100,23 +100,29 @@ public:
         auto& xDims = x->get_dim();
         int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-
-        // Validate bias has correct channel-only shape
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
-
-        // Validate optional mean tensor
-        auto mean = attributes.get_mean();
-        if(mean)
+        // Validate scale has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(scale))
         {
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        }
+
+        // Validate bias has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(bias))
+        {
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        }
+
+        // Validate optional mean tensor (if ready)
+        if(areTensorDimensionsSet(attributes.get_mean()))
+        {
+            auto mean = attributes.get_mean();
             HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
         }
 
-        // Validate optional inv_variance tensor
-        auto invVar = attributes.get_inv_variance();
-        if(invVar)
+        // Validate optional inv_variance tensor (if ready)
+        if(areTensorDimensionsSet(attributes.get_inv_variance()))
         {
+            auto invVar = attributes.get_inv_variance();
             HIPDNN_CHECK_ERROR(
                 validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
         }
@@ -148,18 +154,30 @@ public:
                 "(prev_running_mean, prev_running_variance, next_running_mean, "
                 "next_running_variance) must be provided");
 
-            // Validate running stats have correct shapes
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                prevRunningMean, channels, "Previous running mean tensor"));
+            // Validate running stats have correct shapes (if ready)
+            if(areTensorDimensionsSet(prevRunningMean))
+            {
+                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                    prevRunningMean, channels, "Previous running mean tensor"));
+            }
 
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                prevRunningVar, channels, "Previous running variance tensor"));
+            if(areTensorDimensionsSet(prevRunningVar))
+            {
+                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                    prevRunningVar, channels, "Previous running variance tensor"));
+            }
 
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                nextRunningMean, channels, "Next running mean tensor"));
+            if(areTensorDimensionsSet(nextRunningMean))
+            {
+                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                    nextRunningMean, channels, "Next running mean tensor"));
+            }
 
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                nextRunningVar, channels, "Next running variance tensor"));
+            if(areTensorDimensionsSet(nextRunningVar))
+            {
+                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                    nextRunningVar, channels, "Next running variance tensor"));
+            }
         }
 
         // SECTION 6: Validate Parameters

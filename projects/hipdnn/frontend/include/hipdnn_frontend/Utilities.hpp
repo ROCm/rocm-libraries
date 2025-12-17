@@ -98,6 +98,13 @@ inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
         toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
 }
 
+// Helper to check if tensor dimensions are set (not null, has dimensions)
+// Returns true if dimensions are set by user, false if they will be inferred in infer_properties_node()
+inline bool areTensorDimensionsSet(const std::shared_ptr<TensorAttributes>& tensor)
+{
+    return tensor && !tensor->get_dim().empty();
+}
+
 // Determines if batch normalization is in spatial mode based on scale tensor shape
 // Following MIOpen's DeriveBNTensorDescriptor convention:
 // Spatial mode: scale has shape [1, C, 1, 1, ...] - batch and spatial dims are 1
@@ -236,20 +243,17 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
 }
 
 // Validates tensor has channel-only shape [1, C, 1, 1, ...] for batch normalization parameters
+// NOTE: This function expects tensor to be ready (use isTensorReadyForValidation() before calling)
 inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttributes>& tensor,
                                             int64_t expectedChannels,
                                             const std::string& tensorName)
 {
     if(!tensor)
     {
-        return {ErrorCode::OK, ""}; // Skip if tensor not set
+        return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " is not set"};
     }
 
     const auto& dims = tensor->get_dim();
-    if(dims.empty())
-    {
-        return {ErrorCode::OK, ""}; // Skip if dimensions not set yet
-    }
 
     HIPDNN_RETURN_IF_LT(dims.size(),
                         2,

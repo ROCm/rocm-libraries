@@ -101,18 +101,30 @@ public:
         auto& xDims = x->get_dim();
         int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        // Validate scale has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(scale))
+        {
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        }
 
-        // Validate bias has correct channel-only shape
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        // Validate bias has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(bias))
+        {
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        }
 
-        // Validate mean has correct channel-only shape
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+        // Validate mean has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(mean))
+        {
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+        }
 
-        // Validate inv_variance has correct channel-only shape
-        HIPDNN_CHECK_ERROR(
-            validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
+        // Validate inv_variance has correct channel-only shape (if ready)
+        if(areTensorDimensionsSet(invVar))
+        {
+            HIPDNN_CHECK_ERROR(
+                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
+        }
 
         // NOTE: Unlike training, inference does NOT require m > 1 (where m = N*H*W for 4D
         // or m = N*D*H*W for 5D) since it uses pre-computed statistics rather than
