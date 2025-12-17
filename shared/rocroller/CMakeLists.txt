@@ -40,7 +40,6 @@ cmake_dependent_option(ROCROLLER_ENABLE_SLOW_TESTS "Disable slow running tests."
 option(ROCROLLER_EMBED_ARCH_DEF "Embed msgpack architecture data in library." ON)
 option(ROCROLLER_BUILD_SHARED_LIBS "Build rocRoller as a shared library." ON)
 option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_package fails." OFF)
-option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" OFF)
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
@@ -152,12 +151,6 @@ add_library(roc::rocroller-interface ALIAS rocroller-interface)
 
 target_compile_options(rocroller PUBLIC $<BUILD_INTERFACE:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=shared/rocroller>)
 
-if(ROCROLLER_ENABLE_LLD)
-    find_package(LLD REQUIRED)
-    target_include_directories(rocroller PRIVATE "${LLD_INCLUDES}")
-    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
-endif()
-
 if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     rocroller_target_configure_sanitizers(rocroller PRIVATE)
     set(ASAN_LIB_PATH "unset")
@@ -209,7 +202,6 @@ target_compile_definitions(rocroller
 
 if(ROCROLLER_ENABLE_LLVM)
     llvm_map_components_to_libnames(llvm_yaml_libs objectyaml)
-    llvm_map_components_to_libnames(llvm_libs mc support)
 endif()
 
 target_link_libraries(rocroller
@@ -233,7 +225,6 @@ target_link_libraries(rocroller
         $<BUILD_INTERFACE:spdlog::spdlog_header_only>
         $<BUILD_INTERFACE:libdivide::libdivide>
         ${llvm_yaml_libs}
-        ${llvm_libs}
 )
 
 target_include_directories(rocroller
