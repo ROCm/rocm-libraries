@@ -427,6 +427,10 @@ def isTN(kernel):
     return kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
 
 @CallableGuard
+def isTF32(kernel):
+    return kernel["UseF32XEmulation"]
+
+@CallableGuard
 def is16bit(kernel):
     return kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()
 
@@ -730,6 +734,97 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 96
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(256, 192, 32, 2, 0, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
+    print('kernel', kernel)
+    kernel["MfmaInitCVgprs"] = True
+    numMfma = 144
+    optSchedule = dict()
+    syncCode = []
+    snopCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isTN(kernel) and useLDSTr and TLDS == 1:
+        # kernel["UsePLRPack"] = False
+
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+            
+            7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            
+            35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            
+            71, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            71, SBarrier(comment=""),
+            
+            110, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
+            110, SBarrier(comment="")
+        ]
+
+        snopTable = [
+            -1, SNop(0),
+            0, SNop(0),
+            1, SNop(0),
+            2, SNop(0),
+            3, SNop(0),
+            4, SNop(0),
+            5, SNop(0),
+            35, SNop(0),
+            36, SNop(0),
+            37, SNop(0),
+            38, SNop(0),
+            39, SNop(0),
+            40, SNop(0),
+            41, SNop(0),
+            71, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            107, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0")
+        ]
+        
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+
+            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7]],
+            'LRA3': [[111, 112, 115, 116, 117, 118, 119, 120]],
+
+            'LRB0': [[8, 9, 10, 11, 12, 13]],
+            'LRB3': [[113, 114, 121, 122, 123, 124]],
+
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], 
+
+            'LRSA': [[34]],
+            'LRSB': [[34]],
+
+            'GRA': [[71,71,71,71,71,71, 72,72,72,72,72,72,72,72, 73,73]],
+            'GRB': [[73,73,73,73,73,73, 107,107,107,107,107,107]],
+
+            'LWSA': [[108]],
+            'LWSB': [[108]],
+
+            'LCC': [[143, 143]],
+
+            'PackA3' : [[-1]*4 + [0]*20 + [1]*4 + [2]*20 + [3]*4 + [4]*20 + [5]*24],
+            'PackB3' : [[-1]*4 + [0]*20 + [1]*4 + [2]*20 + [3]*4 + [4]*20],
+
+            'PackA0' : [[35]*4 + [36]*20 + [37]*4 + [38]*20 + [39]*4 + [40]*20 + [41]*24],
+            'PackB0' : [[35]*4 + [36]*20 + [37]*4 + [38]*20 + [39]*4 + [40]*20],
+
+            'SNOP': [snopTable[::2]]
+        }
+        syncCode = syncTable[1::2]
+        snopCode = snopTable[1::2]
+        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=[], snopCode=snopCode)
+    else:
+        return False, None
+
     return True, opt1
 
 @RegisterSchedule(
