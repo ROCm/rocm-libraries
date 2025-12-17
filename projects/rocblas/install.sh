@@ -51,6 +51,21 @@ elevate_if_not_root( )
   fi
 }
 
+# Variant that captures exit code without exiting - useful for special error handling
+elevate_if_not_root_capture_exit( )
+{
+  local uid=$(id -u)
+  local exit_code=0
+
+  if (( ${uid} )); then
+    sudo $@ || exit_code=$?
+  else
+    $@ || exit_code=$?
+  fi
+
+  return ${exit_code}
+}
+
 # Take an array of packages as input, and install those packages with 'apt' if they are not already installed
 install_apt_packages( )
 {
@@ -79,13 +94,10 @@ install_zypper_packages( )
 {
     package_dependencies="$@"
     printf "\033[32mInstalling following packages from distro package manager: \033[33m${package_dependencies}\033[32m \033[0m\n"
-    local uid=$(id -u)
+
     local exit_code=0
-    if (( ${uid} )); then
-        sudo zypper -n install -y ${package_dependencies} || exit_code=$?
-    else
-        zypper -n install -y ${package_dependencies} || exit_code=$?
-    fi
+    elevate_if_not_root_capture_exit zypper -n install -y ${package_dependencies} || exit_code=$?
+
     # Exit code 106 means some repos failed to refresh, but packages may still be available
     # Only fail if it's a different error
     if (( ${exit_code} != 0 && ${exit_code} != 106 )); then
