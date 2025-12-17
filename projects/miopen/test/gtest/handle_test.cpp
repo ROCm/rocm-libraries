@@ -240,6 +240,7 @@ static void test_errors(kernel_type_t kern_type)
     }
 }
 
+#if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
 static std::string WriteNop(kernel_type_t kern_type)
 {
     if(kern_type == miopenOpenCLKernelType)
@@ -261,6 +262,7 @@ static std::string WriteNop(kernel_type_t kern_type)
         MIOPEN_THROW("Unsupported kernel type");
     }
 }
+#endif
 
 static void test_warnings(kernel_type_t kern_type)
 {
