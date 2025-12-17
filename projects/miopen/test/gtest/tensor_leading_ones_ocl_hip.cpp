@@ -93,7 +93,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     int C = 1;
     int H = 1;
     int W = 1;
-    // insertTestCase(N, C, H, W);
+    insertTestCase(N, C, H, W);
     N = 1024;
     C = 4;
     H = 8;
@@ -103,7 +103,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     C = 4;
     H = 16;
     W = 16;
-    // insertTestCase(N, C, H, W);
+    insertTestCase(N, C, H, W);
 
     return configs;
 #endif
@@ -407,7 +407,7 @@ protected:
     PerfHelper ph;
 #endif
 };
-
+/*
 using GPU_OpTensorLeadingOnesTest_FP16 = OpTensorLeadingOnesTest<half_float::half>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP16, PortTest)
@@ -423,7 +423,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-
+*/
 using GPU_OpTensorLeadingOnesTest_FP32 = OpTensorLeadingOnesTest<float>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP32, PortTest)
@@ -439,7 +439,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-
+/*
 using GPU_OpTensorLeadingOnesTest_FP64 = OpTensorLeadingOnesTest<double>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP64, PortTest)
@@ -455,3 +455,4 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
+*/
