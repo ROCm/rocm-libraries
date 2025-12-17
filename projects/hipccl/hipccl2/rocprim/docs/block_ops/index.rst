@@ -5,20 +5,18 @@
 .. _block-index:
 
 ********************************************************************
- Block-Wide Operations
+rocPRIM block-level operations
 ********************************************************************
 
-  * :ref:`class-index`
+API reference for rocPRIM block-level operations.
 
-    * :ref:`blk-load`
-    * :ref:`blk-store`
-    * :ref:`blk-adjacent_difference`
-    * :ref:`blk-discontinuity`
-    * :ref:`blk-scan`
-    * :ref:`blk-reduce`
-    * :ref:`blk-shuffle`
-    * :ref:`blk-exchange`
-    * :ref:`blk-sort`
-    * :ref:`blk-histogram`
-
-  * :ref:`data_mov_funcs`
+* :ref:`blk-load`
+* :ref:`blk-store`
+* :ref:`blk-adjacent_difference`
+* :ref:`blk-discontinuity`
+* :ref:`blk-scan`
+* :ref:`blk-reduce`
+* :ref:`blk-shuffle`
+* :ref:`blk-exchange`
+* :ref:`blk-sort`
+* :ref:`blk-histogram`

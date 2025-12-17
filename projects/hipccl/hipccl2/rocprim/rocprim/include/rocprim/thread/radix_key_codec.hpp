@@ -33,7 +33,7 @@
 #include "../types/tuple.hpp"
 
 ROCPRIM_PRAGMA_MESSAGE("Functionality from rocprim/detail/radix_key_codec.hpp has been moved to "
-                       "rocprim/thread/type_traits.hpp.")
+                       "rocprim/type_traits.hpp.")
 #include "../type_traits.hpp"
 
 #endif // ROCPRIM_THREAD_RADIX_KEY_CODEC_HPP_
