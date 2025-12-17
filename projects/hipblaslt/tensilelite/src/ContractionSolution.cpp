@@ -1994,12 +1994,6 @@ namespace TensileLite
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
 
-        if(sizeMapping.streamK > 0 && gsu < 2)
-        {
-            std::cerr << "\nhipblasLT Error: Trying to launch kernel " << rv.kernelName << " with StreamK and gsu < 2\n";
-            assert(!(sizeMapping.streamK > 0 && gsu < 2));
-        }
-
         rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
         rv.numWorkGroups.y = 1;
         rv.numWorkGroups.z = 1;
@@ -2632,6 +2626,11 @@ namespace TensileLite
                     sk.reduction = ReductionType::Tree;
                     sk.grid = tiles;
                 }
+            }
+
+            if(sk.reduction == ReductionType::Parallel && sk.grid / tiles < 2)
+            {
+                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with StreamK kernel with splitting factor < 2\n");
             }
         }
 
