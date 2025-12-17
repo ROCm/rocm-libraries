@@ -5,6 +5,10 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.36 (unreleased)
 
+### Added
+
+* Added support for per precision and architecture kernel configuration entries in the library.
+
 ### Optimized
 
 * Removed a potential unnecessary global transpose operation from MPI 3D multi-GPU pencil decompositions.
