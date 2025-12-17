@@ -5,7 +5,7 @@
 .. _type_traits:
 
 ********************************************************************
-Implementing traits for custom types in rocPRIM
+Custom type traits in rocPRIM
 ********************************************************************
 
 This interface is designed to enable users to provide additional type trait information to rocPRIM, facilitating better compatibility with custom types.
@@ -46,13 +46,14 @@ Available traits
 .. doxygenstruct:: rocprim::traits::float_bit_mask
   :members:
 
-.. doxygenstruct:: rocprim::traits::is_fundamental
+.. doxygenstruct:: rocprim::traits::is_fundamental 
+  :members:
+
+.. doxygenstruct:: rocprim::traits::radix_key_codec 
   :members:
 
 Type traits wrappers
 ====================
-.. doxygengroup::  rocprim_type_traits_wrapper
-  :content-only:
 
 .. doxygenstruct:: rocprim::is_floating_point
   :no-link:
