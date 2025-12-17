@@ -2220,36 +2220,41 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     elif isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         optSchedule = {
-            'SYNC'  : [[-1, 3, 17, 35, 35, 35, 53, 53, 53]],
+            'SYNC'  : [[-1, 5, 17, 17, 32, 32, 35, 35, 44, 53, 53, 63]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
             'LRA0'  : [[0, 1, 2, 3]],
-            'LRB0'  : [[4, 5, 6, 7, 8, 9]],
-            'PackA0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]],
-            'PackB0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]],
-            'GRA'   : [[35, 35, 35, 35, 35, 35, 35, 35]],
-            'GRB'   : [[35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35]],
-            'PackA1': [[17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]],
-            'PackB1': [[17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21]],
-            'LRA3'  : [[54, 55, 58, 59]],
-            'LRB3'  : [[56, 57, 60, 61, 62, 63]],
+            'LRB0'  : [[4, 6, 8, 10, 12, 14],
+                       [4, 7, 9, 11, 13, 15]],
+            'PackA0': [create_range(5,12,17, 1, 4)],
+            'PackB0': [create_range(18,18,34, 1, 4)],
+            'GRA'   : [[17,17, 18,18, 19,19, 20,20]],
+            'GRB'   : [[33, 33, 34, 34, 41, 42, 43, 44, 51, 51, 52, 52]],
+            'LRB3'  : [[36, 37, 38, 39, 40, 41]],
+            'LRA3'  : [[53, 55, 57, 59],
+                       [54, 56, 58, 60]],
+            'PackB3': [create_range(44,9,52, 1, 8)],
+            'PackA3': [create_range(63,8,71, 1, 6)],
             'LRSA'  : [[16]],
             'LRSB'  : [[16]],
-            'LWSA'  : [[52]],
-            'LWSB'  : [[52]],
-            'SNOP'  : [[-1, 0, 1, 2, 3, 17, 18, 19, 20, 21]],
+            'LWSA'  : [[61]],
+            'LWSB'  : [[62]],
+            'LCC'   : [[71, 71]],
             #'SNOP': [[-1, 0, 1, 2, 3, 17, 18, 19, 20, 21]],
         }
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0") ,
-            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write") ,
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="") ,
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
             SBarrier(comment="") ,
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
-            SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for previous set of global reads") ,
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads") ,
             SBarrier(comment="") ,
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+            SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+            SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for previous set of global reads") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads") ,
         ]
         nglshift = nllshift = 10
     elif isNT(kernel) and useLDSTr and TLDS==0:
@@ -2259,7 +2264,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
     
     numMfma = 72
-    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 @RegisterSchedule(
