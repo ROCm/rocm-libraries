@@ -333,10 +333,11 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             MIOPEN_LOG_I(sol << ": " << elapsed << (elapsed < best ? " < " : " >= ") << best);
             if(elapsed < best)
             {
-                best                              = elapsed;
-                selected                          = sol;
-                best_invoker                      = invoker;
-                core_result.find_search_best_time = best;
+                best         = elapsed;
+                selected     = sol;
+                best_invoker = invoker;
+                if(best < core_result.find_search_best_time)
+                    core_result.find_search_best_time = best;
             }
 
             auto solution = Solution{solver::Id{sol.solver_id}, elapsed, sol.workspace_sz};
