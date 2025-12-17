@@ -6,6 +6,28 @@
 #
 #===----------------------------------------------------------------------===##
 
+# MIT License
+#
+# Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import copy
 import errno
 import os
@@ -14,6 +36,7 @@ import random
 
 import lit.Test        # pylint: disable=import-error
 import lit.TestRunner  # pylint: disable=import-error
+import lit.util
 from lit.TestRunner import ParserKind, IntegratedTestKeywordParser  \
     # pylint: disable=import-error
 
@@ -214,25 +237,39 @@ class LibcxxTestFormat(object):
             data_files = [os.path.join(local_cwd, f)
                           for f in os.listdir(local_cwd) if f.endswith('.dat')]
             is_flaky = self._get_parser('FLAKY_TEST.', parsers).getValue()
-            max_retry = 3 if is_flaky else 1
+            # TODO(AMD): set this to 1 again when tests have stabilized with TheRock
+            # (https://github.com/ROCm/libhipcxx/issues/14)
+            max_retry = 3 #if is_flaky else 1
+            time_out_detected = False
             for retry_count in range(max_retry):
-                cmd, out, err, rc = self.executor.run(exec_path, [exec_path],
-                                                      local_cwd, data_files,
-                                                      env)
-                report = "Compiled With: '%s'\n" % ' '.join(compile_cmd)
-                report += libcudacxx.util.makeReport(cmd, out, err, rc)
-                result_expected = (rc == 0) == run_should_pass
+                try:
+                    cmd, out, err, rc = self.executor.run(exec_path, [exec_path],
+                                                        local_cwd, data_files,
+                                                        env)
+                    report = "Compiled With: '%s'\n" % ' '.join(compile_cmd)
+                    report += libcudacxx.util.makeReport(cmd, out, err, rc)
+                    result_expected = (rc == 0) == run_should_pass
+                except (libcudacxx.util.ExecuteCommandTimeoutException, lit.util.ExecuteCommandTimeoutException) as e:
+                    err = str(e)
+                    rc = -42
+                    out = "None"
+                    report = "Compiled With: '%s'\n" % ' '.join(compile_cmd)
+                    report += libcudacxx.util.makeReport(compile_cmd, out, err, rc)
+                    result_expected = False
+                    time_out_detected = True
                 if result_expected:
                     res = lit.Test.PASS if retry_count == 0 else lit.Test.FLAKYPASS
                     return lit.Test.Result(res, report)
                 # Rarely devices are unavailable, so just restart the test to avoid false negatives.
-                elif rc != 0 and "cudaErrorDevicesUnavailable" in out and max_retry <= 5:
+                elif rc != 0 and "hipErrorNoDevice" in out and max_retry <= 5:
                     max_retry += 1
                 elif retry_count + 1 == max_retry:
                     if run_should_pass:
                         report += "Compiled test failed unexpectedly!"
                     else:
                         report += "Compiled test succeeded unexpectedly!"
+                    if time_out_detected:
+                        return lit.Test.Result(lit.Test.TIMEOUT, report)
                     return lit.Test.Result(lit.Test.FAIL, report)
 
             assert False # Unreachable
