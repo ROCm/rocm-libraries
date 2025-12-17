@@ -245,8 +245,7 @@ namespace rocRoller::KernelGraph
             incorporate(node, std::unordered_set<std::string>{});
         }
 
-        ControlFlowArgumentVisitor(KernelGraph const& graph,
-                                   AssemblyKernelPtr  kernel)
+        ControlFlowArgumentVisitor(KernelGraph const& graph, AssemblyKernelPtr kernel)
             : TopoControlGraphVisitor(graph)
             , m_tracer{graph}
             , m_tagManager(nullptr)

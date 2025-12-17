@@ -26,8 +26,8 @@
 
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 
-#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 
