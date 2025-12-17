@@ -5,13 +5,15 @@
 .. _warp-index:
 
 ********************************************************************
- Warp-Level Operations
+rocPRIM warp-level operations
 ********************************************************************
 
-   * :ref:`warp-load`
-   * :ref:`warp-store`
-   * :ref:`warp-reduce`
-   * :ref:`warp-scan`
-   * :ref:`warp-sort`
-   * :ref:`warp-shuffle`
-   * :ref:`warp-exchange`
+API reference for rocPRIM device-level operations.
+
+* :ref:`warp-load`
+* :ref:`warp-store`
+* :ref:`warp-reduce`
+* :ref:`warp-scan`
+* :ref:`warp-sort`
+* :ref:`warp-shuffle`
+* :ref:`warp-exchange`
