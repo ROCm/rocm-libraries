@@ -233,7 +233,6 @@ namespace rocRoller
                            const bool          maybeLDS,
                            const bool          isTransposed,
                            const ContextPtr    context,
-                           const CommandPtr    command,
                            Transformer&        coords)
         {
             auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
@@ -284,16 +283,15 @@ namespace rocRoller
                 auto userTag = only(graph.coordinates.getNeighbours<Graph::Direction::Downstream>(
                                         baseAddress))
                                    .value();
-                AssertFatal(
-                    userTag > 0,
-                    fmt::format("Could not find User connected to BaseAddress({})", baseAddress));
-                auto user = graph.coordinates.getNode<CG::User>(userTag);
+                auto user = graph.coordinates.get<CG::User>(userTag);
 
                 AssertFatal(
-                    command, "Expected command pointer but got nullptr", ShowValue(command));
+                    userTag > 0 && user.has_value(),
+                    fmt::format("Could not find User connected to BaseAddress({})!", baseAddress));
 
-                auto userAsCmdArg = findArgumentByName(command, user.argumentName);
-                expr              = expr + convert(ci.offsetType, userAsCmdArg->expression());
+                auto basePointer = Expression::fromKernelArgument(
+                    context->kernel()->findArgument(user->argumentName));
+                expr = expr + convert(ci.offsetType, basePointer);
             }
 
             auto assignNode         = Assign{offsetRegisterType, convert(ci.offsetType, expr)};
@@ -562,7 +560,6 @@ namespace rocRoller
                                                    maybeLDS,
                                                    isTransposed,
                                                    m_context,
-                                                   m_command,
                                                    xform);
                 }
 
