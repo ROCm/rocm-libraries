@@ -82,11 +82,10 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle       handle,
         launch = rocsparse::find_csrilu0_kernel_hash_launch(handle, csrilu0_info, A);
     }
 
-    RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                       0,
-                       rocsparse::indextype_sizeof(A->col_type) * A->rows * A->batch_count,
-                       handle->stream));
+    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                       0,
+                                       sizeof(int32_t) * A->rows * A->batch_count,
+                                       handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle,
                                      csrilu0_info,
