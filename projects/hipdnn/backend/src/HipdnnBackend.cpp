@@ -62,13 +62,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate(hipdnnHandle_t* handle)
 
         hipdnn_backend::HandleFactory::createHandle(handle);
 
-        LOG_API_SUCCESS(apiName, "createHandle={:p}", static_cast<void*>(*handle));
+        LOG_API_SUCCESS(apiName, "createHandle={}", logPtr(*handle));
     });
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
 {
-    LOG_API_ENTRY("handle={:p}", static_cast<void*>(handle));
+    LOG_API_ENTRY("handle={}", logPtr(handle));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
@@ -81,8 +81,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream(hipdnnHandle_t handle, hipStream_t streamId)
 {
-    LOG_API_ENTRY(
-        "handle={:p}, streamId={:p}", static_cast<void*>(handle), static_cast<void*>(streamId));
+    LOG_API_ENTRY("handle={}, streamId={:p}", logPtr(handle), static_cast<void*>(streamId));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
@@ -95,8 +94,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream(hipdnnHandle_t handle, hipS
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetStream(hipdnnHandle_t handle, hipStream_t* streamId)
 {
-    LOG_API_ENTRY(
-        "handle={:p}, streamId_ptr={:p}", static_cast<void*>(handle), static_cast<void*>(streamId));
+    LOG_API_ENTRY("handle={}, streamId_ptr={:p}", logPtr(handle), static_cast<void*>(streamId));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
@@ -118,14 +116,14 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor(
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         hipdnn_backend::DescriptorFactory::create(descriptorType, descriptor);
 
-        LOG_API_SUCCESS(apiName, "created_descriptor={:p}", static_cast<void*>(*descriptor));
+        LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendDestroyDescriptor(hipdnnBackendDescriptor_t descriptor)
 {
-    LOG_API_ENTRY("descriptor={:p}", static_cast<void*>(descriptor));
+    LOG_API_ENTRY("descriptor={}", logPtr(descriptor));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
@@ -140,10 +138,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
                                                           hipdnnBackendDescriptor_t executionPlan,
                                                           hipdnnBackendDescriptor_t variantPack)
 {
-    LOG_API_ENTRY("handle={:p}, executionPlan={:p}, variantPack={:p}",
-                  static_cast<void*>(handle),
-                  static_cast<void*>(executionPlan),
-                  static_cast<void*>(variantPack));
+    LOG_API_ENTRY("handle={}, executionPlan={}, variantPack={}",
+                  logPtr(handle),
+                  logPtr(executionPlan),
+                  logPtr(variantPack));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
@@ -158,7 +156,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescriptor_t descriptor)
 {
-    LOG_API_ENTRY("descriptor={:p}", static_cast<void*>(descriptor));
+    LOG_API_ENTRY("descriptor={}", logPtr(descriptor));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
@@ -177,9 +175,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                               int64_t* elementCount,
                               void* arrayOfElements)
 {
-    LOG_API_ENTRY("descriptor={:p}, attributeName={}, attributeType={}, "
+    LOG_API_ENTRY("descriptor={}, attributeName={}, attributeType={}, "
                   "requestedElementCount={}, elementCount_ptr={:p}, arrayOfElements_ptr={:p}",
-                  static_cast<void*>(descriptor),
+                  logPtr(descriptor),
                   hipdnn_backend::hipdnnGetAttributeNameString(attributeName),
                   hipdnn_backend::hipdnnGetAttributeTypeString(attributeType),
                   requestedElementCount,
@@ -215,9 +213,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                               int64_t elementCount,
                               const void* arrayOfElements)
 {
-    LOG_API_ENTRY("descriptor={:p}, attributeName={}, attributeType={}, "
+    LOG_API_ENTRY("descriptor={}, attributeName={}, attributeType={}, "
                   "elementCount={}, arrayOfElements_ptr={:p}",
-                  static_cast<void*>(descriptor),
+                  logPtr(descriptor),
                   hipdnn_backend::hipdnnGetAttributeNameString(attributeName),
                   hipdnn_backend::hipdnnGetAttributeTypeString(attributeType),
                   elementCount,
@@ -245,7 +243,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
         hipdnn_backend::DescriptorFactory::createGraphExt(
             descriptor, serializedGraph, graphByteSize);
 
-        LOG_API_SUCCESS(apiName, "created_descriptor={:p}", static_cast<void*>(*descriptor));
+        LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
 }
 
