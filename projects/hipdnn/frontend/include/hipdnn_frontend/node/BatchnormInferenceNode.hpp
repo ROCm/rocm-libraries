@@ -75,9 +75,14 @@ public:
         auto mean = attributes.get_mean();
         auto invVar = attributes.get_inv_variance();
 
-        // SECTION 2: Validate Input Tensor Properties
-        // Why: Input must be at least 2D (N, C) for per-channel normalization.
+        // SECTION 2: Validate Required Tensor Dimensions
+        // Why: All required tensors must have dimensions set by user - they are never inferred.
+        // For inference: x, scale, bias, mean, invVar are all required user parameters.
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(mean, 2, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(invVar, 2, "Inverse variance tensor"));
 
         HIPDNN_RETURN_IF_FALSE(
             x->validate_dims_and_strides_set_and_positive(),
@@ -88,8 +93,13 @@ public:
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape during inference just as in training.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
-        HIPDNN_CHECK_ERROR(
-            validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
+
+        // x validated in SECTION 2, only check if y dimensions are set
+        if(areTensorDimensionsSet(y))
+        {
+            HIPDNN_CHECK_ERROR(
+                validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
+        }
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: All parameters are per-channel with shape [1, C, 1, 1]:
@@ -101,30 +111,18 @@ public:
         auto& xDims = x->get_dim();
         int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape (if ready)
-        if(areTensorDimensionsSet(scale))
-        {
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-        }
+        // Validate scale has correct channel-only shape (required user parameter)
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
-        // Validate bias has correct channel-only shape (if ready)
-        if(areTensorDimensionsSet(bias))
-        {
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
-        }
+        // Validate bias has correct channel-only shape (required user parameter)
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
 
-        // Validate mean has correct channel-only shape (if ready)
-        if(areTensorDimensionsSet(mean))
-        {
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
-        }
+        // Validate mean has correct channel-only shape (required user parameter for inference)
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
 
-        // Validate inv_variance has correct channel-only shape (if ready)
-        if(areTensorDimensionsSet(invVar))
-        {
-            HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
-        }
+        // Validate inv_variance has correct channel-only shape (required user parameter for inference)
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
 
         // NOTE: Unlike training, inference does NOT require m > 1 (where m = N*H*W for 4D
         // or m = N*D*H*W for 5D) since it uses pre-computed statistics rather than

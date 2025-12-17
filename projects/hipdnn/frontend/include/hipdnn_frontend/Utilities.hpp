@@ -133,18 +133,31 @@ inline bool isBatchNormSpatialMode(const std::shared_ptr<TensorAttributes>& scal
 
 // Validates batch normalization training spatial dimension constraints
 // Returns an Error indicating if the input tensor dimensions are valid for batch norm training
+// NOTE: This function expects tensors to be ready (use areTensorDimensionsSet() before calling if needed)
 inline Error
     validateBatchNormTrainingSpatialDimensions(const std::shared_ptr<TensorAttributes>& x,
                                                const std::shared_ptr<TensorAttributes>& scale,
                                                const std::string& operation
                                                = "Batch normalization training")
 {
-    if(!x || !scale || x->get_dim().size() < 2)
+    if(!x)
     {
-        return {ErrorCode::OK, ""}; // Skip validation if dimensions not set yet
+        return {ErrorCode::ATTRIBUTE_NOT_SET, "Input tensor is not set"};
+    }
+
+    if(!scale)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET, "Scale tensor is not set"};
     }
 
     const auto& dims = x->get_dim();
+
+    if(dims.size() < 2)
+    {
+        return {ErrorCode::INVALID_VALUE,
+                "Input tensor must have at least 2 dimensions, but has "
+                    + std::to_string(dims.size())};
+    }
 
     if(isBatchNormSpatialMode(scale))
     {
@@ -200,25 +213,24 @@ inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttribu
 }
 
 // Validates two tensors have matching shapes
+// NOTE: This function expects both tensors to have dimensions set (use areTensorDimensionsSet() before calling)
 inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& tensor1,
                                        const std::shared_ptr<TensorAttributes>& tensor2,
                                        const std::string& tensor1Name,
                                        const std::string& tensor2Name)
 {
-    if(!tensor1 || !tensor2)
+    if(!tensor1)
     {
-        return {ErrorCode::OK, ""}; // Skip if either tensor not set yet
+        return {ErrorCode::ATTRIBUTE_NOT_SET, tensor1Name + " is not set"};
+    }
+
+    if(!tensor2)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET, tensor2Name + " is not set"};
     }
 
     const auto& dims1 = tensor1->get_dim();
     const auto& dims2 = tensor2->get_dim();
-
-    // Skip validation if either tensor has empty dims - they will be inferred in infer_properties_node()
-    // (e.g., output tensor y gets dims via y->set_dim(x->get_dim()) during property inference)
-    if(dims1.empty() || dims2.empty())
-    {
-        return {ErrorCode::OK, ""};
-    }
 
     if(dims1.size() != dims2.size())
     {

@@ -72,10 +72,13 @@ public:
         auto bias = attributes.get_bias();
         auto epsilon = attributes.get_epsilon();
 
-        // SECTION 2: Validate Input Tensor Properties
-        // Why: Input must be at least 2D (N, C) for BN to work. BN normalizes per-channel,
-        // so we need batch and channel dimensions at minimum.
+        // SECTION 2: Validate Required Tensor Dimensions
+        // Why: All required tensors (x, scale, bias, epsilon) must have dimensions set by user.
+        // These are never inferred - validate them upfront.
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(epsilon, 1, "Epsilon"));
 
         HIPDNN_RETURN_IF_FALSE(
             x->validate_dims_and_strides_set_and_positive(),
@@ -85,8 +88,13 @@ public:
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape - it only transforms values, not dimensions.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
-        HIPDNN_CHECK_ERROR(
-            validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
+
+        // x validated in SECTION 2, only check if y dimensions are set
+        if(areTensorDimensionsSet(y))
+        {
+            HIPDNN_CHECK_ERROR(
+                validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
+        }
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: All BN parameters (scale, bias, mean, variance) are per-channel with
@@ -100,17 +108,11 @@ public:
         auto& xDims = x->get_dim();
         int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape (if ready)
-        if(areTensorDimensionsSet(scale))
-        {
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-        }
+        // Validate scale has correct channel-only shape (required user parameter)
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
-        // Validate bias has correct channel-only shape (if ready)
-        if(areTensorDimensionsSet(bias))
-        {
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
-        }
+        // Validate bias has correct channel-only shape (required user parameter)
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
 
         // Validate optional mean tensor (if ready)
         if(areTensorDimensionsSet(attributes.get_mean()))

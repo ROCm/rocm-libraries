@@ -155,7 +155,8 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsNullXTensor)
     scale->set_dim({1, 3, 1, 1});
 
     auto error = validateBatchNormTrainingSpatialDimensions(nullX, scale);
-    EXPECT_EQ(error.code, ErrorCode::OK);
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("Input tensor is not set") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateBNTrainingSpatialDimsNullScaleTensor)
@@ -165,7 +166,8 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsNullScaleTensor)
     std::shared_ptr<TensorAttributes> nullScale = nullptr;
 
     auto error = validateBatchNormTrainingSpatialDimensions(x, nullScale);
-    EXPECT_EQ(error.code, ErrorCode::OK);
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("Scale tensor is not set") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateBNTrainingSpatialDimsXDimsLessThanTwo)
@@ -176,7 +178,9 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsXDimsLessThanTwo)
     scale->set_dim({1, 32, 1, 1});
 
     auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
-    EXPECT_EQ(error.code, ErrorCode::OK);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("Input tensor must have at least 2 dimensions")
+                != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateBNTrainingSpatialDimsValid2DLargeNHW)
@@ -394,7 +398,8 @@ TEST(TestUtilities, ValidateTensorShapesMatchNullTensor1)
     tensor2->set_dim({2, 64});
 
     auto error = validateTensorShapesMatch(nullTensor, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip validation if tensor not set
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("Tensor1 is not set") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateTensorShapesMatchNullTensor2)
@@ -404,7 +409,8 @@ TEST(TestUtilities, ValidateTensorShapesMatchNullTensor2)
     std::shared_ptr<TensorAttributes> nullTensor = nullptr;
 
     auto error = validateTensorShapesMatch(tensor1, nullTensor, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip validation if tensor not set
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("Tensor2 is not set") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateTensorShapesMatchEmptyDims1)
@@ -414,7 +420,10 @@ TEST(TestUtilities, ValidateTensorShapesMatchEmptyDims1)
     tensor2->set_dim({2, 64});
 
     auto error = validateTensorShapesMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip - dims will be inferred
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must have the same number of dimensions")
+                != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("0 vs 2") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateTensorShapesMatchEmptyDims2)
@@ -424,7 +433,10 @@ TEST(TestUtilities, ValidateTensorShapesMatchEmptyDims2)
     auto tensor2 = std::make_shared<TensorAttributes>();
 
     auto error = validateTensorShapesMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip - dims will be inferred
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must have the same number of dimensions")
+                != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("2 vs 0") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateTensorShapesMatchValid)

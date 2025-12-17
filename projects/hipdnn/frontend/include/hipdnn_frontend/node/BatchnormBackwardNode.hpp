@@ -83,11 +83,12 @@ public:
         auto dscale = attributes.get_dscale();
         auto dbias = attributes.get_dbias();
 
-        // SECTION 2: Validate Input Tensor Properties
-        // Why: Both x (from forward pass) and dy (gradient from next layer) are required
-        // for backward computation. They must be at least 2D (N, C).
+        // SECTION 2: Validate Required Tensor Dimensions
+        // Why: All required tensors (x, dy, scale) must have dimensions set by user.
+        // Outputs (dx, dscale, dbias) are inferred, so not validated here.
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(dy, 2, "Gradient input tensor (dy)"));
+        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
 
         HIPDNN_RETURN_IF_FALSE(
             x->validate_dims_and_strides_set_and_positive(),
@@ -106,11 +107,17 @@ public:
         // - dy has same shape as y (and therefore x) from forward pass
         // - dx has same shape as x (gradient w.r.t. input)
         // All gradient tensors must match the data tensor shapes they correspond to.
+
+        // Both x and dy validated in SECTION 2, can call directly
         HIPDNN_CHECK_ERROR(
             validateTensorShapesMatch(x, dy, "Input tensor (x)", "Gradient input tensor (dy)"));
 
-        HIPDNN_CHECK_ERROR(
-            validateTensorShapesMatch(x, dx, "Input tensor (x)", "Gradient output tensor (dx)"));
+        // dx not validated yet, check if dimensions set before validating
+        if(areTensorDimensionsSet(dx))
+        {
+            HIPDNN_CHECK_ERROR(validateTensorShapesMatch(
+                x, dx, "Input tensor (x)", "Gradient output tensor (dx)"));
+        }
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: Parameter gradients (dscale, dbias) are accumulated per-channel over (N,H,W):
@@ -127,20 +134,17 @@ public:
         auto& xDims = x->get_dim();
         int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape (if ready)
-        if(areTensorDimensionsSet(scale))
-        {
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-        }
+        // Validate scale has correct channel-only shape (required user parameter)
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
-        // Validate dscale has correct channel-only shape (if ready)
+        // Validate dscale has correct channel-only shape (gradient output - if dimensions set)
         if(areTensorDimensionsSet(dscale))
         {
             HIPDNN_CHECK_ERROR(
                 validateChannelOnlyTensorShape(dscale, channels, "Scale gradient tensor (dscale)"));
         }
 
-        // Validate dbias has correct channel-only shape (if ready)
+        // Validate dbias has correct channel-only shape (gradient output - if dimensions set)
         if(areTensorDimensionsSet(dbias))
         {
             HIPDNN_CHECK_ERROR(

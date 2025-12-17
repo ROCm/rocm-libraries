@@ -29,6 +29,18 @@ TEST(TestBatchnormInferenceNode, BatchnormInferenceNodeProperties)
     auto outputTensor = batchnormAttributes.get_y();
     outputTensor->set_uid(2).set_name("OutputTensor");
 
+    auto scaleTensor = batchnormAttributes.get_scale();
+    scaleTensor->set_dim({1, 2, 1, 1});
+
+    auto biasTensor = batchnormAttributes.get_bias();
+    biasTensor->set_dim({1, 2, 1, 1});
+
+    auto meanTensor = batchnormAttributes.get_mean();
+    meanTensor->set_dim({1, 2, 1, 1});
+
+    auto invVarTensor = batchnormAttributes.get_inv_variance();
+    invVarTensor->set_dim({1, 2, 1, 1});
+
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
     auto error = node.infer_properties_node();
@@ -52,9 +64,17 @@ TEST(TestBatchnormInferenceNode, PreValidateNode)
     scaleTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -117,6 +137,15 @@ TEST(TestBatchnormInferenceNode, PreValidateNodeMissingValues)
     auto scaleTensor = batchnormAttributes.get_scale();
     scaleTensor->set_dim({1, 64, 1, 1});
 
+    auto biasTensor = batchnormAttributes.get_bias();
+    biasTensor->set_dim({1, 64, 1, 1});
+
+    auto meanTensor = batchnormAttributes.get_mean();
+    meanTensor->set_dim({1, 64, 1, 1});
+
+    auto invVarTensor = batchnormAttributes.get_inv_variance();
+    invVarTensor->set_dim({1, 64, 1, 1});
+
     batchnormAttributesCopy = batchnormAttributes;
     BatchnormInferenceNode nodeWithAllValues(std::move(batchnormAttributesCopy), graphAttributes);
 
@@ -143,6 +172,18 @@ TEST(TestBatchnormInferenceNode, InferPropertiesNode)
 
     auto outputTensor = batchnormAttributes.get_y();
     outputTensor->set_uid(2).set_name("OutputTensor");
+
+    auto scaleTensor = batchnormAttributes.get_scale();
+    scaleTensor->set_dim({1, 2, 1, 1});
+
+    auto biasTensor = batchnormAttributes.get_bias();
+    biasTensor->set_dim({1, 2, 1, 1});
+
+    auto meanTensor = batchnormAttributes.get_mean();
+    meanTensor->set_dim({1, 2, 1, 1});
+
+    auto invVarTensor = batchnormAttributes.get_inv_variance();
+    invVarTensor->set_dim({1, 2, 1, 1});
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -297,9 +338,17 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsMismatchedInputOutputShapes)
     scaleTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -323,9 +372,17 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsMismatchedChannelDimensions)
     scaleTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 128, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 128, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 128, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -349,9 +406,17 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsInvalidScaleTensorShape)
     scaleTensor->set_dim({1, 64, 32, 32}); // Should be [1, 64, 1, 1] for spatial mode
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -379,8 +444,13 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsInvalidBiasTensorShape)
     biasTensor->set_dim({2, 64, 1, 1}); // Batch dimension should be 1
     batchnormAttributes.set_bias(biasTensor);
 
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -404,13 +474,17 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsInvalidMeanTensorShape)
     scaleTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
 
     auto meanTensor = std::make_shared<TensorAttributes>();
     meanTensor->set_dim({1, 32, 1, 1}); // Wrong channel count
     batchnormAttributes.set_mean(meanTensor);
 
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 32, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -434,8 +508,13 @@ TEST(TestBatchnormInferenceNode, PreValidateRejectsInvalidInvVarianceTensorShape
     scaleTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
 
     auto invVarTensor = std::make_shared<TensorAttributes>();
     invVarTensor->set_dim({1, 64, 2, 1}); // Spatial dimension should be 1
@@ -468,9 +547,17 @@ TEST(TestBatchnormInferenceNode, PreValidateAcceptsSpatialDimensionEqualsOne)
     scaleTensor->set_dim({1, 256, 1, 1}); // Spatial mode
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 256, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 256, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 256, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -494,9 +581,17 @@ TEST(TestBatchnormInferenceNode, PreValidateAcceptsValidSpatialDimensions)
     scaleTensor->set_dim({1, 3, 1, 1}); // Spatial mode
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 3, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 3, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 3, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -524,9 +619,17 @@ TEST(TestBatchnormInferenceNode, PreValidateAcceptsValid5DSpatialDimensions)
     scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 64, 1, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -550,9 +653,17 @@ TEST(TestBatchnormInferenceNode, PreValidateAccepts5DSpatialDimensionEqualsOne)
     scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
     batchnormAttributes.set_scale(scaleTensor);
 
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({1, 64, 1, 1, 1});
+    batchnormAttributes.set_mean(meanTensor);
+
+    auto invVarTensor = std::make_shared<TensorAttributes>();
+    invVarTensor->set_dim({1, 64, 1, 1, 1});
+    batchnormAttributes.set_inv_variance(invVarTensor);
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
