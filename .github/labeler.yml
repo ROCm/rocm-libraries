@@ -1,14 +1,14 @@
-# "project: composablekernel":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/composablekernel/**/*'
+"project: composablekernel":
+- changed-files:
+  - any-glob-to-any-file: 'projects/composablekernel/**/*'
 
-# "project: hipblas":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/hipblas/**/*'
+"project: hipblas":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipblas/**/*'
 
-# "project: hipblas-common":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/hipblas-common/**/*'
+"project: hipblas-common":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipblas-common/**/*'
 
 "project: hipblaslt":
 - changed-files:
@@ -28,25 +28,25 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipdnn/**/*'
 
-# "project: hipfft":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/hipfft/**/*'
+"project: hipfft":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipfft/**/*'
 
-# "project: hiprand":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/hiprand/**/*'
+"project: hiprand":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hiprand/**/*'
 
-# "project: hipsolver":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/hipsolver/**/*'
+"project: hipsolver":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipsolver/**/*'
 
-# "project: hipsparse":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/hipsparse/**/*'
+"project: hipsparse":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipsparse/**/*'
 
-# "project: hipsparselt":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
+"project: hipsparselt":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipsparselt/**/*'
 
 "project: miopen":
 - changed-files:
@@ -60,38 +60,38 @@
 - changed-files:
   - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
 
-# "project: rocblas":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/rocblas/**/*'
-#   - any-glob-to-any-file: 'shared/tensile/**/*'
+"project: rocblas":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocblas/**/*'
+  - any-glob-to-any-file: 'shared/tensile/**/*'
 
-# "project: rocfft":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/rocfft/**/*'
+"project: rocfft":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocfft/**/*'
 
-# "project: rocprim":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/rocprim/**/*'
+"project: rocprim":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprim/**/*'
 
-# "project: rocrand":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/rocrand/**/*'
+"project: rocrand":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocrand/**/*'
 
-# "project: rocsolver":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/rocsolver/**/*'
+"project: rocsolver":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocsolver/**/*'
 
-# "project: rocsparse":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/rocsparse/**/*'
+"project: rocsparse":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocsparse/**/*'
 
-# "project: rocthrust":
-# - changed-files:
-#   - any-glob-to-any-file: 'projects/rocthrust/**/*'
+"project: rocthrust":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocthrust/**/*'
 
-# "shared: mxdatagenerator":
-# - changed-files:
-#   - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
+"shared: mxdatagenerator":
+- changed-files:
+  - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
 
 "shared: origami":
 - changed-files:
