@@ -181,14 +181,14 @@ install_packages( )
 
   if [[ "${build_clients}" == true ]]; then
     # dependencies to build the client
-    library_dependencies_ubuntu+=( "gfortran" "libomp-dev" )
-    library_dependencies_centos_rhel+=( "devtoolset-7-gcc-gfortran" "libgomp" )
-    library_dependencies_centos_8+=( "gcc-gfortran" "libgomp" )
-    library_dependencies_rhel_8+=( "gcc-gfortran" "libgomp" )
-    library_dependencies_rhel_9+=( "gcc-gfortran" "libgomp" )
-    library_dependencies_rhel_10+=( "gcc-gfortran" "libgomp" )
-    library_dependencies_fedora+=( "gcc-gfortran" "libgomp" )
-    library_dependencies_sles+=( "gcc-fortran" "libgomp1" )
+    library_dependencies_ubuntu+=( "gfortran" "libomp-dev" "libomp5" )
+    library_dependencies_centos_rhel+=( "devtoolset-7-gcc-gfortran" "libgomp" "libomp" )
+    library_dependencies_centos_8+=( "gcc-gfortran" "libgomp" "libomp" )
+    library_dependencies_rhel_8+=( "gcc-gfortran" "libgomp" "libomp" )
+    library_dependencies_rhel_9+=( "gcc-gfortran" "libgomp" "libomp" )
+    library_dependencies_rhel_10+=( "gcc-gfortran" "libgomp" "libomp" )
+    library_dependencies_fedora+=( "gcc-gfortran" "libgomp" "libomp" )
+    library_dependencies_sles+=( "gcc-fortran" "libgomp1" "libomp" )
 
     # wget is needed for blis
     if [[ ! -e "${build_dir}/deps/blis/lib/libblis.a" ]] && [[ ! -e "/usr/local/lib/libblis.a" ]]; then
