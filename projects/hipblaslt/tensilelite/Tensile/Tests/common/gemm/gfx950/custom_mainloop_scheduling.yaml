@@ -897,6 +897,40 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - MatrixInstruction:        
+          - [16, 16, 32, 1,  1, 7, 4,  2, 2] # SIMD = (224, 128/4) = (224, 32)          
+        - PrefetchGlobalRead: [2] ## PGR=2 is not supported with DTL
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1] #[-1]
+        - LdsPadB: [-1] #[-1]
+        - StaggerU: [0]
+        #- WorkGroupMapping: [16]
+        #- WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+        #- SpaceFillingAlgo: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [3584, 2048, 1, 8192]
+        - BiasTypeArgs: ['b'] 
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
         - MatrixInstruction:
            - [16, 16, 32, 1, 1, 7, 8, 2, 2]
         - PrefetchGlobalRead: [2]
@@ -1875,40 +1909,6 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[192], [320], [1], [1, 17, 64]]
           - Range: [[192], [320], [1], [32, 64, 256]]
-        - BiasTypeArgs: ['b']
-    - # BenchmarkProblemSizeGroup - Standard - All problem
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:        
-          - [16, 16, 32, 1,  1, 7, 4,  2, 2] # SIMD = (224, 128/4) = (224, 32)          
-        - PrefetchGlobalRead: [2] ## PGR=2 is not supported with DTL
-        - PrefetchLocalRead: [1]
-        - DepthU: [64]
-        - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - TransposeLDS: [1] #0,1
-        - LocalReadVectorWidth: [8]
-        - GlobalReadVectorWidthA: [8]
-        - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
-        - StreamK: [3]
-        - LdsPadA: [-1] #[-1]
-        - LdsPadB: [-1] #[-1]
-        - StaggerU: [0]
-        #- WorkGroupMapping: [16]
-        #- WorkGroupMappingXCC: [2]
-        - 1LDSBuffer: [0]
-        - NonTemporalD: [4]
-        - SourceSwap: [1]
-        - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [1]
-        #- SpaceFillingAlgo: [1]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [3584, 2048, 1, 8192]
         - BiasTypeArgs: ['b']
   ########################################
   # HHS NT - standard
