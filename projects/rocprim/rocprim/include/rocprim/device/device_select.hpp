@@ -25,10 +25,9 @@
 #include <type_traits>
 
 #include "../config.hpp"
-#include "../detail/binary_op_wrappers.hpp"
 #include "../detail/various.hpp"
-
 #include "../iterator/transform_iterator.hpp"
+#include "../thread/thread_operators.hpp"
 
 #include "device_partition.hpp"
 
@@ -546,7 +545,7 @@ inline hipError_t unique(void*                     temporary_storage,
     rocprim::empty_type* const no_values = nullptr; // key only
 
     // Convert equality operator to inequality operator
-    auto inequality_op = detail::inequality_wrapper<EqualityOp>(equality_op);
+    auto inequality_op = inequality_wrapper<EqualityOp>(equality_op);
 
     using output_key_iterator_tuple = tuple<OutputIterator, ::rocprim::empty_type>;
     output_key_iterator_tuple output_tuple{output, ::rocprim::empty_type()};
@@ -649,7 +648,7 @@ inline hipError_t unique_by_key(void*                           temporary_storag
     const auto no_predicate = ::rocprim::empty_type{};
 
     // Convert equality operator to inequality operator
-    const auto inequality_op = detail::inequality_wrapper<EqualityOp>(equality_op);
+    const auto inequality_op = inequality_wrapper<EqualityOp>(equality_op);
 
     using output_key_iterator_tuple = tuple<OutputKeyIterator, ::rocprim::empty_type>;
     output_key_iterator_tuple output_key_tuple{keys_output, ::rocprim::empty_type()};
