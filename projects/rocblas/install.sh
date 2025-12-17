@@ -163,7 +163,8 @@ install_packages( )
   local library_dependencies_fedora=( "make" "rpm-build"
                                       "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" "libcxx-devel" )
-  local library_dependencies_sles=(   "make" "gcc-c++" "rpm-build" )
+  local library_dependencies_sles=(   "make" "gcc-c++" "rpm-build"
+                                      "python3" "python3-PyYAML" "python3-virtualenv" "python3-pip" )
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
     library_dependencies_ubuntu+=("libmsgpack-dev")
