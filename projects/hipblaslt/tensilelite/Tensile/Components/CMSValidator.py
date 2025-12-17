@@ -729,6 +729,9 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
     if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
         return False, f"Incorrect number of VMFMA indices in mfmaReorder. Expected {timeline.num_vmfma}, given {len(mfma_reorder)}."
 
+    n_tiles_a = kernel["MIWaveTileA"]
+    n_tiles_b = kernel["MIWaveTileB"]
+
     n_local_reads_a = len(timeline.get_instructions("LRA0", MAIN_LOOP))
     n_local_reads_b = len(timeline.get_instructions("LRB0", MAIN_LOOP))
 
@@ -740,13 +743,15 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
             local_reads = timeline.get_instructions(instruction_name, loop)
             for lr_idx, (_, lr) in enumerate(local_reads):
                 needed_by = lr_needed_by_mfma(
-                    local_read=lr,
+                    local_read_name=lr.name,
                     lr_idx=lr_idx,
                     num_vmfma=timeline.num_vmfma,
                     mfma_reorder=mfma_reorder,
-                    n_tiles_a=kernel["MIWaveTileA"], n_tiles_b=kernel["MIWaveTileB"],
+                    n_tiles_a=n_tiles_a, n_tiles_b=n_tiles_b,
                     n_local_reads_a=n_local_reads_a,
-                    n_local_reads_b=n_local_reads_b)                
+                    n_local_reads_b=n_local_reads_b,
+                    force_unroll_sub_iter=kernel.get("ForceUnrollSubIter", False),
+                    use_f32x_emulation=kernel.get("UseF32XEmulation", False))                
                 lr.needed_by = needed_by + loop_offset
 
 
@@ -829,8 +834,69 @@ def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> li
     return schedules[0] if len(schedules) == 1 else schedules[code_path]
 
 
+def _transform_index_with_force_unroll_sub_iter(
+    needed_by: int,
+    is_lr0: bool,
+    is_lra: bool,
+    n_tiles_a: int,
+    n_tiles_b: int,
+    use_f32x_emulation: bool,
+    mfma_reorder: list[int],
+    num_vmfma: int,
+) -> int:
+    """
+    Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is enabled.
+    """
+    # For LR0s, add offset for second half of tiles
+    if is_lr0:
+        if is_lra:
+            needed_by += n_tiles_a // 2
+        else:  # LRB0
+            needed_by += n_tiles_a * (n_tiles_b // 2)
+    
+    # Apply ForceUnrollSubIter reordering on TILE indices first,
+    # then convert to MFMA indices for F32X emulation
+    needed_by = index_for_force_unroll_sub_iter(needed_by, n_tiles_a, n_tiles_b)
+    
+    if use_f32x_emulation:  # Each tile requires 3 MFMAs
+        needed_by *= 3
+    
+    if mfma_reorder:
+        needed_by = mfma_reorder[needed_by]
+    
+    if not is_lr0:  # LR1/LR3 reads data for next iteration.
+        needed_by += num_vmfma
+    
+    return needed_by
+
+
+def _transform_index_standard(
+    needed_by: int,
+    is_lr0: bool,
+    use_f32x_emulation: bool,
+    mfma_reorder: list[int],
+    num_vmfma: int,
+) -> int:
+    """
+    Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is disabled.
+    """
+    if use_f32x_emulation:  # Each tile requires 3 MFMAs
+        needed_by *= 3
+    
+    if is_lr0:  # LR0 reads data for 2nd half of this iteration
+        needed_by += num_vmfma // 2
+    
+    if mfma_reorder:
+        needed_by = mfma_reorder[needed_by]
+    
+    if not is_lr0:  # LR1/LR3 reads data for first half of next iteration
+        needed_by += num_vmfma
+    
+    return needed_by
+
+
 def lr_needed_by_mfma(
-    local_read: LocalRead,
+    local_read_name: str,
     lr_idx: int,
     num_vmfma: int,
     mfma_reorder: list[int],
@@ -838,12 +904,14 @@ def lr_needed_by_mfma(
     n_tiles_b: int,
     n_local_reads_a: int,
     n_local_reads_b: int,
+    force_unroll_sub_iter: bool,
+    use_f32x_emulation: bool,
     ) -> int:
     """
     Helper function to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
 
     Args:
-        local_read: The LocalRead object to calculate the needed_by index for.
+        local_read_name: The name of the local read to calculate the needed_by index for.
         lr_idx: The index of the LRA/LRB in the list of LRAs/LRBs for the given code path.
         num_vmfma: The number of MFMA indices.
         mfma_reorder: The reordering mapping for MFMA indices.
@@ -851,6 +919,8 @@ def lr_needed_by_mfma(
         n_tiles_b: The number of tiles in the B dimension.
         n_local_reads_a: The number of local reads in the A dimension.
         n_local_reads_b: The number of local reads in the B dimension.
+        force_unroll_sub_iter: Whether to force unroll the sub-iter.
+        use_f32x_emulation: Whether TF32 emulation is enabled (3 MFMAs per tile).
 
     Returns:
         The index of the MFMA at which the given LRA/LRB will be needed by.
@@ -859,30 +929,39 @@ def lr_needed_by_mfma(
     n_tiles_per_lra = n_tiles_a / n_local_reads_a
     n_tiles_per_lrb = n_tiles_b / n_local_reads_b
 
+    if force_unroll_sub_iter:
+        # Without the unroll, the LRs are for half of the vmfmas.
+        # But the number of vmfmas == 2 * n_tiles_a * n_tiles_b.
+        # So each LR loads n_tiles tiles.
+        # For force_unroll_sub_iter, there are only n_tiles_a * n_tiles_b vmfmas.
+        # So each LR only loads half as many tiles.
+        n_tiles_per_lra /= 2
+        n_tiles_per_lrb /= 2
+
     # NOTE: This is based on the current bahaviour where we iterate through MFMAs in column-major order (A faster than B).
     def index_lra_needed_by_mfma(lra_idx: int) -> int:
         return int(lra_idx * n_tiles_per_lra)
     def index_lrb_needed_by_mfma(lrb_idx: int) -> int:
         return n_tiles_a * int(lrb_idx * n_tiles_per_lrb)
 
-    if local_read.name.startswith("LRA"):
-        needed_by = index_lra_needed_by_mfma(lr_idx)
+    # Calculate base tile index in column-major order
+    is_lra = local_read_name.startswith("LRA")
+    if is_lra:
+        linear_index = index_lra_needed_by_mfma(lr_idx)
     else:
-        needed_by = index_lrb_needed_by_mfma(lr_idx)
+        linear_index = index_lrb_needed_by_mfma(lr_idx)
     
-    # Account for mfmaReorder.
-    is_lr0 = local_read.name == "LRA0" or local_read.name == "LRB0"
-    if is_lr0:
-        # LR0: reading data for 2nd half of this iteration.
-        needed_by += num_vmfma // 2
+    # Apply transformations based on scheduling mode
+    is_lr0 = local_read_name == "LRA0" or local_read_name == "LRB0"
+    if force_unroll_sub_iter:
+        needed_by = _transform_index_with_force_unroll_sub_iter(
+            linear_index, is_lr0, is_lra, n_tiles_a, n_tiles_b,
+            use_f32x_emulation, mfma_reorder, num_vmfma
+        )
     else:
-        # LR1/3: will add after reordering to since we need index in next iteration 
-        pass
-    if mfma_reorder:
-        needed_by = mfma_reorder[needed_by]
-    if not is_lr0:
-        # LR1/3 is reading data for next iteration.
-        needed_by += num_vmfma
+        needed_by = _transform_index_standard(
+            linear_index, is_lr0, use_f32x_emulation, mfma_reorder, num_vmfma
+        )
     
     return needed_by
 
@@ -1028,15 +1107,56 @@ def verify_grs_finish_before_lrs(schedule_info: 'ScheduleInfo', context: dict, c
     return True, ""
 
 
+def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
+    """
+    Map original column-major index to index scheme used by force unroll sub-iter:
+    Split the tile for each wave into 4 blocks, each indexed in column-major order.
+        -------
+        | 0| 2|
+        |--|--|
+        | 1| 3|
+        -------
+    Then, within each block, index within column-major order.
+    For a 4x4 tile, the index changes as follows:
+        |  0  4  8 12 |  ->  |  0  2  8 10 |
+        |  1  5  9 13 |  ->  |  1  3  9 11 |
+        |  2  6 10 14 |  ->  |  4  6 12 14 |
+        |  3  7 11 15 |  ->  |  5  7 13 15 |
+    
+    Args:
+        original_idx: The original column-major index
+        M: Number of rows in the matrix
+        N: Number of columns in the matrix
+    
+    Returns:
+        The permuted index
+    """
+    # Block dimensions
+    block_rows = M // 2
+    block_cols = N // 2
+    block_size = block_rows * block_cols
+    
+    # Convert linear index to 2D coordinates (column-major)
+    row = original_idx % M
+    col = original_idx // M
+    
+    # Determine which block (0-3) in column-major order
+    block_row = row // block_rows  # 0 or 1
+    block_col = col // block_cols  # 0 or 1
+    block_idx = block_col * 2 + block_row  # Column-major block indexing
+    
+    # Position within the block
+    local_row = row % block_rows
+    local_col = col % block_cols
+    local_idx = local_col * block_rows + local_row
+    
+    return block_idx * block_size + local_idx
+
+
 def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
     Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
     """
-    if context.get("kernel", {}).get("UseF32XEmulation", False):
-        message = "LR completion before vmfma validation is disabled for F32X emulation"
-        printWarning(f"{message}")
-        return True, message
-    
     kernel = context["kernel"]
 
     relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
