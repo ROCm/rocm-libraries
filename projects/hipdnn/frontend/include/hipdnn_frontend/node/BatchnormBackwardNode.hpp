@@ -123,35 +123,31 @@ public:
         auto mean = attributes.get_mean();
         auto invVar = attributes.get_inv_variance();
 
+        // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        // NOTE: Defensive check - minimum 2D requirement already validated via
-        // validateMinimumTensorDimensions above, but we verify again before accessing xDims[1].
-        if(!xDims.empty() && xDims.size() >= 2)
+        int64_t channels = xDims[1];
+
+        // Validate scale has correct channel-only shape
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+
+        // Validate dscale has correct channel-only shape
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyTensorShape(dscale, channels, "Scale gradient tensor (dscale)"));
+
+        // Validate dbias has correct channel-only shape
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyTensorShape(dbias, channels, "Bias gradient tensor (dbias)"));
+
+        // Validate optional tensor shapes (using mean and invVar extracted above)
+        if(mean)
         {
-            int64_t channels = xDims[1];
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+        }
 
-            // Validate scale has correct channel-only shape
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-
-            // Validate dscale has correct channel-only shape
+        if(invVar)
+        {
             HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(dscale, channels, "Scale gradient tensor (dscale)"));
-
-            // Validate dbias has correct channel-only shape
-            HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(dbias, channels, "Bias gradient tensor (dbias)"));
-
-            // Validate optional tensor shapes (using mean and invVar extracted above)
-            if(mean)
-            {
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
-            }
-
-            if(invVar)
-            {
-                HIPDNN_CHECK_ERROR(
-                    validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
-            }
+                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
         }
 
         // SECTION 5: Validate Mean and Inverse Variance Consistency

@@ -95,73 +95,71 @@ public:
         // - Each channel c has its own learnable parameters: scale_c, bias_c
         //   - scale_c controls feature importance/gain after normalization
         //   - bias_c controls activation threshold (e.g., for ReLU: active when scale_c*xhat + bias_c > 0)
+
+        // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        if(!xDims.empty() && xDims.size() >= 2)
+        int64_t channels = xDims[1];
+
+        // Validate scale has correct channel-only shape
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+
+        // Validate bias has correct channel-only shape
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+
+        // Validate optional mean tensor
+        auto mean = attributes.get_mean();
+        if(mean)
         {
-            int64_t channels = xDims[1];
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+        }
 
-            // Validate scale has correct channel-only shape
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        // Validate optional inv_variance tensor
+        auto invVar = attributes.get_inv_variance();
+        if(invVar)
+        {
+            HIPDNN_CHECK_ERROR(
+                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
+        }
 
-            // Validate bias has correct channel-only shape
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        // SECTION 5: Validate Running Stats Consistency
+        // Why: Running statistics are updated together during training:
+        //   nextRunMean_c = (1-momentum)*prevRunMean_c + momentum*batchMean_c
+        //   nextRunVar_c  = (1-momentum)*prevRunVar_c  + momentum*batchVar_c
+        // These are used for inference after training completes. If any are provided,
+        // all must be provided to ensure consistent exponential moving average updates.
+        auto prevRunningMean = attributes.get_prev_running_mean();
+        auto prevRunningVar = attributes.get_prev_running_variance();
+        auto nextRunningMean = attributes.get_next_running_mean();
+        auto nextRunningVar = attributes.get_next_running_variance();
 
-            // Validate optional mean tensor
-            auto mean = attributes.get_mean();
-            if(mean)
-            {
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
-            }
+        // If any running stat is provided, all must be provided
+        bool hasPrevRunningMean = prevRunningMean != nullptr;
+        bool hasPrevRunningVar = prevRunningVar != nullptr;
+        bool hasNextRunningMean = nextRunningMean != nullptr;
+        bool hasNextRunningVar = nextRunningVar != nullptr;
 
-            // Validate optional inv_variance tensor
-            auto invVar = attributes.get_inv_variance();
-            if(invVar)
-            {
-                HIPDNN_CHECK_ERROR(
-                    validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
-            }
+        if(hasPrevRunningMean || hasPrevRunningVar || hasNextRunningMean || hasNextRunningVar)
+        {
+            HIPDNN_RETURN_IF_FALSE(
+                hasPrevRunningMean && hasPrevRunningVar && hasNextRunningMean && hasNextRunningVar,
+                ErrorCode::INVALID_VALUE,
+                "BatchnormNode: If any running statistics are provided, all running "
+                "statistics "
+                "(prev_running_mean, prev_running_variance, next_running_mean, "
+                "next_running_variance) must be provided");
 
-            // SECTION 5: Validate Running Stats Consistency
-            // Why: Running statistics are updated together during training:
-            //   nextRunMean_c = (1-momentum)*prevRunMean_c + momentum*batchMean_c
-            //   nextRunVar_c  = (1-momentum)*prevRunVar_c  + momentum*batchVar_c
-            // These are used for inference after training completes. If any are provided,
-            // all must be provided to ensure consistent exponential moving average updates.
-            auto prevRunningMean = attributes.get_prev_running_mean();
-            auto prevRunningVar = attributes.get_prev_running_variance();
-            auto nextRunningMean = attributes.get_next_running_mean();
-            auto nextRunningVar = attributes.get_next_running_variance();
+            // Validate running stats have correct shapes
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                prevRunningMean, channels, "Previous running mean tensor"));
 
-            // If any running stat is provided, all must be provided
-            bool hasPrevRunningMean = prevRunningMean != nullptr;
-            bool hasPrevRunningVar = prevRunningVar != nullptr;
-            bool hasNextRunningMean = nextRunningMean != nullptr;
-            bool hasNextRunningVar = nextRunningVar != nullptr;
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                prevRunningVar, channels, "Previous running variance tensor"));
 
-            if(hasPrevRunningMean || hasPrevRunningVar || hasNextRunningMean || hasNextRunningVar)
-            {
-                HIPDNN_RETURN_IF_FALSE(
-                    hasPrevRunningMean && hasPrevRunningVar && hasNextRunningMean
-                        && hasNextRunningVar,
-                    ErrorCode::INVALID_VALUE,
-                    "BatchnormNode: If any running statistics are provided, all running "
-                    "statistics "
-                    "(prev_running_mean, prev_running_variance, next_running_mean, "
-                    "next_running_variance) must be provided");
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                nextRunningMean, channels, "Next running mean tensor"));
 
-                // Validate running stats have correct shapes
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    prevRunningMean, channels, "Previous running mean tensor"));
-
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    prevRunningVar, channels, "Previous running variance tensor"));
-
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    nextRunningMean, channels, "Next running mean tensor"));
-
-                HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
-                    nextRunningVar, channels, "Next running variance tensor"));
-            }
+            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(
+                nextRunningVar, channels, "Next running variance tensor"));
         }
 
         // SECTION 6: Validate Parameters

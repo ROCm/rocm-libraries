@@ -342,8 +342,9 @@ TEST(TestUtilities, ValidateMinimumTensorDimensionsEmptyDims)
     auto tensor = std::make_shared<TensorAttributes>();
     // Empty dimensions
     auto error = validateMinimumTensorDimensions(tensor, 2, "TestTensor");
-    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
-    EXPECT_TRUE(error.get_message().find("dimensions are not set") != std::string::npos);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must have at least 2 dimensions") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("but has 0") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateMinimumTensorDimensionsValid2DMeetsRequirement)
@@ -413,7 +414,7 @@ TEST(TestUtilities, ValidateTensorShapesMatchEmptyDims1)
     tensor2->set_dim({2, 64});
 
     auto error = validateTensorShapesMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip validation if dimensions not set
+    EXPECT_EQ(error.code, ErrorCode::OK); // Skip - dims will be inferred
 }
 
 TEST(TestUtilities, ValidateTensorShapesMatchEmptyDims2)
@@ -423,7 +424,7 @@ TEST(TestUtilities, ValidateTensorShapesMatchEmptyDims2)
     auto tensor2 = std::make_shared<TensorAttributes>();
 
     auto error = validateTensorShapesMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip validation if dimensions not set
+    EXPECT_EQ(error.code, ErrorCode::OK); // Skip - dims will be inferred
 }
 
 TEST(TestUtilities, ValidateTensorShapesMatchValid)
@@ -531,90 +532,6 @@ TEST(TestUtilities, ValidateChannelOnlyTensorShapeInvalidLessThan2D)
     auto error = validateChannelOnlyTensorShape(tensor, 64, "TestTensor");
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(error.get_message().find("must have at least 2 dimensions") != std::string::npos);
-}
-
-// ============================================================================
-// validateChannelDimensionMatch Tests
-// ============================================================================
-
-TEST(TestUtilities, ValidateChannelDimensionMatchNullTensor1)
-{
-    std::shared_ptr<TensorAttributes> nullTensor = nullptr;
-    auto tensor2 = std::make_shared<TensorAttributes>();
-    tensor2->set_dim({2, 64});
-
-    auto error = validateChannelDimensionMatch(nullTensor, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip if tensor not set
-}
-
-TEST(TestUtilities, ValidateChannelDimensionMatchNullTensor2)
-{
-    auto tensor1 = std::make_shared<TensorAttributes>();
-    tensor1->set_dim({2, 64});
-    std::shared_ptr<TensorAttributes> nullTensor = nullptr;
-
-    auto error = validateChannelDimensionMatch(tensor1, nullTensor, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip if tensor not set
-}
-
-TEST(TestUtilities, ValidateChannelDimensionMatchEmptyDims)
-{
-    auto tensor1 = std::make_shared<TensorAttributes>();
-    auto tensor2 = std::make_shared<TensorAttributes>();
-    tensor2->set_dim({2, 64});
-
-    auto error = validateChannelDimensionMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK); // Skip if dimensions not set
-}
-
-TEST(TestUtilities, ValidateChannelDimensionMatchValid)
-{
-    auto tensor1 = std::make_shared<TensorAttributes>();
-    tensor1->set_dim({2, 64, 32, 32});
-    auto tensor2 = std::make_shared<TensorAttributes>();
-    tensor2->set_dim({2, 64, 16, 16});
-
-    auto error = validateChannelDimensionMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::OK);
-}
-
-TEST(TestUtilities, ValidateChannelDimensionMatchDifferentChannels)
-{
-    auto tensor1 = std::make_shared<TensorAttributes>();
-    tensor1->set_dim({2, 64, 32, 32});
-    auto tensor2 = std::make_shared<TensorAttributes>();
-    tensor2->set_dim({2, 128, 32, 32});
-
-    auto error = validateChannelDimensionMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("channel dimensions") != std::string::npos);
-    EXPECT_TRUE(error.get_message().find("64 vs 128") != std::string::npos);
-}
-
-TEST(TestUtilities, ValidateChannelDimensionMatchTensor1LessThan2D)
-{
-    auto tensor1 = std::make_shared<TensorAttributes>();
-    tensor1->set_dim({64});
-    auto tensor2 = std::make_shared<TensorAttributes>();
-    tensor2->set_dim({2, 64});
-
-    auto error = validateChannelDimensionMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("Tensor1 must have at least 2 dimensions")
-                != std::string::npos);
-}
-
-TEST(TestUtilities, ValidateChannelDimensionMatchTensor2LessThan2D)
-{
-    auto tensor1 = std::make_shared<TensorAttributes>();
-    tensor1->set_dim({2, 64});
-    auto tensor2 = std::make_shared<TensorAttributes>();
-    tensor2->set_dim({128});
-
-    auto error = validateChannelDimensionMatch(tensor1, tensor2, "Tensor1", "Tensor2");
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("Tensor2 must have at least 2 dimensions")
-                != std::string::npos);
 }
 
 // ============================================================================

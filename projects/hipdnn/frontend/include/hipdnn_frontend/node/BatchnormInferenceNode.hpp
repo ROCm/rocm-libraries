@@ -96,24 +96,23 @@ public:
         // - mean_c and var_c: Running statistics saved from training
         // - scale and bias: Learned parameters from training
         // These are the same parameters used during training, now fixed for inference.
+
+        // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        if(!xDims.empty() && xDims.size() >= 2)
-        {
-            int64_t channels = xDims[1];
+        int64_t channels = xDims[1];
 
-            // Validate scale has correct channel-only shape
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        // Validate scale has correct channel-only shape
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
-            // Validate bias has correct channel-only shape
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        // Validate bias has correct channel-only shape
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
 
-            // Validate mean has correct channel-only shape
-            HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+        // Validate mean has correct channel-only shape
+        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
 
-            // Validate inv_variance has correct channel-only shape
-            HIPDNN_CHECK_ERROR(
-                validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
-        }
+        // Validate inv_variance has correct channel-only shape
+        HIPDNN_CHECK_ERROR(
+            validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
 
         // NOTE: Unlike training, inference does NOT require m > 1 (where m = N*H*W for 4D
         // or m = N*D*H*W for 5D) since it uses pre-computed statistics rather than

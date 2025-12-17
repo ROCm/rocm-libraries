@@ -182,10 +182,6 @@ inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttribu
     }
 
     const auto& dims = tensor->get_dim();
-    if(dims.empty())
-    {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " dimensions are not set"};
-    }
 
     HIPDNN_RETURN_IF_LT(dims.size(),
                         minDims,
@@ -210,38 +206,30 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
     const auto& dims1 = tensor1->get_dim();
     const auto& dims2 = tensor2->get_dim();
 
+    // Skip validation if either tensor has empty dims - they will be inferred in infer_properties_node()
+    // (e.g., output tensor y gets dims via y->set_dim(x->get_dim()) during property inference)
     if(dims1.empty() || dims2.empty())
     {
-        return {ErrorCode::OK, ""}; // Skip if dimensions not set yet
+        return {ErrorCode::OK, ""};
     }
 
     if(dims1.size() != dims2.size())
     {
-        std::string errorMsg = tensor1Name;
-        errorMsg += " and ";
-        errorMsg += tensor2Name;
-        errorMsg += " must have the same number of dimensions. Got ";
-        errorMsg += std::to_string(dims1.size());
-        errorMsg += " vs ";
-        errorMsg += std::to_string(dims2.size());
-        return {ErrorCode::INVALID_VALUE, std::move(errorMsg)};
+        return {ErrorCode::INVALID_VALUE,
+                tensor1Name + " and " + tensor2Name + " must have the same number of dimensions: "
+                    + std::to_string(dims1.size()) + " vs " + std::to_string(dims2.size())};
     }
 
-    for(size_t i = 0; i < dims1.size(); ++i)
+    // Find first mismatch location (or end if all match)
+    auto [it1, it2] = std::mismatch(dims1.begin(), dims1.end(), dims2.begin());
+
+    if(it1 != dims1.end())
     {
-        if(dims1[i] != dims2[i])
-        {
-            std::string errorMsg = tensor1Name;
-            errorMsg += " and ";
-            errorMsg += tensor2Name;
-            errorMsg += " dimension mismatch at index ";
-            errorMsg += std::to_string(i);
-            errorMsg += ". Got ";
-            errorMsg += std::to_string(dims1[i]);
-            errorMsg += " vs ";
-            errorMsg += std::to_string(dims2[i]);
-            return {ErrorCode::INVALID_VALUE, std::move(errorMsg)};
-        }
+        auto index = static_cast<size_t>(std::distance(dims1.begin(), it1));
+        return {ErrorCode::INVALID_VALUE,
+                tensor1Name + " and " + tensor2Name + " dimension mismatch at index "
+                    + std::to_string(index) + ": " + std::to_string(*it1) + " vs "
+                    + std::to_string(*it2)};
     }
 
     return {ErrorCode::OK, ""};
@@ -293,45 +281,6 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
                                 + " must be 1 for spatial batch normalization, got "
                                 + std::to_string(dims[i]));
     }
-
-    return {ErrorCode::OK, ""};
-}
-
-// Validates channel dimension matches between two tensors
-inline Error validateChannelDimensionMatch(const std::shared_ptr<TensorAttributes>& tensor1,
-                                           const std::shared_ptr<TensorAttributes>& tensor2,
-                                           const std::string& tensor1Name,
-                                           const std::string& tensor2Name)
-{
-    if(!tensor1 || !tensor2)
-    {
-        return {ErrorCode::OK, ""}; // Skip if either tensor not set
-    }
-
-    const auto& dims1 = tensor1->get_dim();
-    const auto& dims2 = tensor2->get_dim();
-
-    if(dims1.empty() || dims2.empty())
-    {
-        return {ErrorCode::OK, ""}; // Skip if dimensions not set yet
-    }
-
-    HIPDNN_RETURN_IF_LT(dims1.size(),
-                        2,
-                        ErrorCode::INVALID_VALUE,
-                        tensor1Name + " must have at least 2 dimensions");
-
-    HIPDNN_RETURN_IF_LT(dims2.size(),
-                        2,
-                        ErrorCode::INVALID_VALUE,
-                        tensor2Name + " must have at least 2 dimensions");
-
-    HIPDNN_RETURN_IF_NE(dims1[1],
-                        dims2[1],
-                        ErrorCode::INVALID_VALUE,
-                        tensor1Name + " and " + tensor2Name
-                            + " channel dimensions (index 1) must match. Got "
-                            + std::to_string(dims1[1]) + " vs " + std::to_string(dims2[1]));
 
     return {ErrorCode::OK, ""};
 }
