@@ -39,36 +39,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \defgroup thread_operators Thread Operators
-/// \ingroup threadmodule
-
-/// \addtogroup thread_operators
-/// @{
-
-/// \brief Functor that tests for equality.
-struct equality
-{
-    /// \brief Invocation operator
-    template<class T>
-    ROCPRIM_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
-    {
-        return a == b;
-    }
-};
-
-/// \brief Functor that tests for inequality.
-struct inequality
-{
-    /// \brief Invocation operator
-    template<class T>
-    ROCPRIM_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
-    {
-        return a != b;
-    }
-};
-
 /// \brief Functor that tests for inequality using a user-supplied equality comparator.
 template <class EqualityOp>
 struct inequality_wrapper
