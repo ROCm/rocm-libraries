@@ -551,7 +551,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         if constexpr(rem4 > 0)
         {
             unsigned int index = getTensorIndex((lid << 2 * (1 - mio_config::layout_nhwc)) + less4);
-            if(index + 3 < mio_bn_config::nchw)
+            if(index + read_size - 1 < mio_bn_config::nchw)
             {
                 fp_read_vec_type xread = *(reinterpret_cast<const fp_read_vec_type*>(x_in + index));
                 fp_read_vec_type dyRead =
@@ -632,7 +632,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 vals = tmp3 * (tmp2 + tmp1);
             }
 
-            // This syncronization is not required but somehow the kernel runs faster with it
+            // This synchronization is not required but somehow the kernel runs faster with it
             __syncthreads();
 
             if(l < lessout)
