@@ -416,6 +416,39 @@ namespace llvm
             }
         };
 
+        // Explicit vector traits to ensure they're available for LLVM
+        template <>
+        struct SequenceTraits<std::vector<int>>
+        {
+            static size_t size(IO& io, std::vector<int>& seq)
+            {
+                return seq.size();
+            }
+            static int& element(IO& io, std::vector<int>& seq, size_t index)
+            {
+                if(index >= seq.size())
+                    seq.resize(index + 1);
+                return seq[index];
+            }
+            static const bool flow = true;
+        };
+
+        template <>
+        struct SequenceTraits<std::vector<unsigned int>>
+        {
+            static size_t size(IO& io, std::vector<unsigned int>& seq)
+            {
+                return seq.size();
+            }
+            static unsigned int& element(IO& io, std::vector<unsigned int>& seq, size_t index)
+            {
+                if(index >= seq.size())
+                    seq.resize(index + 1);
+                return seq[index];
+            }
+            static const bool flow = true;
+        };
+
     } // namespace yaml
 } // namespace llvm
 #endif
