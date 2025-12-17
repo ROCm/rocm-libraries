@@ -125,6 +125,8 @@ namespace rocRoller
 
             int m_maxUsed = -1;
 
+            int m_minFree = -1;
+
             std::vector<std::weak_ptr<Allocation>> m_registers;
         };
     }

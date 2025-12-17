@@ -599,12 +599,15 @@ namespace rocRoller
             auto userOrder = getUserOrder(graph, forLoop);
 
             Log::debug("User order for ForLoop {}: {}", forLoop, userOrder);
-            auto sortByUser = [&](auto& container, auto getter) {
-                std::sort(container.begin(), container.end(), [&](const auto& a, const auto& b) {
-                    auto itA = std::find(userOrder.begin(), userOrder.end(), getter(a));
-                    auto itB = std::find(userOrder.begin(), userOrder.end(), getter(b));
-                    return itA < itB;
-                });
+            auto sortByUser = [&](auto& container, auto const& order, auto getter) {
+                std::stable_sort(
+                    container.begin(), container.end(), [&](const auto& a, const auto& b) {
+                        auto itA = std::find(order.begin(), order.end(), getter(a));
+                        AssertFatal(itA != order.end(), ShowValue(getter(a)));
+                        auto itB = std::find(order.begin(), order.end(), getter(b));
+                        AssertFatal(itB != order.end(), ShowValue(getter(b)));
+                        return itA < itB;
+                    });
             };
 
             //
@@ -624,7 +627,7 @@ namespace rocRoller
             {
                 for(auto [target, info] : m_info[forLoop][u])
                     loadsByUnroll[u].push_back(info);
-                // sortByUser(loadsByUnroll[u], [](const auto& info) { return info.user; });
+                sortByUser(loadsByUnroll[u], userOrder, [](const auto& info) { return info.user; });
             }
 
             AssertFatal(loadsByUnroll.size() == numUnroll);
@@ -699,13 +702,105 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {preChain.back()}, {preBarrier});
 
             auto addLDSPrefetchChains = [&](int u, int pre, int post, bool duplicate) -> int {
-                std::vector<int> prefetchChain;
-                for(auto [_ignore1, _ignore2, chain] : m_prefetchFromLDSChains[forLoop][u])
+                std::vector<int>   prefetchChain;
+                // std::map<int, int> nodeUser1Coords;
+                // std::map<int, int> nodeUser2Coords;
+                std::map<std::tuple<int, int>, std::vector<int>> ldsByUserAndSmallK;
+
+                for(auto [user, smallk, chain] : m_prefetchFromLDSChains[forLoop][u])
                 {
                     int dchain = duplicate ? duplicateChain(graph, {chain}) : chain;
-                    prefetchChain.push_back(dchain);
+                    ldsByUserAndSmallK[{user, smallk}].push_back(dchain);
+                    // prefetchChain.push_back(dchain);
+                    // nodeUser1Coords[dchain] = user1;
+                    // nodeUser2Coords[dchain] = user2;
                 }
-                sortByUser(prefetchChain, [](const auto& val) { return val; });
+
+                auto userA = 15, userAScale = 4323, userB = 23, userBScale = 4440;
+
+                #if 0
+                {
+                    auto const& a0 = ldsByUserAndSmallK.at({userA, 0});
+                    auto const& a1 = ldsByUserAndSmallK.at({userA, 1});
+                    auto const& aScale = ldsByUserAndSmallK.at({userAScale, 0});
+                    auto const& b0 = ldsByUserAndSmallK.at({userB, 0});
+                    auto const& b1 = ldsByUserAndSmallK.at({userB, 1});
+                    auto const& bScale = ldsByUserAndSmallK.at({userBScale, 0});
+
+                    AssertFatal(a0.size() == a1.size());
+                    AssertFatal(a0.size() == (aScale.size() * 2));
+                    AssertFatal(a0.size() == b0.size());
+                    AssertFatal(a0.size() == b1.size());
+                    AssertFatal(aScale.size() == bScale.size());
+
+                    int idxData = 0;
+                    for(int idxScale = 0; idxScale < aScale.size(); idxScale++, idxData += 2)
+                    {
+                        prefetchChain.push_back(b0.at(idxData));
+                        prefetchChain.push_back(b1.at(idxData));
+
+                        prefetchChain.push_back(b0.at(idxData+1));
+                        prefetchChain.push_back(b1.at(idxData+1));
+
+                        prefetchChain.push_back(bScale.at(idxScale));
+
+                        prefetchChain.push_back(a0.at(idxData));
+                        prefetchChain.push_back(a1.at(idxData));
+
+                        prefetchChain.push_back(a0.at(idxData+1));
+                        prefetchChain.push_back(a1.at(idxData+1));
+
+                        prefetchChain.push_back(aScale.at(idxScale));
+                    }
+                }
+
+                #else
+                auto mixDataAndScale = [&](int dataUser, int scaleUser){
+                    auto const& data0 = ldsByUserAndSmallK.at({dataUser, 0});
+                    auto const& data1 = ldsByUserAndSmallK.at({dataUser, 1});
+                    auto const& scale = ldsByUserAndSmallK.at({scaleUser, 0});
+
+                    AssertFatal(data0.size() == data1.size());
+                    AssertFatal(data0.size() == (scale.size() * 2));
+
+                    int idxData = 0;
+                    for(int idxScale = 0; idxScale < scale.size(); idxScale++)
+                    {
+                        prefetchChain.push_back(data0[idxData]);
+                        prefetchChain.push_back(data1[idxData]);
+                        ++idxData;
+
+                        prefetchChain.push_back(data0[idxData]);
+                        prefetchChain.push_back(data1[idxData]);
+                        ++idxData;
+
+                        prefetchChain.push_back(scale[idxScale]);
+                    }
+                };
+                mixDataAndScale(userB, userBScale);
+                mixDataAndScale(userA, userAScale);
+                #endif
+
+                // auto ts = [](auto pair) { return fmt::format("{}:{}", pair.first, pair.second); };
+                // std::vector<int> ldsOrder = {15, 4323, 23, 4440};
+                // Log::critical("prefetchChain: ({})\ncoords:({})",
+                //               fmt::join(prefetchChain, ", "),
+                //               fmt::join(nodeUser1Coords | std::views::transform(ts), ", "));
+
+                // auto getUser1 = [&nodeUser1Coords](int node) { return nodeUser1Coords.at(node); };
+                // Log::critical("users: ({})",
+                //               fmt::join(prefetchChain | std::views::transform(getUser1), ", "));
+
+                // auto getUser2 = [&nodeUser2Coords](int node) { return nodeUser2Coords.at(node); };
+                // Log::critical("users: ({})",
+                //               fmt::join(prefetchChain | std::views::transform(getUser2), ", "));
+
+                // sortByUser(prefetchChain, ldsOrder, getUser1);
+
+                // Log::critical("now users: ({})",
+                //               fmt::join(prefetchChain | std::views::transform(getUser1), ", "));
+                // Log::critical("now users: ({})",
+                //               fmt::join(prefetchChain | std::views::transform(getUser2), ", "));
 
                 AssertFatal(!prefetchChain.empty());
 

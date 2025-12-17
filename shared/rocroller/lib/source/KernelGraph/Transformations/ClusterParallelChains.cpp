@@ -29,6 +29,10 @@
 
 #include <rocRoller/Graph/GraphUtilities.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
+#include <rocRoller/Utilities/Concepts.hpp>
+
+#define debug critical
+#define Debug Critical
 
 namespace rocRoller
 {
@@ -117,9 +121,61 @@ namespace rocRoller
             return rv;
         }
 
-        vec filterLastCoordinateReads(KernelGraph const& graph, vec const& chain)
+        int getLDSNode(KernelGraph const& graph, int node)
+        {
+            while(auto body = graph.control.getOutputNodeIndices<ControlGraph::Body>(node).only())
+            {
+                node = *body;
+            }
+
+            return node;
+        }
+
+        DataType getLDSType(KernelGraph const& graph, int node)
+        {
+            node = getLDSNode(graph, node);
+
+            auto ldsType = getDataType(graph.control.getNode(node));
+            AssertFatal(ldsType != DataType::None);
+            return ldsType;
+        };
+
+        using ChainTypes = std::vector<std::map<DataType, int>>;
+
+        std::string toString(std::map<DataType, int> const& typeCounts)
+        {
+            auto fmtPair = [](std::pair<DataType, int> const& pair) -> std::string {
+                return fmt::format("{}: {}", toString(pair.first), pair.second);
+            };
+
+            auto formatted = typeCounts | std::views::transform(fmtPair);
+
+            return fmt::format("[{}]", fmt::join(formatted, ","));
+        }
+
+        std::string toString(ChainTypes const& chainTypes)
+        {
+            auto ts = [](auto val) { return toString(val); };
+
+            auto formatted = chainTypes | std::views::transform(ts);
+
+            return fmt::format("{{{}}}", fmt::join(formatted, ", "));
+        }
+
+        ChainTypes filterLastCoordinateReads(KernelGraph const& graph, vec& chain)
         {
             ControlFlowRWTracer tracer(graph);
+
+            auto coordDataType = [&](int coord) -> DataType {
+                for(auto rw : tracer.coordinatesReadWrite(coord))
+                {
+                    auto rwType = getDataType(graph.control.getNode(rw.control));
+                    if(rwType != DataType::None)
+                        return rwType;
+                }
+
+                return DataType::None;
+            };
 
             std::unordered_map<int, int> lastUses;
 
@@ -128,20 +184,74 @@ namespace rocRoller
                 auto records = tracer.opReadWrite(op);
                 for(auto rec : records)
                 {
-                    lastUses[rec.coordinate] = op;
+                    if(rec.rw == ControlFlowRWTracer::READ)
+                        lastUses[rec.coordinate] = op;
                 }
             }
 
-            auto lastNodes = [&]() {
-                auto value = [](auto const& x) { return x.second; };
-                auto tmp   = lastUses | std::views::transform(value);
-                return std::unordered_set(tmp.begin(), tmp.end());
-            }();
+            std::unordered_map<int, std::map<DataType, int>> lastUsedTypes;
 
-            auto isLast = [&](int x) { return lastNodes.contains(x); };
+            for(auto const& [coord, op] : lastUses)
+                lastUsedTypes[op][coordDataType(coord)]++;
 
-            auto rv = chain | std::views::filter(isLast);
-            return std::vector(rv.begin(), rv.end());
+            std::vector<int> newChain;
+            ChainTypes       rv;
+
+            int skipCount = 0;
+            for(auto op : chain)
+            {
+                auto iter = lastUsedTypes.find(op);
+
+                if(iter != lastUsedTypes.end())
+                {
+                    Log::critical("filterLastCoordinateReads: Skipped {}.", skipCount);
+                    skipCount = 0;
+
+                    newChain.push_back(op);
+                    rv.push_back(iter->second);
+                }
+                else
+                {
+                    skipCount++;
+                }
+            }
+            Log::critical("filterLastCoordinateReads: Skipped {}.", skipCount);
+            Log::critical("-------------------------------------------------");
+
+            chain = newChain;
+
+            return rv;
+
+            // auto lastNodes = [&]() {
+            //     auto value = [](auto const& x) { return x.second; };
+            //     auto tmp   = lastUses | std::views::transform(value);
+            //     return std::unordered_set(tmp.begin(), tmp.end());
+            // }();
+
+            // auto isLast = [&](int x) { return lastNodes.contains(x); };
+
+            // auto tmp = chain | std::views::filter(isLast);
+            // auto newChain = std::vector(tmp.begin(), tmp.end());
+            // chain = newChain;
+        }
+
+        std::tuple<vec2, std::vector<ChainTypes>>
+            findMultiplyChainsAndCoords(KernelGraph const& graph)
+        {
+            auto isMultiply = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
+            };
+
+            auto multiplies = graph.control.getNodes().filter(isMultiply).to<std::vector>();
+
+            auto chains = makeChains(graph, std::move(multiplies));
+
+            std::vector<ChainTypes> chainTypes;
+
+            for(auto& chain : chains)
+                chainTypes.push_back(filterLastCoordinateReads(graph, chain));
+
+            return {chains, chainTypes};
         }
 
         vec2 findMultiplyChains(KernelGraph const& graph)
@@ -154,8 +264,8 @@ namespace rocRoller
 
             auto rv = makeChains(graph, std::move(multiplies));
 
-            for(auto & chain: rv)
-                chain = filterLastCoordinateReads(graph, chain);
+            for(auto& chain : rv)
+                auto _ = filterLastCoordinateReads(graph, chain);
 
             return rv;
         }
@@ -213,12 +323,34 @@ namespace rocRoller
             return makeChains(graph, std::move(nodes));
         }
 
+        std::string abbrev(LayoutType t)
+        {
+            switch(t)
+            {
+            case LayoutType::SCRATCH:
+                return "SCR";
+            case LayoutType::MATRIX_A:
+                return "A";
+            case LayoutType::MATRIX_B:
+                return "B";
+            case LayoutType::MATRIX_ACCUMULATOR:
+                return "ACC";
+            case LayoutType::None:
+                return "N/A";
+            case LayoutType::Count:
+                return "MAX";
+            }
+
+            return "";
+        }
+
         void logChainTagTable(KernelGraph const& graph, vec chain)
         {
             ControlFlowRWTracer tracer(graph);
 
             std::vector<int>                              coords;
             std::map<int, DataType>                       coordDataTypes;
+            std::map<int, rocRoller::LayoutType>          coordLayouts;
             std::map<int, ControlFlowRWTracer::ReadWrite> useTypes;
             std::map<int, int>                            lastUses;
 
@@ -270,6 +402,22 @@ namespace rocRoller
                     if(!coordDataTypes.contains(coord))
                         coordDataTypes[coord] = DataType::None;
 
+                coordLayouts = [&]() {
+                    auto getCoordLayout = [&](int coord) {
+                        auto mt = graph.coordinates.get<CoordinateGraph::MacroTile>(coord);
+
+                        LayoutType lt = LayoutType::None;
+                        if(mt)
+                            lt = mt->layoutType;
+
+                        return std::make_pair(coord, lt);
+                    };
+
+                    auto theView = coordSet | std::views::transform(getCoordLayout);
+
+                    return std::map(theView.begin(), theView.end());
+                }();
+
                 auto coordOrder = [&](int a, int b) {
                     auto typeA = useTypes[a], typeB = useTypes[b];
 
@@ -279,7 +427,22 @@ namespace rocRoller
                     return TopologicalCompare(graph)(lastUses[a], lastUses[b]);
                 };
 
-                coords = std::vector(coordSet.begin(), coordSet.end());
+                {
+                    auto isWantedCoord = [&](int coord) {
+                        auto dtype = coordDataTypes.at(coord);
+                        if(dtype == DataType::None)
+                            return false;
+
+                        auto const& info = DataTypeInfo::Get(dtype);
+
+                        return info.packing > 1;
+                    };
+
+                    auto tmp = coordSet | std::views::filter(isWantedCoord);
+                    coords   = std::vector(tmp.begin(), tmp.end());
+                }
+
+                // coords = std::vector(coordSet.begin(), coordSet.end());
                 std::ranges::sort(coords, coordOrder);
 
                 // for(auto it = coords.begin(); it != coords.end(); )
@@ -290,6 +453,8 @@ namespace rocRoller
                 //         it = coords.erase(it);
                 // }
             }
+
+            auto getCoordLayout = [&](int coord) { return coordLayouts.at(coord); };
 
             auto value     = [](auto const& x) { return x.second; };
             auto lastNodes = [&]() {
@@ -318,6 +483,16 @@ namespace rocRoller
             msg += fmt::format("|{}|{}\n{}\n",
                                formatElement(""),
                                fmt::join(coords | std::views::transform(getDtype)
+                                             | std::views::transform(formatElement),
+                                         "|"),
+                               line);
+
+            msg += fmt::format("\n{}\n", line);
+
+            msg += fmt::format("|{}|{}\n{}\n",
+                               formatElement(""),
+                               fmt::join(coords | std::views::transform(getCoordLayout)
+                                             | std::views::transform(abbrev)
                                              | std::views::transform(formatElement),
                                          "|"),
                                line);
@@ -516,11 +691,89 @@ namespace rocRoller
             return identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains)});
         }
 
+        struct ParallelChainSet
+        {
+            vec multiplyChain;
+            vec ldsChain;
+
+            ChainTypes            multiplyTagTypes;
+            std::vector<DataType> ldsChainTypes;
+        };
+
+        // requires std::ranges::forward_range<Range>;
+        // requires std::convertible_to<std::ranges::range_value_t<Range>, Of>;
+
+        template <std::ranges::forward_range ARange, std::ranges::forward_range BRange>
+        Generator<
+            std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<BRange>>>
+            zip(ARange const& a, BRange const& b)
+        {
+            auto aIter = a.begin();
+            auto bIter = b.begin();
+
+            for(; aIter != a.end() && bIter != b.end(); ++aIter, ++bIter)
+            {
+                co_yield std::make_tuple(*aIter, *bIter);
+            }
+        }
+
+        template <std::ranges::forward_range ARange,
+                  std::ranges::forward_range BRange,
+                  std::ranges::forward_range CRange>
+        Generator<std::tuple<std::ranges::range_value_t<ARange>,
+                             std::ranges::range_value_t<BRange>,
+                             std::ranges::range_value_t<CRange>>>
+            zip(ARange const& a, BRange const& b, CRange const& c)
+        {
+            auto aIter = a.begin();
+            auto bIter = b.begin();
+            auto cIter = c.begin();
+
+            for(; aIter != a.end() && bIter != b.end() && cIter != c.end();
+                ++aIter, ++bIter, ++cIter)
+            {
+                co_yield std::make_tuple(*aIter, *bIter, *cIter);
+            }
+        }
+
+        std::vector<ParallelChainSet>
+            identifyParallelMultiplyAndLDSChainsWithTypes(KernelGraph const& graph)
+        {
+            auto [multiplyChains, multiplyCoordTypes] = findMultiplyChainsAndCoords(graph);
+            auto ldsChains                            = findLoadLDSChains(graph);
+            // auto loadChains     = findLoadTiledChains(graph);
+
+            Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
+            Log::debug("LDS chains: \n{}", showChains(ldsChains));
+            // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
+
+            auto chainSets
+                = identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains)});
+
+            AssertFatal(chainSets.size() == multiplyCoordTypes.size(),
+                        ShowValue(chainSets.size()),
+                        ShowValue(multiplyCoordTypes.size()));
+
+            std::vector<ParallelChainSet> rv;
+
+            auto getType = [&](int node) { return getLDSType(graph, node); };
+
+            for(auto const& [chains, types] : zip(chainSets, multiplyCoordTypes))
+            {
+                auto ldsTypes = chains.at(0) | std::views::transform(getType);
+
+                rv.push_back(
+                    {chains.at(1), chains.at(0), types, {ldsTypes.begin(), ldsTypes.end()}});
+            }
+
+            return rv;
+        }
+
         vec3 identifyParallelMultiplyD2LDSAndLDSChains(KernelGraph const& graph)
         {
             auto multiplyChains = findMultiplyChains(graph);
             auto ldsChains      = findLoadLDSChains(graph);
-            auto d2Chains = findD2LDSChains(graph);
+            auto d2Chains       = findD2LDSChains(graph);
             // auto loadChains     = findLoadTiledChains(graph);
 
             Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
@@ -528,7 +781,8 @@ namespace rocRoller
             Log::debug("D2LDS chains: \n{}", showChains(d2Chains));
             // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
 
-            return identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains), std::move(d2Chains)});
+            return identifyParallelChains(
+                graph, {std::move(multiplyChains), std::move(ldsChains), std::move(d2Chains)});
         }
 
         vec3 identifyParallelMultiplyAndLoadStoreChains(KernelGraph const& graph)
@@ -695,19 +949,22 @@ namespace rocRoller
                     for(int idx = group.size() - 1; idx >= 0; --idx)
                     {
                         expectedNodes[idx] = static_cast<float>(incr * sizes[idx]) / maxSize;
-                        auto floor         = static_cast<int>(expectedNodes[idx]);
-                        if(floor > seenNodes[idx])
+                        // auto floor         = static_cast<int>(expectedNodes[idx]);
+                        auto floor = CeilDivide(incr * sizes[idx], maxSize);
+                        if(floor >= seenNodes[idx])
                         {
                             if(idx + 1 < group.size() && seenNodes.back() < sizes.back()
                                && seenNodes[idx] < sizes[idx])
                             {
-                                Log::debug("back[{}] -> group[{}][{}]",
+                                auto a = group.back().at(seenNodes.back());
+                                auto b = group[idx].at(seenNodes[idx]);
+                                Log::debug("back[{}] -> group[{}][{}] aka {} -> {}",
                                            seenNodes.back(),
                                            idx,
-                                           seenNodes.at(idx));
-                                graph.control.chain<ControlGraph::Sequence>(
-                                    group.back().at(seenNodes.back()),
-                                    group[idx].at(seenNodes[idx]));
+                                           seenNodes.at(idx),
+                                           a,
+                                           b);
+                                graph.control.chain<ControlGraph::Sequence>(a, b);
                             }
 
                             seenNodes[idx] = floor;
@@ -848,9 +1105,89 @@ namespace rocRoller
             }
         }
 
+        void distributeChains(KernelGraph& graph, std::vector<ParallelChainSet> const& chainSets)
+        {
+            for(auto const& chainSet : chainSets)
+            {
+                std::map<DataType, int> multiplyTypeCounts, ldsTypeCounts;
+
+                multiplyTypeCounts[DataType::FP4x8]  = 14;
+                multiplyTypeCounts[DataType::E8M0x4] = 8;
+
+                AssertFatal(chainSet.multiplyChain.size() == chainSet.multiplyTagTypes.size(),
+                            ShowValue(chainSet.multiplyChain.size()),
+                            ShowValue(chainSet.multiplyTagTypes.size()));
+
+                auto ldsIter = chainSet.ldsChain.begin();
+                AssertFatal(ldsIter != chainSet.ldsChain.end());
+
+                auto ldsType = getLDSType(graph, *ldsIter);
+                Log::critical("First LDS: {} ({})", *ldsIter, toString(ldsType));
+
+                for(auto const& [multiply, multiplyTypes] :
+                    zip(chainSet.multiplyChain, chainSet.multiplyTagTypes))
+                {
+                    for(auto const& [dtype, count] : multiplyTypes)
+                    {
+                        multiplyTypeCounts[dtype] += count;
+                    }
+
+                    auto ldsCount = 0;
+                    while(ldsIter != chainSet.ldsChain.end()
+                          && multiplyTypeCounts[ldsType] > ldsTypeCounts[ldsType])
+                    {
+                        Log::debug("{} -> {} Mul: {}, LDS: {} ({})",
+                                   multiply,
+                                   *ldsIter,
+                                   toString(multiplyTypeCounts),
+                                   toString(ldsTypeCounts),
+                                   getLDSNode(graph, *ldsIter));
+                        graph.control.chain<ControlGraph::Sequence>(multiply, *ldsIter);
+
+                        ldsTypeCounts[ldsType]++;
+
+                        ++ldsIter;
+                        if(ldsIter != chainSet.ldsChain.end())
+                            ldsType = getLDSType(graph, *ldsIter);
+
+                        ++ldsCount;
+                    }
+
+                    if(ldsCount == 0 && ldsIter != chainSet.ldsChain.end())
+                        Log::debug("Skipping multiply {}. LDS: {} ({})",
+                                   multiply,
+                                   *ldsIter,
+                                   toString(ldsType));
+                }
+
+                Log::debug("Multiply type counts: {{{}}}", toString(multiplyTypeCounts));
+                Log::debug("LDS type counts: {{{}}}", toString(ldsTypeCounts));
+            }
+        }
+
         KernelGraph ClusterParallelChains::apply(KernelGraph const& original)
         {
             auto rv = original;
+
+            auto something = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
+
+            for(auto chainSet : something)
+            {
+                auto ts = [](auto x) { return toString(x); };
+                Log::debug("Chains:\nMultiplies: {{{}}}({})\nTypes: {}({})\nLDS: "
+                           "{{{}}}({})\nTypes: {}({})",
+                           fmt::join(chainSet.multiplyChain, ", "),
+                           chainSet.multiplyChain.size(),
+                           toString(chainSet.multiplyTagTypes),
+                           chainSet.multiplyTagTypes.size(),
+                           fmt::join(chainSet.ldsChain, ", "),
+                           chainSet.ldsChain.size(),
+                           fmt::join(chainSet.ldsChainTypes | std::views::transform(ts), ", "),
+                           chainSet.ldsChainTypes.size());
+            }
+
+            distributeChains(rv, something);
+            return rv;
 
             if(false)
             {

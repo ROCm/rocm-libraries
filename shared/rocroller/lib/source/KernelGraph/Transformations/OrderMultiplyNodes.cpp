@@ -118,11 +118,18 @@ namespace rocRoller::KernelGraph
 
             auto nodeLoop = getLoopOp(node);
 
-            auto          connections = m_graph.mapper.getConnections(node);
+            auto isLeft = [](ControlToCoordinateMapper::Connection const& c){
+                auto arg = getNaryArgument(c);
+                return arg == NaryArgument::LHS || arg == NaryArgument::LHS_SCALE;
+            };
+
+            auto          connections_ = m_graph.mapper.getConnections(node);
+            auto connections = connections_ | std::views::filter(isLeft);
             std::set<int> tags;
 
             for(auto const& connection : connections)
             {
+                Log::critical("Op {}, Connection {}", node, toString(connection));
                 tags.insert(connection.coordinate);
             }
 
