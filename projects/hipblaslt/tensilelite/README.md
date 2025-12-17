@@ -13,7 +13,7 @@ The standard workflow for running the entire test suite is to use `tox`. This co
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
-tox -e py3 -- Tensile/Tests -m common
+tox -e py39 -- Tensile/Tests -m common
 ```
 
 Subsequently, you can run just the Tensile unit tests via:
@@ -69,7 +69,7 @@ specialized builds (e.g., Debug builds) and setting the architecture.
 ```
 # build the client using tox with custom CMake flags
 cd rocm-libraries/projects/hipblaslt/tensilelite
-TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
+TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py39 -- Tensile/Tests -m common
 ```
 
 ### Options
