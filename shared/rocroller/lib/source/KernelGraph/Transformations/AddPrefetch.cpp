@@ -410,6 +410,11 @@ namespace rocRoller
                 auto maybeLoadTile = graph.control.get<LoadTiled>(tag);
                 if(maybeLoadTile)
                 {
+                    auto tileTag = graph.mapper.get<MacroTile>(tag);
+                    AssertFatal(tileTag != -1);
+                    auto tile = graph.coordinates.get<MacroTile>(tileTag).value();
+                    AssertFatal(tile.memoryType == MemoryType::WAVE_Direct2LDS);
+
                     auto preBarrier = graph.control.addElement(Barrier());
                     insertBefore(graph, tag, preBarrier, preBarrier);
                 }
