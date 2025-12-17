@@ -198,29 +198,27 @@ install_packages( )
   # Determine if we need to install alternate Python based on version
   local need_alt_python=false
   local alt_python_pkg=""
-  if [[ -z "${python_executable}" ]]; then
-    local default_version=$(get_python_version python3)
-    if [[ ${default_version} -lt 309 ]]; then
-      need_alt_python=true
-      # Determine which alternate Python package to install based on OS
-      case "${ID}" in
-        sles|opensuse-leap)
-          alt_python_pkg="python311"
-          library_dependencies_sles+=( "python311" "python311-PyYAML" "python311-pip" )
-          ;;
-        rhel)
-          if (( "${VERSION_ID%%.*}" >= "9" )); then
-            # RHEL 9 should have python39 or python3 that's new enough
-            alt_python_pkg="python39"
-          fi
-          ;;
-        ubuntu)
-          # Ubuntu typically has python3.9+ in recent versions
-          # If not, user should install manually
-          printf "\033[33mWarning: python3 is too old. Please install python3.9 or newer manually.\033[0m\n"
-          ;;
-      esac
-    fi
+  local default_version=$(get_python_version python3)
+  if [[ ${default_version} -lt 309 ]]; then
+    need_alt_python=true
+    # Determine which alternate Python package to install based on OS
+    case "${ID}" in
+      sles|opensuse-leap)
+        alt_python_pkg="python311"
+        library_dependencies_sles+=( "python311" "python311-PyYAML" "python311-pip" )
+        ;;
+      rhel)
+        if (( "${VERSION_ID%%.*}" >= "9" )); then
+          # RHEL 9 should have python39 or python3 that's new enough
+          alt_python_pkg="python39"
+        fi
+        ;;
+      ubuntu)
+        # Ubuntu typically has python3.9+ in recent versions
+        # If not, user should install manually
+        printf "\033[33mWarning: python3 is too old. Please install python3.9 or newer manually.\033[0m\n"
+        ;;
+    esac
   fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
@@ -450,7 +448,7 @@ while true; do
   case "${1}" in
     -h|--help)
         display_help
-        ${python_executable} ./rmake.py --help
+        python3 ./rmake.py --help
         exit 0
         ;;
     -i|--install)
@@ -542,14 +540,8 @@ cxx="g++"
 cc="gcc"
 fc="gfortran"
 
-# Determine Python executable based on version requirements (>= 3.9)
-python_executable=$(determine_python_executable)
-if [[ -z "${python_executable}" ]]; then
-  printf "\033[31mError: No suitable Python found (requires >= 3.9).\033[0m\n"
-  printf "\033[31mPlease install Python 3.9 or newer before running this script.\033[0m\n"
-  exit 2
-fi
-printf "\033[32mUsing Python: ${python_executable} (version $(${python_executable} --version 2>&1 | cut -d' ' -f2))\033[0m\n"
+# Python will be determined after dependencies are installed if needed
+python_executable=""
 
 # #################################################
 # dependencies
@@ -608,6 +600,20 @@ elif [[ "${build_clients}" == true ]]; then
   mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
   install_blis
   popd
+fi
+
+# #################################################
+# Determine Python executable
+# #################################################
+# Now that dependencies are installed, determine which Python to use
+if [[ -z "${python_executable}" ]]; then
+  python_executable=$(determine_python_executable)
+  if [[ -z "${python_executable}" ]]; then
+    printf "\033[31mError: No suitable Python found (requires >= 3.9).\033[0m\n"
+    printf "\033[31mPlease install Python 3.9 or newer before running this script.\033[0m\n"
+    exit 2
+  fi
+  printf "\033[32mUsing Python: ${python_executable} (version $(${python_executable} --version 2>&1 | cut -d' ' -f2))\033[0m\n"
 fi
 
 # #################################################
