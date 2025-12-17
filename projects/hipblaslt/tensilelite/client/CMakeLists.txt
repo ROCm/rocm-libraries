@@ -19,9 +19,9 @@ set(COMMON_CLIENT_LIBS
 )
 
 if(NOT WIN32)
-    find_package(amd_smi CONFIG REQUIRED)
+    find_package(amd_smi REQUIRED CONFIG PATHS /opt/rocm/cmake/amd_smi/)
 else()
-    find_package(amd_smi CONFIG)
+    find_package(amd_smi CONFIG PATHS /opt/rocm/cmake/amd_smi/)
 endif()
 
 if(amd_smi_FOUND)
