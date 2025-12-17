@@ -26,6 +26,8 @@
 
 #include "parameter_selection.hpp"
 
+#include <cassert>
+
 const int SWIZZLE_BLOCK_SIZE           = 64;
 
 std::string SolutionParameters::toString() const
@@ -46,8 +48,10 @@ std::string SolutionParameters::toString() const
     result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
            << " LDSFactor:" << prefetchLDSFactor << " MixMemOps:" << prefetchMixMemOps << std::endl;
     result << "Block Scale Options:" << " Swizzle Scale:" << swizzleScale
-           << " Prefetch Scale:" << prefetchScale << " loadLDS A:" << loadLDSScaleA
-           << " loadLDS B:" << loadLDSScaleB << std::endl;
+           << " Prefetch Scale:" << prefetchScale << " loadPathAScale:" << loadPathAScale
+           << " loadPathBScale:" << loadPathBScale << std::endl;
+    result << "SwizzleTileSize: M:" << swizzleTileSize.m << " N:" << swizzleTileSize.n
+           << " K:" << swizzleTileSize.k << " L:" << swizzleTileSize.l << std::endl;
 
     return result.str();
 }
@@ -103,9 +107,49 @@ std::shared_ptr<SolutionParameters>
 
     gemm->workgroupTile = solutionIndexParameters.workgroupTile;
 
-    gemm->machineInstruction = pickMI(gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile);
+    // Determine MI selection based on shuffle tile format {tileMN, tileK}
+    // For pre-swizzled data, always use 16x16x128 MI instruction
+    size_t shuffleTileMN = 0;
+    if (kernelType.scaleTypeA.shuffleTile.size() == 2) {
+        shuffleTileMN = kernelType.scaleTypeA.shuffleTile[0];  // tileMN
+
+        // Pre-swizzled data always uses MI 16x16x128, so WGT.k must be divisible by 128
+        assert(solutionIndexParameters.workgroupTile.k % 128 == 0 &&
+               "Workgroup tile K must be divisible by 128 for pre-swizzled scale data");
+
+        // Swizzle scale requires workgroup tile M and N >= 128
+        assert(solutionIndexParameters.workgroupTile.m >= 128 &&
+               solutionIndexParameters.workgroupTile.n >= 128 &&
+               "Workgroup tile M and N must be >= 128 for pre-swizzled scale data");
+    }
+
+    gemm->machineInstruction = pickMI(gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile, shuffleTileMN);
 
     gemm->prefetchInFlight = preferredUnrolling(kernelType.typeA, kernelType.typeB, gemm->workgroupTile);
+
+    // Calculate swizzleTileSize based on shuffleTile configuration
+    // shuffleTile format: {tileMN, tileK}
+    // With MI 16x16x128 and scaleBlockSize=32, subTileK = 128/32 = 4
+    if (kernelType.scaleTypeA.shuffleTile.size() == 2) {
+        int tileMN = static_cast<int>(kernelType.scaleTypeA.shuffleTile[0]);
+        int scaleBlockSize = kernelType.scaleTypeA.blockRowSize * kernelType.scaleTypeA.blockColSize;
+
+        // Calculate subTileK from MI.k / scaleBlockSize
+        // With MI 16x16x128 and scaleBlockSize=32, subTileK = 4
+        int subTileK = gemm->machineInstruction.k / scaleBlockSize;
+        assert(subTileK == 4 &&
+               "subTileK (machineInstruction.k / scaleBlockSize) must be 4 for 16x16x128 MI");
+
+        // tileK = MI.k / scaleBlockSize * (WGT.k / MI.k) * unrollK
+        int numMITilesK = gemm->workgroupTile.k / gemm->machineInstruction.k;
+        int unrollK = gemm->prefetchInFlight;  // unrollK is the prefetch in-flight count
+        int tileK = subTileK * numMITilesK * unrollK;
+
+        gemm->swizzleTileSize.m = tileMN;
+        gemm->swizzleTileSize.n = tileMN;
+        gemm->swizzleTileSize.k = tileK;
+        gemm->swizzleTileSize.l = tileK;
+    }
 
     if(gemm->prefetchInFlight <= 1)
         gemm->prefetch = false;
@@ -117,22 +161,32 @@ std::shared_ptr<SolutionParameters>
     {
         gemm->swizzleScale = false;
         gemm->prefetchScale = false;
-        gemm->loadLDSScaleA = false;
-        gemm->loadLDSScaleB = false;
+        gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
+        gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
     else if(solutionIndexParameters.workgroupTile.m >= 128
         && solutionIndexParameters.workgroupTile.n >= 128)
     {
         gemm->swizzleScale  = true;
-        gemm->loadLDSScaleA = false;
-        gemm->loadLDSScaleB = false;
+        // Use BufferToVGPR for swizzle scale (matches rocRoller client --loadScale_A BufferToVGPR)
+        gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
+        gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
     else
     {
         gemm->swizzleScale  = false;
         gemm->prefetchScale = false;
-        gemm->loadLDSScaleA = true;
-        gemm->loadLDSScaleB = true;
+        // Use BufferToLDSViaVGPR for LDS-based scale loads
+        gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+    }
+
+    // If shuffleTile.size() == 2, user requests pre-swizzled scale data
+    // swizzleScale must be enabled (true) for this to work correctly
+    if (kernelType.scaleTypeA.shuffleTile.size() == 2 &&
+        kernelType.scaleTypeB.shuffleTile.size() == 2) {
+        assert(gemm->swizzleScale &&
+               "swizzleScale must be enabled when using pre-swizzled scale data (shuffleTile.size() == 2)");
     }
 
     auto workgroupSize = pickWorkgroupSize(gemm);
@@ -177,12 +231,12 @@ std::shared_ptr<SolutionParameters>
     }
     if(numScaleElementsA % workgroupSizeTotal != 0)
     {
-        gemm->loadLDSScaleA     = false;
+        gemm->loadPathAScale    = SolutionParams::LoadPath::BufferToVGPR;
         gemm->prefetchMixMemOps = false;
     }
     if(numScaleElementsB % workgroupSizeTotal != 0)
     {
-        gemm->loadLDSScaleB     = false;
+        gemm->loadPathBScale    = SolutionParams::LoadPath::BufferToVGPR;
         gemm->prefetchMixMemOps = false;
     }
 

@@ -411,6 +411,7 @@ inline size_t blockSize(RocblasltContractionProblem::ScalingFormat s)
     {
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_2:
             return 32;
         default:
             return 1;
@@ -419,10 +420,14 @@ inline size_t blockSize(RocblasltContractionProblem::ScalingFormat s)
 
 inline std::vector<size_t> scaleShuffleTile(RocblasltContractionProblem::ScalingFormat s)
 {
+    // Returns shuffle tile as {tileMN, tileK}
+    // subTileK is calculated from machineInstruction.k / scaleBlockSize
     switch (s)
     {
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
-            return {64, 4, 4};
+            return {64, 4};
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_2:
+            return {32, 8};
         default:
             return {};
     }

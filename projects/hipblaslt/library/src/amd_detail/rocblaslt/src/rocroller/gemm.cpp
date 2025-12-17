@@ -125,11 +125,10 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
             if (gemm->kernelType.scaleTypeA.blockColSize != 1)
                 rv <<"x"<<gemm->kernelType.scaleTypeA.blockColSize;
             rv << "_";
-            if (gemm->kernelType.scaleTypeA.shuffleTile.size() == 3)
+            if (gemm->kernelType.scaleTypeA.shuffleTile.size() == 2)
             {
                 rv << "SWA" << gemm->kernelType.scaleTypeA.shuffleTile[0];
                 rv << "x" << gemm->kernelType.scaleTypeA.shuffleTile[1];
-                rv << "x" << gemm->kernelType.scaleTypeA.shuffleTile[2];
                 rv << "_";
             }
         }
@@ -145,11 +144,10 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
             if (gemm->kernelType.scaleTypeB.blockRowSize != 1)
                 rv <<"x"<<gemm->kernelType.scaleTypeB.blockRowSize;
             rv << "_";
-            if (gemm->kernelType.scaleTypeB.shuffleTile.size() == 3)
+            if (gemm->kernelType.scaleTypeB.shuffleTile.size() == 2)
             {
                 rv << "SWB" << gemm->kernelType.scaleTypeB.shuffleTile[0];
                 rv << "x" << gemm->kernelType.scaleTypeB.shuffleTile[1];
-                rv << "x" << gemm->kernelType.scaleTypeB.shuffleTile[2];
                 rv << "_";
             }
         }
@@ -225,10 +223,17 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
         auto scaleInputA = tagLoadScaleA;
 
-        if (gemm->kernelType.scaleTypeA.shuffleTile.size() == 3)
+        if (gemm->kernelType.scaleTypeA.shuffleTile.size() == 2)
         {
+            // Reconstruct 3-element shuffleTile for SubTileTranspose
+            // shuffleTile format: {tileMN, tileK}
+            // Always use MI 16x16x128, so subTileK = 128/32 = 4
+            auto tileMN = gemm->kernelType.scaleTypeA.shuffleTile[0];
+            auto tileK = gemm->kernelType.scaleTypeA.shuffleTile[1];
+            size_t subTileK = 4;
+            std::vector<size_t> shuffleTile3 = {tileMN, tileK, subTileK};
             scaleInputA = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *tagLoadScaleA, gemm->kernelType.scaleTypeA.shuffleTile));
+                                    *tagLoadScaleA, shuffleTile3));
         }
 
         tagBlockScaleA = mulInputA = command->addOperation(rocRoller::Operations::BlockScale(
@@ -249,10 +254,17 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
         auto scaleInputB = tagLoadScaleB;
 
-        if (gemm->kernelType.scaleTypeB.shuffleTile.size() == 3)
+        if (gemm->kernelType.scaleTypeB.shuffleTile.size() == 2)
         {
+            // Reconstruct 3-element shuffleTile for SubTileTranspose
+            // shuffleTile format: {tileMN, tileK}
+            // Always use MI 16x16x128, so subTileK = 128/32 = 4
+            auto tileMN = gemm->kernelType.scaleTypeB.shuffleTile[0];
+            auto tileK = gemm->kernelType.scaleTypeB.shuffleTile[1];
+            size_t subTileK = 4;
+            std::vector<size_t> shuffleTile3 = {tileMN, tileK, subTileK};
             scaleInputB = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *tagLoadScaleB, gemm->kernelType.scaleTypeB.shuffleTile));
+                                    *tagLoadScaleB, shuffleTile3));
         }
 
         tagBlockScaleB = mulInputB = command->addOperation(rocRoller::Operations::BlockScale(
@@ -400,6 +412,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         // TODO: verify the division of scale block size is correct
         auto const scaleBlockSize
             = gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize;
+
         auto macTileAScale = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.m, gemm->workgroupTile.k / (int)scaleBlockSize},
             LayoutType::MATRIX_A,
@@ -407,7 +420,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k / (int)scaleBlockSize,
              gemm->machineInstruction.b},
-            gemm->loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+            GetMemoryType(gemm->loadPathAScale),
+            {},  // miTileSizes - use default (same as subTileSizes)
+            {gemm->swizzleTileSize.m,
+                gemm->swizzleTileSize.n,
+                gemm->swizzleTileSize.k,
+                1});
         params->setDimensionInfo(*tagLoadScaleA, macTileAScale);
     }
 
@@ -428,6 +446,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         // TODO: verify the division of scale block size is correct
         auto const scaleBlockSize
             = gemm->kernelType.scaleTypeB.blockRowSize * gemm->kernelType.scaleTypeB.blockColSize;
+
         auto macTileBScale = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.k / (int)scaleBlockSize, gemm->workgroupTile.n},
             LayoutType::MATRIX_B,
@@ -435,7 +454,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k / (int)scaleBlockSize,
              gemm->machineInstruction.b},
-            gemm->loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+            GetMemoryType(gemm->loadPathBScale),
+            {},  // miTileSizes - use default (same as subTileSizes)
+            {gemm->swizzleTileSize.m,
+                gemm->swizzleTileSize.n,
+                gemm->swizzleTileSize.l,
+                1});
         params->setDimensionInfo(*tagLoadScaleB, macTileBScale);
     }
 
@@ -529,7 +553,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     // Create CommandKernel
 
     std::string kernelName    = genKernelName(gemm);
-    auto        context       = Context::ForDefaultHipDevice(kernelName, {{.scaleSkipPermlane = gemm->kernelType.scaleTypeA.shuffleTile.size() == 3 && gemm->kernelType.scaleTypeB.shuffleTile.size() == 3}});
+    auto        context       = Context::ForDefaultHipDevice(kernelName, {{.scaleSkipPermlane = gemm->kernelType.scaleTypeA.shuffleTile.size() == 2 && gemm->kernelType.scaleTypeB.shuffleTile.size() == 2}});
     auto        commandKernel = std::make_shared<CommandKernel>(command, kernelName);
     commandKernel->setContext(context);
     commandKernel->setCommandParameters(params);

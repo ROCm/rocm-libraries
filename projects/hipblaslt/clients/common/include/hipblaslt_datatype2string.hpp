@@ -66,6 +66,7 @@ typedef enum class _hipblaslt_scaling_format
     Vector = 2,
     Block_32_UE8M0  = 3,
     Block_32_UE8M0_64_4_4 = 1000,
+    Block_32_UE8M0_32_8_2 = 1001,
 } hipblaslt_scaling_format;
 
 inline bool isBlockScaling(hipblaslt_scaling_format s)
@@ -81,6 +82,7 @@ inline int blockSize(hipblaslt_scaling_format s)
     {
         case hipblaslt_scaling_format::Block_32_UE8M0:
         case hipblaslt_scaling_format::Block_32_UE8M0_64_4_4:
+        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_2:
             return 32;
         default:
             return 1;
@@ -89,10 +91,14 @@ inline int blockSize(hipblaslt_scaling_format s)
 
 inline std::vector<size_t> scaleShuffleTile(hipblaslt_scaling_format s)
 {
+    // Returns shuffle tile as {tileMN, tileK}
+    // subTileK is calculated from machineInstruction.k / scaleBlockSize
     switch (s)
     {
         case hipblaslt_scaling_format::Block_32_UE8M0_64_4_4:
-            return {64, 4, 4};
+            return {64, 4};
+        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_2:
+            return {32, 8};
         default:
             return {};
     }

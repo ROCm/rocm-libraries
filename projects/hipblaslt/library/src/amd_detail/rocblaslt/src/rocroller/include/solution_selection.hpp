@@ -60,6 +60,24 @@ struct MachineInstructionSize
 };
 
 /**
+ * @brief SwizzleTileSize
+ *
+ * The swizzle tile size used for scale tensor swizzling.
+ * For shuffle tile {tileMN, tileK, subTileK}:
+ * - m, n = tileMN (from shuffleTile[0])
+ * - k, l = tileK = 256 / tileMN (from shuffleTile[1])
+ *
+ * The relationship: tileMN * tileK = 256 (minimal swizzle tile elements)
+ */
+struct SwizzleTileSize
+{
+    int m = 64;  // For matrix A scale (M direction)
+    int n = 64;  // For matrix A/B scale (common)
+    int k = 4;   // For matrix A scale (K direction)
+    int l = 4;   // For matrix B scale (L direction, same as K)
+};
+
+/**
  * @brief SolutionIndex Parameters
  *
  * All of the parameters that are used to generated a unique solution index.
@@ -81,12 +99,35 @@ SolutionIndexParameters indexToParameters(int index);
 
 size_t maxNumberSolutions();
 
-constexpr MachineInstructionSize pickMI(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt) {
+/**
+ * @brief Pick machine instruction based on data types, workgroup tile, and shuffle tile
+ *
+ * When pre-swizzled scale data is used (shuffle tile is non-empty), always use
+ * 16x16x128 MI instruction for compatibility.
+ *
+ * @param typeA Data type of matrix A
+ * @param typeB Data type of matrix B
+ * @param wgt Workgroup tile size
+ * @param shuffleTileMN The tileMN value from shuffle tile (0 if no shuffle tile)
+ * @return MachineInstructionSize The selected machine instruction dimensions
+ */
+inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
+                                     rocRoller::DataType typeB,
+                                     WorkGroupTileSize wgt,
+                                     size_t shuffleTileMN = 0) {
     if (typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16) {
         return {32, 32, 8, 1};
     } else if (typeA == rocRoller::DataType::Float) {
         return {32, 32, 2, 1};
     } else {
+        assert((shuffleTileMN == 0 || shuffleTileMN == 64 || shuffleTileMN == 32) &&
+               "shuffleTileMN must be 0, 64, or 32");
+        // For pre-swizzled scale data, always use 16x16x128 MI
+        if (shuffleTileMN != 0) {
+            return {16, 16, 128, 1};
+        }
+
+        // Default selection logic when no shuffle tile constraint
         if ((typeA == rocRoller::DataType::FP6 || typeA == rocRoller::DataType::BF6 ||
              typeB == rocRoller::DataType::FP6 || typeB == rocRoller::DataType::BF6) &&
             ((wgt.m == 256 && wgt.n == 64) || (wgt.m == 64 && wgt.n == 256))) {

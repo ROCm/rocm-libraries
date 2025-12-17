@@ -1949,7 +1949,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               B_col[i],
                                               ldb[i],
                                               transB == HIPBLAS_OP_T,
-                                              scaleShuffleTile(arg.scaleA),
+                                              scaleShuffleTile(arg.scaleB),
                                               1,
                                               blockSize(arg.scaleB),
                                               false,
@@ -2251,6 +2251,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT;
             }
+            else if (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_2)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_32_8_2_EXT;
+            }
 
             if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
             {
@@ -2282,6 +2286,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_64_4_4)
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT;
+            }
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_2)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_32_8_2_EXT;
             }
 
             if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)

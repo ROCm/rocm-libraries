@@ -48,15 +48,21 @@ std::vector<T> preSwizzleScale(std::vector<T> const&      input,
                                size_t                     scaleCols,
                                std::vector<size_t> const& tile)
 {
-    if(tile.size() != 3)
-        throw std::runtime_error("preSwizzleScale: tile must have exactly 3 elements");
+    if(tile.size() != 2)
+        throw std::runtime_error("preSwizzleScale: tile must have exactly 2 elements {tileMN, tileK}");
 
-    auto tileMN   = tile[0];
-    auto tileK    = tile[1];
-    auto subTileK = tile[2];
+    auto tileMN = tile[0];
+    auto tileK  = tile[1];
 
     if(tileMN != 64 && tileMN != 32)
         throw std::runtime_error("preSwizzleScale: tileMN must be 64 or 32");
+
+    // Always use 16x16x128 MI for pre-swizzled data
+    // subTileK = MI.k / scaleBlockSize = 128 / 32 = 4
+    size_t subTileK = 4;
+
+    std::cout << "Pre-swizzling scale data with tile: " << tileMN << "x" << tileK << " (subTileK=" << subTileK << ")" << std::endl;
+
     if(tileK % 4 != 0)
         throw std::runtime_error("preSwizzleScale: tileK must be a multiple of 4");
 
@@ -82,67 +88,71 @@ std::vector<T> preSwizzleScale(std::vector<T> const&      input,
                                     nSIMDIndexBlock,
                                     scaleCols / tileMN};
 
-    // Compute strides for source tensor
+    // Compute strides for source tensor (normal row-major order)
     std::vector<size_t> srcStrides(8);
     srcStrides[0] = 1;
     for(size_t i = 1; i < 8; ++i)
         srcStrides[i] = srcStrides[i - 1] * srcSizes[i - 1];
 
     // Determine dimension order based on tile configuration
+    // Always uses subTileK = 4 (MI 16x16x128)
     std::vector<size_t> dimOrder;
     if(tileMN == 64)
     {
         dimOrder = {6, 1, 2, 3, 4, 5, 0, 7};
     }
-    else if(tileMN == 32 && subTileK == 4)
+    else // tileMN == 32
     {
         dimOrder = {6, 2, 1, 3, 4, 5, 0, 7};
     }
-    else if(tileMN == 32 && subTileK == 2)
-    {
-        dimOrder = {1, 2, 0, 3, 4, 5, 6, 7};
-    }
-    else
-    {
-        throw std::runtime_error("preSwizzleScale: unsupported tile configuration");
-    }
 
-    // Compute destination sizes and strides
-    std::vector<size_t> dstSizes(8);
-    for(size_t i = 0; i < 8; ++i)
-        dstSizes[i] = srcSizes[dimOrder[i]];
-
-    std::vector<size_t> dstStrides(8);
-    dstStrides[0] = 1;
-    for(size_t i = 1; i < 8; ++i)
-        dstStrides[i] = dstStrides[i - 1] * dstSizes[i - 1];
+    // Compute destination strides using the shuffled dimension order
+    // This matches rocRoller's TensorDescriptor::ShuffledNoPadding
+    std::vector<size_t> dstStrides(8, 0);
+    {
+        size_t stride = 1;
+        for(auto idx : dimOrder)
+        {
+            dstStrides.at(idx) = stride;
+            stride *= srcSizes.at(idx);
+        }
+    }
 
     // Perform the shuffle
+    // rocRoller's shuffleDims(input, dst, src) iterates over coordinates and uses:
+    //   output[dst.index(coord)] = input[src.index(coord)]
+    // where dst has shuffled strides and src has normal strides.
+    // We iterate over all coordinates using srcSizes.
     std::vector<T> output(input.size());
 
+    // Compute total number of coordinates
+    size_t totalCoords = 1;
+    for(size_t i = 0; i < 8; ++i)
+        totalCoords *= srcSizes[i];
+
 #pragma omp parallel for
-    for(size_t flatIdx = 0; flatIdx < input.size(); ++flatIdx)
+    for(size_t coordNum = 0; coordNum < totalCoords; ++coordNum)
     {
-        // Convert flat index to multi-dimensional source coordinates
-        std::vector<size_t> srcCoords(8);
-        size_t              remaining = flatIdx;
-        for(int i = 7; i >= 0; --i)
+        // Convert coordNum to 8D coordinates
+        std::vector<size_t> coord(8);
+        size_t remaining = coordNum;
+        for(size_t i = 0; i < 8; ++i)
         {
-            srcCoords[i] = remaining / srcStrides[i];
-            remaining    = remaining % srcStrides[i];
+            coord[i] = remaining % srcSizes[i];
+            remaining /= srcSizes[i];
         }
 
-        // Compute destination coordinates by applying dimension permutation
-        std::vector<size_t> dstCoords(8);
+        // Compute source index using normal strides
+        size_t srcIdx = 0;
         for(size_t i = 0; i < 8; ++i)
-            dstCoords[i] = srcCoords[dimOrder[i]];
+            srcIdx += coord[i] * srcStrides[i];
 
-        // Convert destination coordinates to flat index
-        size_t dstFlatIdx = 0;
+        // Compute destination index using shuffled strides
+        size_t dstIdx = 0;
         for(size_t i = 0; i < 8; ++i)
-            dstFlatIdx += dstCoords[i] * dstStrides[i];
+            dstIdx += coord[i] * dstStrides[i];
 
-        output[dstFlatIdx] = input[flatIdx];
+        output[dstIdx] = input[srcIdx];
     }
 
     return output;
@@ -355,13 +365,16 @@ std::vector<float> generateData(T                              dgen,
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     // Apply pre-swizzle to scale data if shuffleTile is provided
-    if(shuffleTile.size() == 3)
+    // shuffleTile format: {tileMN, tileK}
+    if(shuffleTile.size() == 2)
     {
         // Calculate scale tensor dimensions
-        // For matrix A (non-transpose): scale has shape (K/blockSize, M)
-        // For matrix B (transpose): scale has shape (K/blockSize, N)
-        size_t scaleRows = sizes[1] / elementsPerMXBlock; // K dimension / block size
-        size_t scaleCols = sizes[0];                      // M or N dimension
+        // sizes = {rowSize, colSize} where:
+        //   - For transposed A: rowSize = K, colSize = M
+        //   - For non-transposed B: rowSize = K, colSize = N
+        // The scale tensor has shape (rowSize/blockSize, colSize)
+        size_t scaleRows = sizes[0] / elementsPerMXBlock; // K / blockSize
+        size_t scaleCols = sizes[1];                      // M or N
 
         scaleBytes = preSwizzleScale(scaleBytes, scaleRows, scaleCols, shuffleTile);
     }

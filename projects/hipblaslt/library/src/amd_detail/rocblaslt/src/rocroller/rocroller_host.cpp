@@ -89,6 +89,8 @@ inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat sc
         return "3";
     case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
         return "1000";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_2:
+        return "1001";
     default:
         return "";
     }
@@ -450,6 +452,7 @@ rocblaslt_status
         std::cerr << e.what() << std::endl;
         return rocblaslt_status_not_implemented;
     }
+    std::cout << "Kernel generated: " << params->toString() << std::endl;
 
     return rocblaslt_status_success;
 }

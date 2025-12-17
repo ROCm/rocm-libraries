@@ -80,10 +80,17 @@ struct SolutionParameters
     bool streamKTwoTile = false;
 
     // Scale options
-    bool loadLDSScaleA = false;
-    bool loadLDSScaleB = false;
+    rocRoller::Parameters::Solution::LoadPath loadPathAScale
+        = rocRoller::Parameters::Solution::LoadPath::BufferToVGPR;
+    rocRoller::Parameters::Solution::LoadPath loadPathBScale
+        = rocRoller::Parameters::Solution::LoadPath::BufferToVGPR;
     bool swizzleScale  = true;
     bool prefetchScale = true;
+
+    // Swizzle tile sizes for scale tensor swizzling
+    // Calculated from shuffleTile: {tileMN, tileK, subTileK}
+    // swizzleTileSize = {tileMN, tileMN, tileK, tileK}
+    SwizzleTileSize swizzleTileSize = {64, 64, 16, 16};
 
     // Workgroup Mapping
     int workgroupMappingDim = 0;

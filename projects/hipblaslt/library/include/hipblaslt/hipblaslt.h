@@ -173,6 +173,7 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F = 4,    /**<Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128-element block in the innermost dimension of the corresponding data tensor */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F = 5, /**<Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128x128-element block in the corresponding data tensor */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT = 1000,
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_32_8_2_EXT = 1001,
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 
