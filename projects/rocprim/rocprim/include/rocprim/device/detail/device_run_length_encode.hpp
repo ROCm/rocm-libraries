@@ -125,8 +125,7 @@ struct discontinuity_helper
         }
         else
         {
-            auto not_equal
-                = ::rocprim::inequality_wrapper<CompareFunction>(CompareFunction());
+            auto not_equal = ::rocprim::inequality_wrapper<CompareFunction>(CompareFunction());
 
             constexpr unsigned int block_size      = BlockSize * ItemsPerThread;
             const InputType        block_successor = block_input[block_size];
