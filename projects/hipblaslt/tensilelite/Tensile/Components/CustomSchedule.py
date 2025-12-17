@@ -1551,7 +1551,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     if not (isTN(kernel) and TLDS):
         return False, None
     kernel["MfmaInitCVgprs"] = True
-    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    nglshift = nllshift = 11 # vmcnt shift for ngl and nll
     optSchedule = {
     'SYNC': [[-1, 6, 14, 14, 27,27, 47, 47]], 
     'LRA0': [[0,1, 2,3,4,5,5]],
