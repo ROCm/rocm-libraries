@@ -535,6 +535,9 @@ def tensile_sgemm_guidepost():
 
 
 def streamk_sweep():
+    # Prefetch configurations: (prefetch, prefetchInFlight, prefetchLDSFactor)
+    prefetchConfigs = [(False, 0, 0)] + [(True, 2, 2)]
+
     for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
         for base in [HGEMM_7680x8448x8448]:
             # Currently these run out of LDS everywhere except gfx950.
@@ -542,12 +545,31 @@ def streamk_sweep():
             for mac_m in [64, 128]:
                 for mac_n in [64, 128, 256]:
                     for mac_k in [16, 32, 64]:
-                        if (twoTile or twoTileDPFirst) and mac_m * mac_n * mac_k >= (
-                            64 * 256 * 64
-                        ):
-                            # currently these run out of VGPRs.
-                            pass
-                        else:
+                        for (
+                            prefetch,
+                            prefetchInFlight,
+                            prefetchLDSFactor,
+                        ) in prefetchConfigs:
+                            # Runs out of VGPRs
+                            if (
+                                twoTile or twoTileDPFirst
+                            ) and mac_m * mac_n * mac_k >= (64 * 256 * 64):
+                                continue
+
+                            # Runs out of VGPRs: TwoTile/TwoTileDPFirst + prefetch
+                            if (twoTile or twoTileDPFirst) and prefetch:
+                                continue
+
+                            # Runs out of VGPRs: Standard + large tiles + prefetchLDSFactor=2
+                            if (
+                                (not twoTile and not twoTileDPFirst)
+                                and prefetch
+                                and mac_n == 256
+                                and mac_k == 64
+                                and prefetchLDSFactor == 2
+                            ):
+                                continue
+
                             yield mkGEMM(
                                 base,
                                 mac_m=mac_m,
@@ -556,9 +578,9 @@ def streamk_sweep():
                                 workgroup_size_x=128,
                                 workgroup_size_y=2,
                                 visualize=False,
-                                prefetch=False,  # TODO: Fix k loop unrolling with stream k
-                                # prefetchInFlight=2,
-                                # prefetchLDSFactor=2,
+                                prefetch=prefetch,
+                                prefetchInFlight=prefetchInFlight,
+                                prefetchLDSFactor=prefetchLDSFactor,
                                 streamK=True,
                                 streamKTwoTile=twoTile,
                                 streamKTwoTileDPFirst=twoTileDPFirst,
@@ -575,6 +597,10 @@ def streamk():
         workgroup_size_x=128,
         workgroup_size_y=2,
         prefetch=False,
+        # TODO: Consider enabling, some run out of VGPRs
+        # prefetch=True,
+        # prefetchInFlight=2,
+        # prefetchLDSFactor=2,
         streamK=True,
     )
 
@@ -628,7 +654,7 @@ def smallMN_largeK_fp32():
         workgroup_size_x=128,
         workgroup_size_y=2,
         visualize=False,
-        prefetch=False,  # TODO: Fix k loop unrolling with stream k
+        prefetch=False,
         # prefetchInFlight=2,
         # prefetchLDSFactor=2,
         streamK=False,
@@ -1118,6 +1144,12 @@ def addSkipPermlane(suite: List[GEMMRun], value=True):
         yield run
 
 
+def addStreamK(suite, value=True):
+    for run in suite:
+        run.streamK = value
+        yield run
+
+
 def fp4_target_d2lds_mi32x32x64_pf2x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf2x1())
 
@@ -1415,6 +1447,17 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
     )
 
 
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile():
+    for gemm in fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+        gemm.prefetchScale = False
+        gemm.pretileScale = True
+        gemm.loadScale_A = "BufferToLDS"
+        gemm.loadScale_B = "BufferToLDS"
+        gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
+        gemm.types.scaleSkipPermlane = True
+        yield gemm
+
+
 def fp4_target_mxd2lds_mi16x16x128_st32x8_pf2x1():
     yield GEMMRun(
         M=4096,
@@ -1667,6 +1710,16 @@ def fp4_kernels():
     yield from fp4_16x16x128_scale_options()
     yield from fp4_32x32x64_scale_options()
     yield from fp4_d2lds_wgts256x256x256()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile()
+
+
+def fp4_kernels_streamk():
+    """Only the FP4 kernel configurations that pass with StreamK enabled."""
+    yield from addStreamK(fp4_target())
+    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf2x1())
+    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf4x1())
+    yield from addStreamK(fp4_target_d2lds_mi16x16x128_pf4x1())
+    yield from addStreamK(fp4_d2lds_wgts256x256x256())
 
 
 def fp4_target_sweep_wgms():

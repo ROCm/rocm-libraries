@@ -22,7 +22,6 @@
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-
 if(DEFINED ENV{ROCM_PATH})
   set (ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "The path to the ROCm installation.")
 endif()
@@ -106,7 +105,7 @@ if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
 
   if(GPU_TARGETS STREQUAL "all")
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
     )
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
@@ -153,12 +152,6 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
   add_link_options(-fuse-ld=lld)
-endif()
-
-if(BUILD_CODE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
 endif()
 
 # Set version variables
@@ -220,6 +213,11 @@ else()
     set(package_name hiprand)
 endif()
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
+endif()
+
 rocm_create_package(
         NAME ${package_name}
         DESCRIPTION "GPU-based random number generation library, written in HIP"
@@ -227,48 +225,3 @@ rocm_create_package(
         LDCONFIG
         LDCONFIG_DIR ${HIPRAND_CONFIG_DIR}
 )
-
-if(BUILD_CODE_COVERAGE)
-  #
-  # Run coverage analysis
-  #
-  add_custom_target(coverage_analysis
-    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-
-  add_dependencies(coverage_analysis hiprand)
-
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage_output
-    DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    )
-
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory ./hiprand --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" "'*/test/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output)
-
-  #
-  # Coverage cleanup
-  #
-  add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-endif()
