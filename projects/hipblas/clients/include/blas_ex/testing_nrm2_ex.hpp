@@ -167,11 +167,11 @@ void testing_nrm2_ex(const Arguments& arg)
         ref_nrm2<Tx, Tr>(N, hx.data(), incx, &cpu_result);
 
         // tolerance taken from rocBLAS, could use some improvement
-        double abs_result = cpu_result > 0 ? cpu_result : -cpu_result;
+        double abs_result = (float)cpu_result > 0.0f ? (double)cpu_result : (double)-cpu_result;
         double abs_error;
 
-        abs_error = abs_result > 0 ? hipblas_type_epsilon<Tr> * N * abs_result
-                                   : hipblas_type_epsilon<Tr> * N;
+        abs_error = abs_result > 0.0 ? hipblas_type_epsilon<Tr> * N * abs_result
+                                     : hipblas_type_epsilon<Tr> * N;
 
         double tolerance = 2.0; //  accounts for rounding in reduction sum. depends on n.
             //  If test fails, try decreasing n or increasing tolerance.

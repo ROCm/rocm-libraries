@@ -146,9 +146,6 @@ RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
     git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
     python ./build_tools/fetch_sources.py
 
-# Do this after fetch_sources.py or you wont have the repos pulled this file references.
-RUN pip install -r requirements-external.txt
-
 RUN mkdir build
 WORKDIR /TheRock/build
 
@@ -198,6 +195,7 @@ COPY --from=install_therock /opt/rocm /opt/rocm
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
     clang-tidy-20 \
+    clang-tools-20 \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
 

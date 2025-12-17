@@ -65,10 +65,6 @@ namespace rocRoller
 #define ShowReg(reg)                                              \
     (reg ? concatenate("\t" #reg " = ", reg->description(), "\n") \
          : concatenate("\t" #reg " = (nullptr)\n"))
-#define ShowBuf(buf)                                                              \
-    (buf && buf->allRegisters()                                                   \
-         ? concatenate("\t" #buf " = ", buf->allRegisters()->description(), "\n") \
-         : concatenate("\t" #buf " = (nullptr)\n"))
 
             return concatenate("LSTInfo {\n",
                                ShowValue(info.kind),
@@ -84,7 +80,7 @@ namespace rocRoller
                                ShowReg(info.colStrideReg),
                                ShowValue(info.colStrideAttributes),
                                ShowReg(info.offset),
-                               ShowBuf(info.bufDesc),
+                               ShowReg(info.bufDesc),
                                ShowValue(info.bufOpts),
                                ShowValue(info.isTransposedTile),
                                "}");
@@ -111,11 +107,11 @@ namespace rocRoller
             return Expression::literal(x);
         }
 
-        inline std::shared_ptr<BufferDescriptor> LoadStoreTileGenerator::getBufferDesc(int tag)
+        inline Register::ValuePtr LoadStoreTileGenerator::getBufferDesc(int tag)
         {
             auto bufferTag = m_graph->mapper.get<Buffer>(tag);
             auto bufferSrd = m_context->registerTagManager()->getRegister(bufferTag);
-            return std::make_shared<BufferDescriptor>(bufferSrd, m_context);
+            return bufferSrd;
         }
 
         /**
@@ -461,29 +457,19 @@ namespace rocRoller
                     if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
                     {
                         Register::ValuePtr basePointer;
-                        auto               bufDesc = BufferDescriptor(bufferReg, m_context);
+                        auto               bufferExpr = bufferReg->expression();
                         co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
-                        if(user->offset && !Expression::canEvaluateTo(0u, user->offset))
+                        ExpressionPtr base = basePointer->expression();
+                        if(user->offset)
                         {
-                            Register::ValuePtr tmpRegister;
-                            co_yield generate(tmpRegister,
-                                              simplify(basePointer->expression() + user->offset));
-                            co_yield bufDesc.setBasePointer(tmpRegister);
+                            base = base + user->offset;
                         }
-                        else
-                        {
-                            co_yield bufDesc.setBasePointer(basePointer);
-                        }
-
-                        co_yield bufDesc.setDefaultOpts();
-                        Register::ValuePtr limitValue;
-                        co_yield generate(limitValue, toBytes(user->size));
+                        bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, base);
+                        bufferExpr = BufferDescriptor::SetOptions(
+                            bufferExpr, BufferDescriptor::GetDefaultOptions(m_context));
                         // TODO: Handle sizes larger than 32 bits
-                        auto limit = (limitValue->regType() == Register::Type::Literal)
-                                         ? limitValue
-                                         : limitValue->subset({0});
-                        limit->setVariableType(DataType::UInt32);
-                        co_yield bufDesc.setSize(limit);
+                        bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
+                        co_yield Expression::generate(bufferReg, bufferExpr, m_context);
                     }
                     scope->addRegister(buffer);
                 }
@@ -607,6 +593,8 @@ namespace rocRoller
                         auto stop  = (i * numVGPRBlocks + r + 1) * elementsPerMove;
                         if(info.bufOpts.lds)
                         {
+                            info.offset
+                                = Register::Value::Literal(offsetValue + r * elementBlockStride);
                             co_yield moveTileDirect2LDS<Dir>(
                                 info, bytesPerMove, (i == 0 && r == 0), info.rowOffsetReg);
                         }
