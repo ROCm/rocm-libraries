@@ -274,22 +274,22 @@ if(HIPDNN_ENABLE_COVERAGE)
             WARNING
                 "\nThe code coverage targets depend on test targets but test targets don't exist because HIP_DNN_SKIP_TESTS is enabled."
         )
-    endif()
+    else()
+        add_custom_coverage_target(code_coverage check) # code_coverage depends on 'check'
+        add_custom_coverage_target(unit-coverage unit-check) # unit-coverage depends on 'unit-check'
+        add_custom_coverage_target(integration-coverage integration-check) # ... 'integration-check'
 
-    add_custom_coverage_target(code_coverage check) # code_coverage depends on 'check'
-    add_custom_coverage_target(unit-coverage unit-check) # unit-coverage depends on 'unit-check'
-    add_custom_coverage_target(integration-coverage integration-check) # unit-coverage depends on
-                                                                       # 'unit-check'
+        # Make alias to target coverage
+        add_custom_target(
+            coverage DEPENDS code_coverage COMMENT "Alias for code_coverage to match mathci"
+        )
+    endif()
 
     # Create a coverage target that does not depend on any other target and will use the coverage
     # data that already exists on disk from prior / manual target runs performed before this target
     # is run.
     add_custom_coverage_target(current-coverage "")
 
-    # Make alias to target coverage
-    add_custom_target(
-        coverage DEPENDS code_coverage COMMENT "Alias for code_coverage to match mathci"
-    )
 endif()
 
 if(NOT HIP_DNN_SKIP_TESTS)
