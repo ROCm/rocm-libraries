@@ -82,13 +82,13 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
               miopenStatusBadParm);
 
     // Test FindSolutions
-    auto solutions = std::vector<miopenSolution_t>{};
+    auto solutions    = std::vector<miopenSolution_t>{};
     std::size_t found = 0;
     solutions.resize(100);
 
-    EXPECT_EQ(miopenFindSolutions(
-                  handle, problem, nullptr, solutions.data(), &found, solutions.size()),
-              miopenStatusSuccess);
+    EXPECT_EQ(
+        miopenFindSolutions(handle, problem, nullptr, solutions.data(), &found, solutions.size()),
+        miopenStatusSuccess);
     EXPECT_GE(found, 0);
     solutions.resize(found);
 
@@ -202,8 +202,9 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
             arguments[i].buffer     = buffers[i];
         }
 
-        EXPECT_EQ(miopenRunSolution(handle, solution, 3, arguments.get(), wspace.ptr(), wspace.size()),
-                  miopenStatusSuccess);
+        EXPECT_EQ(
+            miopenRunSolution(handle, solution, 3, arguments.get(), wspace.ptr(), wspace.size()),
+            miopenStatusSuccess);
 
         // Save-load cycle
         std::size_t solution_size;
@@ -217,8 +218,9 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
         EXPECT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
 
         miopenSolution_t read_solution;
-        EXPECT_EQ(miopenLoadSolution(&read_solution, solution_binary.data(), solution_binary.size()),
-                  miopenStatusSuccess);
+        EXPECT_EQ(
+            miopenLoadSolution(&read_solution, solution_binary.data(), solution_binary.size()),
+            miopenStatusSuccess);
 
         // Run loaded solution
         auto read_arguments = std::make_unique<miopenTensorArgument_t[]>(3);
@@ -254,9 +256,6 @@ class GPU_Find2Conv_FP32 : public testing::TestWithParam<Find2ConvTestCase>
     }
 };
 
-TEST_P(GPU_Find2Conv_FP32, FloatTest_find_2_conv)
-{
-    RunFind2ConvTest(GetParam());
-}
+TEST_P(GPU_Find2Conv_FP32, FloatTest_find_2_conv) { RunFind2ConvTest(GetParam()); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Find2Conv_FP32, testing::ValuesIn(GetFind2ConvTestCases()));
