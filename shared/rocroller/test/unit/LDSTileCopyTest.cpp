@@ -280,7 +280,7 @@ namespace LDSCopyTest
         if(m_context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context));
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context, nullptr));
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());

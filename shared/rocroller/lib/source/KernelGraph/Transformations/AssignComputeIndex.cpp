@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "rocRoller/CodeGen/Buffer.hpp"
+#include "rocRoller/CommandSolution.hpp"
 #include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
@@ -410,7 +411,8 @@ namespace rocRoller
                        ComputeIndex const& ci,
                        const int           target,
                        const int           buffer,
-                       const ContextPtr    context)
+                       const ContextPtr    context,
+                       const CommandPtr    command)
         {
             // Check if target has a User coordinate
             auto user = graph.coordinates.get<User>(target);
@@ -433,9 +435,9 @@ namespace rocRoller
             auto bufferRegType = Register::Type::Scalar;
 
             // Create a buffer descriptor expression
-            Expression::ExpressionPtr bufferExpr  = L(rocRoller::Buffer{0, 0, 0, 0});
-            Expression::ExpressionPtr basePointer = Expression::fromKernelArgument(
-                context->kernel()->findArgument(user->argumentName));
+            Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
+            Expression::ExpressionPtr basePointer
+                = findArgumentByName(command, user->argumentName)->expression();
 
             if(user->offset)
                 basePointer = basePointer + user->offset;
@@ -603,7 +605,7 @@ namespace rocRoller
 
                 if(buffer > 0)
                 {
-                    assignBufferTag = makeBuffer(kgraph, ci, target, buffer, m_context);
+                    assignBufferTag = makeBuffer(kgraph, ci, target, buffer, m_context, m_command);
                 }
 
                 if(assignStrideTag != -1 || assignBaseTag != -1 || assignBufferTag != -1)

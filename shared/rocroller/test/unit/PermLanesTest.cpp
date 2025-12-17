@@ -134,7 +134,7 @@ namespace PermLanesTest
         kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
         if(context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context));
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context, nullptr));
 
         context->schedule(k->preamble());
         context->schedule(k->prolog());
