@@ -24,9 +24,9 @@
  *
  *******************************************************************************/
 
-#include "rocRoller/CodeGen/Buffer.hpp"
-#include "rocRoller/CommandSolution.hpp"
+#include <rocRoller/CodeGen/Buffer.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
