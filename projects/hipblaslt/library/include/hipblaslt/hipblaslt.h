@@ -172,7 +172,7 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F = 3, /**<Scaling factors are single-precision vectors. This mode is only applicable to matrices A and B, in which case the vectors are expected to have M and N elements respectively, and each (i, j)-th element of product of A and B is multiplied by i-th element of A scale and j-th element of B scale. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F = 4,    /**<Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128-element block in the innermost dimension of the corresponding data tensor */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F = 5, /**<Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128x128-element block in the corresponding data tensor */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT_EXT = 1000,
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT = 1000,
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 

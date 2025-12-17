@@ -29,8 +29,124 @@
 #include <cblas.h>
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-#include <rocRoller/TensorDescriptor.hpp>
-#include <client/PreSwizzle.hpp>
+/**
+ * @brief Pre-swizzle scale data for block-scaled GEMM operations.
+ *
+ * This is a standalone implementation based on rocRoller's preSwizzle algorithm.
+ * It rearranges scale data according to the specified tile configuration to match
+ * the memory access pattern expected by the kernel.
+ *
+ * @param input The original scale data
+ * @param scaleRows Number of rows in the scale tensor (K / blockSize)
+ * @param scaleCols Number of columns in the scale tensor (M or N)
+ * @param tile The shuffle tile configuration {tileMN, tileK, subTileK}
+ * @return The pre-swizzled scale data
+ */
+template <typename T>
+std::vector<T> preSwizzleScale(std::vector<T> const&      input,
+                               size_t                     scaleRows,
+                               size_t                     scaleCols,
+                               std::vector<size_t> const& tile)
+{
+    if(tile.size() != 3)
+        throw std::runtime_error("preSwizzleScale: tile must have exactly 3 elements");
+
+    auto tileMN   = tile[0];
+    auto tileK    = tile[1];
+    auto subTileK = tile[2];
+
+    if(tileMN != 64 && tileMN != 32)
+        throw std::runtime_error("preSwizzleScale: tileMN must be 64 or 32");
+    if(tileK % 4 != 0)
+        throw std::runtime_error("preSwizzleScale: tileK must be a multiple of 4");
+
+    size_t totalElements = scaleRows * scaleCols;
+    if(totalElements != input.size())
+        throw std::runtime_error("preSwizzleScale: input size mismatch");
+
+    size_t nLanesPerSIMD   = 16;
+    size_t nSIMDsPerWave   = 4;
+    size_t nSIMDIndex      = tileMN / nLanesPerSIMD;
+    size_t nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+    size_t nVGPRIndex      = std::min(nSIMDIndex, subTileK);
+    size_t nVGPRBlock      = tileK / nSIMDBlock / nVGPRIndex;
+    size_t nSIMDIndexBlock = nVGPRIndex;
+    size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+
+    std::vector<size_t> srcSizes = {nVGPRIndex,
+                                    nVGPRBlock,
+                                    nSIMDBlock,
+                                    scaleRows / tileK,
+                                    nLanesPerSIMD,
+                                    nSIMDIndexIndex,
+                                    nSIMDIndexBlock,
+                                    scaleCols / tileMN};
+
+    // Compute strides for source tensor
+    std::vector<size_t> srcStrides(8);
+    srcStrides[0] = 1;
+    for(size_t i = 1; i < 8; ++i)
+        srcStrides[i] = srcStrides[i - 1] * srcSizes[i - 1];
+
+    // Determine dimension order based on tile configuration
+    std::vector<size_t> dimOrder;
+    if(tileMN == 64)
+    {
+        dimOrder = {6, 1, 2, 3, 4, 5, 0, 7};
+    }
+    else if(tileMN == 32 && subTileK == 4)
+    {
+        dimOrder = {6, 2, 1, 3, 4, 5, 0, 7};
+    }
+    else if(tileMN == 32 && subTileK == 2)
+    {
+        dimOrder = {1, 2, 0, 3, 4, 5, 6, 7};
+    }
+    else
+    {
+        throw std::runtime_error("preSwizzleScale: unsupported tile configuration");
+    }
+
+    // Compute destination sizes and strides
+    std::vector<size_t> dstSizes(8);
+    for(size_t i = 0; i < 8; ++i)
+        dstSizes[i] = srcSizes[dimOrder[i]];
+
+    std::vector<size_t> dstStrides(8);
+    dstStrides[0] = 1;
+    for(size_t i = 1; i < 8; ++i)
+        dstStrides[i] = dstStrides[i - 1] * dstSizes[i - 1];
+
+    // Perform the shuffle
+    std::vector<T> output(input.size());
+
+#pragma omp parallel for
+    for(size_t flatIdx = 0; flatIdx < input.size(); ++flatIdx)
+    {
+        // Convert flat index to multi-dimensional source coordinates
+        std::vector<size_t> srcCoords(8);
+        size_t              remaining = flatIdx;
+        for(int i = 7; i >= 0; --i)
+        {
+            srcCoords[i] = remaining / srcStrides[i];
+            remaining    = remaining % srcStrides[i];
+        }
+
+        // Compute destination coordinates by applying dimension permutation
+        std::vector<size_t> dstCoords(8);
+        for(size_t i = 0; i < 8; ++i)
+            dstCoords[i] = srcCoords[dimOrder[i]];
+
+        // Convert destination coordinates to flat index
+        size_t dstFlatIdx = 0;
+        for(size_t i = 0; i < 8; ++i)
+            dstFlatIdx += dstCoords[i] * dstStrides[i];
+
+        output[dstFlatIdx] = input[flatIdx];
+    }
+
+    return output;
+}
 #endif
 
 template <typename DT>
@@ -247,10 +363,7 @@ std::vector<float> generateData(T                              dgen,
         size_t scaleRows = sizes[1] / elementsPerMXBlock; // K dimension / block size
         size_t scaleCols = sizes[0];                      // M or N dimension
 
-        // Create a TensorDescriptor for the scale data
-        rocRoller::TensorDescriptor scaleDesc(rocRoller::DataType::UInt8, {scaleRows, scaleCols});
-
-        scaleBytes = rocRoller::Client::preSwizzle(scaleBytes, scaleDesc, shuffleTile);
+        scaleBytes = preSwizzleScale(scaleBytes, scaleRows, scaleCols, shuffleTile);
     }
 #endif
 

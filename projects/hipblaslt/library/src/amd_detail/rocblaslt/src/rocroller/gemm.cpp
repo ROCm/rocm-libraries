@@ -521,15 +521,15 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
          static_cast<uint>(gemm->workgroupTile.n / gemm->machineInstruction.n
                            / wavetilePerWavefrontN)});
 
-    AssertFatal(gemm->kernelType.scaleShuffleTileA.size()
-                == gemm->kernelType.scaleShuffleTileB.size(),
+    AssertFatal(gemm->kernelType.scaleTypeA.shuffleTile.size()
+                == gemm->kernelType.scaleTypeB.shuffleTile.size(),
                 "A and B must have the same shuffle parameter");
 
     // -------------------------------------------------------------
     // Create CommandKernel
 
     std::string kernelName    = genKernelName(gemm);
-    auto        context       = Context::ForDefaultHipDevice(kernelName, {{.scaleSkipPermlane = gemm->kernelType.scaleShuffleTileA.size() > 0}});
+    auto        context       = Context::ForDefaultHipDevice(kernelName, {{.scaleSkipPermlane = gemm->kernelType.scaleTypeA.shuffleTile.size() == 3 && gemm->kernelType.scaleTypeB.shuffleTile.size() == 3}});
     auto        commandKernel = std::make_shared<CommandKernel>(command, kernelName);
     commandKernel->setContext(context);
     commandKernel->setCommandParameters(params);
@@ -619,7 +619,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
 
     if(gemm->params->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
     {
-        auto const scaleBlockSize = gemm->params->kernelType.scaleABlockRowSize * gemm->params->kernelType.scaleABlockColSize;
+        auto const scaleBlockSize = gemm->params->kernelType.scaleTypeA.blockRowSize * gemm->params->kernelType.scaleTypeA.blockColSize;
         TensorDescriptor descAScale(gemm->params->kernelType.typeA,
                                     {size_t(M), size_t(K / scaleBlockSize)},
                                     gemm->params->kernelType.transA ? "T" : "N");
@@ -627,7 +627,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
     }
     if(gemm->params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
     {
-        auto const scaleBlockSize = gemm->params->kernelType.scaleBBlockRowSize * gemm->params->kernelType.scaleBBlockColSize;
+        auto const scaleBlockSize = gemm->params->kernelType.scaleTypeB.blockRowSize * gemm->params->kernelType.scaleTypeB.blockColSize;
         TensorDescriptor descBScale(gemm->params->kernelType.typeB,
                                     {size_t(K / scaleBlockSize), size_t(N)},
                                     gemm->params->kernelType.transB ? "T" : "N");
