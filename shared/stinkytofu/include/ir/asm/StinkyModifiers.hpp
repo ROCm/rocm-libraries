@@ -28,6 +28,14 @@
 
 namespace stinkytofu
 {
+    // Enum for selecting high or low 16 bits in True16 instructions
+    enum class HighBitSel : int
+    {
+        NONE = -1,
+        LOW  = 0,
+        HIGH = 1
+    };
+
     struct Modifier
     {
         enum class Type : uint8_t
@@ -40,11 +48,13 @@ namespace stinkytofu
             SDWA,
             DPP,
             VOP3P,
+            TRUE16,
             EXEC,
             VCC,
             SWAITCNT_DATA,
             SWAITTENSORCNT_DATA,
             LABEL_NAME,
+            COMMENT,
         };
 
         Modifier(Type type)
@@ -233,6 +243,23 @@ namespace stinkytofu
         std::vector<int> byte_sel;
     };
 
+    struct True16Modifiers : public Modifier
+    {
+        True16Modifiers(HighBitSel high_bit = HighBitSel::NONE)
+            : Modifier(Type::TRUE16)
+            , high_bit(high_bit)
+        {
+        }
+
+        True16Modifiers(int high_bit_int)
+            : Modifier(Type::TRUE16)
+            , high_bit(static_cast<HighBitSel>(high_bit_int))
+        {
+        }
+
+        HighBitSel high_bit;
+    };
+
     struct EXEC : public Modifier
     {
         EXEC(bool setHi = false)
@@ -317,6 +344,17 @@ namespace stinkytofu
         int8_t tlcnt;
     };
 
+    struct CommentData : public Modifier
+    {
+        CommentData(const std::string& comment)
+            : Modifier(Type::COMMENT)
+            , comment(comment)
+        {
+        }
+
+        std::string comment;
+    };
+
     inline std::ostream& operator<<(std::ostream& os, const SWaitCntData& waitCntData)
     {
         os << "vlcnt=" << (int)waitCntData.vlcnt << ", vscnt=" << (int)waitCntData.vscnt
@@ -342,11 +380,13 @@ namespace stinkytofu
     template<> constexpr Modifier::Type getModifierType<SDWAModifiers>() { return Modifier::Type::SDWA; }
     template<> constexpr Modifier::Type getModifierType<DPPModifiers>() { return Modifier::Type::DPP; }
     template<> constexpr Modifier::Type getModifierType<VOP3PModifiers>() { return Modifier::Type::VOP3P; }
+    template<> constexpr Modifier::Type getModifierType<True16Modifiers>() { return Modifier::Type::TRUE16; }
     template<> constexpr Modifier::Type getModifierType<EXEC>() { return Modifier::Type::EXEC; }
     template<> constexpr Modifier::Type getModifierType<VCC>() { return Modifier::Type::VCC; }
     template<> constexpr Modifier::Type getModifierType<SWaitCntData>() { return Modifier::Type::SWAITCNT_DATA; }
     template<> constexpr Modifier::Type getModifierType<SWaitTensorCntData>() { return Modifier::Type::SWAITTENSORCNT_DATA; }
     template<> constexpr Modifier::Type getModifierType<LabelData>() { return Modifier::Type::LABEL_NAME; }
+    template<> constexpr Modifier::Type getModifierType<CommentData>() { return Modifier::Type::COMMENT; }
     // clang-format on
 
 } // namespace stinkytofu

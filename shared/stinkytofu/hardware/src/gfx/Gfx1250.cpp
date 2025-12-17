@@ -40,6 +40,9 @@ namespace stinkytofu
     {
         defineGfx950Insts(registry);
 
+        // Set wavefront size for gfx1250
+        registry.setWaveFrontSize(32);
+
         // gfx1250 removes ds_read/ds_write variant instructions.
         std::vector<std::string> removedInsts;
         for(const auto& inst : registry.getInstructions())
@@ -54,6 +57,29 @@ namespace stinkytofu
         {
             registry.erase(name);
         }
+
+        // ============================================
+        // Scalar ALU
+        // ============================================
+        DEF_T(SALU, "s_mul_lo_u32");
+        DEF_T(SALU, "s_sub_u64");
+        DEF_T(SALU, "s_and_saveexec_b32");
+        DEF_T(SALU, "s_or_saveexec_b32");
+
+        // ============================================
+        // Vector ALU
+        // ============================================
+        DEF_T(VALU, "v_fma_mix_f32");
+        DEF_T(VALU, "v_rsq_iflag_f32");
+
+        // Vector control/sync instructions
+        DEF_T(HasSideEffectInst, "v_nop");
+
+        // ============================================
+        // Scalar control/sync instructions
+        // ============================================
+        DEF_T(HasSideEffectInst, "s_wait_alu");
+        DEF_T(HasSideEffectInst, "s_set_vgpr_msb");
 
         // ============================================
         // TDM

@@ -124,6 +124,8 @@ namespace stinkytofu
 
         std::string name;
 
+        uint32_t waveFrontSize = 64; // Default to 64, can be overridden per architecture
+
         void updateCycleAndLatency(const InstructionInfo& info);
 
         GfxInstDef* getInst(const std::string& name);
@@ -137,6 +139,16 @@ namespace stinkytofu
         const std::string& getName() const
         {
             return name;
+        }
+
+        uint32_t getWaveFrontSize() const
+        {
+            return waveFrontSize;
+        }
+
+        void setWaveFrontSize(uint32_t size)
+        {
+            waveFrontSize = size;
         }
 
         const List& getInstructions() const

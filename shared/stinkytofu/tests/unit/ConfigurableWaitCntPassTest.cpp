@@ -41,27 +41,37 @@ protected:
         kernelInfo.arch[0] = 12;
         kernelInfo.arch[1] = 5;
         kernelInfo.arch[2] = 0;
+
+        // Create a Function with a single BasicBlock for testing
+        func = std::make_unique<Function>("test_function");
+        bb   = func->createBasicBlock("entry");
+        func->setEntryBlock(bb);
     }
 
     void TearDown() override
     {
-        insts.clear();
+        // Clean up Function (which will clean up BasicBlocks and IR)
+        func.reset();
+        bb = nullptr;
+    }
+
+    // Get the IRList from the BasicBlock
+    IRList& getIRList()
+    {
+        return bb->getIR();
     }
 
     // Create IRBuilder for building test instructions
-    StinkyInstIRBuilder& getIRBuilder()
+    StinkyInstIRBuilder getIRBuilder()
     {
-        if(!irBuilder)
-        {
-            irBuilder = std::make_unique<StinkyInstIRBuilder>(insts, arch);
-        }
-        return *irBuilder;
+        return StinkyInstIRBuilder(getIRList(), arch);
     }
 
     // Helper to create a ds_read instruction (64-bit, 2 registers)
     StinkyInstruction* createDSRead(int destReg, int addrReg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b64, arch));
 
@@ -73,7 +83,8 @@ protected:
     // Helper to create a ds_read instruction (128-bit, 4 registers)
     StinkyInstruction* createDSRead128(int destReg, int addrReg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b128, arch));
 
@@ -85,7 +96,8 @@ protected:
     // Helper to create a ds_write instruction
     StinkyInstruction* createDSWrite(int addrReg, int dataReg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_write_b64, arch));
 
@@ -97,7 +109,8 @@ protected:
     // Helper to create a global_load instruction
     StinkyInstruction* createGlobalLoad(int destReg, int addrReg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::global_load_dword, arch));
 
@@ -109,7 +122,8 @@ protected:
     // Helper to create a global_store instruction
     StinkyInstruction* createGlobalStore(int addrReg, int dataReg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::global_store_dword, arch));
 
@@ -120,7 +134,8 @@ protected:
 
     StinkyInstruction* createTensorLoad(int src0Reg, int src1Reg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::tensor_load_to_lds, arch));
 
@@ -132,7 +147,8 @@ protected:
     // Helper to create a v_add instruction
     StinkyInstruction* createVAdd(int destReg, int src0Reg, int src1Reg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
@@ -145,7 +161,8 @@ protected:
     // Helper to create a v_mul instruction
     StinkyInstruction* createVMul(int destReg, int src0Reg, int src1Reg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f32, arch));
 
@@ -158,7 +175,8 @@ protected:
     // Helper to create an s_barrier instruction
     StinkyInstruction* createBarrier()
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::s_barrier, arch));
         return inst;
@@ -167,7 +185,8 @@ protected:
     // Helper to create a mfma instruction (tensor load)
     StinkyInstruction* createWMMA(int destReg, int src0Reg, int src1Reg)
     {
-        auto&              builder = getIRBuilder();
+        auto               builder = getIRBuilder();
+        IRList&            insts   = getIRList();
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch));
 
@@ -181,7 +200,8 @@ protected:
     // Helper to count waitcnt instructions
     int countWaitCnt()
     {
-        int count = 0;
+        int     count = 0;
+        IRList& insts = getIRList();
         for(auto& irBase : insts)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
@@ -196,7 +216,8 @@ protected:
     // Helper to count tensor waitcnt instructions
     int countTensorWaitCnt()
     {
-        int count = 0;
+        int     count = 0;
+        IRList& insts = getIRList();
         for(auto& irBase : insts)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
@@ -243,6 +264,7 @@ protected:
     {
         std::vector<WaitCntInfo> waitcnts;
         int                      position = 0;
+        IRList&                  insts    = getIRList();
         for(auto& irBase : insts)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
@@ -260,6 +282,7 @@ protected:
     {
         std::vector<TensorWaitCntInfo> tensorWaitcnts;
         int                            position = 0;
+        IRList&                        insts    = getIRList();
         for(auto& irBase : insts)
         {
             StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
@@ -275,7 +298,8 @@ protected:
     // Helper to find instruction position in the list
     int getInstructionPosition(StinkyInstruction* target)
     {
-        int position = 0;
+        int     position = 0;
+        IRList& insts    = getIRList();
         for(auto& irBase : insts)
         {
             if(&static_cast<StinkyInstruction&>(irBase) == target)
@@ -290,6 +314,7 @@ protected:
     // Helper to find waitcnt before a specific instruction
     SWaitCntData* findWaitCntBefore(StinkyInstruction* target)
     {
+        IRList&          insts    = getIRList();
         IRList::iterator targetIt = insts.end();
         for(auto it = insts.begin(); it != insts.end(); ++it)
         {
@@ -332,6 +357,7 @@ protected:
 
     SWaitTensorCntData* findTensorWaitCntBefore(StinkyInstruction* target)
     {
+        IRList&          insts    = getIRList();
         IRList::iterator targetIt = insts.end();
         for(auto it = insts.begin(); it != insts.end(); ++it)
         {
@@ -378,18 +404,18 @@ protected:
         PassContext passCtx;
         passCtx.addKernelInfo(kernelInfo);
         auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
-        pass->run(insts, passCtx);
+        pass->run(*func, passCtx);
     }
 
     void dumpInsts()
     {
-        std::cout << insts << std::endl;
+        std::cout << getIRList() << std::endl;
     }
 
-    IRList                               insts;
-    StinkyKernelInfo                     kernelInfo;
-    GfxArchID                            arch;
-    std::unique_ptr<StinkyInstIRBuilder> irBuilder;
+    std::unique_ptr<Function> func;
+    BasicBlock*               bb = nullptr;
+    StinkyKernelInfo          kernelInfo;
+    GfxArchID                 arch;
 };
 
 // ============================================================================

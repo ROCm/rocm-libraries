@@ -21,12 +21,12 @@
  *
  * ************************************************************************ */
 #include "stinkytofu-opt.hpp"
-
-#include "ir/asm/IRParser.hpp"
+#include "ir/asm/StinkyAsmIR.hpp"
 
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -57,78 +57,29 @@ namespace
             return &DeserializeStinkytofuIRPass::ID;
         }
 
-        void run(IRList& insts, PassContext& passCtx) override
+        void run(Function& func, PassContext& passCtx) override
         {
-            GfxArchID arch = getGfxArchID(passCtx.getKernelInfo().arch[0],
+            IRList&   insts = func.getEntryBlock()->getIR();
+            GfxArchID arch  = getGfxArchID(passCtx.getKernelInfo().arch[0],
                                           passCtx.getKernelInfo().arch[1],
                                           passCtx.getKernelInfo().arch[2]);
 
-            std::string irText             = readFile(stinkytofuIRFile);
-            auto        parsedInstructions = parseSourceString(irText);
+            std::string irText = readFile(stinkytofuIRFile);
 
-            StinkyInstIRBuilder& irBuilder
-                = passCtx.getOrCreateIRBuilder<StinkyInstIRBuilder>(insts, arch);
-
-            for(const auto& inst : parsedInstructions)
+            // Use the shared conversion logic from StinkyIRConverter
+            StinkyErrorCode result
+                = StinkyIRConverter::populateFunctionFromString(irText, func, passCtx, arch);
+            if(result != StinkyErrorCode::SUCCESS)
             {
-                // Check if label
-                if(inst->isLabel)
+                if(result == StinkyErrorCode::PASSCTX_EMPTY)
                 {
-                    irBuilder.createStinkyLabel(insts.end(), inst->opcodeStr);
-                    continue;
-                }
-
-                auto              opcode     = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
-                const HwInstDesc* hwInstDesc = getMCIDByIsaOp(opcode, arch);
-                if(hwInstDesc == nullptr)
-                {
-                    std::cerr << "Warning: No hardware instruction descriptor found for opcode "
-                              << opcode << " in arch gfx" << int(arch) << "\n";
+                    std::cerr << "No PassContext available. Call convertToIRList first."
+                              << "\n";
                 }
                 else
                 {
-                    StinkyInstruction* stinkyInst
-                        = irBuilder.createStinkyInstBefore(insts.end(), hwInstDesc);
-
-                    // move destRegs and srcRegs
-                    stinkyInst->destRegs = inst->destRegs;
-                    stinkyInst->srcRegs  = inst->srcRegs;
-
-                    // Overwrite cycles when valid (> 0), otherwise use default from HwInstDesc
-                    if(inst->issueCycles > 0)
-                    {
-                        stinkyInst->issueCycles = inst->issueCycles;
-                    }
-
-                    if(inst->latencyCycles > 0)
-                    {
-                        stinkyInst->latencyCycles = inst->latencyCycles;
-                    }
-                }
-            }
-
-            // FIXME: Workaround to detect loops in the IR. Just like in ToStinkyAsmPass.
-            std::vector<IntrusiveListIterator<IRBase>> loopLabels;
-            for(auto it = insts.begin(); it != insts.end(); ++it)
-            {
-                StinkyInstruction* inst = cast<StinkyInstruction>(it.getNodePtr());
-                if(inst->getUnifiedOpcode() == GFX::LABEL)
-                {
-                    loopLabels.push_back(it);
-                }
-                else if(isBranch(*inst))
-                {
-                    auto branchLabel = inst->srcRegs.front();
-                    for(auto targetLabel : loopLabels)
-                    {
-                        StinkyInstruction* label
-                            = cast<StinkyInstruction>(targetLabel.getNodePtr());
-                        if(branchLabel.getLiteralString() == label->getModifier<LabelData>()->label)
-                        {
-                            passCtx.setLoopProperties(true, targetLabel, it);
-                            break;
-                        }
-                    }
+                    std::cerr << "Error: Failed to populate IRList from string. Error code: "
+                              << static_cast<int>(result) << "\n";
                 }
             }
         }

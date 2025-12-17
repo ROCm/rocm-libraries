@@ -82,6 +82,9 @@ namespace stinkytofu
     //       parse it, and populate the registry accordingly.
     void defineGfx942Insts(GpuArch& registry)
     {
+        // Set wavefront size for gfx942
+        registry.setWaveFrontSize(64);
+
         // ============================================
         // Scalar instructions (SOP1 / SOP2 / Scalar ALU)
         // ============================================
@@ -141,7 +144,7 @@ namespace stinkytofu
                 "vccnz",
                 "vccz",
             })
-            DEF_T(BranchInst, "s_cbranch_" + op);
+            DEF_T(ConditionalBranchInst, "s_cbranch_" + op);
 
         DEF_T(BranchInst, "s_and_saveexec_b64");
 
@@ -201,6 +204,36 @@ namespace stinkytofu
 
         for(std::string suffix : {"f16", "f32", "i32", "u32", "co_u32"})
             DEF_T(VALU, "v_sub_" + suffix);
+
+        // Packed integer 16-bit arithmetic and logical operations
+        for(auto op :
+            {"v_pk_mad_i16", "v_pk_add_i16", "v_pk_sub_i16", "v_pk_max_i16", "v_pk_min_i16"})
+            DEF_T(VALU, op);
+
+        // Packed unsigned 16-bit arithmetic and logical operations
+        for(auto op : {"v_pk_mul_lo_u16",
+                       "v_pk_mad_u16",
+                       "v_pk_add_u16",
+                       "v_pk_sub_u16",
+                       "v_pk_max_u16",
+                       "v_pk_min_u16"})
+            DEF_T(VALU, op);
+
+        // Packed 16-bit bit shift operations
+        for(auto op : {"v_pk_lshlrev_b16", "v_pk_lshrrev_b16", "v_pk_ashrrev_i16"})
+            DEF_T(VALU, op);
+
+        // Packed float 16-bit operations (excluding duplicates defined later)
+        for(auto op : {"v_pk_add_f16", "v_pk_mul_f16", "v_pk_min_f16"})
+            DEF_T(VALU, op);
+
+        // Mixed precision operations (excluding v_mad_mix_f32 defined later)
+        for(auto op : {"v_mad_mixlo_f16", "v_mad_mixhi_f16"})
+            DEF_T(VALU, op);
+
+        // Packed float 32-bit operations
+        for(auto op : {"v_pk_fma_f32", "v_pk_mul_f32", "v_pk_add_f32", "v_pk_mov_b32"})
+            DEF_T(VALU, op);
 
         for(auto name : {
                 "v_max_i32",

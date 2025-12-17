@@ -22,9 +22,13 @@
  * ************************************************************************ */
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
+#include <functional>
 #include <memory>
+#include <set>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -35,6 +39,14 @@ namespace stinkytofu
 {
     // Forward declarations
     class PassContext;
+    enum class GfxArchID : uint32_t;
+
+    // Error codes for StinkyIRConverter operations
+    enum class StinkyErrorCode : int
+    {
+        SUCCESS       = 0,
+        PASSCTX_EMPTY = 1,
+    };
 
     struct StinkyKernelInfo
     {
@@ -86,14 +98,301 @@ namespace stinkytofu
         const IRType irType;
     };
 
-    struct IRListProperties
+    using IRList = IntrusiveList<IRBase>;
+
+    // Forward declarations for BasicBlock and Function
+    class Function;
+
+    // BasicBlock holds a list of IR and CFG edges.
+    //
+    // BasicBlocks are organized in an intrusive list within a Function.
+    // Each BasicBlock contains an IRList and maintains
+    // predecessor/successor relationships for control flow.
+    class BasicBlock : public IntrusiveListNode<BasicBlock>
     {
-        bool                          containsLoop = false;
-        IntrusiveListIterator<IRBase> loopBegin;
-        IntrusiveListIterator<IRBase> loopEnd;
+    private:
+        Function*                parent = nullptr;
+        std::string              label; // Optional label for the block
+        IRList                   ir;
+        std::vector<BasicBlock*> predecessors;
+        std::vector<BasicBlock*> successors;
+
+    public:
+        explicit BasicBlock(Function* parent, const std::string& label = "")
+            : parent(parent)
+            , label(label)
+        {
+        }
+
+        Function* getParent()
+        {
+            return parent;
+        }
+        const Function* getParent() const
+        {
+            return parent;
+        }
+        void setParent(Function* p)
+        {
+            parent = p;
+        }
+
+        const std::string& getLabel() const
+        {
+            return label;
+        }
+        void setLabel(const std::string& l)
+        {
+            label = l;
+        }
+
+        // Access to IR
+        IRList& getIR()
+        {
+            return ir;
+        }
+        const IRList& getIR() const
+        {
+            return ir;
+        }
+
+        // CFG navigation
+        void addSuccessor(BasicBlock* bb)
+        {
+            successors.push_back(bb);
+        }
+
+        void addPredecessor(BasicBlock* bb)
+        {
+            predecessors.push_back(bb);
+        }
+
+        void removeSuccessor(BasicBlock* bb)
+        {
+            successors.erase(std::remove(successors.begin(), successors.end(), bb),
+                             successors.end());
+        }
+
+        void removePredecessor(BasicBlock* bb)
+        {
+            predecessors.erase(std::remove(predecessors.begin(), predecessors.end(), bb),
+                               predecessors.end());
+        }
+
+        const std::vector<BasicBlock*>& getSuccessors() const
+        {
+            return successors;
+        }
+        const std::vector<BasicBlock*>& getPredecessors() const
+        {
+            return predecessors;
+        }
+
+        std::vector<BasicBlock*>& getSuccessors()
+        {
+            return successors;
+        }
+        std::vector<BasicBlock*>& getPredecessors()
+        {
+            return predecessors;
+        }
+
+        // Utilities
+        IRBase* getTerminator()
+        {
+            if(ir.empty())
+                return nullptr;
+            return &ir.back();
+        }
+
+        const IRBase* getTerminator() const
+        {
+            if(ir.empty())
+                return nullptr;
+            return &ir.back();
+        }
+
+        bool empty() const
+        {
+            return ir.empty();
+        }
+        size_t size() const
+        {
+            size_t count = 0;
+            for(auto it = ir.begin(); it != ir.end(); ++it)
+                ++count;
+            return count;
+        }
+
+        // Clear all IR in this BasicBlock
+        // Deletes all IRBase objects and clears the IR list
+        void clearAllIR()
+        {
+            while(!ir.empty())
+            {
+                IRBase* irNode = ir.begin().getNodePtr();
+                ir.erase(ir.begin());
+                delete irNode;
+            }
+        }
+
+        void dump(std::ostream& out) const;
     };
 
-    using IRList = IntrusiveList<IRBase>;
+    using BasicBlockList = IntrusiveList<BasicBlock>;
+
+    // Function holds a list of BasicBlocks.
+    //
+    // This represents a function/kernel in the StinkyTofu IR.
+    // BasicBlocks are organized as an intrusive list and can be
+    // traversed in program order.
+    class Function
+    {
+    private:
+        std::string      name;
+        BasicBlockList   basicBlocks;
+        BasicBlock*      entryBlock = nullptr;
+        StinkyKernelInfo kernelInfo;
+
+    public:
+        explicit Function(const std::string& name = "")
+            : name(name)
+        {
+        }
+
+        ~Function()
+        {
+            // Clean up all basic blocks
+            while(!basicBlocks.empty())
+            {
+                BasicBlock* bb = &basicBlocks.front();
+                basicBlocks.remove(bb);
+                delete bb;
+            }
+        }
+
+        const std::string& getName() const
+        {
+            return name;
+        }
+        void setName(const std::string& n)
+        {
+            name = n;
+        }
+
+        // BasicBlock management
+        BasicBlock* createBasicBlock(const std::string& label = "")
+        {
+            BasicBlock* bb = new BasicBlock(this, label);
+            basicBlocks.push_back(bb);
+            if(!entryBlock)
+                entryBlock = bb;
+            return bb;
+        }
+
+        BasicBlock* createBasicBlockBefore(BasicBlock* before, const std::string& label = "")
+        {
+            BasicBlock* bb = new BasicBlock(this, label);
+            basicBlocks.insert(BasicBlockList::iterator(before), bb);
+            return bb;
+        }
+
+        void removeBasicBlock(BasicBlock* bb)
+        {
+            if(bb == entryBlock)
+                entryBlock = nullptr;
+            basicBlocks.remove(bb);
+            delete bb;
+        }
+
+        // Delete all BasicBlocks and their IR
+        // Clears all IR in each BasicBlock, then deletes all BasicBlocks
+        void deleteAllBasicBlocks()
+        {
+            while(!basicBlocks.empty())
+            {
+                BasicBlock* bb = &basicBlocks.front();
+                bb->clearAllIR();
+                basicBlocks.remove(bb);
+                delete bb;
+            }
+            entryBlock = nullptr;
+        }
+
+        BasicBlockList& getBasicBlocks()
+        {
+            return basicBlocks;
+        }
+        const BasicBlockList& getBasicBlocks() const
+        {
+            return basicBlocks;
+        }
+
+        void setEntryBlock(BasicBlock* bb)
+        {
+            entryBlock = bb;
+        }
+        BasicBlock* getEntryBlock()
+        {
+            return entryBlock;
+        }
+        const BasicBlock* getEntryBlock() const
+        {
+            return entryBlock;
+        }
+
+        // Kernel info
+        void setKernelInfo(const StinkyKernelInfo& info)
+        {
+            kernelInfo = info;
+        }
+        const StinkyKernelInfo& getKernelInfo() const
+        {
+            return kernelInfo;
+        }
+
+        // Iteration over basic blocks
+        auto begin()
+        {
+            return basicBlocks.begin();
+        }
+        auto end()
+        {
+            return basicBlocks.end();
+        }
+        auto begin() const
+        {
+            return basicBlocks.begin();
+        }
+        auto end() const
+        {
+            return basicBlocks.end();
+        }
+
+        bool empty() const
+        {
+            return basicBlocks.empty();
+        }
+        size_t size() const
+        {
+            size_t count = 0;
+            for(auto it = basicBlocks.begin(); it != basicBlocks.end(); ++it)
+                ++count;
+            return count;
+        }
+
+        void clear()
+        {
+            while(!basicBlocks.empty())
+            {
+                BasicBlock* bb = &basicBlocks.front();
+                basicBlocks.remove(bb);
+                delete bb;
+            }
+        }
+
+        void dump(std::ostream& out) const;
+    };
 
     // Base IR Builder.
     //
@@ -101,8 +400,20 @@ namespace stinkytofu
     // deletion of derived IRBase should be handled through the derived
     // IRBuilder.
     //
-    // Note that PassContext owns the IRList, PassContext will delete all
-    // IRs when PassContext is destructed.
+    // Note that PassContext owns the Function (which owns BasicBlocks and IRLists),
+    // PassContext will delete all IRs when PassContext is destructed.
+    /// IRBuilder base class for constructing IR.
+    ///
+    /// Follows LLVM/MLIR's IRBuilder pattern as a lightweight value object.
+    /// Builders are typically created on the stack and passed an insertion
+    /// point (IRList) where new instructions should be inserted.
+    ///
+    /// Example usage (LLVM/MLIR style):
+    ///   auto builder = passCtx.getIRBuilder<StinkyInstIRBuilder>(bb.getIR(), arch);
+    ///   builder.createStinkyInstBefore(...);
+    ///
+    /// Derived builders (e.g., StinkyInstIRBuilder) provide type-specific
+    /// construction methods.
     class IRBuilder
     {
     protected:
@@ -117,12 +428,80 @@ namespace stinkytofu
         }
 
         virtual ~IRBuilder() = default;
+
+        /// Set the insertion point to a different IRList.
+        /// This allows the builder to be reused across different BasicBlocks.
+        void setInsertionPoint(IRList& newIRList)
+        {
+            irlist = &newIRList;
+        }
+
+        /// Get the current insertion point.
+        IRList* getInsertionPoint() const
+        {
+            return irlist;
+        }
     };
+
+    //----------------------------------------------------------------------
+    // BasicBlock Filter Support
+    //----------------------------------------------------------------------
+
+    // Forward declaration
+    class BasicBlock;
+
+    // BasicBlock filter predicate type
+    using BasicBlockFilter = std::function<bool(const BasicBlock&)>;
+
+    // Filter builder for easy construction of BasicBlock filters
+    class BasicBlockFilterBuilder
+    {
+    public:
+        // Filter by label prefix
+        static BasicBlockFilter byLabelPrefix(const std::string& prefix)
+        {
+            return [prefix](const BasicBlock& bb) { return bb.getLabel().rfind(prefix, 0) == 0; };
+        }
+
+        // Filter by exact label names
+        static BasicBlockFilter byLabels(const std::set<std::string>& labels)
+        {
+            return [labels](const BasicBlock& bb) { return labels.count(bb.getLabel()) > 0; };
+        }
+
+        // Filter by custom predicate
+        static BasicBlockFilter byPredicate(std::function<bool(const BasicBlock&)> pred)
+        {
+            return pred;
+        }
+
+        // Combine filters with AND logic
+        static BasicBlockFilter combine(const BasicBlockFilter& f1, const BasicBlockFilter& f2)
+        {
+            return [f1, f2](const BasicBlock& bb) { return f1(bb) && f2(bb); };
+        }
+
+        // Exclude certain BasicBlocks (NOT logic)
+        static BasicBlockFilter exclude(const BasicBlockFilter& filter)
+        {
+            return [filter](const BasicBlock& bb) { return !filter(bb); };
+        }
+
+        // Process all BasicBlocks (default)
+        static BasicBlockFilter all()
+        {
+            return [](const BasicBlock&) { return true; };
+        }
+    };
+
+    //----------------------------------------------------------------------
+    // Pass Infrastructure
+    //----------------------------------------------------------------------
 
     // Base class for all passes.
     //
-    // A pass operates on an IRList and performs either analysis or
-    // transformation.
+    // A pass operates on a Function (which contains BasicBlocks with IRLists)
+    // and performs either analysis or transformation.
     class Pass
     {
     public:
@@ -135,7 +514,7 @@ namespace stinkytofu
         virtual ID          getPassID() const = 0;
         virtual const char* getName() const   = 0;
 
-        virtual void run(IRList& irlist, PassContext& passCtx) = 0;
+        virtual void run(Function& func, PassContext& passCtx) = 0;
     };
 
     // Base class for all analysis passes.
@@ -219,29 +598,38 @@ namespace stinkytofu
         AnalysisManager  analysisMgr;
         StinkyKernelInfo kernel;
         StinkyOptInfo    optInfo;
-        IRListProperties properties;
 
-        std::unordered_map<IRBuilder::ID, std::unique_ptr<IRBuilder>> irBuilders;
+        // Function holds BasicBlocks which contain IRLists.
+        // This is the primary IR container for the pass infrastructure.
+        std::unique_ptr<Function> function;
 
-        // Note: Even though StinkyInstruction is currently the only IR
-        //       type, there could be more IR types (levels) like MLIR in
-        //       the future.
-        IRList irlist;
+        // Global BasicBlock filter applied to all StinkyInstPass instances.
+        // By default, all BasicBlocks are processed.
+        BasicBlockFilter globalBBFilter;
 
         void cleanup();
 
     public:
-        PassContext() = default;
+        PassContext()
+            : function(std::make_unique<Function>("kernel"))
+            , globalBBFilter(BasicBlockFilterBuilder::all())
+        {
+        }
+
         ~PassContext()
         {
             cleanup();
         }
 
-        // FIXME: This should be removed, as PassContext should not expose IRList directly.
-        //        But if we don't expose it, the derived PassManager classes cannot access it.
-        IRList& getIRList()
+        // Access to the Function
+        Function& getFunction()
         {
-            return irlist;
+            return *function;
+        }
+
+        const Function& getFunction() const
+        {
+            return *function;
         }
 
         AnalysisManager& getAnalysisManager()
@@ -269,41 +657,36 @@ namespace stinkytofu
             return optInfo;
         }
 
-        void setLoopProperties(bool                          containsLoop,
-                               IntrusiveListIterator<IRBase> loopBegin,
-                               IntrusiveListIterator<IRBase> loopEnd)
+        /// Set global BasicBlock filter for all StinkyInstPass instances.
+        /// This filter determines which BasicBlocks should be processed by passes.
+        void setBasicBlockFilter(BasicBlockFilter filter)
         {
-            properties.containsLoop = containsLoop;
-            properties.loopBegin    = loopBegin;
-            properties.loopEnd      = loopEnd;
+            globalBBFilter = std::move(filter);
         }
 
-        const IRListProperties& getProperties() const
+        /// Check if a BasicBlock should be processed according to the global filter.
+        bool shouldProcessBasicBlock(const BasicBlock& bb) const
         {
-            return properties;
+            return globalBBFilter(bb);
         }
 
+        /// Get an IRBuilder of the specified type.
+        ///
+        /// The builder is returned by value and can be used as a local variable.
+        /// No heap allocation or lifetime management is needed.
+        ///
+        /// Example:
+        ///   for (BasicBlock& bb : func) {
+        ///     auto builder = passCtx.getIRBuilder<StinkyInstIRBuilder>(
+        ///                         bb.getIR(), arch);
+        ///     // Use builder to create instructions in bb
+        ///     builder.createStinkyInstBefore(...);
+        ///   }
         template <class IRBuilderType, class... Args>
-        IRBuilderType& getOrCreateIRBuilder(IRList& irlist, Args&&... args)
+        IRBuilderType getIRBuilder(IRList& irlist, Args&&... args)
         {
-            IRBuilder::ID id = IRBuilderType::ID;
-            auto          it = irBuilders.find(id);
-
-            IRBuilderType* builder = nullptr;
-            if(it == irBuilders.end())
-            {
-                std::unique_ptr<IRBuilderType> builderPtr
-                    = std::make_unique<IRBuilderType>(irlist, std::forward<Args>(args)...);
-
-                builder = builderPtr.get();
-
-                irBuilders[id] = std::move(builderPtr);
-            }
-            else
-            {
-                builder = static_cast<IRBuilderType*>(it->second.get());
-            }
-            return *builder;
+            // Construct and return builder by value (LLVM/MLIR style)
+            return IRBuilderType(irlist, std::forward<Args>(args)...);
         }
     };
 
@@ -398,6 +781,8 @@ namespace stinkytofu
 
     public:
         void setDebugConfig(std::unique_ptr<PassManagerDebugConfig> cfg);
+
+        // Set kernel configuration (wavefront size automatically determined from architecture)
         void setKernelConfig(std::array<int, 3> arch,
                              uint32_t           ta0,
                              uint32_t           tb0,
@@ -405,9 +790,13 @@ namespace stinkytofu
                              uint32_t           nGRA,
                              uint32_t           nGRB,
                              uint32_t           nGRM,
-                             uint32_t           wavefrontSz,
                              uint32_t           numWaves);
+
         void setOptConfig(const StinkyOptInfo& opt);
+        void setBasicBlockFilter(BasicBlockFilter filter)
+        {
+            passCtx.setBasicBlockFilter(filter);
+        }
 
     protected:
         PassContext passCtx;
@@ -419,6 +808,96 @@ namespace stinkytofu
         std::vector<std::unique_ptr<Pass>> passes;
 
         std::unique_ptr<PassManagerDebugConfig> dbgCfg;
+    };
+
+    /**
+     * StinkyIRConverter - A utility class for converting raw instruction strings to a Function.
+     *
+     * This class provides a simple interface to parse MLIR-style StinkyTofu IR text and
+     * convert it to a Function that can be used with the StinkyTofu pass infrastructure.
+     *
+     * Example usage:
+     * ```cpp
+     * std::string raw_stinky_inst = R"(
+     *   v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }
+     *   v[4:7] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }
+     * )";
+     *
+     * StinkyIRConverter converter;
+     * Function* func = converter.convertToFunction(raw_stinky_inst);
+     *
+     * // Use the function with passes...
+     * // Access the entry BasicBlock and its IR:
+     * BasicBlock* entryBB = func->getEntryBlock();
+     * IRList& irlist = entryBB->getIR();
+     *
+     * // Don't forget to clean up when done
+     * converter.cleanup();
+     * ```
+     */
+    class StinkyIRConverter
+    {
+    public:
+        /**
+         * Constructor with default architecture (gfx942).
+         */
+        StinkyIRConverter();
+
+        /**
+         * Constructor with specified architecture.
+         *
+         * @param targetArch The target GPU architecture (e.g., {9, 4, 2} for gfx942)
+         */
+        StinkyIRConverter(const std::array<int, 3>& targetArch);
+
+        /**
+         * Convert a raw instruction string to a Function.
+         *
+         * The string should be in MLIR-style StinkyTofu IR format:
+         * destRegs = "st.mnemonic"(srcRegs) { attributes }
+         *
+         * @param rawInstructions The raw instruction string to parse
+         * @return Pointer to the Function owned by the internal PassContext, or nullptr if conversion fails
+         */
+        Function* convertToFunction(const std::string& rawInstructions);
+
+        /**
+         * Static helper to populate a Function from an IR text string.
+         * This is the core conversion logic shared by both StinkyIRConverter and stinkytofu-opt.
+         *
+         * @param irText The IR source text to parse
+         * @param func The Function to populate with a BasicBlock containing instructions
+         * @param passCtx The PassContext for resource management
+         * @param arch The target GPU architecture
+         * @return StinkyErrorCode indicating success or failure
+         */
+        static StinkyErrorCode populateFunctionFromString(const std::string& irText,
+                                                          Function&          func,
+                                                          PassContext&       passCtx,
+                                                          GfxArchID          arch);
+
+        /**
+         * Get the PassContext associated with the last conversion.
+         * This is useful if you need to access the context for running passes.
+         *
+         * @return Pointer to the PassContext, or nullptr if not available
+         */
+        PassContext* getPassContext();
+
+        /**
+         * Cleanup resources. Call this when done with the IRList.
+         * The PassContext destructor will handle cleanup of all IR objects.
+         */
+        void cleanup();
+
+        /**
+         * Destructor - automatically cleans up resources.
+         */
+        ~StinkyIRConverter();
+
+    private:
+        std::array<int, 3>                       arch;
+        std::unique_ptr<stinkytofu::PassContext> passCtx;
     };
 }
 

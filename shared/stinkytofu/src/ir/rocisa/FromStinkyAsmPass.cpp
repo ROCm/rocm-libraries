@@ -116,18 +116,6 @@ namespace
 
             return std::move(item);
         }
-        case GFX::s_wait_tensorcnt:
-        {
-            const SWaitTensorCntData* data = stinkyInst.getModifier<SWaitTensorCntData>();
-            assert(data && "Internal Error: S_WAITTENSORCNT missing SWaitTensorCntData modifier");
-            std::shared_ptr<Item> item = std::make_shared<SWaitTensorcnt>();
-
-            SWaitTensorcnt* waittensorcnt = static_cast<SWaitTensorcnt*>(item.get());
-
-            waittensorcnt->tensorcnt = data->tlcnt;
-
-            return std::move(item);
-        }
         default:
             assert(false
                    && "Internal Error: TODO: Unsupported StinkyInstruction to Rocisa creation.");
@@ -168,15 +156,66 @@ namespace
             return static_cast<Label*>(flatItems.back());
         }
 
-        void run(IRList& irlist, PassContext& passCtx) override
+        void processBasicBlockIR(
+            BasicBlock&                                          bb,
+            RocisaStinkyMapping&                                 mapping,
+            const std::unordered_map<Item*, std::vector<Item*>>& instPairedTextblocks,
+            std::vector<std::shared_ptr<Item>>&                  reorderedItems)
         {
-            //eraseLabel(irlist, passCtx);
+            IRList& irlist = bb.getIR();
+            for(IRBase& ir : irlist)
+            {
+                StinkyInstruction& inst = *cast<StinkyInstruction>(&ir);
 
+                rocisa::Instruction* rocInst = mapping.getRocisaInst(&inst);
+
+                rocisa::Label* rocLabel = nullptr;
+                if(rocInst == nullptr)
+                {
+                    rocLabel = mapping.getRocisaLabel(&inst);
+                }
+
+                rocisa::Item* rocItem = rocInst != nullptr ? static_cast<rocisa::Item*>(rocInst)
+                                                           : static_cast<rocisa::Item*>(rocLabel);
+
+                // If the instruction has TextBlocks associated with it, add them first
+                auto it = instPairedTextblocks.find(rocItem);
+                if(it != instPairedTextblocks.end())
+                {
+                    const std::vector<Item*>& textblocks = it->second;
+                    for(unsigned i = textblocks.size(); i != 0; --i)
+                    {
+                        Item* text = textblocks[i - 1];
+
+                        std::shared_ptr<Item> origShared = origSharedItems.pop(text);
+
+                        // use std::move to avoid copying the shared_ptr
+                        reorderedItems.push_back(std::move(origShared));
+                    }
+                }
+
+                // The instruction is created in Stinky passes so it's not in the original module.
+                if(rocItem == nullptr)
+                {
+                    assert(rocLabel == nullptr && "TODO: Handle label creation");
+                    reorderedItems.push_back(std::move(createSharedRocisa(inst)));
+                }
+                else
+                {
+                    reorderedItems.push_back(std::move(origSharedItems.pop(rocItem)));
+                }
+            }
+        }
+
+        void run(Function& func, PassContext& passCtx) override
+        {
+            // Note: This pass needs to work across all BasicBlocks to build a single output module
+            // Get analysis results once (they're function-level)
             RocisaDFSFlatItems& flatItemsData
-                = passCtx.getAnalysisManager().getResult<RocisaDFSFlatItems>(irlist, passCtx);
+                = passCtx.getAnalysisManager().getResult<RocisaDFSFlatItems>(func, passCtx);
 
             RocisaStinkyMapping& mapping
-                = passCtx.getAnalysisManager().getResult<RocisaStinkyMapping>(irlist, passCtx);
+                = passCtx.getAnalysisManager().getResult<RocisaStinkyMapping>(func, passCtx);
 
             const std::vector<Item*>& flatItems = flatItemsData.getFlatItems();
 
@@ -188,7 +227,11 @@ namespace
 
             // build instruction to text block mapping
             std::unordered_map<Item*, std::vector<Item*>> instPairedTextblocks;
-            instPairedTextblocks.reserve(irlist.size());
+            // Reserve space for all BasicBlocks
+            size_t totalIRCount = 0;
+            for(const BasicBlock& bb : func)
+                totalIRCount += bb.size();
+            instPairedTextblocks.reserve(totalIRCount);
 
             Item* curInstOrLabel = nullptr;
             for(unsigned i = flatItems.size(); i != 0; --i)
@@ -216,47 +259,10 @@ namespace
             std::vector<std::shared_ptr<Item>> reorderedItems;
             reorderedItems.reserve(flatItems.size());
 
-            for(IRBase& ir : irlist)
+            // Process all BasicBlocks in order
+            for(BasicBlock& bb : func)
             {
-                StinkyInstruction& inst = *cast<StinkyInstruction>(&ir);
-
-                rocisa::Instruction* rocInst = mapping.getRocisaInst(&inst);
-
-                rocisa::Label* rocLabel = nullptr;
-                if(rocInst == nullptr)
-                {
-                    rocLabel = mapping.getRocisaLabel(&inst);
-                }
-
-                rocisa::Item* rocItem = rocInst != nullptr ? static_cast<rocisa::Item*>(rocInst)
-                                                           : static_cast<rocisa::Item*>(rocLabel);
-
-                // If the instruction has TextBlocks associated with it, add them first
-                auto it = instPairedTextblocks.find(rocItem);
-                if(it != instPairedTextblocks.end())
-                {
-                    std::vector<Item*>& textblocks = it->second;
-                    for(unsigned i = textblocks.size(); i != 0; --i)
-                    {
-                        Item* text = textblocks[i - 1];
-
-                        std::shared_ptr<Item> origShared = origSharedItems.pop(text);
-
-                        // use std::move to avoid copying the shared_ptr
-                        reorderedItems.push_back(std::move(origShared));
-                    }
-                }
-
-                // The instruction is created in Stinky passes so it's not in the original module.
-                if(rocItem == nullptr)
-                {
-                    assert(rocLabel == nullptr && "TODO: Handle label creation");
-                    reorderedItems.push_back(std::move(createSharedRocisa(inst)));
-                }
-                else
-                {
-                    reorderedItems.push_back(std::move(origSharedItems.pop(rocItem)));
-                }
+                processBasicBlockIR(bb, mapping, instPairedTextblocks, reorderedItems);
             }
 
             // for(Item* lastLabel : lastLabels)

@@ -72,11 +72,11 @@ Here's a complete example for a typical setup:
 # Configuration
 CONTAINER="rocm_dev"
 DOCKER_PATH="/workspace/hipblaslt"
-HOST_PATH="/home/cycheng2/rocm-libraries_p/projects/hipblaslt"
+HOST_PATH="<path-to-rocm-libraries-folder>/projects/hipblaslt"
 OUTPUT_DIR="/tmp/hipblaslt_test_$(date +%Y%m%d_%H%M%S)"
 
 # Run all tests
-/home/cycheng2/rocm-libraries_p/shared/stinkytofu/test/scripts/main.sh \
+<path-to-rocm-libraries-folder>/shared/stinkytofu/test/scripts/main.sh \
     --container-name "$CONTAINER" \
     --docker-path "$DOCKER_PATH" \
     --host-path "$HOST_PATH" \
@@ -215,7 +215,7 @@ docker exec your_container rm -rf /workspace/hipblaslt/tensilelite/rel_build
 ### "No tests found"
 Check available test files:
 ```bash
-ls /home/cycheng2/rocm-libraries_p/shared/stinkytofu/test/yaml/
+ls <path-to-rocm-libraries-folder>/shared/stinkytofu/test/yaml/
 ```
 
 ## Understanding Test Variants

@@ -1,0 +1,5 @@
+# Test dependencies for StinkyTofu Python module
+pytest>=6.0
+pytest-cov>=3.0  # For coverage reports
+pytest-xdist>=2.0  # For parallel test execution
+

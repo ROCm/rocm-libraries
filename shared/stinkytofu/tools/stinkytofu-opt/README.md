@@ -91,7 +91,7 @@ Available passes:
 =================
   --StinkyClusterDSReadPass
   --StinkyDAGSchedulerPass
-  --StinkyUnrollInsertWaitCntPass
+  --StinkyConfigurableWaitCntPass
   --ScheduleLastLRsPass
   --ScheduleFirstLRsPass
 ```
@@ -177,7 +177,7 @@ struct PassInfo
 const std::vector<PassInfo> availablePasses = {
     { "StinkyClusterDSReadPass", []() { return createStinkyClusterDSReadPass(); } },
     { "StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); } },
-    { "StinkyUnrollInsertWaitCntPass", []() { return createStinkyUnrollInsertWaitCntPass(); } },
+    { "StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); } },
     { "ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); } },
     { "ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); } },
 };
@@ -235,8 +235,8 @@ void setKernelConfig(stinkytofu::PassManager& passManager)
         0,          // nGRA: NumGRA
         0,          // nGRB: NumGRB
         0,          // nGRM: NumGRM
-        64,         // wavefrontSz: Wavefront size (typically 32 or 64)
         0           // numWaves: Number of waves per workgroup
+                    // Note: wavefrontSz is automatically determined from architecture
     );
 }
 ```

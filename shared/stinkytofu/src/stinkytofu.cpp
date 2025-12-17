@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include <cassert>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -27,7 +28,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "ir/asm/IRParser.hpp"
+#include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
+#include "isa/gfx/GfxIsa.hpp"
 #include "stinkytofu.hpp"
 
 namespace stinkytofu
@@ -47,12 +51,64 @@ namespace stinkytofu
 
     void PassContext::cleanup()
     {
-        while(!irlist.empty())
+        // Use Function's deleteAllBasicBlocks method to clean up
+        // This will clear all IR in each BasicBlock and delete all BasicBlocks
+        if(function)
         {
-            IRBase* ir = irlist.begin().getNodePtr();
-            irlist.erase(irlist.begin());
-            delete ir;
+            function->deleteAllBasicBlocks();
         }
+    }
+
+    void BasicBlock::dump(std::ostream& out) const
+    {
+        if(!label.empty())
+        {
+            out << "BasicBlock: " << label << "\n";
+        }
+        else
+        {
+            out << "BasicBlock (unlabeled)\n";
+        }
+
+        out << "  Number of instructions: " << ir.size() << "\n";
+
+        for(const IRBase& irNode : ir)
+        {
+            out << "  ";
+            irNode.dump(out);
+        }
+
+        if(!successors.empty())
+        {
+            out << "  Successors: ";
+            for(size_t i = 0; i < successors.size(); ++i)
+            {
+                if(i > 0)
+                    out << ", ";
+                if(!successors[i]->getLabel().empty())
+                    out << successors[i]->getLabel();
+                else
+                    out << "<unlabeled>";
+            }
+            out << "\n";
+        }
+
+        out.flush();
+    }
+
+    void Function::dump(std::ostream& out) const
+    {
+        out << "Function: " << name << "\n";
+        out << "BasicBlocks: " << size() << "\n";
+        out << "---\n";
+
+        for(const BasicBlock& bb : basicBlocks)
+        {
+            bb.dump(out);
+            out << "\n";
+        }
+
+        out.flush();
     }
 
     //----------------------------------------------------------------------
@@ -155,19 +211,11 @@ namespace stinkytofu
     //----------------------------------------------------------------------
     // PassManager implementation
     //----------------------------------------------------------------------
-    static void dumpStinkyInstList(const IRList& irlist, std::ostream& out)
-    {
-        const auto irlistString = toString(irlist);
-        out << irlistString;
-
-        out.flush();
-    }
-
-    // Run the scheduling pass on the instructions in the module.
-    // This will build the use-def chain and then schedule the instructions in a DAG.
+    // Run the passes on the Function.
+    // Passes can operate on BasicBlocks and their instruction lists.
     void PassManager::run()
     {
-        IRList& irlist = passCtx.getIRList();
+        Function& func = passCtx.getFunction();
 
         for(const auto& pass : passes)
         {
@@ -175,16 +223,16 @@ namespace stinkytofu
             {
                 dbgCfg->getOutputStreamInBefore()
                     << "\n*** Before Pass: " << pass->getName() << " ***\n";
-                dumpStinkyInstList(irlist, dbgCfg->getOutputStreamInBefore());
+                func.dump(dbgCfg->getOutputStreamInBefore());
             }
 
-            pass->run(irlist, passCtx);
+            pass->run(func, passCtx);
 
             if(dbgCfg && dbgCfg->shouldPrintAfter(pass->getName()))
             {
                 dbgCfg->getOutputStreamInAfter()
                     << "\n*** After Pass: " << pass->getName() << " ***\n";
-                dumpStinkyInstList(irlist, dbgCfg->getOutputStreamInAfter());
+                func.dump(dbgCfg->getOutputStreamInAfter());
             }
         }
     }
@@ -201,19 +249,19 @@ namespace stinkytofu
                                       uint32_t           nGRA,
                                       uint32_t           nGRB,
                                       uint32_t           nGRM,
-                                      uint32_t           wavefrontSz,
                                       uint32_t           numWaves)
     {
         StinkyKernelInfo kr;
-        kr.arch          = arch;
-        kr.TileA0        = ta0;
-        kr.TileB0        = tb0;
-        kr.TileM0        = tm0;
-        kr.NumGRA        = nGRA;
-        kr.NumGRB        = nGRB;
-        kr.NumGRM        = nGRM;
-        kr.WavefrontSize = wavefrontSz;
-        kr.NumWaves      = wavefrontSz;
+        kr.arch   = arch;
+        kr.TileA0 = ta0;
+        kr.TileB0 = tb0;
+        kr.TileM0 = tm0;
+        kr.NumGRA = nGRA;
+        kr.NumGRB = nGRB;
+        kr.NumGRM = nGRM;
+        // Automatically determine wavefront size based on architecture
+        kr.WavefrontSize = getWaveFrontSize(arch[0], arch[1], arch[2]);
+        kr.NumWaves      = numWaves;
         passCtx.addKernelInfo(kr);
     }
 
@@ -221,4 +269,133 @@ namespace stinkytofu
     {
         passCtx.setOptInfo(opt);
     }
+
+    //----------------------------------------------------------------------
+    // StinkyIRConverter implementation
+    //----------------------------------------------------------------------
+
+    StinkyIRConverter::StinkyIRConverter()
+        : arch({9, 4, 2})
+    {
+    }
+
+    StinkyIRConverter::StinkyIRConverter(const std::array<int, 3>& targetArch)
+        : arch(targetArch)
+    {
+    }
+
+    StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,
+                                                                  Function&          func,
+                                                                  PassContext&       passCtx,
+                                                                  GfxArchID          arch)
+    {
+        // Parse the raw instruction string
+        auto parsedInstructions = parseSourceString(irText);
+
+        // Create an entry BasicBlock to hold all instructions
+        BasicBlock* entryBB = func.createBasicBlock("entry");
+        func.setEntryBlock(entryBB);
+        IRList& irlist = entryBB->getIR();
+
+        // Create the IR builder
+        StinkyInstIRBuilder irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(irlist, arch);
+
+        // Convert parsed instructions to StinkyInstruction objects
+        for(const auto& inst : parsedInstructions)
+        {
+            // Check if it's a label
+            if(inst->isLabel)
+            {
+                irBuilder.createStinkyLabel(irlist.end(), inst->opcodeStr);
+                continue;
+            }
+
+            // Get the opcode and hardware instruction descriptor
+            auto              opcode     = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
+            const HwInstDesc* hwInstDesc = getMCIDByIsaOp(opcode, arch);
+
+            if(hwInstDesc == nullptr)
+            {
+                std::cerr << "Warning: No hardware instruction descriptor found for opcode "
+                          << opcode << " in arch gfx" << static_cast<int>(arch) << "\n";
+            }
+            else
+            {
+                StinkyInstruction* stinkyInst
+                    = irBuilder.createStinkyInstBefore(irlist.end(), hwInstDesc);
+
+                // Move destination and source registers
+                stinkyInst->destRegs = inst->destRegs;
+                stinkyInst->srcRegs  = inst->srcRegs;
+
+                // Overwrite cycles when valid (> 0), otherwise use default from HwInstDesc
+                if(inst->issueCycles > 0)
+                {
+                    stinkyInst->issueCycles = inst->issueCycles;
+                }
+
+                if(inst->latencyCycles > 0)
+                {
+                    stinkyInst->latencyCycles = inst->latencyCycles;
+                }
+            }
+        }
+
+        return StinkyErrorCode::SUCCESS;
+    }
+
+    Function* StinkyIRConverter::convertToFunction(const std::string& rawInstructions)
+    {
+        // Create a fresh PassContext for this conversion
+        passCtx = std::make_unique<PassContext>();
+
+        // Set up kernel configuration
+        StinkyKernelInfo kernelInfo;
+        kernelInfo.arch   = arch;
+        kernelInfo.TileA0 = 0;
+        kernelInfo.TileB0 = 0;
+        kernelInfo.TileM0 = 0;
+        kernelInfo.NumGRA = 0;
+        kernelInfo.NumGRB = 0;
+        kernelInfo.NumGRM = 0;
+        // Get WavefrontSize from hardware configuration based on architecture
+        kernelInfo.WavefrontSize = getWaveFrontSize(arch[0], arch[1], arch[2]);
+        kernelInfo.NumWaves      = 0;
+
+        passCtx->addKernelInfo(kernelInfo);
+
+        // Get the Function from PassContext
+        Function& func = passCtx->getFunction();
+
+        // Get the architecture ID
+        GfxArchID archID = getGfxArchID(arch[0], arch[1], arch[2]);
+
+        // Use the shared conversion logic
+        StinkyErrorCode result
+            = populateFunctionFromString(rawInstructions, func, *passCtx, archID);
+        if(result != StinkyErrorCode::SUCCESS)
+        {
+            // Conversion failed, cleanup and return nullptr
+            passCtx.reset();
+            return nullptr;
+        }
+
+        return &func;
+    }
+
+    PassContext* StinkyIRConverter::getPassContext()
+    {
+        return passCtx.get();
+    }
+
+    void StinkyIRConverter::cleanup()
+    {
+        passCtx.reset();
+    }
+
+    StinkyIRConverter::~StinkyIRConverter()
+    {
+        cleanup();
+    }
+
 } // namespace stinkytofu

@@ -26,7 +26,9 @@
 #include <sstream>
 #include <string>
 
+#include "ir/asm/StinkyAsmDirectives.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/StinkyMacro.hpp"
 #include "stinkytofu.hpp"
 
 namespace stinkytofu
@@ -75,6 +77,30 @@ namespace stinkytofu
         }
 
         void print(const StinkyRegister& reg);
+    };
+
+    // Printer for AsmDirective (low-level IR)
+    class DirectivePrinter : public AsmPrinterBase
+    {
+    public:
+        DirectivePrinter(std::ostream& os, const AsmPrinterOptions& options = AsmPrinterOptions())
+            : AsmPrinterBase(os, options)
+        {
+        }
+
+        void print(const AsmDirective& directive);
+    };
+
+    // Printer for MacroInstruction (low-level IR)
+    class MacroPrinter : public AsmPrinterBase
+    {
+    public:
+        MacroPrinter(std::ostream& os, const AsmPrinterOptions& options = AsmPrinterOptions())
+            : AsmPrinterBase(os, options)
+        {
+        }
+
+        void print(const MacroInstruction& macro);
     };
 
     // Main AsmPrinter for StinkyInstruction
@@ -136,6 +162,20 @@ namespace stinkytofu
     {
         RegisterPrinter printer(os, AsmPrinterOptions());
         printer.print(reg);
+        return os;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const AsmDirective& directive)
+    {
+        DirectivePrinter printer(os, AsmPrinterOptions());
+        printer.print(directive);
+        return os;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const MacroInstruction& macro)
+    {
+        MacroPrinter printer(os, AsmPrinterOptions());
+        printer.print(macro);
         return os;
     }
 

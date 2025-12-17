@@ -47,7 +47,7 @@ public:
         return "DummyAnalysis";
     }
 
-    void run(IRList&, PassContext&) override
+    void run(Function&, PassContext&) override
     {
         runCount++;
     }
@@ -70,7 +70,7 @@ public:
         return "NoOpPass";
     }
 
-    void run(IRList&, PassContext&) override {}
+    void run(Function&, PassContext&) override {}
 };
 Pass::ID NoOpPass::ID = &NoOpPass::ID;
 
@@ -90,7 +90,7 @@ public:
         return "InvalidateAnalysisPass";
     }
 
-    void run(IRList&, PassContext& ctx) override
+    void run(Function&, PassContext& ctx) override
     {
         ctx.getAnalysisManager().invalidate(DummyAnalysis::ID);
     }
@@ -114,9 +114,9 @@ TEST_F(PassManagerFlowTest, AnalysisLazilyComputedAndCached)
     run();
 
     auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a1.runCount, 1);
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a2.runCount, 1);
 }
 
@@ -126,10 +126,10 @@ TEST_F(PassManagerFlowTest, ManualInvalidationRecomputesOnDemand)
     run();
 
     auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     ASSERT_EQ(a1.runCount, 1);
     mgr.invalidate(DummyAnalysis::ID);
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a2.runCount, 2);
 }
 
@@ -140,12 +140,12 @@ TEST_F(PassManagerFlowTest, NoOpPassDoesNotInvalidateAnalysis)
     run();
 
     auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     ASSERT_EQ(a1.runCount, 1);
     addPass(std::make_unique<NoOpPass>());
 
     run();
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a2.runCount, 1);
 }
 
@@ -155,11 +155,11 @@ TEST_F(PassManagerFlowTest, InvalidatingPassTriggersRecomputeOnNextQuery)
     addPass(std::make_unique<InvalidateAnalysisPass>());
     run();
     auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a1.runCount, 1);
     addPass(std::make_unique<InvalidateAnalysisPass>());
     run();
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a2.runCount, 2);
 }
 
@@ -169,14 +169,14 @@ TEST_F(PassManagerFlowTest, MixedPassSequenceMinimizesRecomputations)
     addPass(std::make_unique<NoOpPass>());
     run();
     auto& mgr = passCtx.getAnalysisManager();
-    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a1  = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a1.runCount, 1);
     addPass(std::make_unique<NoOpPass>());
     run();
-    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a2 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a2.runCount, 1);
     addPass(std::make_unique<InvalidateAnalysisPass>());
     run();
-    auto& a3 = mgr.getResult<DummyAnalysis>(passCtx.getIRList(), passCtx);
+    auto& a3 = mgr.getResult<DummyAnalysis>(passCtx.getFunction(), passCtx);
     EXPECT_EQ(a3.runCount, 2);
 }

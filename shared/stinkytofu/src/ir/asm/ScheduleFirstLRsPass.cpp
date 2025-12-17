@@ -73,16 +73,6 @@ namespace
 
         IntrusiveListIterator<IRBase> beginIt = insts.begin();
         IntrusiveListIterator<IRBase> endIt   = insts.end();
-        if(passCtx.getProperties().containsLoop)
-        {
-            beginIt = passCtx.getProperties().loopBegin;
-            endIt   = passCtx.getProperties().loopEnd;
-            for(IRList::iterator it = insts.begin(); it != beginIt; ++it)
-            {
-                StinkyInstruction& inst = getStinkyInst(it);
-                scheduled.push_back(&inst);
-            }
-        }
 
         IRList::iterator regionEnd = beginIt;
 
@@ -196,10 +186,19 @@ namespace
             return &ScheduleFirstLRsPass::ID;
         }
 
-        void run(IRList& irlist, PassContext& passCtx) override
+        void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
         {
+            IRList& irlist = bb.getIR();
             scheduleFirstLocalReadWithLatency(irlist, passCtx);
-            return;
+        }
+
+        void run(Function& func, PassContext& passCtx) override
+        {
+            for(BasicBlock& bb : func)
+            {
+                if(passCtx.shouldProcessBasicBlock(bb))
+                    runOnBasicBlock(bb, passCtx);
+            }
         }
     };
 

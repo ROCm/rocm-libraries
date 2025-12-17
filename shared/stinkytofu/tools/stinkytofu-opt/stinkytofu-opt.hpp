@@ -38,9 +38,8 @@ struct PassInfo
 
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
-    {"StinkyClusterDSReadPass", []() { return createStinkyClusterDSReadPass(); }},
     {"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
-    {"StinkyUnrollInsertWaitCntPass", []() { return createStinkyUnrollInsertWaitCntPass(); }},
+    {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
     {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
     {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
 };
@@ -82,6 +81,5 @@ void setKernelConfig(stinkytofu::PassManager& passManager, const std::array<int,
                                 0 /* nGRA */,
                                 0 /* nGRB */,
                                 0 /* nGRM */,
-                                64 /* wavefrontSz */,
                                 0 /* numWaves */);
 }

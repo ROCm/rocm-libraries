@@ -2,7 +2,7 @@
  * Copyright (C) 2025 Advanced Micro Devices, Inc.
  *
  * Configurable WaitCnt Pass - Policy-Based Design
- * 
+ *
  * Allows configuring what to wait for at barriers and dependencies
  * ************************************************************************ */
 
@@ -139,15 +139,13 @@ namespace
             DependencyType     type;
         };
 
-        ConfigurableWaitCntInserter(IRList&                 insts,
-                                    StinkyInstIRBuilder&    irBuilder,
-                                    GfxArchID               arch,
-                                    const IRListProperties& props,
-                                    const WaitCntConfig&    config = WaitCntConfig::standard())
+        ConfigurableWaitCntInserter(IRList&              insts,
+                                    StinkyInstIRBuilder& irBuilder,
+                                    GfxArchID            arch,
+                                    const WaitCntConfig& config = WaitCntConfig::standard())
             : insts_(insts)
             , irBuilder_(irBuilder)
             , arch_(arch)
-            , properties_(props)
             , config_(config)
         {
         }
@@ -489,9 +487,9 @@ namespace
             IRList::iterator it = start;
             ++it;
 
-            bool allowCrossBoundary = config_.dependencyPolicy.trackCrossBoundary;
-            if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
-                it = properties_.loopBegin;
+            // bool allowCrossBoundary = config_.dependencyPolicy.trackCrossBoundary;
+            // if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
+            //     it = properties_.loopBegin;
 
             while(it != start && it != insts_.end())
             {
@@ -511,8 +509,8 @@ namespace
 
                 ++it;
 
-                if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
-                    it = properties_.loopBegin;
+                // if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
+                //     it = properties_.loopBegin;
             }
 
             return insts_.end();
@@ -524,9 +522,9 @@ namespace
             IRList::iterator it = storeIt;
             ++it;
 
-            bool allowCrossBoundary = config_.dependencyPolicy.trackCrossBoundary;
-            if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
-                it = properties_.loopBegin;
+            // bool allowCrossBoundary = config_.dependencyPolicy.trackCrossBoundary;
+            // if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
+            //     it = properties_.loopBegin;
 
             while(it != storeIt && it != insts_.end())
             {
@@ -550,8 +548,8 @@ namespace
 
                 ++it;
 
-                if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
-                    it = properties_.loopBegin;
+                // if(allowCrossBoundary && properties_.containsLoop && it == properties_.loopEnd)
+                //     it = properties_.loopBegin;
             }
 
             return insts_.end();
@@ -607,9 +605,9 @@ namespace
 
                 ++it;
 
-                if(config_.dependencyPolicy.trackCrossBoundary && properties_.containsLoop
-                   && it == properties_.loopEnd)
-                    it = properties_.loopBegin;
+                // if(config_.dependencyPolicy.trackCrossBoundary && properties_.containsLoop
+                //    && it == properties_.loopEnd)
+                //     it = properties_.loopBegin;
             }
 
             if(isGlobalMemLoad(memInst))
@@ -645,9 +643,9 @@ namespace
 
                 ++it;
 
-                if(config_.dependencyPolicy.trackCrossBoundary && properties_.containsLoop
-                   && it == properties_.loopEnd)
-                    it = properties_.loopBegin;
+                // if(config_.dependencyPolicy.trackCrossBoundary && properties_.containsLoop
+                //    && it == properties_.loopEnd)
+                //     it = properties_.loopBegin;
             }
 
             if(isGlobalMemStore(storeInst))
@@ -661,7 +659,6 @@ namespace
         IRList&                       insts_;
         StinkyInstIRBuilder&          irBuilder_;
         GfxArchID                     arch_;
-        const IRListProperties&       properties_;
         WaitCntConfig                 config_;
         std::vector<MemoryDependency> dependencies_;
     };
@@ -689,21 +686,25 @@ namespace
             return &StinkyConfigurableWaitCntPass::ID;
         }
 
-        void run(IRList& insts, PassContext& passCtx) override
+        void run(Function& func, PassContext& passCtx) override
         {
-            if(insts.empty())
-                return;
-
             GfxArchID arch = getGfxArchID(passCtx.getKernelInfo().arch[0],
                                           passCtx.getKernelInfo().arch[1],
                                           passCtx.getKernelInfo().arch[2]);
 
-            StinkyInstIRBuilder& irBuilder
-                = passCtx.getOrCreateIRBuilder<StinkyInstIRBuilder>(insts, arch);
+            // Process each BasicBlock
+            for(BasicBlock& bb : func)
+            {
+                IRList& insts = bb.getIR();
 
-            ConfigurableWaitCntInserter inserter(
-                insts, irBuilder, arch, passCtx.getProperties(), config_);
-            inserter.insertWaitCounts();
+                if(insts.empty())
+                    continue;
+
+                auto irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
+
+                ConfigurableWaitCntInserter inserter(insts, irBuilder, arch, config_);
+                inserter.insertWaitCounts();
+            }
         }
 
         // Allow configuration to be changed

@@ -220,19 +220,8 @@ namespace
         std::vector<StinkyInstruction*> scheduled;
         scheduled.reserve(insts.size());
 
-        // TODO: Only optimize loop for now
         IntrusiveListIterator<IRBase> beginIt = insts.begin();
         IntrusiveListIterator<IRBase> endIt   = insts.end();
-        if(readyQueue.getPassContext().getProperties().containsLoop)
-        {
-            beginIt = readyQueue.getPassContext().getProperties().loopBegin;
-            endIt   = readyQueue.getPassContext().getProperties().loopEnd;
-            for(IRList::iterator it = insts.begin(); it != beginIt; ++it)
-            {
-                StinkyInstruction& inst = getStinkyInst(it);
-                scheduled.push_back(&inst);
-            }
-        }
 
         readyQueue.onInit(beginIt, endIt);
 
@@ -258,16 +247,6 @@ namespace
         }
         // Flush the last region if it has not been flushed yet.
         scheduleRegionWithMovableSideEffects(regionStart, endIt, scheduled, readyQueue);
-
-        // TODO: Only optimize loop for now
-        if(endIt != insts.end())
-        {
-            for(IRList::iterator it = endIt; it != insts.end(); ++it)
-            {
-                StinkyInstruction& inst = getStinkyInst(it);
-                scheduled.push_back(&inst);
-            }
-        }
 
         assert(scheduled.size() == insts.size()
                && "Scheduled instructions size must match original instructions size");
@@ -314,14 +293,24 @@ namespace
             return &StinkyDAGSchedulerPass::ID;
         }
 
-        void run(IRList& irlist, PassContext& passCtx) override
+        void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
         {
+            IRList& irlist = bb.getIR();
             buildUseDefChain(irlist);
 
             PASS_DEBUG(dumpUseDefChain(irlist));
 
             std::unique_ptr<ReadyQueue> readyQueue = chooseReadyQueue(passCtx);
             scheduleInDAG(irlist, *readyQueue);
+        }
+
+        void run(Function& func, PassContext& passCtx) override
+        {
+            for(BasicBlock& bb : func)
+            {
+                if(passCtx.shouldProcessBasicBlock(bb))
+                    runOnBasicBlock(bb, passCtx);
+            }
         }
     };
 

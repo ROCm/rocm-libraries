@@ -53,7 +53,7 @@ namespace stinkytofu
         }
     }
 
-    void RocisaDFSFlatItems::run(IRList& irlist, PassContext& passCtx)
+    void RocisaDFSFlatItems::run(Function& func, PassContext& passCtx)
     {
         getFlatItemsInDepthFirst(module, flatItems);
     }
@@ -171,19 +171,24 @@ namespace
 
         bool ignoreWaitCnt = false;
 
-        void run(IRList& insts, PassContext& passCtx) override
+        void run(Function& func, PassContext& passCtx) override
         {
             RocisaDFSFlatItems& flatItems
-                = passCtx.getAnalysisManager().getResult<RocisaDFSFlatItems>(insts, passCtx);
+                = passCtx.getAnalysisManager().getResult<RocisaDFSFlatItems>(func, passCtx);
             RocisaStinkyMapping& mapping
-                = passCtx.getAnalysisManager().getResult<RocisaStinkyMapping>(insts, passCtx);
+                = passCtx.getAnalysisManager().getResult<RocisaStinkyMapping>(func, passCtx);
 
             GfxArchID arch = getGfxArchID(passCtx.getKernelInfo().arch[0],
                                           passCtx.getKernelInfo().arch[1],
                                           passCtx.getKernelInfo().arch[2]);
 
-            StinkyInstIRBuilder& irBuilder
-                = passCtx.getOrCreateIRBuilder<StinkyInstIRBuilder>(insts, arch);
+            // Create a single BasicBlock to hold all IR (common case)
+            BasicBlock* bb = func.createBasicBlock("entry");
+            func.setEntryBlock(bb);
+            IRList& insts = bb->getIR();
+
+            auto irBuilder
+                = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
 
             assert(insts.empty() && "Instruction list must be empty before populating");
 
@@ -347,34 +352,6 @@ namespace
                     next->srcRegs.push_back(StinkyRegister::getBarrierRegister());
                 }
                 nextIR = next->getNext();
-            }
-
-            // Check if the input IRList contains a loop.
-            std::vector<IntrusiveListIterator<IRBase>> loopLabels;
-            for(auto it = insts.begin(); it != insts.end(); ++it)
-            {
-                StinkyInstruction* inst = cast<StinkyInstruction>(it.getNodePtr());
-                if(inst->getUnifiedOpcode() == GFX::LABEL)
-                {
-                    loopLabels.push_back(it);
-                }
-                else if(isBranch(*inst))
-                {
-                    auto branchTarget = inst->getModifier<LabelData>();
-                    if(branchTarget)
-                    {
-                        for(auto targetLabel : loopLabels)
-                        {
-                            StinkyInstruction* label
-                                = cast<StinkyInstruction>(targetLabel.getNodePtr());
-                            if(branchTarget->label == label->getModifier<LabelData>()->label)
-                            {
-                                passCtx.setLoopProperties(true, targetLabel, it);
-                                break;
-                            }
-                        }
-                    }
-                }
             }
         }
     };
