@@ -71,9 +71,9 @@ namespace detail
             start = std::chrono::steady_clock::now();                                             \
         }                                                                                         \
                                                                                                   \
-        auto block_reduce_kernel = [=](auto target_config) mutable                                  \
+        auto block_reduce_kernel = [=](auto target_config) mutable                                \
         {                                                                                         \
-            block_reduce_kernel_impl<decltype(target_config),                                       \
+            block_reduce_kernel_impl<decltype(target_config),                                     \
                                      WithInitialValue,                                            \
                                      fit_larger,                                                  \
                                      fit_items,                                                   \

@@ -299,7 +299,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto partition_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto target_config) mutable
+                auto partition_kernel
+                    = [=, vsm = detail::vsmem_t{vsmem}](auto target_config) mutable
                 {
                     using partition_kernel_impl_t = partition_kernel_impl_<decltype(target_config),
                                                                            method,

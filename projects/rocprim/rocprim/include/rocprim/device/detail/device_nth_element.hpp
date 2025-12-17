@@ -625,10 +625,10 @@ hipError_t
         auto find_splitters_kernel = [=](auto target_config)
         {
             find_splitters_kernel_impl<decltype(target_config)>(keys,
-                                                              tree,
-                                                              equality_buckets,
-                                                              size,
-                                                              compare_function);
+                                                                tree,
+                                                                equality_buckets,
+                                                                size,
+                                                                compare_function);
         };
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                       find_splitters_kernel,
@@ -642,11 +642,11 @@ hipError_t
         auto count_bucket_sizes_kernel = [=](auto target_config)
         {
             count_bucket_sizes_kernel_impl<decltype(target_config)>(keys,
-                                                                  tree,
-                                                                  size,
-                                                                  buckets,
-                                                                  equality_buckets,
-                                                                  compare_function);
+                                                                    tree,
+                                                                    size,
+                                                                    buckets,
+                                                                    equality_buckets,
+                                                                    compare_function);
         };
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                       count_bucket_sizes_kernel,
@@ -660,9 +660,9 @@ hipError_t
         auto find_nth_element_bucket_kernel = [=](auto target_config)
         {
             find_nth_element_bucket_kernel_impl<decltype(target_config)>(buckets,
-                                                                       nth_element_data,
-                                                                       equality_buckets,
-                                                                       rank);
+                                                                         nth_element_data,
+                                                                         equality_buckets,
+                                                                         rank);
         };
         ROCPRIM_RETURN_ON_ERROR(
             execute_launch_plan<Config, Selector>(current_target,
@@ -677,14 +677,14 @@ hipError_t
         auto copy_buckets_kernel = [=](auto target_config)
         {
             copy_buckets_kernel_impl<decltype(target_config), num_partitions>(keys,
-                                                                            tree,
-                                                                            size,
-                                                                            lookback_states,
-                                                                            nth_element_data,
-                                                                            keys_buffer,
-                                                                            equality_buckets,
-                                                                            compare_function,
-                                                                            ordered_bid);
+                                                                              tree,
+                                                                              size,
+                                                                              lookback_states,
+                                                                              nth_element_data,
+                                                                              keys_buffer,
+                                                                              equality_buckets,
+                                                                              compare_function,
+                                                                              ordered_bid);
         };
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                       copy_buckets_kernel,

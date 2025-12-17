@@ -91,11 +91,11 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
     auto segmented_reduce_kernel = [=](auto target_config)
     {
         segmented_reduce<decltype(target_config)>(input,
-                                                output,
-                                                begin_offsets,
-                                                end_offsets,
-                                                reduce_op,
-                                                static_cast<result_type>(initial_value));
+                                                  output,
+                                                  begin_offsets,
+                                                  end_offsets,
+                                                  reduce_op,
+                                                  static_cast<result_type>(initial_value));
     };
 
     ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,

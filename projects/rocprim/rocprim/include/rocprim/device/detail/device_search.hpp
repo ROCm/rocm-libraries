@@ -341,11 +341,11 @@ hipError_t search_impl(void*          temporary_storage,
                 auto search_shared_kernel = [=](auto target_config)
                 {
                     search_kernel_shared_impl<decltype(target_config)>(input,
-                                                                     keys,
-                                                                     tmp_output,
-                                                                     size,
-                                                                     keys_size,
-                                                                     compare_function);
+                                                                       keys,
+                                                                       tmp_output,
+                                                                       size,
+                                                                       keys_size,
+                                                                       compare_function);
                 };
                 ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
                                                                               search_shared_kernel,
@@ -385,11 +385,11 @@ hipError_t search_impl(void*          temporary_storage,
                 auto search_kernel = [=](auto target_config)
                 {
                     search_kernel_impl<decltype(target_config)>(input,
-                                                              keys,
-                                                              tmp_output,
-                                                              size,
-                                                              keys_size,
-                                                              compare_function);
+                                                                keys,
+                                                                tmp_output,
+                                                                size,
+                                                                keys_size,
+                                                                compare_function);
                 };
                 ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(current_target,
                                                                               search_kernel,

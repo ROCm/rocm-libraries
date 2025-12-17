@@ -54,7 +54,7 @@ inline size_t get_merge_vsmem_size_per_block(detail::target t)
         {
             if(target{candidate} == most_common_config<targets>(t))
             {
-                using TargetConfig           = target_config<Config, Selector, decltype(candidate)>;
+                using TargetConfig         = target_config<Config, Selector, decltype(candidate)>;
                 using merge_kernel_impl_t  = merge_kernel_impl_<TargetConfig, Key, Value>;
                 using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
 
@@ -181,7 +181,8 @@ inline hipError_t merge_impl(void*                temporary_storage,
         using key_type   = typename std::iterator_traits<KeysInputIterator1>::value_type;
         using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
 
-        using merge_kernel_impl_t = merge_kernel_impl_<decltype(target_config), key_type, value_type>;
+        using merge_kernel_impl_t
+            = merge_kernel_impl_<decltype(target_config), key_type, value_type>;
 
         using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
         ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;

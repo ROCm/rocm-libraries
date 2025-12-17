@@ -1004,12 +1004,12 @@ public:
                                        temp_storage.get().shared.ordered_bid);
 
         non_blev_memcpy<TargetConfig>{}.copy(temp_storage.get(),
-                                           buffers,
-                                           num_buffers,
-                                           blev_buffers,
-                                           blev_buffer_scan_state,
-                                           blev_block_scan_state,
-                                           tile_id /* rocprim::flat_block_id() */);
+                                             buffers,
+                                             num_buffers,
+                                             blev_buffers,
+                                             blev_buffer_scan_state,
+                                             blev_block_scan_state,
+                                             tile_id /* rocprim::flat_block_id() */);
     }
 
     template<typename TargetConfig>
@@ -1322,13 +1322,13 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
 
             auto non_blev_memcpy_kernel = [=](auto target_config)
             {
-                batch_memcpy_impl_type::template non_blev_memcpy_kernel_impl<decltype(target_config)>(
-                    buffers,
-                    num_copies,
-                    blev_buffers,
-                    scan_state_buffer,
-                    scan_state_block,
-                    ordered_bid);
+                batch_memcpy_impl_type::template non_blev_memcpy_kernel_impl<
+                    decltype(target_config)>(buffers,
+                                             num_copies,
+                                             blev_buffers,
+                                             scan_state_buffer,
+                                             scan_state_block,
+                                             ordered_bid);
             };
 
             // Launch batch_memcpy_non_blev_kernel.

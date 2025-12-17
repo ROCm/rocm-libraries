@@ -74,11 +74,11 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target current_
     {
         // each block processes one segment
         ::rocprim::detail::segmented_reduce<decltype(target_config)>(input,
-                                                                   output,
-                                                                   begin_offsets,
-                                                                   end_offsets,
-                                                                   reduce_op,
-                                                                   initial_value);
+                                                                     output,
+                                                                     begin_offsets,
+                                                                     end_offsets,
+                                                                     reduce_op,
+                                                                     initial_value);
         // no synchronization is needed since thread 0 writes to output
 
         const unsigned int flat_id    = ::rocprim::detail::block_thread_id<0>();

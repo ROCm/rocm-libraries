@@ -66,13 +66,13 @@ struct adjacent_find_impl_kernels
 
         using transformed_input_type =
             typename std::iterator_traits<TransformedInputIterator>::value_type;
-        using block_reduce_type
-            = ::rocprim::block_reduce<transformed_input_type,
-                                      block_size,
-                                      block_reduce_algorithm::raking_reduce,
-                                      1,
-                                      1,
-                                      TargetConfig::wavefront>; // TODO?: params.block_reduce_method>;
+        using block_reduce_type = ::rocprim::block_reduce<
+            transformed_input_type,
+            block_size,
+            block_reduce_algorithm::raking_reduce,
+            1,
+            1,
+            TargetConfig::wavefront>; // TODO?: params.block_reduce_method>;
 
         ROCPRIM_SHARED_MEMORY union
         {
