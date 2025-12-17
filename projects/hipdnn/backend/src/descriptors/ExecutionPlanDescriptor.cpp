@@ -249,7 +249,8 @@ std::string ExecutionPlanDescriptor::toString() const
     str += "workspaceSize=" + std::to_string(_workspaceSize);
     if(_engineConfig)
     {
-        str += ", engineConfig=" + fmt::format("{:p}", static_cast<const void*>(_engineConfig.get()));
+        str += ", engineConfig="
+               + fmt::format("{:p}", static_cast<const void*>(_engineConfig.get()));
     }
     else
     {
