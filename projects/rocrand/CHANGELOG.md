@@ -11,6 +11,7 @@ Documentation for rocRAND is available at
 
 ### Added
 
+* gfx1150,gfx1152 and gfx1153 support
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 
 ### Changed
