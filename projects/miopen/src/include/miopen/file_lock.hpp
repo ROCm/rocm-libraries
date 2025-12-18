@@ -69,7 +69,7 @@ public:
                              nullptr);
 
         if(handle == INVALID_HANDLE_VALUE)
-            throw std::runtime_error("FileLock: cannot open file: " + filename);
+            throw std::runtime_error("file_lock: cannot open file: " + filename);
     }
     ~file_lock()
     {
@@ -94,12 +94,11 @@ public:
     file_lock(const file_lock&) = delete;
     file_lock& operator=(const file_lock&) = delete;
 
-    file_lock(file_lock&& rhs) noexcept { this->swap(rhs); }
+    file_lock(file_lock&& rhs) noexcept { std::swap(*this, rhs); }
 
     file_lock& operator=(file_lock&& rhs) noexcept
     {
-        file_lock tmp(std::move(rhs));
-        this->swap(tmp);
+        std::swap(*this, rhs);
         return *this;
     }
 
@@ -119,7 +118,11 @@ public:
             return;
 
         OVERLAPPED ov = {};
-        UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &ov);
+        if(UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &ov) == 0)
+        {
+            throw std::system_error(
+                errno, std::generic_category(), "file_lock: failed to unlock file");
+        }
     }
 #else
     void unlock() const
@@ -132,7 +135,11 @@ public:
         fl.l_whence = SEEK_SET;
         fl.l_start  = 0;
         fl.l_len    = 0;
-        fcntl(fd, F_SETLK, &fl);
+        if(fcntl(fd, F_SETLK, &fl) != 0)
+        {
+            throw std::system_error(
+                errno, std::generic_category(), "file_lock: failed to unlock file");
+        }
     }
 #endif
 
@@ -152,13 +159,6 @@ private:
 #ifdef _WIN32
     HANDLE handle{INVALID_HANDLE_VALUE};
 
-    void swap(file_lock& rhs) noexcept
-    {
-        HANDLE tmp = rhs.handle;
-        rhs.handle = handle;
-        handle     = tmp;
-    }
-
     bool lock_impl(bool exclusive, bool nonblocking) const
     {
         DWORD flags = 0;
@@ -174,13 +174,6 @@ private:
 #else
     int fd{-1};
 
-    void swap(file_lock& rhs) noexcept
-    {
-        int tmp = rhs.fd;
-        rhs.fd  = fd;
-        fd      = tmp;
-    }
-
     bool lock_impl(bool exclusive, bool nonblocking) const
     {
         flock fl    = {};
@@ -194,7 +187,8 @@ private:
         {
             if(nonblocking && (errno == EACCES || errno == EAGAIN))
                 return false;
-            throw std::system_error(errno, std::generic_category(), "Failed to lock file");
+            throw std::system_error(
+                errno, std::generic_category(), "file_lock: failed to lock file");
         }
 
         return true;

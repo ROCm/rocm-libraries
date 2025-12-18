@@ -72,7 +72,7 @@ struct handle_mutex
     std::recursive_timed_mutex m;
     miopen::file_lock flock;
 
-    handle_mutex(const char* name) : flock(name) {}
+    handle_mutex(const std::string& name) : flock(name) {}
 
     bool try_lock() { return std::try_lock(m, flock) != 0; }
 
@@ -81,10 +81,8 @@ struct handle_mutex
     template <class Duration>
     bool try_lock_for(Duration d)
     {
-        return m.try_lock_for(d) &&
-               flock.timed_lock(std::chrono::steady_clock::now() +
-                                std::chrono::duration_cast<Duration>(d) +
-                                std::chrono::duration_cast<std::chrono::milliseconds>(d));
+        return m.try_lock_for(d) && flock.timed_lock(std::chrono::steady_clock::now() +
+                                                     std::chrono::duration_cast<Duration>(d));
     }
 
     template <class Point>
@@ -104,7 +102,7 @@ template <class T>
 inline std::unique_lock<handle_mutex> get_handle_lock(T, int timeout = 120)
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static handle_mutex m{get_handle_lock_path(T::value()).c_str()};
+    static handle_mutex m{get_handle_lock_path(T::value())};
     return {m, std::chrono::seconds{timeout}};
 }
 
