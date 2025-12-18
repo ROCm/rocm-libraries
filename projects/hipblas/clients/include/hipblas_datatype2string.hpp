@@ -25,6 +25,7 @@
 #define hipblas_DATATYPE2STRING_H_
 
 #include "hipblas.h"
+#include "type_utils.h"
 #include <complex>
 #include <ostream>
 #include <string>
@@ -55,6 +56,14 @@ hipblas_initialization string2hipblas_initialization(const std::string& value);
 inline std::ostream& operator<<(std::ostream& os, hipblas_initialization init)
 {
     return os << hipblas_initialization2string(init);
+}
+
+// Define ostream overload for __half
+inline std::ostream& operator<<(std::ostream& os, const hipblasHalf& h)
+{
+    // Convert to float before printing
+    os << half_to_float(h);
+    return os;
 }
 
 // Complex output

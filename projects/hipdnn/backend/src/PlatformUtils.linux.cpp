@@ -31,11 +31,13 @@ std::filesystem::path getCurrentModuleDirectory()
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-    // We should only load plugins wtih RTLD_NOW to avoid issues.
+    // We should only load plugins with RTLD_NOW to avoid issues (fail-fast).
     // RTLD_DEEPBIND can NOT be used as it can cause symbol issues that are hard to debug.
     // In order to ensure plugins work correctly with RTLD_NOW, plugins must be built with -fvisibility=hidden
     // or accidental symbol collisions may occur.
-    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW);
+    // We explicitly use RTLD_LOCAL to ensure plugin symbols do not pollute the global namespace, in all environments.
+    // RTLD_LOCAL is the default in most cases, but we are being explicit here for clarity.
+    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_LOCAL);
 
     if(handle == nullptr)
     {

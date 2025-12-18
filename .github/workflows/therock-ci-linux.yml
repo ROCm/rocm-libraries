@@ -51,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: a1f6b57cc31890c05ab0094212ae0b269765db8e # 2025-11-25 commit
+          ref: bfcaf6e0bcd4bfe3c21990f49bbccb7d2a087d5d # 2025-12-15 commit
 
       - name: Install python deps
         run: |
@@ -93,10 +93,6 @@ jobs:
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
-
-      - name: Install external python deps
-        run: |
-          pip install -r TheRock/requirements-external.txt
 
       - name: Configure Projects
         env:

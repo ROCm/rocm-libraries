@@ -129,6 +129,44 @@ namespace rocRoller
          * VGPR indexes.
          */
 
+        std::tuple<int, int, int, int>
+            addLoadMacroTileCTPreTiled(KernelGraph&                     graph,
+                                       std::vector<DeferredConnection>& connections,
+                                       int                              macTileTag,
+                                       std::vector<int> const&          sdim)
+        {
+            AssertFatal(sdim.size() == 4, "Expected 4 sub-dimensions for Pretiled MacroTile CT.");
+
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+            auto sdimXTile = sdim[0];
+            auto sdimYTile = sdim[1];
+            auto sdimX     = sdim[2];
+            auto sdimY     = sdim[3];
+
+            auto numTilesX = graph.coordinates.get<SubDimension>(sdimXTile)->size;
+            auto numTilesY = graph.coordinates.get<SubDimension>(sdimYTile)->size;
+
+            connections.push_back(DC<SubDimension>(sdimX, 0));
+            connections.push_back(DC<SubDimension>(sdimY, 1));
+
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0, numTilesX));
+            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1, numTilesY));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
+
+            connections.push_back(DC<MacroTileNumber>(nMacX, 0));
+            connections.push_back(DC<MacroTileNumber>(nMacY, 1));
+
+            graph.coordinates.addElement(PassThrough(), {sdimXTile}, {nMacX});
+            graph.coordinates.addElement(PassThrough(), {sdimYTile}, {nMacY});
+
+            graph.coordinates.addElement(PassThrough(), {sdimX}, {iMacX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {iMacY});
+
+            return {nMacX, iMacX, nMacY, iMacY};
+        }
+
         /**
          * @brief Add coordinate-transforms for tiling two
          * SubDimension coordinates into macro number/index
@@ -149,6 +187,9 @@ namespace rocRoller
                                int                              macTileTag,
                                std::vector<int> const&          sdim)
         {
+            if(sdim.size() == 4)
+                return addLoadMacroTileCTPreTiled(graph, connections, macTileTag, sdim);
+
             auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto sdimX     = sdim[0];
             auto sdimY     = sdim[1];
@@ -1390,8 +1431,10 @@ namespace rocRoller
                                           GPUCapability::HasWiderDirectToLds);
 
             // Enable the use of longer word instructions if possible
-            if(params->enableLongDwordInstructions && (packed || packFactor <= 1)
-               && (!direct2LDS || useWiderDirect2LDS))
+            auto update = params->enableLongDwordInstructions;
+            update      = update && (packed || packFactor <= 1);
+            update      = update && (!direct2LDS || useWiderDirect2LDS);
+            if(update)
             {
                 auto maxWidth = std::min(context->kernelOptions()->storeGlobalWidth,
                                          context->kernelOptions()->loadLocalWidth);
@@ -1402,8 +1445,13 @@ namespace rocRoller
 
                 auto macTileFastMovingDimSize = !useSwappedAccess ? macTileM : macTileN;
 
-                updateThreadTileForLongDwords(
-                    thrTileM, thrTileN, maxWidth, macTileFastMovingDimSize, numDwordsPerElement);
+                auto avoidDWordX2 = direct2LDS;
+                updateThreadTileForLongDwords(thrTileM,
+                                              thrTileN,
+                                              maxWidth,
+                                              macTileFastMovingDimSize,
+                                              numDwordsPerElement,
+                                              avoidDWordX2);
             }
 
             if(!useSwappedAccess)

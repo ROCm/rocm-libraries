@@ -282,6 +282,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/Operations_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/Operations_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/RandomNumberGenerator.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/Scratch.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/Scratch_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/T_Execute.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/T_Execute_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/T_Execute_impl.hpp"
@@ -380,6 +382,9 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ControlGraph.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ControlToCoordinateMapper.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/CoordinateGraph.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ELF.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ELF_detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ELF_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/Enum.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/Expression.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/GPUArchitecture.hpp"
@@ -391,6 +396,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/XOps.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/YAML.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/YAML_impl.hpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/comgr/comgr.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/llvm/YAML.hpp"
 
