@@ -25,6 +25,7 @@ exclude: |
     projects/hipsparse/.*|
     projects/hipsparselt/.*|
     projects/hiptensor/.*|
+    projects/miopen/.*|
     projects/rocblas/.*|
     projects/rocfft/.*|
     projects/rocprim/.*|
@@ -51,8 +52,6 @@ exclude: |
     projects/hipblaslt/tensilelite/Tensile/CustomKernels/.*|
     # Generated test yaml files
     projects/hipblaslt/tensilelite/Tensile/Tests/.*|
-    # Large source files
-    projects/miopen/src/kernels/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)
