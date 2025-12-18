@@ -46,6 +46,7 @@ def getRequiredParametersMin() -> set:
         'DirectToLdsA',
         'DirectToLdsB',
         'ExpandPointerSwap',
+        'ExtraMiLatencyLeft',
         'ForceDisableShadowInit',
         'GlobalReadPerMfma',
         'GlobalReadVectorWidthA',

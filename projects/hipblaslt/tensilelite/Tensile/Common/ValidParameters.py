@@ -859,7 +859,11 @@ validParameters = { # we need to make sure this matches develop
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
     "UseCustomMainLoopSchedule" : [0, 1],
-    "AdaptiveGemm": [0, 1]
+    "AdaptiveGemm": [0, 1],
+    # Add extra miLatencyLeft to improve local read scheduling
+    # Adding more room for scheduling local read instructions
+    # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
+    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8]
 }
 
 newMIValidParameters = {

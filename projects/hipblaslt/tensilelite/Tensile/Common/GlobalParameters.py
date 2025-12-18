@@ -426,7 +426,8 @@ defaultBenchmarkCommonParameters = [
     {"UseCustomMainLoopSchedule": [1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
-    {"AdaptiveGemm": [0]}
+    {"AdaptiveGemm": [0]},
+    {"ExtraMiLatencyLeft": [-1]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
