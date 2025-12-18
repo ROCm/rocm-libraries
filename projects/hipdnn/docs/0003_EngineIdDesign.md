@@ -165,7 +165,7 @@ namespace hipdnn_plugin_sdk::engine_names {
 // X-Macro list of all engines, add all new engines here.
 #define HIPDNN_ENGINE_LIST(X) \
     X(MIOPEN_ENGINE) \
-    X(VENDOR_FAST_CONV_ENGINE) 
+    X(VENDOR_FAST_CONV_ENGINE)
 
 // Generate const char* definitions using stringification
 #define DEFINE_ENGINE_NAME(name) \
@@ -218,7 +218,7 @@ Hash function is implemented in the data_sdk so that it can be used anywhere
 namespace hipdnn_data_sdk {
 inline int64_t engineNameToId(const char* engineName) {
     // Implementation of this hash function is an implementation detail and is
-    // up to the developer who implements it.  The developer is expected to create a robust 
+    // up to the developer who implements it.  The developer is expected to create a robust
     // test suite to ensure the function is deterministic and is made to have minimal collision possibilities.
 }
 } // namespace hipdnn_data_sdk
@@ -226,7 +226,7 @@ inline int64_t engineNameToId(const char* engineName) {
 
 ### Plugin Implementation
 
-Plugins will use the hash function internally to convert their engine names to ids to they can communicate via the existing API.  The EnginePluginApi.h only addresses engines by `int64_t`, so no API changes are needed. 
+Plugins will use the hash function internally to convert their engine names to ids so they can communicate via the existing API.  The EnginePluginApi.h only addresses engines by `int64_t`, so no API changes are needed.
 
 ### Frontend Implementation
 
@@ -247,7 +247,7 @@ public:
         int64_t engineId = hipdnn::engineNameToId(engineName);
         
         // Log for debugging
-        HIPDNN_LOG_DEBUG("Engine name '{}' mapped to ID: 0x{:016X}", 
+        HIPDNN_LOG_DEBUG("Engine name '{}' mapped to ID: 0x{:016X}",
                         engineName, engineId);
         
         // Forward to the int64_t version
@@ -315,7 +315,7 @@ class MyCustomPlugin {
         int64_t engineId = hipdnn::data_sdk::engineNameToId(engineName);
         
         // Log for debugging
-        HIPDNN_LOG_INFO("Initializing engine '{}' with ID: 0x{:016X}", 
+        HIPDNN_LOG_INFO("Initializing engine '{}' with ID: 0x{:016X}",
                        engineName, engineId);
         
         // Register engine
