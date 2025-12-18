@@ -556,6 +556,7 @@ class TestCustomScheduleTF32:
         })
         kernel.update({
             "UseF32XEmulation": True,
+            "ForceUnrollSubIter": True,
             "MacroTile0": 192, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
             "DirectToLds": True,
