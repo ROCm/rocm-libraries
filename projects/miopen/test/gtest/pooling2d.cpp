@@ -6,6 +6,7 @@
 #include "gtest_common.hpp"
 #include "../pooling_common.hpp"
 #include <half/half.hpp>
+#include <miopen/logger.hpp>
 #include <vector>
 #include <limits>
 
@@ -23,11 +24,15 @@ struct Pooling2dTestCase
 
     friend std::ostream& operator<<(std::ostream& os, const Pooling2dTestCase& tc)
     {
-        return os << "input_dims: [" << tc.input_dims[0] << "," << tc.input_dims[1] << ","
-                  << tc.input_dims[2] << "," << tc.input_dims[3] << "] lens: [" << tc.lens[0]
-                  << "," << tc.lens[1] << "] pads: [" << tc.pads[0] << "," << tc.pads[1]
-                  << "] strides: [" << tc.strides[0] << "," << tc.strides[1]
-                  << "] index_type: " << tc.index_type << ", mode: " << tc.mode
+        os << "input_dims: ";
+        miopen::LogRange(os << "[", tc.input_dims, ",") << "] ";
+        os << "lens: ";
+        miopen::LogRange(os << "[", tc.lens, ",") << "] ";
+        os << "pads: ";
+        miopen::LogRange(os << "[", tc.pads, ",") << "] ";
+        os << "strides: ";
+        miopen::LogRange(os << "[", tc.strides, ",") << "] ";
+        return os << "index_type: " << tc.index_type << ", mode: " << tc.mode
                   << ", wsidx: " << tc.wsidx;
     }
 };
