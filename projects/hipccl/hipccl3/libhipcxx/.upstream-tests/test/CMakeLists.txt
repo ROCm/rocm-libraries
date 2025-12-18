@@ -79,6 +79,20 @@ elseif (LIBHIPCXX_TEST_WITH_HIPRTC)
   set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "False")
   set(LIBCUDACXX_FORCE_INCLUDE "-include '${libhipcxx_SOURCE_DIR}/test/support/nvrtc_limit_macros.h'")
   set(LIBCUDACXX_TEST_COMPILER_FLAGS "-I'${HIP_INCLUDE_DIR}'")
+  # NOTE(HIP/AMD): We need to identify clang version to find from the path to clang new header.
+  # The header is used in libhipcxx/include/cuda/std/__memory/construct_at.h.
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" --print-resource-dir
+    OUTPUT_VARIABLE _clang_abs_resource_dir
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
+  )
+  cmake_path(GET _clang_abs_resource_dir FILENAME _clang_version)
+  set(_clang_new_header_prefix_resource_dir "lib/llvm/lib/clang/${_clang_version}/include/cuda_wrappers")
+  string(JOIN " " LIBCUDACXX_TEST_COMPILER_FLAGS
+    -I${HIP_INCLUDE_DIR}
+    -I${HIP_INCLUDE_DIR}/../${_clang_new_header_prefix_resource_dir}
+  )
   # Use the NVRTCC utility to run the built test outputs
   set(LIBCUDACXX_EXECUTOR "PrefixExecutor(['${LIBCUDACXX_CUDA_COMPILER}'], LocalExecutor())")
 else() # NOT LIBCUDACXX_TEST_WITH_NVRTC
