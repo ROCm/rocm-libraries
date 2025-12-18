@@ -99,7 +99,6 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     graph = transform<LowerTile>(graph, params, context.get());
     graph = transform<LowerTensorContraction>(graph, params, context.get());
     graph = transform<Simplify>(graph);
-
     graph = transform<ConstantPropagation>(graph);
     graph = transform<FuseExpressions>(graph);
     graph = transform<ConnectWorkgroups>(graph, context.get());
@@ -108,18 +107,54 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     graph = transform<FuseLoops>(graph);
     graph = transform<RemoveDuplicates>(graph);
     graph = transform<OrderEpilogueBlocks>(graph);
+    graph = transform<Simplify>(graph);
     graph = transform<CleanLoops>(graph);
+    graph = transform<SwizzleScale>(graph, params, context.get());
     graph = transform<AddPrefetch>(graph, params, context.get());
-    graph = transform<AddComputeIndex>(graph);
     graph = transform<AddPRNG>(graph, context.get());
     graph = transform<UpdateWavefrontParameters>(graph, params);
-    graph = transform<LoadPacked>(graph, context.get());
-    graph = transform<AddConvert>(graph);
-    graph = transform<AddDeallocateDataFlow>(graph);
-    graph = transform<InlineIncrements>(graph);
-    graph = transform<Simplify>(graph);
+    graph = transform<AddComputeIndex>(graph);
+    graph = transform<AssignComputeIndex>(graph, context.get());
 
     ControlFlowRWTracer tracer(graph);
+
+    const auto [a, b, c, d] = example.getOperationTags();
+    auto macroTiles         = [&](auto op) -> Generator<int> {
+        for(auto tag : graph.coordinates.getNodes<User>())
+        {
+            const auto user = graph.coordinates.get<User>(tag).value();
+            if(user.commandTag == op)
+            {
+                auto tags = graph.coordinates.followEdges<DataFlowEdge>({tag});
+                for(auto t : tags)
+                {
+                    const auto node = graph.coordinates.getNode(t);
+                    if(std::holds_alternative<MacroTile>(node))
+                    {
+                        co_yield t;
+                    }
+                }
+            }
+        }
+    };
+
+    int kLoop = -1, kLoopTail = -1;
+    for(auto tag : graph.control.getNodes<ForLoopOp>())
+    {
+        const auto loop = graph.control.get<ForLoopOp>(tag).value();
+        Log::info("Found loop {} with tag {}", loop.loopName, tag);
+        if(loop.loopName == "KLoop")
+            kLoop = tag;
+        else if(loop.loopName == "KLoopTail")
+            kLoopTail = tag;
+    }
+    AssertFatal(kLoop != -1 && kLoopTail != -1, ShowValue(kLoop), ShowValue(kLoopTail));
+
+    { // TODO: remove
+        std::ofstream file("HoistLoopInvariantTest_graph.dot");
+        file << graph.toDOT(false);
+    }
+
     SECTION("buildCoordinateLoopMapping")
     {
         auto loopMapping = kg::buildCoordinateLoopMapping(graph, tracer);
@@ -149,11 +184,24 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
 
     SECTION("countCoordinateWritesInLoop")
     {
-        // Written in both
-        CHECK(countCoordinateWritesInLoop(graph, 1122, 510, tracer) == 16);
-        CHECK(countCoordinateWritesInLoop(graph, 1127, 510, tracer) == 8);
+        for(auto tag : macroTiles(a))
+        {
+            const auto node = graph.coordinates.getNode(tag);
+            if(!std::holds_alternative<MacroTile>(node))
+                continue;
+            const auto& macroTile = std::get<MacroTile>(node);
+            if(macroTile.layoutType != LayoutType::MATRIX_ACCUMULATOR)
+                continue;
+            CAPTURE(tag);
+            for(const auto dup : graph.coordinates.getInputNodeIndices(tag, isEdge<Duplicate>))
+            {
+                CAPTURE(dup);
+                CHECK(countCoordinateWritesInLoop(graph, kLoop, dup, tracer) == 16);
+                CHECK(countCoordinateWritesInLoop(graph, kLoopTail, dup, tracer) == 8);
+            }
+            break; // only first macro tile encountered is used in kloop[tail]
+        }
 
-        // For loop variable only written in one loop
         CHECK(countCoordinateWritesInLoop(graph, 1127, 314, tracer) == 1);
         CHECK(countCoordinateWritesInLoop(graph, 1122, 314, tracer) == 0);
     }
