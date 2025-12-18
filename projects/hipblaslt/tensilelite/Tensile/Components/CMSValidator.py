@@ -1017,7 +1017,7 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
 
     # Checks value is in [interval[0],interval[1]].
     # if lhsGt : ]interval[0],interval[1]] else  [interval[0],interval[1][
-    def inInterval(value : int, interval : list[int], lhsGt : bool):
+    def inInterval(value: int, interval: list[int], lhsGt: bool):
         if lhsGt:
             return value>interval[0] and value<=interval[1]
         else:
@@ -1032,7 +1032,7 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
     if DTL:
         names += ["GRA", "GRB"]
 
-    def verifyIndices(grIncData : GRIncData, name : str, indices : list[int]) -> str | None:
+    def verifyIndices(grIncData: GRIncData, name: str, indices: list[int]) -> Optional[str]:
         dclIndex = getDeclarationIndex(name)
         dclIndexGrInc = getDeclarationIndex(grIncData.name)
         for v in indices:

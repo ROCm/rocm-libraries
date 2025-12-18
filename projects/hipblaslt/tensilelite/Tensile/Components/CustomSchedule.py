@@ -39,8 +39,8 @@ from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
-from typing import Callable
-from enum import Enum, auto, Union
+from typing import Callable, Optional, Union
+from enum import Enum, auto
 import Tensile.Components.CMSValidator as cmsv
 
 # Enum to distinguish between different schedule matching outcomes
@@ -54,9 +54,9 @@ _SCHEDULE_REGISTRY = []
 
 @dataclass
 class SyncSchedule:
-    schedule : list[tuple[int, Union[SWaitCnt, SBarrier]]] = field(default_factory=list)
+    schedule: list[tuple[int, Union[SWaitCnt, SBarrier]]] = field(default_factory=list)
 
-    def add(self, idx:int, dscnt:int=-1, vlcnt:int=-1, vscnt:int=-1, comment:str="", barrier:bool=False, barrier_idx:Union[int, None]=None, barrier_comment:str=""):
+    def add(self, idx: int, dscnt: int = -1, vlcnt: int = -1, vscnt: int = -1, comment: str = "", barrier: bool = False, barrier_idx: Optional[int] = None, barrier_comment: str = ""):
         """ Add a SWaitCnt (and optionally a SBarrier) to the schedule at the given index.
 
         Args:
@@ -103,7 +103,7 @@ def create_range(min_val: int, num: int, max_val: int, step: int = 1, repeat: in
     """
     return [min(val, max_val) for val in range(min_val, min_val + num, step) for _ in range(repeat)]
 
-def duplicate_list_items(input_list: list, repeat_count: int, step:int=0) -> list:
+def duplicate_list_items(input_list: list, repeat_count: int, step: int = 0) -> list:
     """
     Duplicate each item in input_list repeat_count times. Optionally duplicate with a step
 
@@ -113,7 +113,7 @@ def duplicate_list_items(input_list: list, repeat_count: int, step:int=0) -> lis
     """
     return [item + step * j for item in input_list for j in range(repeat_count)]
 
-def count_items(input_list: list[int], sv:Union[int, None] = None, ev:Union[int, None] = None):
+def count_items(input_list: list[int], sv: Optional[int] = None, ev: Optional[int] = None):
     """
     Count how many items in the list are between start value `sv` (inclusive) and end value `ev` (exclusive)
 
@@ -144,8 +144,8 @@ class ScheduleInfo:
         syncCode,
         nglshift,
         nllshift,
-        nllZeroDscnt=False,
-        mfmaReorder=[],
+        nllZeroDscnt = False,
+        mfmaReorder = [],
         snopCode = [],
     ):
         self.numCodePaths = numCodePaths
@@ -508,7 +508,7 @@ class RegisterSchedule:
     
     def __call__(self, func: Callable) -> Callable:
         """Wrap the function with matching logic and register it."""
-        def wrapped_func(kernel: dict, useLDSTr: bool, TLDS: int) -> tuple[ScheduleMatchStatus, ScheduleInfo | None]:
+        def wrapped_func(kernel: dict, useLDSTr: bool, TLDS: int) -> tuple[ScheduleMatchStatus, Optional[ScheduleInfo]]:
             # TODO: Currently ULSGRO not checked for in CMS, disabled for now
             if kernel["UnrollLoopSwapGlobalReadOrder"]:
                 return ScheduleMatchStatus.NO_MATCH, None
