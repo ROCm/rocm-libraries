@@ -3,9 +3,9 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 TEST(TestPluginException, WhatReturnsMessage)
 {
