@@ -377,7 +377,7 @@ double estimate_l2_hit(const problem_t& problem,
       std::max(math::safe_ceil_div(effective_cus, hardware.NUM_XCD), static_cast<size_t>(1));
 
   // Initial guess for the L2 tile dimensions (a tile of workgroups).
-  size_t l2_tile_n = std::min(cu_per_xcd, std::min(static_cast<size_t>(config.workgroup_mapping), workgroups_n));
+  size_t l2_tile_n = std::min(static_cast<size_t>(config.workgroup_mapping), workgroups_n);
   size_t l2_tile_m = math::safe_ceil_div(cu_per_xcd, l2_tile_n);
 
   // Handle wrap-around case: if the tile is taller than the grid, wrap it to be wider.
@@ -400,7 +400,6 @@ double estimate_l2_hit(const problem_t& problem,
   auto calculate_footprint = [&](auto tile_m, auto tile_n) {
     auto a_footprint = tile_m * config.mt.mk() * a_bytes;
     auto b_footprint = tile_n * config.mt.nk() * b_bytes;
-    return (a_footprint + b_footprint) * batches_per_xcd;
     return (a_footprint + b_footprint) * tiles_per_xcd;
   };
 
@@ -513,6 +512,7 @@ double compute_l2_hit_rate_global(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config,
                                   size_t l2_capacity_bytes,
+                                  size_t num_active_cus,
                                   size_t splitting_factor) {
   // --- Hardware Parameters (as requested, defined locally) ---
   // You would normally get l2_capacity_bytes from your hardware_t struct.
@@ -532,7 +532,7 @@ double compute_l2_hit_rate_global(const problem_t& problem,
 
   const double a_working_set           = static_cast<double>(grid_m * config.mt.mk()) * a_bytes;
   const double b_working_set           = static_cast<double>(grid_n * config.mt.nk()) * b_bytes;
-  const double concurrent_tiles = std::min(problem.batch * splitting_factor, std::max(hardware.N_CU / (grid_m * grid_n), static_cast<size_t>(1)));
+  const double concurrent_tiles = std::min(problem.batch * splitting_factor, std::max(num_active_cus / (grid_m * grid_n), static_cast<size_t>(1)));
   const double total_working_set_bytes = (a_working_set + b_working_set) * concurrent_tiles;
 
   // 3. CRUCIAL: Check if the working set fits in the L2 cache.
@@ -600,11 +600,11 @@ double compute_memory_latency(const problem_t& problem,
   // (Assumes capacity is given in KiB, convert to bytes)
   // TODO hardware.L2_capacity is already in bytes?
   double H_mem1_global =
-      compute_l2_hit_rate_global(problem, hardware, config, hardware.L2_capacity * 1024, splitting_factor);
+      compute_l2_hit_rate_global(problem, hardware, config, hardware.L2_capacity * 1024, num_active_cus, splitting_factor);
 
   H_mem1 = std::min(H_mem1, H_mem1_global);
 
-  // if (H_mem1 == 0) { H_mem1 = 0.5; }
+  if (H_mem1 == 0) { H_mem1 = 0.1; }
 
   // 2) Estimate mall hit-rate
   double H_mem2 = estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor);
@@ -653,7 +653,6 @@ double compute_memory_latency(const problem_t& problem,
   size_t grid_m = math::safe_ceil_div(problem.size.m, MT_M);
   size_t grid_n = math::safe_ceil_div(problem.size.n, MT_N);
   size_t mall_n = std::min(static_cast<size_t>(config.workgroup_mapping), grid_n);
-  // size_t mall_m = math::safe_ceil_div(num_active_cus, mall_n);
   size_t mall_m = math::safe_ceil_div(std::min(num_active_cus, grid_m * grid_n), mall_n);
   // Handle wrap-around case
   if (mall_m > grid_m) {
@@ -675,10 +674,10 @@ double compute_memory_latency(const problem_t& problem,
     }
   }
   double concurrent_tiles = std::min(static_cast<double>(problem.batch * splitting_factor),
-      std::max(static_cast<double>(num_active_cus) / (mall_m * mall_n), 1.));
+      std::max(static_cast<double>(num_active_cus) / (grid_m * grid_n), 1.));
   // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
-  double min_load = static_cast<double>((mall_m * Ld_A_value * static_cast<size_t>(a_bytes)) +
-                                       (mall_n * Ld_B_value * static_cast<size_t>(b_bytes))) *
+  double min_load = static_cast<double>((mall_m * Ld_A_value * a_bytes) +
+                                        (mall_n * Ld_B_value * b_bytes)) *
                     concurrent_tiles;  // Apply batching to the minimum load itself.
   // The actual loads cannot be less than this physical minimum.
   Ld_MEM  = std::max(Ld_MEM, min_load);
@@ -909,6 +908,11 @@ double compute_total_latency(const problem_t& problem,
 
   // 1-1) To compute the latency, use default WGM. And WGM can't be greater than one
   int defaultWGM = batch > 1 ? 1 : static_cast<int>(ceil(std::sqrt(max_cus / hardware.NUM_XCD)));
+  const size_t grid_m = math::safe_ceil_div(M, MT_N);
+  const size_t grid_n = math::safe_ceil_div(N, MT_N);
+  if(grid_m * grid_n > hardware.N_CU && M > 10 * N && grid_n <= 8) {
+    defaultWGM = grid_n;
+  }
   auto config_with_default_wgm              = config;
   config_with_default_wgm.workgroup_mapping = std::max(defaultWGM, 1);
 
