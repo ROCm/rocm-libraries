@@ -413,6 +413,7 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
     assert(AA != nullptr);
     assert(info != nullptr);
 
+    // TODO: offset A here based on block/tid?
     T* const A = load_ptr_batch(AA, bid, shiftA, strideA);
     INFO* const info_bid = info + bid;
 
@@ -464,6 +465,9 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             auto kk = kcol * ldash + kcol;
             auto const akk = std::real(Ash[kk]);
             bool const isok = (akk > 0) && (std::isfinite(akk));
+
+            __syncthreads();
+
             if(!isok)
             {
                 if(tid == 0)
@@ -474,6 +478,7 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
                         *info_bid = j * PANEL_SIZE + kcol + 1;
                 }
                 failed = true;
+                __syncthreads();
                 break;
             }
 
@@ -482,8 +487,6 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             {
                 Ash[kk] = lkk;
             }
-
-            __syncthreads();
 
             // ------------------------------------------------------------
             //   (2) vl21 * l11' = va21 =>  vl21 = va21/ l11', scale vector
@@ -520,18 +523,11 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             __syncthreads();
         }
 
-        __syncthreads();
-
         // update trailing matrix
         for(I k = j + 1; k < NB; k++)
         {
             for(I i = k; i < NB; i++)
             {
-                // const auto c_row
-                //     = (i - j) * tile_size + widx * 16 + get_c_row<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0, (I)0);
-                // const auto c_col
-                //     = (k - j) * tile_size + widy * 16 + get_c_col<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0, (I)0);
-
                 const auto col = (k - j) * PANEL_SIZE + tidy;
                 const auto row = (i - j) * PANEL_SIZE + tidx;
 
@@ -542,9 +538,6 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             }
         }
 
-        // TODO: reevaluate syncthreads
-        __syncthreads();
-
         // write panel back to registers
         for(I i = j; i < NB; i++)
         {
@@ -552,6 +545,8 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             const auto idx = tidy * ldash + row;
             Arg[idx_lower<I>(i, j, NB)] = Ash[idx];
         }
+
+        __syncthreads();
 
         if(failed)
             break;
