@@ -23,11 +23,11 @@ struct Pooling2dTestCase
 
     friend std::ostream& operator<<(std::ostream& os, const Pooling2dTestCase& tc)
     {
-        return os << "input_dims: " << miopen::Join(tc.input_dims, ", ")
-                  << ", lens: " << miopen::Join(tc.lens, ", ")
-                  << ", pads: " << miopen::Join(tc.pads, ", ")
-                  << ", strides: " << miopen::Join(tc.strides, ", ")
-                  << ", index_type: " << tc.index_type << ", mode: " << tc.mode
+        return os << "input_dims: [" << tc.input_dims[0] << "," << tc.input_dims[1] << ","
+                  << tc.input_dims[2] << "," << tc.input_dims[3] << "] lens: [" << tc.lens[0]
+                  << "," << tc.lens[1] << "] pads: [" << tc.pads[0] << "," << tc.pads[1]
+                  << "] strides: [" << tc.strides[0] << "," << tc.strides[1]
+                  << "] index_type: " << tc.index_type << ", mode: " << tc.mode
                   << ", wsidx: " << tc.wsidx;
     }
 };
