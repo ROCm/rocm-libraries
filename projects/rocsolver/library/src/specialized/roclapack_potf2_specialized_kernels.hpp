@@ -511,8 +511,7 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             for(I j = (kcol + 1) + tidy; j < PANEL_SIZE; j += hipBlockDim_y)
             {
                 auto const vj = Ash[j + kcol * ldash];
-                // TODO: j + tidx
-                for(I i = (kcol + 1) + tidx; i < nn; i += hipBlockDim_x)
+                for(I i = j + tidx; i < nn; i += hipBlockDim_x)
                 {
                     auto const vi = Ash[i + kcol * ldash];
                     auto const ij = i + j * ldash;
