@@ -13,8 +13,6 @@
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>

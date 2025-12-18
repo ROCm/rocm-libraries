@@ -5,8 +5,8 @@
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -14,6 +14,7 @@
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
 using namespace miopen_legacy_plugin;
+using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin;
 
 class TestMiopenBatchnormFwdTrainingActivPlanBuilder : public ::testing::Test
@@ -158,8 +159,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
-                 hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -252,8 +252,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
-                 hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
