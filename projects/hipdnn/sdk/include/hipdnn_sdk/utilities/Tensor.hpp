@@ -468,7 +468,7 @@ public:
         if(isPacked())
         {
             auto data{_memory.hostData()};
-            std::fill(data, data + _element_count, value);
+            std::fill(data, data + _elementCount, value);
         }
         else
         {
@@ -490,7 +490,7 @@ public:
         if(isPacked())
         {
             auto data{_memory.hostData()};
-            for(size_t i{0}; i < _element_count; i++)
+            for(size_t i{0}; i < _elementCount; i++)
             {
                 data[i] = static_cast<T>(distribution(generator));
             }
