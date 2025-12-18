@@ -484,13 +484,12 @@ int RNNSeqDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("iter", 'i', "1", "Number of Iterations (Default=1)", "int");
     inflags.AddInputFlag("verify", 'V', "1", "Verify Each Layer (Default=1)", "int");
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
-    inflags.AddInputFlag(
-        "wall",
-        'w',
-        "0",
-        "Wall-clock, for host and gpu, Time Each Layer. KernelOnly = 0, OldWallClock = 1, "
-        "SeparateClocksSynced = 2, SeparateClocksNotSynced = 3 (Default = 0) ",
-        "int");
+    inflags.AddInputFlag("wall",
+                         'w',
+                         "1",
+                         "Wall-clock mode, for host and gpu, Time Each Layer. OldWallClock = 1, "
+                         "SeparateClocksSynced = 2, SeparateClocksNotSynced = 3 (Default = 1) ",
+                         "int");
     inflags.AddInputFlag("dump_output", 'o', "0", "Dumps the output buffers (Default=0)", "int");
     /*  // DL: These have not been implemented. Removing them for now.
         inflags.AddInputFlag("in_data", 'd', "", "Input data filename (Default=)", "string");
@@ -1081,8 +1080,10 @@ int RNNSeqDriver<Tgpu, Tref>::RunForwardGPU()
     if(inflags.GetValueInt("forw") != 0 && !(inflags.GetValueInt("forw") & 1))
         return miopenStatusSuccess;
 
-    RNNCombTimeLogger time_logger(
-        GetStream(), inflags.GetValueInt("iter"), inflags.GetValueInt("wall"));
+    RNNCombTimeLogger time_logger(GetStream(),
+                                  inflags.GetValueInt("iter"),
+                                  inflags.GetValueInt("time"),
+                                  inflags.GetValueInt("wall"));
 
     from_gpu_out = std::vector<Tgpu>(out_dev->GetSize() / sizeof(Tgpu), static_cast<Tgpu>(0));
     out_dev->ToGPU(q, from_gpu_out.data());
@@ -1091,10 +1092,7 @@ int RNNSeqDriver<Tgpu, Tref>::RunForwardGPU()
 
     for(int i = 0; i < inflags.GetValueInt("iter"); i++)
     {
-        if(inflags.GetValueInt("time") == 1)
-        {
-            time_logger.Start();
-        }
+        time_logger.Start();
         miopenRNNForward(GetHandle(),
                          rnnDesc,
                          fwd_type,
@@ -1114,17 +1112,14 @@ int RNNSeqDriver<Tgpu, Tref>::RunForwardGPU()
                          workspace_dev->GetSize(),
                          reservespace_dev->GetMem(),
                          reservespace_dev->GetSize());
-        if(inflags.GetValueInt("time") == 1)
-        {
-            time_logger.StopAndPush();
-        }
+        time_logger.StopAndPush();
     }
 
     miopen::deref(GetHandle()).Finish();
     if(inflags.GetValueInt("time") == 1)
     {
         printf("Forward RNN time results:\n");
-        time_logger.Print(inflags.GetValueInt("wall") > 0);
+        time_logger.Print();
     }
 
     if(io_layout != miopenRNNDataSeqMajorNotPadded)
@@ -1177,8 +1172,10 @@ int RNNSeqDriver<Tgpu, Tref>::RunBackwardGPU()
 
     if((inflags.GetValueInt("forw") & 2) || (inflags.GetValueInt("forw") == 0))
     {
-        RNNCombTimeLogger time_logger(
-            GetStream(), inflags.GetValueInt("iter"), inflags.GetValueInt("wall"));
+        RNNCombTimeLogger time_logger(GetStream(),
+                                      inflags.GetValueInt("iter"),
+                                      inflags.GetValueInt("time"),
+                                      inflags.GetValueInt("wall"));
 
         workspace_dev->ToGPU(q, workspace.data());
         if(inflags.GetValueInt("inputmode") == 1)
@@ -1191,10 +1188,7 @@ int RNNSeqDriver<Tgpu, Tref>::RunBackwardGPU()
 
         for(int i = 0; i < inflags.GetValueInt("iter"); i++)
         {
-            if(inflags.GetValueInt("time") == 1)
-            {
-                time_logger.Start();
-            }
+            time_logger.Start();
             ret = miopenRNNBackwardSeqData(GetHandle(),
                                            rnnDesc,
                                            outputSeqTensor,
@@ -1216,17 +1210,14 @@ int RNNSeqDriver<Tgpu, Tref>::RunBackwardGPU()
                                            workspace_dev->GetSize(),
                                            reservespace_dev->GetMem(),
                                            reservespace_dev->GetSize());
-            if(inflags.GetValueInt("time") == 1)
-            {
-                time_logger.StopAndPush();
-            }
+            time_logger.StopAndPush();
         }
 
         miopen::deref(GetHandle()).Finish();
         if(inflags.GetValueInt("time") == 1)
         {
             printf("Backward Data RNN time results:\n");
-            time_logger.Print(inflags.GetValueInt("wall") > 0);
+            time_logger.Print();
         }
 
         if(io_layout != miopenRNNDataSeqMajorNotPadded)
@@ -1269,15 +1260,14 @@ int RNNSeqDriver<Tgpu, Tref>::RunBackwardGPU()
 
     if((inflags.GetValueInt("forw") & 4) || (inflags.GetValueInt("forw") == 0))
     {
-        RNNCombTimeLogger time_logger(
-            GetStream(), inflags.GetValueInt("iter"), inflags.GetValueInt("wall"));
+        RNNCombTimeLogger time_logger(GetStream(),
+                                      inflags.GetValueInt("iter"),
+                                      inflags.GetValueInt("time"),
+                                      inflags.GetValueInt("wall"));
 
         for(int i = 0; i < inflags.GetValueInt("iter"); i++)
         {
-            if(inflags.GetValueInt("time") == 1)
-            {
-                time_logger.Start();
-            }
+            time_logger.Start();
             ret = miopenRNNBackwardWeightsSeqTensor(GetHandle(),
                                                     rnnDesc,
                                                     inputSeqTensor,
@@ -1292,10 +1282,7 @@ int RNNSeqDriver<Tgpu, Tref>::RunBackwardGPU()
                                                     workspace_dev->GetSize(),
                                                     reservespace_dev->GetMem(),
                                                     reservespace_dev->GetSize());
-            if(inflags.GetValueInt("time") == 1)
-            {
-                time_logger.StopAndPush();
-            }
+            time_logger.StopAndPush();
         }
 
         miopen::deref(GetHandle()).Finish();
@@ -1303,7 +1290,7 @@ int RNNSeqDriver<Tgpu, Tref>::RunBackwardGPU()
         if(inflags.GetValueInt("time") == 1)
         {
             printf("Backward Weights RNN time results:\n");
-            time_logger.Print(inflags.GetValueInt("wall") > 0);
+            time_logger.Print();
         }
         dwei_dev->FromGPU(GetStream(), dwei.data());
     }
