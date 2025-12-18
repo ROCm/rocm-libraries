@@ -42,9 +42,9 @@ function( apply_omp_settings lib_target_ )
   if (BLAS_LIBRARY MATCHES "\\.so$")
     get_filename_component(blas_lib_dir "${BLAS_LIBRARY}" DIRECTORY)
     list(APPEND build_rpath_list "${blas_lib_dir}")
-    # For install RPATH, use relative path to deps if BLAS is in build deps
+    # For install RPATH, use relative path if BLAS is in build deps
     if (BLAS_LIBRARY MATCHES "${BUILD_DIR}/deps/")
-      list(APPEND install_rpath_list "$ORIGIN/../deps/aocl/install_package/lib")
+      list(APPEND install_rpath_list "$ORIGIN/../lib")
     else()
       list(APPEND install_rpath_list "${blas_lib_dir}")
     endif()
@@ -487,3 +487,25 @@ rocm_install(
   DESTINATION "${CMAKE_INSTALL_BINDIR}"
   COMPONENT clients
 )
+
+# Install AOCL library if it's a shared library built from source
+if (BUILD_CLIENTS AND BLAS_LIBRARY MATCHES "\\.so$" AND BLAS_LIBRARY MATCHES "${BUILD_DIR}/deps/aocl")
+  # Get the directory containing the AOCL library
+  get_filename_component(aocl_lib_dir "${BLAS_LIBRARY}" DIRECTORY)
+  
+  # Find all shared libraries in the AOCL lib directory
+  file(GLOB AOCL_SHARED_LIBS "${aocl_lib_dir}/*.so*")
+  
+  if(AOCL_SHARED_LIBS)
+    message(STATUS "Installing AOCL shared libraries to package:")
+    foreach(lib ${AOCL_SHARED_LIBS})
+      message(STATUS "  ${lib}")
+    endforeach()
+    
+    rocm_install(
+      FILES ${AOCL_SHARED_LIBS}
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      COMPONENT clients-common
+    )
+  endif()
+endif()
