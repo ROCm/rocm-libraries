@@ -191,14 +191,14 @@ namespace rocRoller
 
         DataType getOffsetDataTypeFromGraph(int                op,
                                             KernelGraph const& graph,
-                                            bool               isStorePartOfGGlobalToLDSOp)
+                                            bool               isStorePartOfGlobalToLDSOp)
         {
             DataType rv = DataType::UInt64;
             auto     s  = graph.control.get<StoreTiled>(op);
             auto     l  = graph.control.get<LoadTiled>(op);
             auto     ll = graph.control.get<LoadLDSTile>(op);
             auto     sl = graph.control.get<StoreLDSTile>(op);
-            if(s || l || ll || sl || isStorePartOfGGlobalToLDSOp)
+            if(s || l || ll || sl || isStorePartOfGlobalToLDSOp)
             {
                 rv = DataType::UInt32;
             }

@@ -436,8 +436,11 @@ namespace rocRoller
 
             // Create a buffer descriptor expression
             Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
-            Expression::ExpressionPtr basePointer
-                = findArgumentByName(command, user->argumentName)->expression();
+            auto                      arg        = findArgumentByName(command, user->argumentName);
+            AssertFatal(arg,
+                        "Argument for buffer descriptor base pointer not found.",
+                        ShowValue(user->argumentName));
+            Expression::ExpressionPtr basePointer = arg->expression();
 
             if(user->offset)
                 basePointer = basePointer + user->offset;
@@ -464,7 +467,7 @@ namespace rocRoller
 
         KernelGraph AssignComputeIndex::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddComputeIndex");
+            TIMER(t, "KernelGraph::AssignComputeIndex");
             auto kgraph = original;
 
             auto isComputeIndexPredicate
