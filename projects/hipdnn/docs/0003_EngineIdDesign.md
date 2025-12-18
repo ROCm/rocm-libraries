@@ -8,10 +8,8 @@
 5. [Implementation Details](#implementation-details)
 6. [Engine Name Registration](#engine-name-registration)
 7. [Error Handling](#error-handling)
-8. [Documentation Standards](#documentation-standards)
-9. [Migration Strategy](#migration-strategy)
-10. [Examples](#examples)
-11. [Future Considerations](#future-considerations)
+8. [Examples](#examples)
+9. [Future Improvments](#future-improvments)
 
 ## Executive Summary
 
@@ -265,9 +263,6 @@ public:
 The backend when loading plugins can check for any duplicate engine IDs.  It will throw
 an error when duplicate IDs are found along with the names of the plugins that caused the conflict.
 
-### Forward Compatibility
-
-If a plugin name is not known (not in the shared header), the hash function can still generate a unique ID.  The usage of a unknown plugin name will generate a warning but thats it.  This allows newer plugins to be used without needing to update the shared header.
 
 ## Engine Name Registration
 
@@ -292,6 +287,10 @@ If a plugin name is not known (not in the shared header), the hash function can 
 - Include vendor/organization prefix to make it easier to identify author
 - Be descriptive about the engine's purpose
 - Once merged, names should not be changed (breaks compatibility)
+
+### Forward Compatibility
+
+If a plugin name is not known (not in the shared header), the hash function can still generate a unique ID.  The usage of a unknown plugin name will generate a warning but thats it.  This allows newer plugins to be used without needing to update the shared header.
 
 ## Error Handling
 
