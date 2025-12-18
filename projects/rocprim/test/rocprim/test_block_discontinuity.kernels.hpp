@@ -483,7 +483,7 @@ template<unsigned int First,
          class Type,
          class FlagType,
          class FlagOpType,
-         unsigned int                                 Method,
+         TestBlockDiscontinuityMethod                 Method,
          unsigned int                                 BlockSize = 256U,
          rocprim::block_adjacent_difference_algorithm Algorithm
          = rocprim::block_adjacent_difference_algorithm::default_algorithm>
@@ -508,7 +508,7 @@ template<unsigned int N,
          class Type,
          class FlagType,
          class FlagOpType,
-         unsigned int                                 Method,
+         TestBlockDiscontinuityMethod                 Method,
          unsigned int                                 BlockSize,
          rocprim::block_adjacent_difference_algorithm Algorithm>
 struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize, Algorithm>
