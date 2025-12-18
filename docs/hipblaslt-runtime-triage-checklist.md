@@ -115,7 +115,7 @@ done
 echo "Failure rate: $((FAILED * 100 / TOTAL))%"
 ```
 
-**Minimum to file issue:** 
+**Minimum to file issue:**
 - Failure rate >10% (if <10%, too unreliable to debug)
 - At least 3 failure logs captured
 - At least 3 success logs captured (for comparison)
@@ -241,7 +241,7 @@ git log -1 --format="Commit: %H%nDate: %ci"
 # Check rocBLAS for symbol conflicts
 nm -D /opt/rocm/lib/librocblas.so | grep -E "hipblasLt|Tensile" > rocblas_symbols.txt
 
-# Check hipSPARSELt for symbol conflicts  
+# Check hipSPARSELt for symbol conflicts
 nm -D /opt/rocm/lib/libhipsparselt.so 2>/dev/null | grep -E "hipblasLt|Tensile" > hipsparselt_symbols.txt
 
 # Check for ODR violations (One Definition Rule)
@@ -327,7 +327,7 @@ diff <(grep -E "hipblasLt|Tensile" good_run.log) \
 
 **Attach to issue:**
 - good_run.log
-- bad_run.log  
+- bad_run.log
 - diff.txt
 
 **Git Bisect (if building from source):**
@@ -360,7 +360,7 @@ git bisect log > bisect.log  # Attach this
 # MANDATORY: Kernel selection logging
 export TENSILE_DB=0x8040
 
-# MANDATORY: hipBLASLt verbose logging  
+# MANDATORY: hipBLASLt verbose logging
 export HIPBLASLT_LOG_LEVEL=4
 export HIPBLASLT_LOG_MASK=0xFFFFFFFF
 
@@ -499,7 +499,7 @@ export ASAN_OPTIONS=detect_leaks=0:log_path=asan.log
 
 **ERROR TYPE:** [Segfault/GPU Kernel/Assertion/Memory/Other]
 
-**REPRODUCIBILITY:** 
+**REPRODUCIBILITY:**
 [Deterministic 100%] OR [Flaky ___% - increases with scale]
 
 **OBSERVED:**
@@ -622,7 +622,7 @@ ALWAYS RUN WITH DEBUG FLAGS:
 FOR SEGFAULTS:
 ☑ ulimit -c unlimited → capture core dump
 ☑ gdb <binary> core → bt full
-☑ Optional: rebuild with --address-sanitizer 
+☑ Optional: rebuild with --address-sanitizer
 
 FOR GEMM ISSUES:
 ☑ Try hipblaslt-bench reproduction

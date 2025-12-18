@@ -48,13 +48,8 @@
 #include <omp.h>
 #endif
 
-#ifdef __cpp_lib_filesystem
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
 
 /*! \brief Return path of this executable */
 std::string hipsparse_exepath();
@@ -100,11 +95,11 @@ inline std::string get_filename(const std::string& matrix_filename)
 {
     std::string matrix_filename_with_ext = matrix_filename;
 
-    // Check if file already has extension, keep it, otherwise add .bin extension
+    // Check if file already has extension, keep it, otherwise add .csr extension
     size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
     if(last_dot_pos == std::string::npos || last_dot_pos == 0)
     {
-        matrix_filename_with_ext += ".bin";
+        matrix_filename_with_ext += ".csr";
     }
 
     const char* matrices_dir = get_hipsparse_clients_matrices_dir();
@@ -113,20 +108,42 @@ inline std::string get_filename(const std::string& matrix_filename)
         matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
     }
 
-    fs::path r;
+    fs::path matrix_path;
     if(matrices_dir != nullptr)
     {
-        r = fs::path(matrices_dir) / matrix_filename_with_ext;
+        matrix_path = fs::path(matrices_dir) / matrix_filename_with_ext;
     }
     else
     {
-        r = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
+        static constexpr const char* possible_relative_paths[] = {
+            // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
+            "../matrices",
+            // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
+            "../clients/matrices",
+        };
+
+        for(const auto& rel_path : possible_relative_paths)
+        {
+            fs::path test_path = fs::path(hipsparse_exepath()) / rel_path;
+            if(fs::exists(test_path))
+            {
+                matrix_path = test_path / matrix_filename_with_ext;
+                break;
+            }
+        }
+
+        if(matrix_path.empty())
+        {
+            missing_file_error_message(matrix_path.string().c_str());
+            std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
+            exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
+        }
     }
 
-    FILE* tmpf = fopen(r.string().c_str(), "r");
+    FILE* tmpf = fopen(matrix_path.string().c_str(), "r");
     if(!tmpf)
     {
-        missing_file_error_message(r.string().c_str());
+        missing_file_error_message(matrix_path.string().c_str());
         std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
         exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
     }
@@ -134,7 +151,7 @@ inline std::string get_filename(const std::string& matrix_filename)
     {
         fclose(tmpf);
     }
-    return r.string();
+    return matrix_path.string();
 }
 
 /*!\file

@@ -109,9 +109,9 @@ cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
 
 ### Code Coverage Build
 ```bash
-cmake -GNinja -DCODE_COVERAGE=ON ..
+cmake -GNinja -DHIPDNN_ENABLE_COVERAGE=ON ..
 ninja code_coverage
-# Coverage reports will be generated in build/hipdnn_code_coverage/
+# Coverage reports will be generated in build/coverage_report/
 ```
 
 ### Address Sanitizer Build
@@ -166,7 +166,7 @@ All targets support parallel builds with ninja.
 | `install` | Install libraries and headers |
 | `format` | Auto-format all C++ source files |
 | `check_format` | Check code formatting compliance |
-| `code_coverage` | Generate test coverage reports (requires `-DCODE_COVERAGE=ON`) |
+| `code_coverage` | Generate test coverage reports (requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
 | `generate_hipdnn_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
