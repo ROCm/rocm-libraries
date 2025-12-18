@@ -61,12 +61,10 @@ def load_suite(suite, problems_dir=None):
     ns = {}
     exec(code, ns)
     
-    # Return the function itself, not the result of calling it
-    # If we need to pass problems_dir, wrap it in a lambda
     if suite == 'all' and problems_dir is not None:
         return lambda: ns[suite](problems_dir)
     else:
-        return ns[suite]  # Just return the function
+        return ns[suite]
 
 @dataclass
 class SuiteProblemGenerator:
