@@ -216,26 +216,6 @@ class LibcxxTestFormat(object):
         # Create the output directory if it does not already exist.
         libcudacxx.util.mkdir_p(os.path.dirname(tmpBase))
         try:
-            # Compile the test
-            cmd, out, err, rc = test_cxx.compileLinkTwoSteps(
-                source_path, out=exec_path, object_file=object_path,
-                cwd=execDir)
-            compile_cmd = cmd
-            if rc != 0:
-                report = libcudacxx.util.makeReport(cmd, out, err, rc)
-                report += "Compilation failed unexpectedly!"
-                return lit.Test.Result(lit.Test.FAIL, report)
-            # Run the test
-            local_cwd = os.path.dirname(source_path)
-            env = None
-            if self.exec_env:
-                env = self.exec_env
-            # TODO: Only list actually needed files in file_deps.
-            # Right now we just mark all of the .dat files in the same
-            # directory as dependencies, but it's likely less than that. We
-            # should add a `// FILE-DEP: foo.dat` to each test to track this.
-            data_files = [os.path.join(local_cwd, f)
-                          for f in os.listdir(local_cwd) if f.endswith('.dat')]
             is_flaky = self._get_parser('FLAKY_TEST.', parsers).getValue()
             # TODO(AMD): set this to 1 again when tests have stabilized with TheRock
             # (https://github.com/ROCm/libhipcxx/issues/14)
@@ -243,6 +223,29 @@ class LibcxxTestFormat(object):
             time_out_detected = False
             for retry_count in range(max_retry):
                 try:
+                    # Compile the test
+                    cmd, out, err, rc = test_cxx.compileLinkTwoSteps(
+                        source_path, out=exec_path, object_file=object_path,
+                        cwd=execDir)
+                    compile_cmd = cmd
+                    if rc != 0:
+                        report = libcudacxx.util.makeReport(cmd, out, err, rc)
+                        report += "Compilation failed unexpectedly!"
+                        if retry_count + 1 == max_retry:
+                            return lit.Test.Result(lit.Test.FAIL, report)
+                        else:
+                            continue
+                    # Run the test
+                    local_cwd = os.path.dirname(source_path)
+                    env = None
+                    if self.exec_env:
+                        env = self.exec_env
+                    # TODO: Only list actually needed files in file_deps.
+                    # Right now we just mark all of the .dat files in the same
+                    # directory as dependencies, but it's likely less than that. We
+                    # should add a `// FILE-DEP: foo.dat` to each test to track this.
+                    data_files = [os.path.join(local_cwd, f)
+                                for f in os.listdir(local_cwd) if f.endswith('.dat')]
                     cmd, out, err, rc = self.executor.run(exec_path, [exec_path],
                                                         local_cwd, data_files,
                                                         env)
