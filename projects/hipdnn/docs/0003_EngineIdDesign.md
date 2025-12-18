@@ -67,21 +67,21 @@ The solution consists of three main components:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   Frontend                               │
+│                   Frontend                              │
 │  - Accepts engine names (strings) or IDs (int64_t)      │
 │  - Converts names to IDs using hash function            │
 │  - Passes int64_t to backend                            │
 └──────────────────────┬──────────────────────────────────┘
                        │ int64_t
 ┌──────────────────────▼──────────────────────────────────┐
-│                   Backend                                │
+│                   Backend                               │
 │  - Only deals with int64_t engine IDs                   │
 │  - No knowledge of string names                         │
 │  - Detects duplicate IDs and warns                      │
 └──────────────────────┬──────────────────────────────────┘
                        │ int64_t
 ┌──────────────────────▼──────────────────────────────────┐
-│                   Plugins                                │
+│                   Plugins                               │
 │  - Use hash function to generate their engine IDs       │
 │  - Return int64_t IDs via API                           │
 │  - Document their engine names and capabilities         │
@@ -293,68 +293,124 @@ Add a unit test to the repo that checks for duplicate engine IDs. This test shou
 
 ### Required Documentation
 
-Each engine must document:
+Each plugin must provide comprehensive documentation in a `docs/` subdirectory within the plugin's directory structure. At minimum, each plugin must include:
 
-1. **Engine Name**: The string constant used
-2. **Supported Operations**: What operations the engine implements
-3. **Configuration Options**: Any special settings or modes
-4. **Performance Characteristics**: When to use this engine
-5. **Version**: Engine version for compatibility tracking
+```
+plugins/<plugin_name>/
+├── docs/
+│   └── OperationSupport.md    # Required: Detailed operation support matrix
+└── ...
+```
 
-### Documentation Format
+### OperationSupport.md Structure
 
-Create a markdown file for each plugin:
+The `OperationSupport.md` file must follow this standard format:
+
+#### 1. Header and Overview
+```markdown
+# [Plugin Name] - Operation Support
+
+This document provides detailed information about the operations supported by [Plugin Name] for hipDNN.
+
+For general information about hipDNN's operation support, please see the [hipDNN Operation Support](../../../docs/OperationSupport.md) documentation.
+```
+
+#### 2. Current Operation Support Table
+
+A comprehensive table listing all supported operations:
 
 ```markdown
-# Engine Documentation: [Engine Name]
+## Current Operation Support
 
-## Basic Information
-- **Engine Name**: `MIOPEN_LEGACY`
-- **Engine ID**: `0xABCDEF0123456789` (auto-generated)
-- **Plugin**: miopen_legacy_plugin
-- **Version**: 1.0.0
+| Operation | Datatypes | Layouts | Notes |
+|-----------|-----------|---------|-------|
+| Operation Name | Supported types | Supported layouts | Special notes¹ |
+```
 
-## Supported Operations
+Required columns:
+- **Operation**: Precise operation name (e.g., "Convolution Forward", "Batchnorm Training")
+- **Datatypes**: List of supported data types (FP16, BFP16, FP32, FP64, INT8, etc.)
+- **Layouts**: Supported tensor layouts (NCHW, NHWC, NCDHW, NDHWC, etc.)
+- **Notes**: Reference numbers to detailed explanations below
 
-| Operation | Direction | Layouts | Data Types | Notes |
-|-----------|-----------|---------|------------|-------|
-| Convolution | FWD, BWD_DATA, BWD_FILTER | NCHW, NHWC | FP32, FP16 | Groups supported |
-| BatchNorm | FWD_TRAINING, FWD_INFERENCE, BWD | NCHW, NHWC | FP32, FP16 | Per-channel only |
-| Activation | FWD, BWD | Any | FP32, FP16, BF16 | ReLU, Tanh, Sigmoid |
+#### 3. Detailed Requirements Section
 
-## Configuration Options
-- `MIOPEN_FIND_MODE`: Algorithm search mode
-- `MIOPEN_DEBUG_FIND_ONLY_SOLVER`: Specific solver selection
+For complex or fused operations, provide detailed requirements:
 
+```markdown
+## Detailed Requirements
+
+### [Operation Name]
+- Compute data type: [type]
+- Tensor requirements:
+  - Input tensor: [requirements]
+  - Output tensor: [requirements]
+- Constraints: [any specific constraints]
+- Configuration options: [supported parameters]
+```
+
+#### 4. Operation Notes
+
+Use GitHub-style alerts for important information:
+
+```markdown
+## Operation Notes
+
+> [!NOTE]
+> **[Topic]:** Detailed explanation of limitations, special behaviors, or implementation details.
+```
+
+#### 5. Legend
+
+Define all technical terms and abbreviations:
+
+```markdown
+## Legend
+
+### Datatypes
+- **FP16**: Half-precision floating point (16-bit)
+- **BFP16**: Brain floating point (16-bit)
+- **FP32**: Single-precision floating point (32-bit)
+[... additional types as supported]
+
+### Layouts  
+- **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
+- **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
+[... additional layouts as supported]
+```
+
+### Additional Documentation Requirements
+
+#### Engine Information
+
+Each plugin should also document its engine names and IDs:
+
+```markdown
+## Engines Provided
+
+| Engine Name | Description | Optimization Target |
+|-------------|-------------|-------------------|
+| MIOPEN_LEGACY | MIOpen-based implementation | AMD GPUs (gfx908, gfx90a, gfx942) |
+```
+
+#### Performance Characteristics
+
+When relevant, include performance guidance:
+
+```markdown
 ## Performance Characteristics
-- Optimized for AMD GPUs (gfx908, gfx90a, gfx942)
-- Best for batch sizes > 32
-- Requires workspace memory for convolution
-
-## Usage Example
-```cpp
-// In frontend
-graphBuilder.setPreferredEngine("MIOPEN_LEGACY");
-
-// Or using the constant
-graphBuilder.setPreferredEngine(hipdnn::engine_names::MIOPEN_LEGACY);
-```
+- Optimal batch sizes: [range]
+- Memory requirements: [workspace needs]
+- Hardware targets: [specific architectures]
 ```
 
-### Runtime Discovery
+### Documentation Standards
 
-Plugins should log available engines on initialization:
-
-```cpp
-void logEngineInfo() {
-    HIPDNN_LOG_INFO("=== Engine Registration ===");
-    HIPDNN_LOG_INFO("Engine: {} (ID: 0x{:016X})", 
-                   engineName, engineId);
-    HIPDNN_LOG_INFO("  Operations: Convolution, BatchNorm, Activation");
-    HIPDNN_LOG_INFO("  Data Types: FP32, FP16");
-    HIPDNN_LOG_INFO("===========================");
-}
-```
+1. **Accuracy**: Documentation must accurately reflect current implementation
+2. **Completeness**: All supported operations must be listed
+3. **Clarity**: Use standard terminology consistent with hipDNN documentation
+4. **Maintenance**: Update documentation with each release that changes support
+5. **Cross-references**: Link to general hipDNN documentation where appropriate
 
 ## Examples
 
