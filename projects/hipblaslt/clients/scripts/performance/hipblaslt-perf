@@ -360,7 +360,7 @@ def main():
             sys.exit(1)
         probYaml_folder = custom_prob_dir
         print(f'Info: Using custom problems directory = {probYaml_folder}')
-    else
+    else:
         print(f'Info: path of bench yaml problems = {probYaml_folder}')
 
     if arguments.run_sh is not None:
