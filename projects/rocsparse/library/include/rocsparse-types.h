@@ -1233,7 +1233,7 @@ typedef enum rocsparse_dnvec_prop_
      */
     rocsparse_dnvec_prop_datatype,
     /*!
-     * @brief The number of elements, \ref int64_t.
+     * @brief The number of elements, int64_t.
      */
     rocsparse_dnvec_prop_size,
     /*!
@@ -1241,7 +1241,7 @@ typedef enum rocsparse_dnvec_prop_
      */
     rocsparse_dnvec_prop_size_in_bytes,
     /*!
-     * @brief The increment, \ref int64_t, default value is 1.
+     * @brief The increment, int64_t, default value is 1.
      */
     rocsparse_dnvec_prop_inc,
     /*!
@@ -1253,7 +1253,7 @@ typedef enum rocsparse_dnvec_prop_
      */
     rocsparse_dnvec_prop_batchstorage,
     /*!
-     * @brief The batch count, \ref int64_t, default value is 1.
+     * @brief The batch count, int64_t, default value is 1.
      */
     rocsparse_dnvec_prop_batch_count,
     /*!
@@ -1272,7 +1272,7 @@ typedef enum rocsparse_idvec_prop_
      */
     rocsparse_idvec_prop_indextype,
     /*!
-     * @brief The number of elements, \ref int64_t.
+     * @brief The number of elements, int64_t.
      */
     rocsparse_idvec_prop_size,
     /*!
@@ -1280,7 +1280,7 @@ typedef enum rocsparse_idvec_prop_
      */
     rocsparse_idvec_prop_size_in_bytes,
     /*!
-     * @brief The increment, \ref int64_t, default value is 1.
+     * @brief The increment, int64_t, default value is 1.
      */
     rocsparse_idvec_prop_inc,
     /*!
@@ -1296,7 +1296,7 @@ typedef enum rocsparse_idvec_prop_
      */
     rocsparse_idvec_prop_batchstorage,
     /*!
-     * @brief The batch count, \ref int64_t, default value is 1.
+     * @brief The batch count, int64_t, default value is 1.
      */
     rocsparse_idvec_prop_batch_count,
     /*!
@@ -1319,15 +1319,15 @@ typedef enum rocsparse_dnmat_prop_
      */
     rocsparse_dnmat_prop_order,
     /*!
-     * @brief The number of rows, \ref int64_t.
+     * @brief The number of rows, int64_t.
      */
     rocsparse_dnmat_prop_rows,
     /*!
-     * @brief The number of columnd, \ref int64_t.
+     * @brief The number of columnd, int64_t.
      */
     rocsparse_dnmat_prop_cols,
     /*!
-     * @brief The leading dimension, \ref int64_t.
+     * @brief The leading dimension, int64_t.
      */
     rocsparse_dnmat_prop_ld,
     /*!
@@ -1339,7 +1339,7 @@ typedef enum rocsparse_dnmat_prop_
      */
     rocsparse_dnmat_prop_batchstorage,
     /*!
-     * @brief The batch count, \ref int64_t, default value is 1.
+     * @brief The batch count, int64_t, default value is 1.
      */
     rocsparse_dnmat_prop_batch_count,
     /*!
@@ -1358,23 +1358,23 @@ typedef enum rocsparse_spattern_prop_
      */
     rocsparse_spattern_prop_format,
     /*!
-     * @brief The number of rows, \ref int64_t.
+     * @brief The number of rows, int64_t.
      */
     rocsparse_spattern_prop_rows,
     /*!
-     * @brief The number of columns, \ref int64_t.
+     * @brief The number of columns, int64_t.
      */
     rocsparse_spattern_prop_cols,
     /*!
-     * @brief The width of the ellpack format, \ref int64_t.
+     * @brief The width of the ellpack format, int64_t.
      */
     rocsparse_spattern_prop_ell_width,
     /*!
-     * @brief The width of the block-ellpack format, \ref int64_t.
+     * @brief The width of the block-ellpack format, int64_t.
      */
     rocsparse_spattern_prop_bell_width,
     /*!
-     * @brief The number of non-zeros, \ref int64_t.
+     * @brief The number of non-zeros, int64_t.
      */
     rocsparse_spattern_prop_nnz,
     /*!
@@ -1382,7 +1382,7 @@ typedef enum rocsparse_spattern_prop_
      */
     rocsparse_spattern_prop_batchtype,
     /*!
-     * @brief The batch count, \ref int64_t, default value is 1.
+     * @brief The batch count, int64_t, default value is 1.
      */
     rocsparse_spattern_prop_batch_count,
 } rocsparse_spattern_prop;
@@ -1397,26 +1397,26 @@ typedef enum rocsparse_spmat_prop_
      */
     rocsparse_spmat_prop_format,
     /*!
-     * @brief The number of rows, \ref int64_t.
+     * @brief The number of rows, int64_t.
      * @note With block formats, e.g. \ref rocsparse_format_bsr, the number of symbolic rows is different from the number of numeric rows.
      */
     rocsparse_spmat_prop_rows,
     /*!
-     * @brief The number of columns, \ref int64_t.
+     * @brief The number of columns, int64_t.
      * @note With block formats, e.g. \ref rocsparse_format_bsr, the number of symbolic rows is different from the number of numeric rows.
      */
     rocsparse_spmat_prop_cols,
     /*!
-   * @brief The number of numeric non-zeros, \ref int64_t.
+   * @brief The number of numeric non-zeros, int64_t.
    * @note With some formats, e.g. \ref rocsparse_format_bsr, the number of symbolic non-zeros is different from the number of numeric non-zeros.
    */
     rocsparse_spmat_prop_nnz,
     /*!
-   * @brief The batch count, \ref int64_t, default value is 1.
+   * @brief The batch count, int64_t, default value is 1.
    */
     rocsparse_spmat_prop_batch_count,
     /*!
-   * @brief The block dimension, \ref int64_t, default is 1.
+   * @brief The block dimension, int64_t, default is 1.
    */
     rocsparse_spmat_prop_block_dim,
     /*!

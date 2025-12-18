@@ -155,7 +155,7 @@ struct rocsparse_dnvec_prop_t
         }
         case rocsparse_dnvec_prop_inc:
         {
-            return "rocsparse_dnvec_prop_size_inc";
+            return "rocsparse_dnvec_prop_inc";
         }
         case rocsparse_dnvec_prop_batchtype:
         {
@@ -211,7 +211,7 @@ static const char * to_string(rocsparse_dnmat_prop prop)
 	}
 case     rocsparse_dnmat_prop_ld:
 	{
-	  return "rocsparse_dnmat_prop_size_ld";
+	  return "rocsparse_dnmat_prop_ld";
 	}
       case     rocsparse_dnmat_prop_order:
 	{
