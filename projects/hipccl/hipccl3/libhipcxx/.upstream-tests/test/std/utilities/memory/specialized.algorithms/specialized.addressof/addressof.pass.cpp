@@ -31,6 +31,13 @@
 #include <cuda/std/cassert>
 #include <cuda/std/type_traits>
 
+// NOTE(HIP/AMD): We need to include new header to get the correct device definitions.
+#if defined(__HIPCC_RTC__)
+  #if __has_include("new")
+    #include <new>
+  #endif
+#endif
+
 #include "test_macros.h"
 
 #if defined(TEST_COMPILER_CLANG_CUDA) || defined(TEST_COMPILER_HIPCC)

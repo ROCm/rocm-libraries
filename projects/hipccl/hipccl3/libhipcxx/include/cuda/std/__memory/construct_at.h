@@ -56,6 +56,13 @@
 #include <cuda/std/__utility/move.h>
 #include <cuda/std/detail/libcxx/include/__assert>
 
+// NOTE(HIP/AMD): We need to include new header to get the correct device definitions.
+#if defined(__HIPCC_RTC__)
+  #if __has_include("new")
+    #include <new>
+  #endif
+#endif
+
 #if defined(_CCCL_CUDA_COMPILER_CLANG) || defined(_CCCL_COMPILER_HIPCC)
 #  include <new>
 #endif // _CCCL_CUDA_COMPILER_CLANG

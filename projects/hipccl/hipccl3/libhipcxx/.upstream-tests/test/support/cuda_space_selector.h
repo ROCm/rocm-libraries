@@ -31,6 +31,13 @@
 #include <cuda/std/cassert>
 #include <cuda/std/cstddef>
 
+// NOTE(HIP/AMD): We need to include new header to get the correct device definitions.
+#if defined(__HIPCC_RTC__)
+  #if __has_include("new")
+    #include <new>
+  #endif
+#endif
+
 #include "concurrent_agents.h"
 
 #if defined(__clang__) && (defined(__CUDA__) || defined(__HIP__))
