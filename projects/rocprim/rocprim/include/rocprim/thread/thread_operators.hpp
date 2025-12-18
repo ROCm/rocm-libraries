@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -39,6 +39,31 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief Functor that tests for equality.
+struct [[deprecated("Duplicate, use 'rocprim::equal_to' in functional.hpp instead.")]] equality
+{
+    /// \brief Invocation operator
+    template<class T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a == b;
+    }
+};
+
+/// \brief Functor that tests for inequality.
+struct [[deprecated(
+    "Duplicate, use 'rocprim::not_equal_to' in functional.hpp instead.")]] inequality
+{
+    /// \brief Invocation operator
+    template<class T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a != b;
+    }
+};
+
 /// \brief Functor that tests for inequality using a user-supplied equality comparator.
 template <class EqualityOp>
 struct inequality_wrapper
@@ -59,6 +84,42 @@ struct inequality_wrapper
     bool operator()(const T &a, const T &b)
     {
         return !op(a, b);
+    }
+};
+
+/// \brief Functor that returns the sum of its arguments.
+struct [[deprecated("Duplicate, use 'rocprim::plus' in functional.hpp instead.")]] sum
+{
+    /// \brief Invocation operator
+    template<class T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T &a, const T &b) const
+    {
+        return a + b;
+    }
+};
+
+/// \brief Functor that returns the maximum of its arguments.
+struct [[deprecated("Duplicate, use 'rocprim::max' in functional.hpp instead.")]] max
+{
+    /// \brief Invocation operator
+    template<class T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T &a, const T &b) const
+    {
+        return a < b ? b : a;
+    }
+};
+
+/// \brief Functor that returns the minimum of its arguments.
+struct [[deprecated("Duplicate, use 'rocprim::min' in functional.hpp instead.")]] min
+{
+    /// \brief Invocation operator
+    template<class T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T &a, const T &b) const
+    {
+        return a < b ? a : b;
     }
 };
 
