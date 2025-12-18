@@ -106,6 +106,34 @@ namespace hiptensor
                 || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
     }
 
+    bool HipDevice::matrixCoreSupport(hiptensorComputeDescriptor_t typeCompute) const
+    {
+        switch(typeCompute)
+        {
+        case HIPTENSOR_COMPUTE_DESC_64F:
+        case HIPTENSOR_COMPUTE_DESC_C64F:
+            return (mGcnArch == HipDevice::hipGcnArch_t::GFX90A
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX942
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
+        case HIPTENSOR_COMPUTE_DESC_32F:
+        case HIPTENSOR_COMPUTE_DESC_C32F:
+            return (mGcnArch == HipDevice::hipGcnArch_t::GFX908
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX90A
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX942
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
+        case HIPTENSOR_COMPUTE_DESC_16F:
+        case HIPTENSOR_COMPUTE_DESC_16BF:
+            return (mGcnArch == HipDevice::hipGcnArch_t::GFX908
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX90A
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX942
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1200
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1201);
+        default:
+            return false;
+        }
+    }
+
     // Need to check the host device target support statically before hip modules attempt
     // to load any kernels. Not safe to proceed if the host device is unsupported.
     struct HipStaticDeviceGuard

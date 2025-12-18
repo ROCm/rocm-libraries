@@ -28,6 +28,8 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include "hiptensor/hiptensor_types.hpp"
+
 namespace hiptensor
 {
     class HipDevice
@@ -61,6 +63,8 @@ namespace hiptensor
 
         bool supportsF64() const;
 
+        bool matrixCoreSupport(hiptensorComputeDescriptor_t typeCompute) const;
+
     private:
         hipDevice_t     mDeviceId;
         hipDeviceProp_t mProps;
@@ -73,4 +77,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

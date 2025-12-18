@@ -71,7 +71,7 @@ GPU support
 hipTensor is supported on the AMD CDNA class GPUs featuring matrix core support,
 including the gfx908, gfx90a, gfx942, and gfx950 GPUs (collectively labeled as gfx9).
 
-Additionally, hipTensor is supported on AMD RDNA GPUs gfx1200 and gfx1201.
+Additionally, hipTensor is supported on AMD RDNA GPUs gfx1200 and gfx1201 (gfx12-generic).
 
 .. note::
 
