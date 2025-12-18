@@ -721,7 +721,10 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
     For LRA1/LRB1, the data is needed at a VMFMA index offset by num_vmfma (next iteration).
     
     Args:
-        timeline: The Timeline object containing the instructions.
+        timeline:       The Timeline object containing the instructions.
+        kernel:         Solution object containing the kernel metadata.
+        mfma_reorder:   List of indices representing the reordering of the MFMA indices.
+                        Index into it using mfma index are scheduled by default for this kernel, value is the new 0-based position in the order.
     """
 
     if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
@@ -841,9 +844,10 @@ def lr_needed_by_mfma(
     Helper function to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
 
     Args:
+        local_read: The LocalRead object to calculate the needed_by index for.
         lr_idx: The index of the LRA/LRB in the list of LRAs/LRBs for the given code path.
         num_vmfma: The number of MFMA indices.
-        mfma_reorder: The reordering of the MFMA indices.
+        mfma_reorder: The reordering mapping for MFMA indices.
         n_tiles_a: The number of tiles in the A dimension.
         n_tiles_b: The number of tiles in the B dimension.
         n_local_reads_a: The number of local reads in the A dimension.
