@@ -303,11 +303,13 @@ Add a unit test to the repo that checks for duplicate engine IDs. This test shou
 ### Example 1: Custom Plugin Development
 
 ```cpp
+#include "hipdnn_plugin_sdk/EngineNames.hpp"
+
 // MyCustomPlugin.cpp
 class MyCustomPlugin {
     void initialize() {
-        // Define custom engine name
-        const std::string engineName = "ACME_ULTRA_FAST_CONV";
+        // Use the custom engine name defined in the shared header
+        const std::string engineName = hipdnn::engine_names::MY_CUSTOM_ENGINE;
         
         // Generate ID from name
         int64_t engineId = hipdnn::data_sdk::engineNameToId(engineName);
