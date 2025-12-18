@@ -6,9 +6,9 @@
 #include <exception>
 #include <string>
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-namespace hipdnn_plugin
+namespace hipdnn_plugin_sdk
 {
 
 class HipdnnPluginException : public std::exception
@@ -40,7 +40,7 @@ private:
     std::string _message;
 };
 
-}
+} // namespace hipdnn_plugin_sdk
 
 #define PLUGIN_THROW_IF_NE(x, y, failureStatus, message)                    \
     if(x != y)                                                              \

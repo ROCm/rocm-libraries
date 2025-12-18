@@ -5,10 +5,10 @@
 
 #include <optional>
 
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_plugin
