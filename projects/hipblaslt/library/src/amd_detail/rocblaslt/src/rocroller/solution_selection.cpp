@@ -193,8 +193,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         .a_dtype = rocroller_type_to_analytical_type(kernelType.typeA),
         .b_dtype = rocroller_type_to_analytical_type(kernelType.typeB),
         .mi_dtype = rocroller_type_to_analytical_type(elementSizeA_bits < elementSizeB_bits ? kernelType.typeB : kernelType.typeA),
-        .a_mx_block_size = kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize,
-        .b_mx_block_size = kernelType.scaleBBlockRowSize * kernelType.scaleBBlockColSize,
+        .a_mx_block_size = kernelType.scaleTypeA.blockRowSize * kernelType.scaleTypeA.blockColSize,
+        .b_mx_block_size = kernelType.scaleTypeB.blockRowSize * kernelType.scaleTypeB.blockColSize,
     };
 
     int defaultWGM = std::ceil(std::sqrt(analytical_hardware.N_CU / analytical_hardware.NUM_XCD));

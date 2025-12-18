@@ -111,8 +111,8 @@ std::shared_ptr<SolutionParameters>
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate ||
-        kernelType.scaleBMode != rocRoller::Operations::ScaleMode::Separate)
+    if (kernelType.scaleTypeA.mode != rocRoller::Operations::ScaleMode::Separate ||
+        kernelType.scaleTypeB.mode != rocRoller::Operations::ScaleMode::Separate)
     {
         gemm->swizzleScale = false;
         gemm->prefetchScale = false;
@@ -161,18 +161,18 @@ std::shared_ptr<SolutionParameters>
     // LDS can only be used for scaling data with certain workgroup tile sizes
     auto workgroupSizeTotal = gemm->workgroupSizeX * gemm->workgroupSizeY;
     auto numScaleElementsA = 0;
-    if(gemm->kernelType.scaleABlockRowSize * gemm->kernelType.scaleABlockColSize != 0)
+    if(gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize != 0)
     {
         numScaleElementsA = gemm->workgroupTile.m
           * (gemm->workgroupTile.k
-             / (gemm->kernelType.scaleABlockRowSize * gemm->kernelType.scaleABlockColSize));
+             / (gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize));
     }
     auto numScaleElementsB = 0;
-    if(gemm->kernelType.scaleBBlockRowSize * gemm->kernelType.scaleBBlockColSize != 0)
+    if(gemm->kernelType.scaleTypeB.blockRowSize * gemm->kernelType.scaleTypeB.blockColSize != 0)
     {
         numScaleElementsB = gemm->workgroupTile.n
           * (gemm->workgroupTile.k
-             / (gemm->kernelType.scaleBBlockRowSize * gemm->kernelType.scaleBBlockColSize));
+             / (gemm->kernelType.scaleTypeB.blockRowSize * gemm->kernelType.scaleTypeB.blockColSize));
     }
     if(numScaleElementsA % workgroupSizeTotal != 0)
     {
