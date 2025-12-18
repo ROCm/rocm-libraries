@@ -143,22 +143,25 @@ inline bool isBatchNormSpatialMode(const std::shared_ptr<TensorAttributes>& scal
 }
 
 // Validates batch normalization training spatial dimension constraints
+// Uses tensor names if set, otherwise uses fallback names for error messages
 // Returns an Error indicating if the input tensor dimensions are valid for batch norm training
-// NOTE: This function expects tensors to be ready (use areTensorDimensionsSet() before calling if needed)
 inline Error
     validateBatchNormTrainingSpatialDimensions(const std::shared_ptr<TensorAttributes>& x,
                                                const std::shared_ptr<TensorAttributes>& scale,
                                                const std::string& operation
-                                               = "Batch normalization training")
+                                               = "Batch normalization training",
+                                               const std::string& xFallback = "Input tensor",
+                                               const std::string& scaleFallback = "Scale tensor")
 {
     if(!x)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, "Input tensor is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET, getTensorNameForError(x, xFallback) + " is not set"};
     }
 
     if(!scale)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, "Scale tensor is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(scale, scaleFallback) + " is not set"};
     }
 
     const auto& dims = x->get_dim();
@@ -166,7 +169,7 @@ inline Error
     if(dims.size() < 2)
     {
         return {ErrorCode::INVALID_VALUE,
-                "Input tensor must have at least 2 dimensions, but has "
+                getTensorNameForError(x, xFallback) + " must have at least 2 dimensions, but has "
                     + std::to_string(dims.size())};
     }
 
@@ -208,11 +211,10 @@ inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttribu
                                              size_t minDims,
                                              const std::string& fallbackName = "Tensor")
 {
-    std::string tensorName = getTensorNameForError(tensor, fallbackName);
-
     if(!tensor)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(tensor, fallbackName) + " is not set"};
     }
 
     const auto& dims = tensor->get_dim();
@@ -220,8 +222,9 @@ inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttribu
     HIPDNN_RETURN_IF_LT(dims.size(),
                         minDims,
                         ErrorCode::INVALID_VALUE,
-                        tensorName + " must have at least " + std::to_string(minDims)
-                            + " dimensions, but has " + std::to_string(dims.size()));
+                        getTensorNameForError(tensor, fallbackName) + " must have at least "
+                            + std::to_string(minDims) + " dimensions, but has "
+                            + std::to_string(dims.size()));
 
     return {ErrorCode::OK, ""};
 }
@@ -234,17 +237,16 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
                                        const std::string& fallbackName1 = "Tensor1",
                                        const std::string& fallbackName2 = "Tensor2")
 {
-    std::string name1 = getTensorNameForError(tensor1, fallbackName1);
-    std::string name2 = getTensorNameForError(tensor2, fallbackName2);
-
     if(!tensor1)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, name1 + " is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(tensor1, fallbackName1) + " is not set"};
     }
 
     if(!tensor2)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, name2 + " is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(tensor2, fallbackName2) + " is not set"};
     }
 
     const auto& dims1 = tensor1->get_dim();
@@ -253,8 +255,10 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
     if(dims1.size() != dims2.size())
     {
         return {ErrorCode::INVALID_VALUE,
-                name1 + " and " + name2 + " must have the same number of dimensions: "
-                    + std::to_string(dims1.size()) + " vs " + std::to_string(dims2.size())};
+                getTensorNameForError(tensor1, fallbackName1) + " and "
+                    + getTensorNameForError(tensor2, fallbackName2)
+                    + " must have the same number of dimensions: " + std::to_string(dims1.size())
+                    + " vs " + std::to_string(dims2.size())};
     }
 
     // Find first mismatch location (or end if all match)
@@ -264,8 +268,10 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
     {
         auto index = static_cast<size_t>(std::distance(dims1.begin(), it1));
         return {ErrorCode::INVALID_VALUE,
-                name1 + " and " + name2 + " dimension mismatch at index " + std::to_string(index)
-                    + ": " + std::to_string(*it1) + " vs " + std::to_string(*it2)};
+                getTensorNameForError(tensor1, fallbackName1) + " and "
+                    + getTensorNameForError(tensor2, fallbackName2)
+                    + " dimension mismatch at index " + std::to_string(index) + ": "
+                    + std::to_string(*it1) + " vs " + std::to_string(*it2)};
     }
 
     return {ErrorCode::OK, ""};
@@ -295,11 +301,10 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
                                             int64_t expectedChannels,
                                             const std::string& fallbackName = "Tensor")
 {
-    std::string tensorName = getTensorNameForError(tensor, fallbackName);
-
     if(!tensor)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, tensorName + " is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(tensor, fallbackName) + " is not set"};
     }
 
     const auto& dims = tensor->get_dim();
@@ -307,22 +312,24 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
     HIPDNN_RETURN_IF_LT(dims.size(),
                         2,
                         ErrorCode::INVALID_VALUE,
-                        tensorName + " must have at least 2 dimensions for batch normalization");
+                        getTensorNameForError(tensor, fallbackName)
+                            + " must have at least 2 dimensions for batch normalization");
 
     // Check batch dimension is 1
     HIPDNN_RETURN_IF_NE(dims[0],
                         1,
                         ErrorCode::INVALID_VALUE,
-                        tensorName + " batch dimension (index 0) must be 1, got "
+                        getTensorNameForError(tensor, fallbackName)
+                            + " batch dimension (index 0) must be 1, got "
                             + std::to_string(dims[0]));
 
     // Check channel dimension matches expected
-    HIPDNN_RETURN_IF_NE(dims[1],
-                        expectedChannels,
-                        ErrorCode::INVALID_VALUE,
-                        tensorName + " channel dimension (index 1) must be "
-                            + std::to_string(expectedChannels) + ", got "
-                            + std::to_string(dims[1]));
+    HIPDNN_RETURN_IF_NE(
+        dims[1],
+        expectedChannels,
+        ErrorCode::INVALID_VALUE,
+        getTensorNameForError(tensor, fallbackName) + " channel dimension (index 1) must be "
+            + std::to_string(expectedChannels) + ", got " + std::to_string(dims[1]));
 
     // Check all spatial dimensions are 1
     for(size_t i = 2; i < dims.size(); ++i)
@@ -330,7 +337,8 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
         HIPDNN_RETURN_IF_NE(dims[i],
                             1,
                             ErrorCode::INVALID_VALUE,
-                            tensorName + " spatial dimension at index " + std::to_string(i)
+                            getTensorNameForError(tensor, fallbackName)
+                                + " spatial dimension at index " + std::to_string(i)
                                 + " must be 1 for spatial batch normalization, got "
                                 + std::to_string(dims[i]));
     }
@@ -361,17 +369,17 @@ inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<TensorAttribute
 inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& param,
                                      const std::string& fallbackName = "Parameter")
 {
-    std::string paramName = getTensorNameForError(param, fallbackName);
-
     if(!param)
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, paramName + " parameter is not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(param, fallbackName) + " parameter is not set"};
     }
 
     const auto& dims = param->get_dim();
     if(dims.empty())
     {
-        return {ErrorCode::ATTRIBUTE_NOT_SET, paramName + " dimensions are not set"};
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(param, fallbackName) + " dimensions are not set"};
     }
 
     // Scalar parameters should be single-element tensors
@@ -385,7 +393,8 @@ inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& pa
     HIPDNN_RETURN_IF_NE(totalElements,
                         1,
                         ErrorCode::INVALID_VALUE,
-                        paramName + " must be a scalar (single element), but has "
+                        getTensorNameForError(param, fallbackName)
+                            + " must be a scalar (single element), but has "
                             + std::to_string(totalElements) + " elements");
 
     // Note: We can't validate the actual value (e.g., epsilon > 0) at pre-validation time
