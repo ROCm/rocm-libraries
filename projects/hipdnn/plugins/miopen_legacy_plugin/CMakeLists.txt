@@ -142,7 +142,7 @@ if(WIN32)
     endif()
 endif()
 
-target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk)
+target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk hipdnn_plugin_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)

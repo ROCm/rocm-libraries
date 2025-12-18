@@ -42,38 +42,38 @@ private:
 
 } // namespace hipdnn_plugin_sdk
 
-#define PLUGIN_THROW_IF_NE(x, y, failureStatus, message)                    \
-    if(x != y)                                                              \
-    {                                                                       \
-        throw hipdnn_plugin::HipdnnPluginException(failureStatus, message); \
+#define PLUGIN_THROW_IF_NE(x, y, failureStatus, message)                        \
+    if(x != y)                                                                  \
+    {                                                                           \
+        throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
     }
 
-#define PLUGIN_THROW_IF_EQ(x, y, failureStatus, message)                    \
-    if(x == y)                                                              \
-    {                                                                       \
-        throw hipdnn_plugin::HipdnnPluginException(failureStatus, message); \
+#define PLUGIN_THROW_IF_EQ(x, y, failureStatus, message)                        \
+    if(x == y)                                                                  \
+    {                                                                           \
+        throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
     }
 
-#define PLUGIN_THROW_IF_TRUE(x, failureStatus, message)                     \
-    if(x)                                                                   \
-    {                                                                       \
-        throw hipdnn_plugin::HipdnnPluginException(failureStatus, message); \
+#define PLUGIN_THROW_IF_TRUE(x, failureStatus, message)                         \
+    if(x)                                                                       \
+    {                                                                           \
+        throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
     }
 
-#define PLUGIN_THROW_IF_FALSE(x, failureStatus, message)                    \
-    if(!(x))                                                                \
-    {                                                                       \
-        throw hipdnn_plugin::HipdnnPluginException(failureStatus, message); \
+#define PLUGIN_THROW_IF_FALSE(x, failureStatus, message)                        \
+    if(!(x))                                                                    \
+    {                                                                           \
+        throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
     }
 
-#define PLUGIN_THROW_IF_NULL(x, failureStatus, message)                     \
-    if(x == nullptr)                                                        \
-    {                                                                       \
-        throw hipdnn_plugin::HipdnnPluginException(failureStatus, message); \
+#define PLUGIN_THROW_IF_NULL(x, failureStatus, message)                         \
+    if(x == nullptr)                                                            \
+    {                                                                           \
+        throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
     }
 
-#define PLUGIN_THROW_IF_LT(x, y, failureStatus, message)                    \
-    if(x < y)                                                               \
-    {                                                                       \
-        throw hipdnn_plugin::HipdnnPluginException(failureStatus, message); \
+#define PLUGIN_THROW_IF_LT(x, y, failureStatus, message)                        \
+    if(x < y)                                                                   \
+    {                                                                           \
+        throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
     }

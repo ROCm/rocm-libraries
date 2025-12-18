@@ -5,8 +5,8 @@
 
 #include "BackendDescriptor.hpp"
 #include <flatbuffers/detached_buffer.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 
 namespace hipdnn_backend
 {

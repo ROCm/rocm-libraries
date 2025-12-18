@@ -28,7 +28,7 @@ using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 class TestCpuReferenceGraphExecutor
 {

@@ -23,7 +23,6 @@ add_executable(
     utilities/TestCallbackLogger.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
-    utilities/TestLoadGraphAndTensors.cpp
     utilities/TestMigratableMemory.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestPointwiseValidation.cpp
