@@ -40,7 +40,7 @@ from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
 from typing import Callable
-from enum import Enum, auto
+from enum import Enum, auto, Union
 import Tensile.Components.CMSValidator as cmsv
 
 # Enum to distinguish between different schedule matching outcomes
@@ -54,9 +54,9 @@ _SCHEDULE_REGISTRY = []
 
 @dataclass
 class SyncSchedule:
-    schedule : list[tuple[int, SWaitCnt | SBarrier]] = field(default_factory=list)
+    schedule : list[tuple[int, Union[SWaitCnt, SBarrier]]] = field(default_factory=list)
 
-    def add(self, idx:int, dscnt:int=-1, vlcnt:int=-1, vscnt:int=-1, comment:str="", barrier:bool=False, barrier_idx:int|None=None, barrier_comment:str=""):
+    def add(self, idx:int, dscnt:int=-1, vlcnt:int=-1, vscnt:int=-1, comment:str="", barrier:bool=False, barrier_idx:Union[int, None]=None, barrier_comment:str=""):
         """ Add a SWaitCnt (and optionally a SBarrier) to the schedule at the given index.
 
         Args:
@@ -113,7 +113,7 @@ def duplicate_list_items(input_list: list, repeat_count: int, step:int=0) -> lis
     """
     return [item + step * j for item in input_list for j in range(repeat_count)]
 
-def count_items(input_list: list[int], sv:int|None = None, ev:int|None = None):
+def count_items(input_list: list[int], sv:Union[int, None] = None, ev:Union[int, None] = None):
     """
     Count how many items in the list are between start value `sv` (inclusive) and end value `ev` (exclusive)
 
