@@ -51,17 +51,16 @@ int64_t engineId = 1;  // Same hardcoded value!
 3. **Ensure Deterministic IDs**: Same name always produces same ID
 4. **Support Forward Compatibility**: Allow unknown engine names for newer engines
 5. **Enable Documentation**: Standardize how to document engine capabilities
-6. **Keep It Simple**: Minimal complexity for implementation
+6. **Keep It Simple**: Minimal complexity for implementation, developers only need to worry about a name
 
 ## Proposed Solution
 
 ### Overview
 
-The solution consists of three main components:
+The solution consists of two main components:
 
 1. **Shared Header**: Central definition of known engine names
 2. **Hash Function**: Deterministic conversion from name to `int64_t`
-3. **Documentation Standards**: How to document engine capabilities
 
 ### System Architecture
 
@@ -100,8 +99,7 @@ Simple implementation with string constants.  Possible issues with creating auto
 ```cpp
 #pragma once
 
-namespace hipdnn {
-namespace engine_names {
+namespace hipdnn_plugin_sdk::engine_names {
 
 // Built-in AMD engines
 constexpr const char* MIOPEN_LEGACY = "MIOPEN_PLUGIN";
@@ -109,11 +107,10 @@ constexpr const char* MIOPEN_LEGACY = "MIOPEN_PLUGIN";
 // Vendor engines
 constexpr const char* VENDOR_EXAMPLE = "VENDOR_FAST_CONV";
 
-} // namespace engine_names
-} // namespace hipdnn
+} // namespace hipdnn_plugin_sdk::engine_names
 ```
 
-### Option 2 Simple Macros with Static Registration
+#### Option 2 Simple Macros with Static Registration
 Easy to understand macro approach that runtime creates a set of all registered engine names for future
 automation
 
@@ -123,8 +120,7 @@ automation
 #include <set>
 #include <string_view>
 
-namespace hipdnn {
-namespace engine_names {
+namespace hipdnn_plugin_sdk::engine_names {
 
 // Forward declare the registration set
 inline std::set<std::string_view>& getAllEngineNames() {
@@ -150,12 +146,11 @@ HIPDNN_REGISTER_ENGINE(VENDOR_EXAMPLE, "VENDOR_FAST_CONV")
 HIPDNN_REGISTER_ENGINE(CPU_REFERENCE, "CPU_REFERENCE_ENGINE")
 HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RENAME_THIS, "EXAMPLE_PLUGIN_RENAME_THIS")
 
-} // namespace engine_names
-} // namespace hipdnn
+} // namespace hipdnn_plugin_sdk::engine_names
 
 ```
 
-### Option 3 X-Macro Pattern
+#### Option 3 X-Macro Pattern
 More complex macro option that offers compile time arrays of all engine names.  Additionally developers only need to list their engine name once as stringifiation can take care of making the `const char*` definitions.
 
 A downside to this approach is the complexity.
@@ -167,8 +162,7 @@ A downside to this approach is the complexity.
 #include <string_view>
 #include <unordered_set>
 
-namespace hipdnn {
-namespace engine_names {
+namespace hipdnn_plugin_sdk::engine_names {
 
 // X-Macro list of all engines, add all new engines here.
 #define HIPDNN_ENGINE_LIST(X) \
@@ -206,8 +200,7 @@ inline const std::unordered_set<std::string_view>& getAllEngineNamesSet() {
     return engineSet;
 }
 
-} // namespace engine_names
-} // namespace hipdnn
+} // namespace hipdnn_plugin_sdk::engine_names
 
 ```
 
@@ -221,8 +214,7 @@ Hash function is implemented in the data_sdk so that frontend, and plugin both c
 
 ### Plugin Implementation
 
-Plugins will use the hash function internally to convert their engine names to ids to they can communicate via the existing API. 
-The EnginePluginApi.h only addresses engines by `int64_t`, so no API changes are needed. 
+Plugins will use the hash function internally to convert their engine names to ids to they can communicate via the existing API.  The EnginePluginApi.h only addresses engines by `int64_t`, so no API changes are needed. 
 
 ### Frontend Implementation
 
@@ -259,6 +251,10 @@ public:
 The backend when loading plugins can check for any duplicate engine IDs.  It will throw
 an error when duplicate IDs are found along with the names of the plugins that caused the conflict.
 
+### Forward Compatibility
+
+If a plugin name is not known (not in the shared header), the hash function can still generate a unique ID.  The usage of a unknown plugin name will generate a warning but thats it.  This allows newer plugins to be used without needing to update the shared header.
+
 ## Engine Name Registration
 
 ### Process for Adding New Engine Names
@@ -288,129 +284,6 @@ an error when duplicate IDs are found along with the names of the plugins that c
 ### Duplicate IDs
 
 Add a unit test to the repo that checks for duplicate engine IDs. This test should be setup to such that it doesnt need updates in order to test newly added engines.  This requires we pick a engine name registration option that allows us to query all known engine names at runtime without manually updating a list.
-
-## Documentation Standards
-
-### Required Documentation
-
-Each plugin must provide comprehensive documentation in a `docs/` subdirectory within the plugin's directory structure. At minimum, each plugin must include:
-
-```
-plugins/<plugin_name>/
-├── docs/
-│   └── OperationSupport.md    # Required: Detailed operation support matrix
-└── ...
-```
-
-### OperationSupport.md Structure
-
-The `OperationSupport.md` file must follow this standard format:
-
-#### 1. Header and Overview
-```markdown
-# [Plugin Name] - Operation Support
-
-This document provides detailed information about the operations supported by [Plugin Name] for hipDNN.
-
-For general information about hipDNN's operation support, please see the [hipDNN Operation Support](../../../docs/OperationSupport.md) documentation.
-```
-
-#### 2. Current Operation Support Table
-
-A comprehensive table listing all supported operations:
-
-```markdown
-## Current Operation Support
-
-| Operation | Datatypes | Layouts | Notes |
-|-----------|-----------|---------|-------|
-| Operation Name | Supported types | Supported layouts | Special notes¹ |
-```
-
-Required columns:
-- **Operation**: Precise operation name (e.g., "Convolution Forward", "Batchnorm Training")
-- **Datatypes**: List of supported data types (FP16, BFP16, FP32, FP64, INT8, etc.)
-- **Layouts**: Supported tensor layouts (NCHW, NHWC, NCDHW, NDHWC, etc.)
-- **Notes**: Reference numbers to detailed explanations below
-
-#### 3. Detailed Requirements Section
-
-For complex or fused operations, provide detailed requirements:
-
-```markdown
-## Detailed Requirements
-
-### [Operation Name]
-- Compute data type: [type]
-- Tensor requirements:
-  - Input tensor: [requirements]
-  - Output tensor: [requirements]
-- Constraints: [any specific constraints]
-- Configuration options: [supported parameters]
-```
-
-#### 4. Operation Notes
-
-Use GitHub-style alerts for important information:
-
-```markdown
-## Operation Notes
-
-> [!NOTE]
-> **[Topic]:** Detailed explanation of limitations, special behaviors, or implementation details.
-```
-
-#### 5. Legend
-
-Define all technical terms and abbreviations:
-
-```markdown
-## Legend
-
-### Datatypes
-- **FP16**: Half-precision floating point (16-bit)
-- **BFP16**: Brain floating point (16-bit)
-- **FP32**: Single-precision floating point (32-bit)
-[... additional types as supported]
-
-### Layouts  
-- **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
-- **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
-[... additional layouts as supported]
-```
-
-### Additional Documentation Requirements
-
-#### Engine Information
-
-Each plugin should also document its engine names and IDs:
-
-```markdown
-## Engines Provided
-
-| Engine Name | Description | Optimization Target |
-|-------------|-------------|-------------------|
-| MIOPEN_LEGACY | MIOpen-based implementation | AMD GPUs (gfx908, gfx90a, gfx942) |
-```
-
-#### Performance Characteristics
-
-When relevant, include performance guidance:
-
-```markdown
-## Performance Characteristics
-- Optimal batch sizes: [range]
-- Memory requirements: [workspace needs]
-- Hardware targets: [specific architectures]
-```
-
-### Documentation Standards
-
-1. **Accuracy**: Documentation must accurately reflect current implementation
-2. **Completeness**: All supported operations must be listed
-3. **Clarity**: Use standard terminology consistent with hipDNN documentation
-4. **Maintenance**: Update documentation with each release that changes support
-5. **Cross-references**: Link to general hipDNN documentation where appropriate
 
 ## Examples
 
