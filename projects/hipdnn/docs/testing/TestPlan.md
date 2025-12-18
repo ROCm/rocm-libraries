@@ -89,10 +89,9 @@ The install_rocm_from_artifacts.py script requires the boto3 python library, run
 
 ### Download the Install Script
 
-The simplest way to get the script with its dependencies is to clone TheRock (without submodules). The script will be located in TheRock/buildtools/install_rocm_from_artifacts.py.
+The simplest way to get the script with its dependencies is to clone TheRock (without submodules). The script will be located in `./TheRock/buildtools/install_rocm_from_artifacts.py`.
 ```
 git clone https://github.com/ROCm/TheRock.git
-cd TheRock/build_tools
 ```
 
 ### Install ROCm with hipDNN Tests
@@ -110,12 +109,12 @@ With the above values, use the following command to download and install this RO
 python3 TheRock/build_tools/install_rocm_from_artifacts.py --release 7.11.0a20251217 --amdgpu-family gfx90X-dcgpu --hipdnn --test
 ```
 
-The files will be downloaded and extracted to a folder named `therock-build` in the current directory.
+The ROCm install will be downloaded and extracted to a folder named `therock-build` in the current directory.
 
 
 ### Running the hipDNN Tests
 
-To list the test executables, using ctest:
+After files have been extracted to `./therock-build`, use ctest to list the hipDNN test executables:
 ```
 ctest --test-dir therock-build/bin/hipdnn --show-only
 ```
@@ -134,7 +133,7 @@ Test project /workspace/therock-build/bin/hipdnn
 Total Tests: 7
 ```
 
-Run all tests in parallel:
+Run all hipDNN tests in parallel:
 ```
 ctest --test-dir therock-build/bin/hipdnn --output-on-failure --parallel 8 --timeout 30
 ```
