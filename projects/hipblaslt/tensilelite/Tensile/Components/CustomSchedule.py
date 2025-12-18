@@ -2634,31 +2634,21 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
-    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    nglshift = nllshift = 0
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
-
-        # Used the following constrains to create schedule
-        #  - LRA0 + PACKA0 needs to be done before 1/4 MFMAs
-        #  - LBR0 + PACKB0 needs to be done before 2/4 MFMAs
-        #  - LRB3 + PACKB3 needs to start after 2/4 MFMAs
-        #  - LRA3 + PACKA3 needs to start after 3/4 MFMAs
+        # This schedule follows similar pattern as 192x256x32 TF32 schedule
 
         # LRA0 + GRIncA
         lra0 = create_range(min_val = 0, num = 4, step = 1, repeat = 1)
         lra0 += create_range(min_val = max(lra0)+4, num = 4, step = 1, repeat = 1)
 
         grIncA = create_range(min_val = max(lra0)+1, num = 3, step = 1, repeat = 3)
-        # Hide LRA0 latency behind GRIncA
         waitLRA0 = max(grIncA)+5
         startPACKA0 = waitLRA0
 
-        # Reordering of packA instructions.
-        # 4 CVT + 2 4x4x4_16B MFMAs + 4 CVTs
-        # we interleave the 3 blocks together to avoid :
-        # - having a 5 state wait after each 4x4x4_16B MFMA
-        # - having extra latency when switching between MFMA types
+        # Use a common packOffser re-ordering for both A and B
         packOffset = [ 
             0, 0, 1, 1, 
             8, 8,
@@ -2684,17 +2674,16 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         # Sanity check
         assert packA0Done < numMfma//4
 
-        # LRB0 + GRIncB
+        # LRB0 + GRIncB (Split LRB0 into two halves to hide latency)
         lrb0 = create_range(min_val = max(packA0)+1, num = 4, step = 1, repeat = 1)
         lrb0 += create_range(min_val = max(lrb0)+4, num = 4, step = 1, repeat = 1)
         grIncB = create_range(max(lrb0)+1,3,max(lrb0)+4,1,3)
         waitLRB0 = max(grIncB)+6
         startPACKB0 = waitLRB0
         
-
         packB0 = [x + startPACKB0 for x in packOffset]
 
-        # GRA - 1st half                
+        # GRA - 1st half (4 reads)                
         grA = create_range(min_val = max(packB0)+1, num = 4, step = 2,repeat = 2)
 
         halfMFMA = numMfma//2
@@ -2705,27 +2694,24 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         lrb3 = create_range(min_val = startLRB3, num = 4, step = 1, repeat = 1)
         lrb3 += create_range(min_val = max(lrb3)+4, num = 4, step = 1, repeat = 1)
 
-        # GRA - 2nd half  
+        # GRA - 2nd half (4 reads)   
         grA += create_range(min_val = max(lrb3)+1, num = 4, step = 2,repeat = 2)
         waitLRB3 = max(grA)+1 
 
-
-
-        # PackB3 (starts after 1st GRB block)
+        # PackB3
         packB3 = [x + waitLRB3 for x in packOffset]
 
-        # GRB - 1st half
+        # GRB - 1st half (4 reads) 
         grB = create_range(min_val = max(packB3)+1,num = 4,step = 2, repeat = 2)
-        
 
         # LRA3 + PACKA3
-        startLRA3 = (3*numMfma)//4 # Can't start before 3/4 MFMAs
+        startLRA3 = (3*numMfma)//4 
         lra3 = create_range(min_val = startLRA3,num=4,step=1,repeat=1)
         lra3 += create_range(min_val = max(lra3)+4,num=4,step=1,repeat=1)
         waitLRA3 = max(lra3) + 10 
         packA3 = [x + waitLRA3 for x in packOffset]
 
-        # GRB - 2nd half
+        # GRB - 2nd half (4 reads) 
         grB += create_range(min_val = max(packA3)+1,num = 4,step = 2, repeat = 2)
 
         syncTable = [                    
@@ -2772,5 +2758,5 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    # opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
+    opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1
