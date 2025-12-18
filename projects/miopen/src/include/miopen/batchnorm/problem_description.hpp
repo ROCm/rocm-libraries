@@ -175,6 +175,31 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
         out_layout = ComputeOutLayout();
     }
 
+    // Forward Inference with activation using inverse variance
+    ProblemDescription(miopenBatchNormMode_t bn_mode_,
+                       const TensorDescriptor& xDesc_,
+                       const TensorDescriptor& yDesc_,
+                       const TensorDescriptor& scaleDesc_,
+                       const TensorDescriptor& biasDesc_,
+                       const TensorDescriptor& sMeanDesc_,
+                       const TensorDescriptor& sVarianceDesc_,
+                       const ActivationDescriptor& activDesc_)
+        : direction(Direction::ForwardInference),
+          bn_mode(bn_mode_),
+          xDesc(xDesc_),
+          yOrDyDesc(yDesc_),
+          scaleDesc(scaleDesc_),
+          biasDesc(biasDesc_),
+          sMeanDesc(sMeanDesc_),
+          sVarianceDesc(sVarianceDesc_),
+          useInverseVariance(true),
+          activDesc(activDesc_)
+    {
+        SetSpatialDims();
+        in_layout  = ComputeInLayout();
+        out_layout = ComputeOutLayout();
+    }
+
     // Backward without activation
     ProblemDescription(miopenBatchNormMode_t bn_mode_,
                        const TensorDescriptor& xDesc_,
@@ -334,6 +359,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
 
     bool Is2D() const { return xDesc.GetLengths().size() == 4; }
     bool Is3D() const { return xDesc.GetLengths().size() == 5; }
+    bool isInverseVariance() const { return useInverseVariance; }
 
     bool IsFp64() const { return xDesc.GetType() == miopenDouble; }
     bool IsFp32() const { return xDesc.GetType() == miopenFloat; }
@@ -412,6 +438,7 @@ private:
     bool resultsave            = false;
     bool resultrunning         = false;
     bool useSaved              = false;
+    bool useInverseVariance    = false;
     std::string in_layout      = "NCHW";
     std::string out_layout     = "NCHW";
     std::string din_layout     = "NCHW";

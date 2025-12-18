@@ -3086,6 +3086,101 @@ miopenBatchNormalizationForwardInference_V2(miopenHandle_t handle,
                                             void* estimatedVariance,
                                             double epsilon);
 
+/*! @brief Execute forward inference layer for batch normalization using inverse variance
+ *
+ * Batch normalization pass for forward inference pass.
+ * Takes in batch normalization mode bn_mode and input tensor x, output tensor y, bnBias and bnScale
+ * with their descriptor.
+ *
+ * If either estimatedMean, or estimatedInvVariance are null pointers then the values for the mean
+ * and inverse variance will be calculated from input data using an epsilon of 1e-5, and this
+ * calculated mean and inverse variance will be used to update input values.
+ *
+ * @param handle                    MIOpen handle (input)
+ * @param bn_mode                   Batch normalization mode (input)
+ * @param alpha                     Floating point scaling factor, allocated on the host (input)
+ * @param beta                      Floating point shift factor, allocated on the host (input)
+ * @param xDesc                     Tensor descriptor for data input tensor x (input)
+ * @param x                         Data tensor x (input)
+ * @param yDesc                     Tensor descriptor for output data tensor y (input)
+ * @param y                         Data tensor y (output)
+ * @param ScaleDesc                 Tensor descriptor for BN scaling
+ * @param biasVarDesc               Tensor descriptor for BN bias
+ * @param estMeanDesc               Tensor descriptor for BN estimated Mean
+ * @param estInvVarianceDesc        Tensor descriptor for BN estimated inverse variance
+ * @param bnScale                   Batch norm scaling, gamma, tensor (input)
+ * @param bnBias                    Batch norm bias, beta, tensor (input)
+ * @param estimatedMean             Running average saved during forward training (input)
+ * @param estimatedInvVariance      Running inverse variance saved during forward training (input)
+ * @return                          miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenBatchNormalizationForwardInferenceInvVariance(
+    miopenHandle_t handle,
+    miopenBatchNormMode_t bn_mode,
+    void* alpha,
+    void* beta,
+    const miopenTensorDescriptor_t xDesc,
+    const void* x,
+    const miopenTensorDescriptor_t yDesc,
+    void* y,
+    const miopenTensorDescriptor_t scaleDesc,
+    const miopenTensorDescriptor_t biasDesc,
+    const miopenTensorDescriptor_t estMeanDesc,
+    const miopenTensorDescriptor_t estInvVarianceDesc,
+    void* bnScale,
+    void* bnBias,
+    void* estimatedMean,
+    void* estimatedInvVariance);
+
+/*! @brief Execute forward inference layer for batch normalization with fused activation using
+ * inverse variance
+ *
+ * Batch normalization pass for forward inference pass.
+ * Takes in batch normalization mode bn_mode and input tensor x, output tensor y, bnBias and bnScale
+ * with their descriptor.
+ *
+ * If either estimatedMean, or estimatedInvVariance are null pointers then the values for the mean
+ * and inverse variance will be calculated from input data using an epsilon of 1e-5 and this
+ * calculated mean and inverse variance will be used to update input values.
+ *
+ * @param handle                    MIOpen handle (input)
+ * @param bn_mode                   Batch normalization mode (input)
+ * @param alpha                     Floating point scaling factor, allocated on the host (input)
+ * @param beta                      Floating point shift factor, allocated on the host (input)
+ * @param xDesc                     Tensor descriptor for data input tensor x (input)
+ * @param x                         Data tensor x (input)
+ * @param yDesc                     Tensor descriptor for output data tensor y (input)
+ * @param y                         Data tensor y (output)
+ * @param ScaleDesc                 Tensor descriptor for BN scaling
+ * @param biasVarDesc               Tensor descriptor for BN bias
+ * @param estMeanDesc               Tensor descriptor for BN estimated Mean
+ * @param estInvVarianceDesc        Tensor descriptor for BN estimated inverse variance
+ * @param bnScale                   Batch norm scaling, gamma, tensor (input)
+ * @param bnBias                    Batch norm bias, beta, tensor (input)
+ * @param estimatedMean             Running average saved during forward training (input)
+ * @param estimatedInvVariance      Running inverse variance saved during forward training (input)
+ * @param activDesc                 Activation descriptor
+ * @return                          miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenBatchNormForwardInferenceActivationInvVariance(
+    miopenHandle_t handle,
+    miopenBatchNormMode_t bn_mode,
+    void* alpha,
+    void* beta,
+    const miopenTensorDescriptor_t xDesc,
+    const void* x,
+    const miopenTensorDescriptor_t yDesc,
+    void* y,
+    const miopenTensorDescriptor_t scaleDesc,
+    const miopenTensorDescriptor_t biasDesc,
+    const miopenTensorDescriptor_t estMeanDesc,
+    const miopenTensorDescriptor_t estInvVarianceDesc,
+    void* bnScale,
+    void* bnBias,
+    void* estimatedMean,
+    void* estimatedInvVariance,
+    const miopenActivationDescriptor_t activDesc);
+
 /*! @brief Execute forward inference layer for batch normalization with fused activation
  *
  * Batch normalization pass for forward inference pass.
