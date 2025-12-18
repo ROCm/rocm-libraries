@@ -119,7 +119,9 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     ControlFlowRWTracer tracer(graph);
 
     const auto [a, b, c, d] = example.getOperationTags();
-    auto macroTiles         = [&](auto op) -> Generator<int> {
+
+    /** Yields macro tiles encountered by following edges */
+    auto macroTiles = [&](auto op) -> Generator<int> {
         for(auto tag : graph.coordinates.getNodes<User>())
         {
             const auto user = graph.coordinates.get<User>(tag).value();
@@ -182,28 +184,56 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
         CHECK(loopMapping.size() == 140);
     }
 
+    SECTION("test")
+    {
+        graph.mapper.getConnections(1122);
+        signal(SIGTRAP, SIG_IGN);
+        raise(SIGTRAP);
+    }
+
     SECTION("countCoordinateWritesInLoop")
     {
-        for(auto tag : macroTiles(a))
         {
-            const auto node = graph.coordinates.getNode(tag);
-            if(!std::holds_alternative<MacroTile>(node))
-                continue;
-            const auto& macroTile = std::get<MacroTile>(node);
-            if(macroTile.layoutType != LayoutType::MATRIX_ACCUMULATOR)
-                continue;
-            CAPTURE(tag);
-            for(const auto dup : graph.coordinates.getInputNodeIndices(tag, isEdge<Duplicate>))
+            bool didACheck = false;
+            for(auto tag : macroTiles(a))
             {
-                CAPTURE(dup);
-                CHECK(countCoordinateWritesInLoop(graph, kLoop, dup, tracer) == 16);
-                CHECK(countCoordinateWritesInLoop(graph, kLoopTail, dup, tracer) == 8);
+                const auto node = graph.coordinates.getNode(tag);
+                if(!std::holds_alternative<MacroTile>(node))
+                    continue;
+                const auto& macroTile = std::get<MacroTile>(node);
+                if(macroTile.layoutType != LayoutType::MATRIX_ACCUMULATOR)
+                    continue;
+                CAPTURE(tag);
+                CHECK(countCoordinateWritesInLoop(graph, kLoop, tag, tracer) == 16);
+                for(const auto upstream :
+                    graph.coordinates.getInputNodeIndices(tag, isEdge<Duplicate>))
+                {
+                    CAPTURE(upstream);
+                    CHECK(countCoordinateWritesInLoop(graph, kLoop, upstream, tracer) == 16);
+                    CHECK(countCoordinateWritesInLoop(graph, kLoopTail, upstream, tracer) == 8);
+                    didACheck = true;
+                }
+                break; // second macro tile and beyond are not used in kloop[tail]
             }
-            break; // only first macro tile encountered is used in kloop[tail]
+            CHECK(didACheck);
         }
 
-        CHECK(countCoordinateWritesInLoop(graph, 1127, 314, tracer) == 1);
-        CHECK(countCoordinateWritesInLoop(graph, 1122, 314, tracer) == 0);
+        {
+            bool didACheck = false;
+            for(const auto& c : graph.mapper.getConnections(kLoop))
+            {
+                CAPTURE(c.control);
+                if(std::holds_alternative<Connections::JustNaryArgument>(c.connection))
+                {
+                    CAPTURE(c.coordinate);
+                    // KLoop's for loop variable is only written in the KLoop, not in KLoopTail
+                    CHECK(countCoordinateWritesInLoop(graph, kLoop, c.coordinate, tracer) == 1);
+                    CHECK(countCoordinateWritesInLoop(graph, kLoopTail, c.coordinate, tracer) == 0);
+                    didACheck = true;
+                }
+            }
+            CHECK(didACheck);
+        }
     }
 
     SECTION("hoistNodeBeforeLoop")
