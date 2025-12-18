@@ -102,7 +102,7 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpSMAlg_t          alg,
                                            hipsparseSpSMDescr_t        spsmDescr,
                                            size_t*                     pBufferSizeInBytes);
-#elif(CUDART_VERSION >= 11031)
+#elif (CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -171,7 +171,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr,
                                          void*                       externalBuffer);
-#elif(CUDART_VERSION >= 11031)
+#elif (CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseOperation_t        opA,
@@ -247,6 +247,10 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
+*  \note This routine does not correctly match the parameter list of the corresponding cusparse API, \p cusparseSpSM_solve, 
+*  which does not take the external buffer paramter. We provide an alternate routine \ref hipsparseSpSM_solve_ex which
+*  correctly matches the parameter list of \p cusparseSpSM_solve.
+*
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
 *  @param[in]
@@ -277,7 +281,8 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *               currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
-HIPSPARSE_DEPRECATED_MSG("This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
+HIPSPARSE_DEPRECATED_MSG(
+    "This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseOperation_t        opA,
@@ -290,8 +295,9 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseSpSMAlg_t          alg,
                                       hipsparseSpSMDescr_t        spsmDescr,
                                       void*                       externalBuffer);
-#elif(CUDART_VERSION >= 11031)
-HIPSPARSE_DEPRECATED_MSG("This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
+#elif (CUDART_VERSION >= 11031)
+HIPSPARSE_DEPRECATED_MSG(
+    "This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseOperation_t        opA,
@@ -359,7 +365,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spsm_uniform">Uniform Precisions</caption>
+*  <caption id="spsm_ex_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -367,8 +373,9 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \note This routine correctly matches the parameter list of the corresponding cusparse API cusparseSpSM_solve. The routine
-*  hipsparseSpSM_solve incorrectly passed the external buffer as the last parameter. 
+*  \note This routine correctly matches the parameter list of the corresponding cusparse API \p cusparseSpSM_solve. The routine
+*  \ref hipsparseSpSM_solve incorrectly passed the external buffer as the last parameter. Users looking for an exact match in the 
+*  parameters should \ref hipsparseSpSM_solve_ex instead of \ref hipsparseSpSM_solve.
 *
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
@@ -408,7 +415,7 @@ hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipDataType                 computeType,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr);
-#elif(CUDART_VERSION >= 11031)
+#elif (CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipsparseOperation_t        opA,
