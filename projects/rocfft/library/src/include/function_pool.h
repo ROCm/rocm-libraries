@@ -407,10 +407,16 @@ static void insert_default_entry(const FMKey&     def_key,
 {
     FMKey def_key_with_lds = def_key;
 
-    // Specifically add the current device's max LDS size if not a generic arch entry
+    // Handle the case where this function is called within the AOT Stockham function
+    // pool build process. AOT kernels will always have gfx_generic as arch name, so
+    // skip retreiving device properties in this case.
+    auto is_device_visible = check_any_devices_visible();
+
+    // Specifically add the current device's max LDS size if not a generic arch entry.
     def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
                                           ? lds_size_bytes
-                                          : get_curr_device_prop().sharedMemPerBlock;
+                                      : is_device_visible ? get_curr_device_prop().sharedMemPerBlock
+                                                          : 0;
 
     // simple_key means the same thing as def_key, but we just remove kernel-config
     // so we don't need to know the exact config when we're lookin' for the default kernel
@@ -420,7 +426,7 @@ static void insert_default_entry(const FMKey&     def_key,
     def_key_pool.emplace(simple_key, def_key_with_lds);
 
     // still use the detailed key with config to maintain the function map
-    function_map.emplace(def_key_with_lds, kernel);
+    function_map.emplace(def_key_with_lds, kernel);    
 }
 
 static void insert_default_entry(const PPFMKey&   def_key,
@@ -432,10 +438,16 @@ static void insert_default_entry(const PPFMKey&   def_key,
 {
     PPFMKey def_key_with_lds = def_key;
 
-    // Specifically add the current device's max LDS size if not a generic arch entry
+    // Handle the case where this function is called within the AOT Stockham function
+    // pool build process. AOT kernels will always have gfx_generic as arch name, so
+    // skip retrieving device properties in this case.
+    auto is_device_visible = check_any_devices_visible();
+
+    // Specifically add the current device's max LDS size if not a generic arch entry.
     def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
                                           ? lds_size_bytes
-                                          : get_curr_device_prop().sharedMemPerBlock;
+                                      : is_device_visible ? get_curr_device_prop().sharedMemPerBlock
+                                                          : 0;
 
     PPFMKey simple_key(def_key_with_lds);
 

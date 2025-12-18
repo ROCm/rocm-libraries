@@ -518,13 +518,21 @@ def list_3d_partial_pass_kernels():
 
 
 def default_runtime_compile(kernels, default_val):
-    '''Returns a copy of input kernel list with a default value for runtime_compile.'''
+    """Returns a copy of input kernel list with a default value for runtime_compile.
+       Validates that AOT kernels only use gfx-generic as architecture."""
 
-    return [
-        k if hasattr(k, 'runtime_compile') else NS(**k.__dict__,
-                                                   runtime_compile=default_val)
-        for k in kernels
-    ]
+    for k in kernels:
+        if not hasattr(k, 'runtime_compile'):
+            k.runtime_compile = default_val
+
+        if k.runtime_compile is False:
+            # validate that gcn_arch_name is not gfx generic
+            if k.gcn_arch_name != config_arch.supported_arch.GFX_GENERIC.value:
+                err_msg = "Error: runtime_compile cannot be false for non gfx-generic architectures: \n"
+                print(err_msg + str(k))
+                sys.exit(1)
+
+    return kernels
 
 
 def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
