@@ -2647,7 +2647,7 @@ MIOPEN_EXPORT miopenStatus_t miopenDestroyLRNDescriptor(miopenLRNDescriptor_t lr
  * @param biasDesc       Tensor descriptor for data input tensor bias (input)
  * @param bias           Data tensor bias (input)
  * @param epsilon        Value to stabilize inverse variance calculation (input)
- * @param normalized_dim Nomalized dimensions in the input array (input)
+ * @param normalized_dim Normalized dimensions in the input array (input)
  * @param yDesc          Tensor descriptor for output data tensor y (input)
  * @param y              Data tensor y (output)
  * @param meanDesc       Tensor descriptor for output data tensor mean (input)
@@ -2683,7 +2683,7 @@ MIOPEN_EXPORT miopenStatus_t miopenLayerNormForward(miopenHandle_t handle,
  * @param weightDesc               Tensor descriptor for data input tensor weight (input)
  * @param meanDesc                 Tensor descriptor for data input tensor mean (input)
  * @param rstdDesc                 Tensor descriptor for data input tensor rstd (input)
- * @param normalized_dim           Nomalized dimensions in the input array (input)
+ * @param normalized_dim           Normalized dimensions in the input array (input)
  * @param dxDesc                   Tensor descriptor for output data tensor dx (input)
  * @param dwDesc                   Tensor descriptor for output data tensor dw (input)
  * @param dbDesc                   Tensor descriptor for output data tensor db (input)
@@ -2720,7 +2720,7 @@ miopenGetLayerNormBackwardWorkspaceSize(miopenHandle_t handle,
  * @param mean                     Data tensor mean (input)
  * @param rstdDesc                 Tensor descriptor for input data tensor rstd (input)
  * @param rstd                     Data tensor rstd (input)
- * @param normalized_dim           Nomalized dimensions in the input array (input)
+ * @param normalized_dim           Normalized dimensions in the input array (input)
  * @param dxDesc                   Tensor descriptor for output data tensor dx (input)
  * @param dx                       Data tensor dx (output)
  * @param dwDesc                   Tensor descriptor for output data tensor dw (input)
@@ -4087,7 +4087,7 @@ typedef enum
 {
     miopenRNNdefault = 0,        /*!< Use dedicated gate-operation kernel for LSTM and fundamental
                                     algorithm for vanilla RNN & GRU */
-    miopenRNNfundamental = 1,    /*!< Deprecated, low performance. Function by basic tesnsor
+    miopenRNNfundamental = 1,    /*!< Deprecated, low performance. Function by basic tensor
                                     operations, supported for vanilla RNN, LSTM, GRU */
     miopenRNNroundedDynamic = 2, /*!< The algorithm rounds some RNN parameters upwards
                                     to utilize the most optimal GEMM kernel in the computation.*/
