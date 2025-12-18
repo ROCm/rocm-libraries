@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <iostream>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -57,6 +58,7 @@ public:
 
     virtual std::vector<std::shared_ptr<TensorAttributes>> getNodeOutputTensorAttributes() const
     {
+        std::cout << "INode::getNodeOutputTensorAttributes()\n";
         return {};
     }
 
@@ -196,7 +198,9 @@ public:
                     "Node " + self().attributes.name + " does not have a compute_data_type set"};
         }
 
-        for(const auto& tensorAttr : getNodeOutputTensorAttributes())
+        std::cout << "outputs.size() = " << this->getNodeOutputTensorAttributes().size() << "\n";
+
+        for(const auto& tensorAttr : this->getNodeOutputTensorAttributes())
         {
             HIPDNN_CHECK_ERROR(tensorAttr->validate());
         }
@@ -220,6 +224,7 @@ public:
 
     std::vector<std::shared_ptr<TensorAttributes>> getNodeOutputTensorAttributes() const override
     {
+        std::cout << "BaseNode::getNodeOutputTensorAttributes()\n";
         std::vector<std::shared_ptr<TensorAttributes>> outputAttributes;
         for(auto& tensorAttrPair : self().attributes.outputs)
         {

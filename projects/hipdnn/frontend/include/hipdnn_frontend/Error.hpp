@@ -35,6 +35,11 @@ inline std::string to_string(ErrorCode code)
     return s_errorCodes[static_cast<size_t>(code)];
 }
 
+inline std::ostream& operator<<(std::ostream& os, const ErrorCode& error)
+{
+    return os << to_string(error);
+}
+
 typedef ErrorCode error_code_t; // NOLINT(readability-identifier-naming)
 
 struct Error
@@ -92,7 +97,7 @@ struct Error
 
 inline std::ostream& operator<<(std::ostream& os, const Error& error)
 {
-    return os << "{" << to_string(error.code) << ", " << error.get_message() << "}";
+    return os << "{" << error.code << ", " << error.get_message() << "}";
 }
 
 typedef Error error_object; // NOLINT(readability-identifier-naming)
