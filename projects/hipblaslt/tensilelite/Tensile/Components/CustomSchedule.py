@@ -2353,7 +2353,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         waitLRA0 = max(grIncA)+5
         startPACKA0 = waitLRA0
 
-        # Use a common packOffser re-ordering for both A and B
+        # Use a common packOffset re-ordering for both A and B
         packOffset = [ 
             0, 0, 1, 1, 
             8, 8,
