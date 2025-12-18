@@ -628,12 +628,14 @@ auto compare_nan_sensitive(const T& a, const T& b) ->
     static constexpr auto sign_bit = ::rocprim::traits::get<T>().float_bit_mask().sign_bit;
     using bit_key_type             = decltype(sign_bit);
 
-    auto a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
-    auto b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
-
     // convert -0.0 to +0.0
-    a_bits = a_bits == sign_bit ? 0 : a_bits;
-    b_bits = b_bits == sign_bit ? 0 : b_bits;
+    const T zero{0};
+    const T a_plus = a + zero;
+    const T b_plus = b + zero;
+
+    auto a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a_plus);
+    auto b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b_plus);
+
     // invert negatives, put 1 into sign bit for positives
     a_bits ^= (sign_bit & a_bits) == 0 ? sign_bit : bit_key_type(-1);
     b_bits ^= (sign_bit & b_bits) == 0 ? sign_bit : bit_key_type(-1);
