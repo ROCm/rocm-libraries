@@ -2,13 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <half/half.hpp>
+#include <limits>
+#include <miopen/logger.hpp>
+#include <vector>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "../pooling_common.hpp"
-#include <half/half.hpp>
-#include <miopen/logger.hpp>
-#include <vector>
-#include <limits>
 
 namespace {
 
