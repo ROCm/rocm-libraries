@@ -935,7 +935,6 @@ struct TestNameGenerator
         return ss.str();
     }
 };
-
 template<typename T>
 class na_fusion_test_peract : public na_fusion_test<T>
 {

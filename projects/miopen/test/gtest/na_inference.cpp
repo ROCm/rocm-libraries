@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2018 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,11 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "test.hpp"
-#include "driver.hpp"
-#include "fusionHost.hpp"
-#include "random.hpp"
+
+#include <gtest/gtest.h>
+#include "../fusionHost.hpp"
+#include "../random.hpp"
+#include "compare_helper.hpp"
 #include <miopen/stringutils.hpp>
 
 #define MIO_BN_USE_MIX_PREC 1
@@ -36,10 +37,15 @@
 #define PREC_TYPE T
 #endif
 
+namespace
+{
 using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miopenDestroyFusionPlan);
 using ptr_FusionPlanArgs = MIOPEN_MANAGE_PTR(miopenOperatorArgs_t, miopenDestroyOperatorArgs);
 using ptr_ActivationDesc = MIOPEN_MANAGE_PTR(miopenActivationDescriptor_t,
                                              miopenDestroyActivationDescriptor);
+
+constexpr int batch_factor = 4;
+
 ptr_FusionPlanDesc GetManagedFusionPlanDesc(miopenTensorDescriptor_t inputDesc)
 {
     miopenFusionPlanDescriptor_t fusePlanDesc;
@@ -171,7 +177,7 @@ struct verify_inference_batchnorm_activ
         return baout;
     }
 
-    void fail(float = 0) const { std::cerr << "BatchNorm+Activation Inference:" << std::endl; }
+    void fail() const { GTEST_FAIL() << "BatchNorm+Activation Inference:" << std::endl; }
 };
 
 static std::string transform_mode(std::string s)
@@ -179,8 +185,33 @@ static std::string transform_mode(std::string s)
     return miopen::RemovePrefix(miopen::ToUpper(s), "MIOPENACTIVATION");
 }
 
+using TestCase = std::tuple<std::vector<int>, double, double, double, std::string, int>;
+
+auto GenCases(bool full=false)
+{
+    if(!full)
+    {
+        return ::testing::Combine(
+                    ::testing::ValuesIn(std::set<std::vector<int>>{{16, 32, 8, 8}}),
+                    ::testing::ValuesIn({double{0.5}}),
+                    ::testing::ValuesIn({double{0.5}}),
+                    ::testing::ValuesIn({double{0.5}}),
+                    ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"}}),
+                    ::testing::ValuesIn({/*0, */ 1})
+                );
+    }
+    return ::testing::Combine(
+        ::testing::ValuesIn(get_inputs(batch_factor)),
+        ::testing::ValuesIn({double{0.5}}),
+        ::testing::ValuesIn({double{0.5}}),
+        ::testing::ValuesIn({double{0.5}}),
+        ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU", /*, "std::string{MIOPENACTIVATIONLOGISTIC}", "std::string{MIOPENACTIVATIONABS}"*/}}),
+        ::testing::ValuesIn({/*0, */ 1})
+    );
+}
+
 template <class T>
-struct na_fusion_driver : test_driver
+struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
 {
     tensor<T> input;
     tensor<PREC_TYPE> scale;
@@ -194,24 +225,16 @@ struct na_fusion_driver : test_driver
     miopenBatchNormMode_t bnmode{};
     int batchnormMode = 1;
 
-    uint64_t max_value = miopen_type<T>{} == miopenHalf ? 3 : 17;
+    const uint64_t max_value = miopen_type<T>{} == miopenHalf ? 3 : 17;
     double alpha = 0., beta = 0., gamma = 0.;
 
-    na_fusion_driver()
+    void SetUp() override
     {
-        add(input, "input", get_input_tensor());
-        add(alpha, "alpha", generate_data({/*1.,*/ 0.5}));
-        add(beta, "beta", generate_data({/*0.,*/ 0.5}));
-        add(gamma, "gamma", generate_data({/*1.,*/ 0.5}));
-        add(amode,
-            "amode",
-            generate_data(
-                {"MIOPENACTIVATIONRELU" /*, "MIOPENACTIVATIONLOGISTIC", "MIOPENACTIVATIONABS"*/}));
-        add(batchnormMode, "batch-norm-mode", generate_data({/*0, */ 1}));
-    }
+        std::vector<int> nchw{};
+        std::tie(nchw, alpha, beta, gamma, amode, batchnormMode) = GetParam();
+        input                = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
+        input.generate(tensor_elem_gen_integer{max_value});
 
-    void run()
-    {
         amode = transform_mode(amode);
 
         // NOLINTBEGIN(*-braces-around-statements)
@@ -236,7 +259,10 @@ struct na_fusion_driver : test_driver
         else if(amode == "ELU")
             activ_mode = miopenActivationELU;
         // NOLINTEND(*-braces-around-statements)
+    }
 
+    void Run()
+    {
         int input_c, input_h, input_w;
         std::tie(std::ignore, input_c, input_h, input_w) = miopen::tien<4>(input.desc.GetLengths());
         ptr_activdesc                                    = GetManagedActivDesc();
@@ -295,7 +321,7 @@ struct na_fusion_driver : test_driver
         }
         else
         {
-            verify(verify_inference_batchnorm_activ<T, PREC_TYPE>{ptr_fusionplan.get(),
+            test_helpers::CompareResults(verify_inference_batchnorm_activ<T, PREC_TYPE>{ptr_fusionplan.get(),
                                                                   input,
                                                                   ptr_activdesc.get(),
                                                                   scale,
@@ -309,4 +335,63 @@ struct na_fusion_driver : test_driver
     }
 };
 
-int main(int argc, const char* argv[]) { test_drive<na_fusion_driver>(argc, argv); }
+struct TestNameGenerator
+{
+    std::string operator()(const ::testing::TestParamInfo<TestCase>& param_info)
+    {
+        std::stringstream ss{};
+        auto replace_dot = [](double value) // assuming there's only one
+        {
+            std::string str{std::to_string(value)};
+            auto i = str.find('.');
+            if(i != std::string::npos)
+                str[i] = '_';
+            return str;
+        };
+
+        auto print_nchw = [](std::vector<int> const& vec)
+        {
+            std::stringstream vec_ss{};
+            for(auto el : vec)
+            {
+                vec_ss << std::to_string(el) << "_";
+            }
+            return vec_ss.str();
+        };
+
+        ss <<   "nchw_" << print_nchw(std::get<0>(param_info.param)) <<
+                "_alpha_" << replace_dot(std::get<1>(param_info.param)) <<
+                "_beta_" << replace_dot(std::get<2>(param_info.param)) <<
+                "_gamma_" << replace_dot(std::get<3>(param_info.param)) <<
+                "_amode_" << std::get<4>(param_info.param) <<
+                "_batchnormMode_" << std::get<5>(param_info.param);
+        return ss.str();
+    }
+};
+
+} // namespace
+
+using GPU_na_fusion_inference_test_I8 = na_fusion_inference_test<int8_t>;
+using GPU_na_fusion_inference_test_FP16 = na_fusion_inference_test<half_float::half>;
+using GPU_na_fusion_inference_test_BFP16 = na_fusion_inference_test<bfloat16>;
+using GPU_na_fusion_inference_test_FP32 = na_fusion_inference_test<float>;
+using GPU_na_fusion_inference_test_FP64 = na_fusion_inference_test<double>;
+
+TEST_P(GPU_na_fusion_inference_test_I8, TestInt8) { Run(); }
+TEST_P(GPU_na_fusion_inference_test_FP16, TestFloat16) { Run(); }
+TEST_P(GPU_na_fusion_inference_test_BFP16, TestBFloat16) { Run(); }
+TEST_P(GPU_na_fusion_inference_test_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_na_fusion_inference_test_FP64, TestFloat64) { Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_I8, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP16, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_BFP16, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP32, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP64, GenCases(), TestNameGenerator{});
+
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_I8, GenCases(true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_FP16, GenCases(true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_BFP16, GenCases(true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_FP32, GenCases(true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_FP64, GenCases(true), TestNameGenerator{});
