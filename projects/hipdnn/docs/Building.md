@@ -194,7 +194,7 @@ All targets support parallel builds with ninja.
 | `check_format` | Check code formatting compliance |
 | `coverage` | Run `check` and generate test coverage reports (requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `unit-coverage` or `integration-coverage` | Run `unit-check` or `integration-check` (respectively) and generate test coverage reports (requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
-| `current-coverage` | Generate test coverage reports using coverage data already on disk (doesn not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
+| `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
 | `generate_hipdnn_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
