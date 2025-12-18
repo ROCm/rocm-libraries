@@ -89,7 +89,7 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     return configs;
 #else
-    int N = 1;
+    int N = 16;
     int C = 1;
     int H = 1;
     int W = 1;
@@ -123,9 +123,12 @@ protected:
 
         // Generate elements in tensors
         tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
-            tensor_elem_gen_integer{17});
+            tensor_elem_gen_integer{});
+        for(size_t i = 0; i < 16; ++i)
+            std::cout << ' ' << tensA.data[i];
+        std::cout << '\n';
         tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
-            tensor_elem_gen_integer{17});
+            tensor_elem_gen_integer{});
         tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides};
 
         // Write the device tensors
@@ -239,7 +242,6 @@ protected:
             tensorsConfig.aclens[3],    // c_w
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
-            tensorsConfig.acstrides[2], // c_hstride
             work_per_wg,
             alpha0,
             alpha1,
@@ -252,7 +254,7 @@ protected:
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
         std::cout << "OCL:";
-        for(size_t i = 0; i < 10; ++i)
+        for(size_t i = 0; i < 16; ++i)
             std::cout << ' ' << tensC_ocl.data[i];
         std::cout << '\n';
 
@@ -268,7 +270,6 @@ protected:
                     tensorsConfig.aclens[3],
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
-                    tensorsConfig.acstrides[2],
                     work_per_wg,
                     alpha0,
                     alpha1,
@@ -304,7 +305,6 @@ protected:
             tensorsConfig.aclens[3],    // c_w
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
-            tensorsConfig.acstrides[2], // c_hstride
             work_per_wg,
             alpha0,
             alpha1,
@@ -317,7 +317,7 @@ protected:
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
         std::cout << "HIP:";
-        for(size_t i = 0; i < 10; ++i)
+        for(size_t i = 0; i < 16; ++i)
             std::cout << ' ' << tensC_hip.data[i];
         std::cout << '\n';
 
@@ -333,7 +333,6 @@ protected:
                     tensorsConfig.aclens[3],
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
-                    tensorsConfig.acstrides[2],
                     work_per_wg,
                     alpha0,
                     alpha1,
