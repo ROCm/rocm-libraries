@@ -520,6 +520,7 @@ class TestCustomScheduleBF16:
         # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds", [
         (  True,  False,       False,       1),
+        ( False,  False,        True,       1),
         # fmt: on
         ])
     def test_schedule_128x224x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
