@@ -176,10 +176,9 @@ def all(problems_dir=None):
                 problems=problemlist
             )
     else:
-        # Original behavior - use predefined suites
         # general suites for all arches
-        # yield from api_overhead()
-        # yield from amax_set_1()
+        yield from api_overhead()
+        yield from amax_set_1()
 
         if "gfx942" in target_arch:
             # Put focused tests set for gfx942
