@@ -196,7 +196,7 @@ public:
                     "Node " + self().attributes.name + " does not have a compute_data_type set"};
         }
 
-        for(const auto& tensorAttr : this->getNodeOutputTensorAttributes())
+        for(const auto& tensorAttr : getNodeOutputTensorAttributes())
         {
             HIPDNN_CHECK_ERROR(tensorAttr->validate());
         }
