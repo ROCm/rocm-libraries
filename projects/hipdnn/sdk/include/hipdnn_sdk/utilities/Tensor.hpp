@@ -465,9 +465,17 @@ public:
     void fillWithValue(T value) override
     {
         _memory.markHostModified();
-        iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-            this->setHostValue(value, indices);
-        });
+        if(isPacked())
+        {
+            auto data{_memory.hostData()};
+            std::fill(data, data + _element_count, value);
+        }
+        else
+        {
+            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
+                this->setHostValue(value, indices);
+            });
+        }
     }
 
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
