@@ -105,9 +105,9 @@ As an example, from examining the gfx90X GPU builds available on the [nightly ta
 * The release version is `7.11.0a20251217`
 * The gpu family is `gfx90X-dcgpu`
 
-The command to download and install this ROCm build _with hipDNN and the hipDNN test executables_ is:
+With the above values, use the following command to download and install this ROCm build _with hipDNN and the hipDNN test executables_ (in this example, TheRock was cloned to `./TheRock`):
 ```
-python3 install_rocm_from_artifacts.py --release 7.11.0a20251217 --amdgpu-family gfx90X-dcgpu --hipdnn --test
+python3 TheRock/build_tools/install_rocm_from_artifacts.py --release 7.11.0a20251217 --amdgpu-family gfx90X-dcgpu --hipdnn --test
 ```
 
 The files will be downloaded and extracted to a folder named `therock-build` in the current directory.
@@ -115,44 +115,54 @@ The files will be downloaded and extracted to a folder named `therock-build` in 
 
 ### Running the hipDNN Tests
 
-The test executables can be found by running the following command from within the `therock-build` folder (on Linux):
+To list the test executables, using ctest:
+```
+ctest --test-dir therock-build/bin/hipdnn --show-only
+```
+Sample output:
+```
+Internal ctest changing into directory: /workspace/therock-build/bin/hipdnn
+Test project /workspace/therock-build/bin/hipdnn
+  Test #1: hipdnn_sdk_tests
+  Test #2: hipdnn_backend_tests
+  Test #3: hipdnn_frontend_tests
+  Test #4: hipdnn_test_sdk_tests
+  Test #5: hipdnn_plugin_sdk_tests
+  Test #6: public_hipdnn_backend_tests
+  Test #7: public_hipdnn_frontend_tests
 
-```
- find . \( -name '*hipdnn*tests' -o -name 'miopen*plugin_tests' \)
-./bin/hipdnn_plugin_sdk_tests
-./bin/hipdnn_sdk_tests
-./bin/hipdnn_frontend_tests
-./bin/public_hipdnn_backend_tests
-./bin/public_hipdnn_frontend_tests
-./bin/hipdnn_test_sdk_tests
-./bin/hipdnn_backend_tests
-./bin/miopen_legacy_plugin_tests
-```
-
-To run all of the test, use the `-exec` option:
-```
-find . \( -name '*hipdnn*tests' -o -name 'miopen*plugin_tests' \) -exec {} \;
-```
-
-To view a brief help of the gtest options that cane be used with these tests, use the --help option with the test executable:
-```
-./bin/hipdnn_sdk_tests --help
+Total Tests: 7
 ```
 
-Some notable options:
+Run all tests in parallel:
 ```
-  --gtest_list_tests
-      List the names of all tests instead of running them. The name of
-      TEST(Foo, Bar) is "Foo.Bar".
-  --gtest_filter=POSITIVE_PATTERNS[-NEGATIVE_PATTERNS]
-      Run only the tests whose name matches one of the positive patterns but
-      none of the negative patterns. '?' matches any single character; '*'
-      matches any substring; ':' separates two patterns.
- --gtest_brief=1
-      Only print test failures.
+ctest --test-dir therock-build/bin/hipdnn --output-on-failure --parallel 8 --timeout 30
+```
+Sample output:
+```
+Internal ctest changing into directory: /workspace/therock-build/bin/hipdnn
+Test project /workspace/therock-build/bin/hipdnn
+    Start 1: hipdnn_sdk_tests
+    Start 2: hipdnn_backend_tests
+    Start 6: public_hipdnn_backend_tests
+    Start 7: public_hipdnn_frontend_tests
+    Start 3: hipdnn_frontend_tests
+    Start 4: hipdnn_test_sdk_tests
+    Start 5: hipdnn_plugin_sdk_tests
+1/7 Test #4: hipdnn_test_sdk_tests ............   Passed    0.02 sec
+2/7 Test #5: hipdnn_plugin_sdk_tests ..........   Passed    0.02 sec
+3/7 Test #3: hipdnn_frontend_tests ............   Passed    0.02 sec
+4/7 Test #7: public_hipdnn_frontend_tests .....   Passed    0.27 sec
+5/7 Test #6: public_hipdnn_backend_tests ......   Passed    0.84 sec
+6/7 Test #2: hipdnn_backend_tests .............   Passed    1.33 sec
+7/7 Test #1: hipdnn_sdk_tests .................   Passed    2.64 sec
+
+100% tests passed, 0 tests failed out of 7
+
+Total Test time (real) =   2.64 sec
 ```
 
-Example: run all tests with brief output and print errors:
+Use the --verbose option for more detailed output:
 ```
-find . \( -name '*hipdnn*tests' -o -name 'miopen*plugin_tests' \) -exec {} --gtest_brief=1 \;
+ctest --test-dir therock-build/bin/hipdnn --output-on-failure --parallel 8 --timeout 30 --verbose
 ```
