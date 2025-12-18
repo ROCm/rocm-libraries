@@ -2165,6 +2165,48 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 11 # vmcnt shift for ngl and nll
+    elif isNN(kernel) and useLDSTr and TLDS==1:
+        optSchedule = {
+
+            'SYNC'   : [[-1,3, 10,10, 26,27, 45,45]],
+            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB' : [[22,22,24,24,25,25,26,27,27]],
+
+            'LRA0'   : [[0,0,2,2,3,3,4,4]],  ## -2 is place holder
+
+            'LRB0'   : [[8,11,13,15,17,19,21],   ## After LRA0, we can mix LRB0 and GRA
+                        [9,12,14,16,18,20,22]],
+            ## GRA should start after LRA0 is done.
+            'GRA'    : [[10,11, 14,14, 17,17, 20,20],
+                        [11,12, 15,15, 18,18, 21,21]],
+
+            ## GRB should start after LRB0 is done
+            'GRB'    : [[28,28, 31,31, 34,34, 37,37, 40,40, 43,43, 46,46],  # m0 inc is part of GRA/GRB
+                        [29,29, 32,32, 35,35, 38,38, 41,41, 44,44, 47,47]],
+            'LRA1'   : [[29,30, 32,33, 35,36, 38,39],
+                        [30,31, 33,34, 36,37, 39,40]],
+
+            #After GRB is done.
+            'LRB1'   : [[45,46,47,48,49,50,51]],
+
+            'LRSA'   : [[23]], # after LRA0 and before LRA1
+            'LRSB'   : [[23]], # after LRB0 and before LRB2
+            'LWSA'   : [[54]], # For A
+            'LWSB'   : [[54]],
+
+            'LCC'    : [[55, 55]],
+        }
+        # note: syncCode needs to be
+        syncCode = [SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for necessary prior LRA1/LRB1 before starting main loop"),
+                    SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+                    SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="Wait for LRB0/GRA to complete to start GRB/LRA1"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for GRB to complete to start LRB1"),
+                    SBarrier(comment=""),
+                   ]
+        nglshift = nllshift = 11 # vmcnt shift for ngl and nll
     else:
         return False, None
     numMfma = 56
