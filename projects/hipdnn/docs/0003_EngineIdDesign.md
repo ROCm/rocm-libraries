@@ -210,7 +210,21 @@ Implement a deterministic hash function to convert names to IDs:
 
 "engine name string" ---> [Hash Function] ---> int64_t engine ID
 
-Hash function is implemented in the data_sdk so that frontend, and plugin both can use it.  
+Hash function is implemented in the data_sdk so that it can be used anywhere
+
+```cpp
+#pragma once
+#include <string>
+#include <cstdint>
+
+namespace hipdnn_data_sdk {
+inline int64_t engineNameToId(const char* engineName) {
+    // Implementation of this hash function is an implementation detail and is
+    // up to the developer who implements it.  The developer is expected to create a robust 
+    // test suite to ensure the function is deterministic and is made to have minimal collision possibilities.
+}
+} // namespace hipdnn_data_sdk
+```
 
 ### Plugin Implementation
 
