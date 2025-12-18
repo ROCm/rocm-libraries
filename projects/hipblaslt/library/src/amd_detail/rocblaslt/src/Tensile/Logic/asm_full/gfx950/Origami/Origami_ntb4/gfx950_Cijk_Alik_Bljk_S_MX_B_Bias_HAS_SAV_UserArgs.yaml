@@ -2762,8 +2762,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -3007,8 +3007,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [128, 2, 1]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -3924,8 +3924,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -5737,8 +5737,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -11134,8 +11134,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -13171,8 +13171,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 2, 4]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -19038,8 +19038,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
