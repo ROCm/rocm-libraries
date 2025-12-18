@@ -7,7 +7,7 @@
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwisePlan.hpp>
 

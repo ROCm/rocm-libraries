@@ -3,11 +3,25 @@
 Documentation for hipFFT is available at
 [https://rocm.docs.amd.com/projects/hipFFT/en/latest/](https://rocm.docs.amd.com/projects/hipFFT/en/latest/).
 
-## hipFFT 1.0.22 (unreleased)
+## (Unreleased) hipFFT 1.0.23
 
 ### Resolved issues
 
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
+
+## hipFFT 1.0.22 for ROCm 7.2.0
+
+### Added
+
+* hipFFTW execution functions, where input and output data buffers differ from the
+  buffers specified at plan creation:
+
+  * fftw_execute_dft
+  * fftwf_execute_dft
+  * fftw_execute_dft_r2c
+  * fftwf_execute_dft_r2c
+  * fftw_execute_dft_c2r
+  * fftwf_execute_dft_c2r
 
 ## hipFFT 1.0.21 for ROCm 7.1.0
 
