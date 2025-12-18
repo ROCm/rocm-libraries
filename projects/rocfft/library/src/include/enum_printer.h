@@ -44,7 +44,7 @@ enum PlacementCode
     PC_UNSET,
 };
 
-// the decision strategy for buffer assigment
+// the decision strategy for buffer assignment
 enum rocfft_optimize_strategy
 {
     rocfft_optimize_min_buffer, // minimize number of buffers, possibly fewer fusions

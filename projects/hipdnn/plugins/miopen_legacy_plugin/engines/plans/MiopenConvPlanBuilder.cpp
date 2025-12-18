@@ -48,7 +48,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -83,7 +83,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -119,7 +119,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
