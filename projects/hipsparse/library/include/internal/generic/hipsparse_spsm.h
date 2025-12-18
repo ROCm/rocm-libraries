@@ -277,6 +277,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *               currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
+HIPSPARSE_DEPRECATED_MSG("This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseOperation_t        opA,
@@ -290,6 +291,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseSpSMDescr_t        spsmDescr,
                                       void*                       externalBuffer);
 #elif(CUDART_VERSION >= 11031)
+HIPSPARSE_DEPRECATED_MSG("This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseOperation_t        opA,
@@ -308,7 +310,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  \brief Sparse triangular system solve
 *
 *  \details
-*  \p hipsparseSpSM_solve solves a triangular linear system of equations defined by a sparse \f$m \times m\f$ square matrix \f$op(A)\f$,
+*  \p hipsparseSpSM_solve_ex solves a triangular linear system of equations defined by a sparse \f$m \times m\f$ square matrix \f$op(A)\f$,
 *  given in CSR or COO storage format, such that
 *  \f[
 *    op(A) \cdot C = \alpha \cdot op(B),
@@ -337,9 +339,9 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  Performing the above operation requires three steps. First, the user calls \ref hipsparseSpSM_bufferSize in order to
 *  determine the size of the required temporary storage buffer. The user then allocates this buffer and calls
 *  \ref hipsparseSpSM_analysis which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes
-*  the computation by calling \p hipsparseSpSM_solve. The buffer size and analysis routines only need to be called once
+*  the computation by calling \p hipsparseSpSM_solve_ex. The buffer size and analysis routines only need to be called once
 *  for a given sparse matrix \f$op(A)\f$ while the computation can be called repeatedly with different \f$B\f$ and \f$C\f$
-*  matrices. Once all calls to \p hipsparseSpSM_solve are complete, the temporary buffer can be deallocated.
+*  matrices. Once all calls to \p hipsparseSpSM_solve_ex are complete, the temporary buffer can be deallocated.
 *
 *  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
 *  row order and \f$C\f$ is column order and vice versa). When running on an AMD system with the rocSPARSE backend, the kernels
@@ -351,8 +353,8 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  temporary storage buffers on an AMD system, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column
 *  order if \f$B\f$ is being transposed).
 *
-*  \p hipsparseSpSM_solve supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions for storing the
-*  row pointer and column indices arrays of the sparse matrices. \p hipsparseSpSM_solve supports the following data types for
+*  \p hipsparseSpSM_solve_ex supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions for storing the
+*  row pointer and column indices arrays of the sparse matrices. \p hipsparseSpSM_solve_ex supports the following data types for
 *  \f$op(A)\f$, \f$op(B)\f$, \f$C\f$ and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
@@ -364,6 +366,9 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_32F
 *  <tr><td>HIP_C_64F
 *  </table>
+*
+*  \note This routine correctly matches the parameter list of the corresponding cusparse API cusparseSpSM_solve. The routine
+*  hipsparseSpSM_solve incorrectly passed the external buffer as the last parameter. 
 *
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
