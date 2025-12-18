@@ -426,7 +426,7 @@ static void insert_default_entry(const FMKey&     def_key,
     def_key_pool.emplace(simple_key, def_key_with_lds);
 
     // still use the detailed key with config to maintain the function map
-    function_map.emplace(def_key_with_lds, kernel);    
+    function_map.emplace(def_key_with_lds, kernel);
 }
 
 static void insert_default_entry(const PPFMKey&   def_key,
