@@ -768,7 +768,7 @@
     reorderGRInstForDTVB: false
     tailLoopOptA: true
     tailLoopOptB: true
-- - 1LDSBuffer: 0
+  - 1LDSBuffer: 0
     ActivationAlt: false
     ActivationFuncCall: true
     ActivationFused: true
