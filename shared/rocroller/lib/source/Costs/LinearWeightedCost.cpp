@@ -116,9 +116,9 @@ namespace rocRoller
                                                        .fractionOfVGPRs    = 0,
                                                        .outOfRegisters     = 1000000000.0,
                                                        .zeroFreeBarriers   = true,
-                                                       .vmemCycles         = 280,
+                                                       .vmemCycles         = 64,
                                                        .vmemQueueSize      = 3,
-                                                       .dsmemCycles        = 160,
+                                                       .dsmemCycles        = 32,
                                                        .dsmemQueueSize     = 3};
 
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,
