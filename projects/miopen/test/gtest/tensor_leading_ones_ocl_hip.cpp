@@ -116,21 +116,19 @@ struct OpTensorLeadingOnesTest
 protected:
     void SetUp() override
     {
-        auto&& handle                                 = get_handle();
-        std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
-
         data_type = miopen_type<T>{};
+
+        std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
 
         // Generate elements in tensors
         tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
             tensor_elem_gen_integer{});
-        for(size_t i = 0; i < 16; ++i)
-            std::cout << ' ' << tensA.data[i];
-        std::cout << '\n';
         tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
             tensor_elem_gen_integer{});
-        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides};
+        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
+            tensor_elem_gen_integer{2});
 
+        auto&& handle = get_handle();
         // Write the device tensors
         tensA_dev = handle.Write(tensA.data);
         tensB_dev = handle.Write(tensB.data);
@@ -143,10 +141,10 @@ protected:
         auto first_not_one = std::find_if(
             tensorsConfig.blens.rbegin(), tensorsConfig.blens.rend(), [](int i) { return i != 1; });
         auto d = std::distance(tensorsConfig.blens.begin(), first_not_one.base());
+        num_wg = first_not_one != tensorsConfig.blens.rend()
+                     ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
+                     : 1;
 
-        num_wg      = first_not_one != tensorsConfig.blens.rend()
-                          ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
-                          : 1;
         work_per_wg = std::accumulate(tensorsConfig.aclens.begin() + d,
                                       tensorsConfig.aclens.end(),
                                       1,
@@ -229,7 +227,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_LEADING_ONES";
 
-        std::string program_name       = "MIOpenTensorKernels.cl";
+        std::string program_name{"MIOpenTensorKernels.cl"};
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel(
@@ -246,9 +244,9 @@ protected:
             alpha0,
             alpha1,
             beta,
-            0L, // Aoffset
-            0L, // Boffset
-            0L, // Coffset
+            0LL, // Aoffset
+            0LL, // Boffset
+            0LL, // Coffset
             num_wg,
             bitmap);
 
@@ -274,9 +272,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    0L,
-                    0l,
-                    0L,
+                    0LL,
+                    0LL,
+                    0LL,
                     num_wg,
                     bitmap);
 #endif
@@ -285,14 +283,15 @@ protected:
     void runHIP() // run HIP kernel
     {
         auto&& handle = get_handle();
-        tensC_dev     = handle.Write(tensC.data);
+        // Write data to device tensor
+        tensC_dev = handle.Write(tensC.data);
 
         params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) +
                  " -DMAX_NUM_WG=" + std::to_string(max_num_wg);
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_LEADING_ONES";
 
-        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
+        std::string program_name{"MIOpenTensorKernelsHip.cpp"};
         std::string network_config_hip = network_config + "-hip";
 
         handle.AddKernel(
@@ -309,9 +308,9 @@ protected:
             alpha0,
             alpha1,
             beta,
-            0L, // Aoffset
-            0L, // Boffset
-            0L, // Coffset
+            0LL, // Aoffset
+            0LL, // Boffset
+            0LL, // Coffset
             num_wg,
             bitmap);
 
@@ -337,9 +336,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    0L,
-                    0L,
-                    0L,
+                    0LL,
+                    0LL,
+                    0LL,
                     num_wg,
                     bitmap);
 #endif
