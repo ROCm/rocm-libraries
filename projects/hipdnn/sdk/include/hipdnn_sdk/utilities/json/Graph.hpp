@@ -7,6 +7,9 @@
 #include <hipdnn_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_sdk/utilities/json/Common.hpp>
+#include <hipdnn_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
+#include <hipdnn_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
+#include <hipdnn_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
 #include <hipdnn_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_sdk/utilities/json/TensorAttributes.hpp>
 
@@ -19,7 +22,14 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::BatchnormBackwardAttributes, "BatchnormBackwardAttributes"},
      {NodeAttributes::BatchnormAttributes, "BatchnormAttributes"},
      {NodeAttributes::ConvolutionFwdAttributes, "ConvolutionFwdAttributes"},
+     {NodeAttributes::ConvolutionBwdAttributes, "ConvolutionBwdAttributes"},
+     {NodeAttributes::ConvolutionWrwAttributes, "ConvolutionWrwAttributes"},
      {NodeAttributes::NONE, ""}})
+
+NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
+                             {{ConvMode::UNSET, "UNSET"},
+                              {ConvMode::CONVOLUTION, "CONVOLUTION"},
+                              {ConvMode::CROSS_CORRELATION, "CROSS_CORRELATION"}})
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
@@ -39,6 +49,15 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::PointwiseAttributes:
         nodeJson = *node.attributes_as_PointwiseAttributes();
+        break;
+    case data_objects::NodeAttributes::ConvolutionFwdAttributes:
+        nodeJson = *node.attributes_as_ConvolutionFwdAttributes();
+        break;
+    case data_objects::NodeAttributes::ConvolutionBwdAttributes:
+        nodeJson = *node.attributes_as_ConvolutionBwdAttributes();
+        break;
+    case data_objects::NodeAttributes::ConvolutionWrwAttributes:
+        nodeJson = *node.attributes_as_ConvolutionWrwAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -83,6 +102,12 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::BatchnormAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::PointwiseAttributes:
             return to<data_objects::PointwiseAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::ConvolutionFwdAttributes:
+            return to<data_objects::ConvolutionFwdAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::ConvolutionBwdAttributes:
+            return to<data_objects::ConvolutionBwdAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::ConvolutionWrwAttributes:
+            return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error(
                 "hipdnn_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "

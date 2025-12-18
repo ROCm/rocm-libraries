@@ -1447,6 +1447,17 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
     )
 
 
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile():
+    for gemm in fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+        gemm.prefetchScale = False
+        gemm.pretileScale = True
+        gemm.loadScale_A = "BufferToLDS"
+        gemm.loadScale_B = "BufferToLDS"
+        gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
+        gemm.types.scaleSkipPermlane = True
+        yield gemm
+
+
 def fp4_target_mxd2lds_mi16x16x128_st32x8_pf2x1():
     yield GEMMRun(
         M=4096,
@@ -1699,6 +1710,7 @@ def fp4_kernels():
     yield from fp4_16x16x128_scale_options()
     yield from fp4_32x32x64_scale_options()
     yield from fp4_d2lds_wgts256x256x256()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile()
 
 
 def fp4_kernels_streamk():

@@ -204,6 +204,20 @@ namespace GEMMTests
                         problem.workgroupSizeX * problem.workgroupSizeY);
     }
 
+    TEST_P(GEMMDirectLDSTestGPU, GPU_BasicGEMMFP32D2L)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
+        gemm.m         = 3072;
+        gemm.n         = 4096;
+        gemm.k         = 4096;
+        basicGEMM<float>(gemm);
+    }
+
     TEST_P(GEMMDirectLDSTestGPU, GPU_BasicGEMMFP32)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
