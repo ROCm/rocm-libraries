@@ -4770,6 +4770,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.b.startVgprLocalWriteSwapAddr = vgprIdx
       vgprIdx += 1
 
+    if kernel["UseMFMAF32XEmulation"]:
+      vgprIdx = ((vgprIdx+1)//2)*2 #align 64 bit
+      self.states.startVgprIdentityMatrix = vgprIdx
+      vgprIdx+=2
+      
     # TODO: Serial is always the first/last register in the pool so the store
     # code doesn't have to deal with fragmentation
     self.states.startVgprSerial = vgprIdx
@@ -4786,9 +4791,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.startVgprCvt = vgprIdx
         vgprIdx += numVgprsEmu # for vgpr 32XEmulation
 
-    if kernel["UseMFMAF32XEmulation"]:
-      self.states.startVgprIdentityMatrix = vgprIdx
-      vgprIdx+=2
+
 
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
