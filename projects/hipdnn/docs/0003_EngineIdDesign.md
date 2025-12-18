@@ -240,16 +240,16 @@ class Graph : public INode
 {
 public:
     // Existing API - accepts int64_t
-    void set_preferred_engine_id_ext(std::optional<int64_t> engineId);
-    
+    void set_preferred_engine_id_ext(std::optional<int64_t> engineId)
+
     // New overload - accepts string name
     void set_preferred_engine_id_ext(const std::optional<std::string> engineName) {
         int64_t engineId = hipdnn::engineNameToId(engineName);
-        
+
         // Log for debugging
         HIPDNN_LOG_DEBUG("Engine name '{}' mapped to ID: 0x{:016X}",
                         engineName, engineId);
-        
+
         // Forward to the int64_t version
         setPreferredEngine(engineId);
     }
@@ -310,14 +310,14 @@ class MyCustomPlugin {
     void initialize() {
         // Use the custom engine name defined in the shared header
         const std::string engineName = hipdnn::engine_names::MY_CUSTOM_ENGINE;
-        
+
         // Generate ID from name
         int64_t engineId = hipdnn::data_sdk::engineNameToId(engineName);
-        
+
         // Log for debugging
         HIPDNN_LOG_INFO("Initializing engine '{}' with ID: 0x{:016X}",
                        engineName, engineId);
-        
+
         // Register engine
         auto engine = std::make_unique<MyCustomEngine>(engineId);
         registerEngine(std::move(engine));
@@ -331,16 +331,16 @@ class MyCustomPlugin {
 // Application using the frontend
 void setupGraph() {
     hipdnn::frontend::Graph graph;
-    
+
     // Option 1: Use string name directly
     graph.set_preferred_engine_id_ext("MIOPEN_LEGACY");
-    
+
     // Option 2: Use constant from header
     graph.set_preferred_engine_id_ext(hipdnn::engine_names::MIOPEN_LEGACY);
-    
+
     // Option 3: Use custom engine name (not in header)
     graph.set_preferred_engine_id_ext("MY_CUSTOM_ENGINE_V2");  // Works, with warning
-    
+
     // Option 4: Still support int64_t for compatibility
     graph.set_preferred_engine_id_ext(0x123456789ABCDEF0LL);
 }
