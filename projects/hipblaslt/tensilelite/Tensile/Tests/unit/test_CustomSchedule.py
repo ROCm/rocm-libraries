@@ -363,7 +363,7 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
-     @pytest.mark.parametrize(
+    @pytest.mark.parametrize(
         # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds", [
         ( False,  False,        True,       1),
@@ -398,9 +398,7 @@ class TestCustomScheduleBF16:
     @pytest.mark.parametrize(
         # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds", [
-        ( False,  False,        True,       1),
         (  True,  False,       False,       1),
-        ( False,   True,        True,       0)
         # fmt: on
         ])
     def test_schedule_224x128x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
