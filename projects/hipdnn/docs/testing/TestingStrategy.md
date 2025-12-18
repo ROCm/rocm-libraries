@@ -142,7 +142,7 @@ Tests must work in the following environments:
 | **Operating System** | • Windows<br>• Supported Linux distros |
 
 > [!TIP]
-> `ninja unit-check` runs fast, isolated unit and API tests (also: `unit-check-verbose`).
+> `ninja unit-check` runs fast, isolated unit and API tests (also: `unit-check-verbose`).<br>
 > `ninja integration-check` runs slower, end-to-end integration tests (also: `integration-check-verbose`).
 
 ### GPU Requirements

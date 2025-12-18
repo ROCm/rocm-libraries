@@ -38,7 +38,7 @@ If needed, reference the [Quick Start Guide](../Building.md#quick-start-guide) t
 
 ### Test Case 1: Build and Run the Automated Tests ⚙️
 
-With a clone of the [rocm-libraries repository](https://github.com/ROCm/rocm-libraries/):
+With a working copy of the [rocm-libraries/projecdts/hipdnn folder](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn):
 
 ```bash
 # Run the following from the projects/hipdnn/build folder:
@@ -61,7 +61,7 @@ ninja check
 
 ### Test Case 1: Build and Run the Automated Tests with ASAN Enabled 🚨
 
-With a clone of the [rocm-libraries repository](https://github.com/ROCm/rocm-libraries/):
+With a working copy of the [rocm-libraries/projecdts/hipdnn folder](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn):
 
 ```bash
 # Run the following from the projects/hipdnn/build folder:
@@ -79,13 +79,15 @@ ninja check_ctest
 
 The hipDNN library is included in ROCm development and release builds produced by [TheRock](https://github.com/ROCm/TheRock).
 
-This procedure uses the [install_rocm_from_artifacts.py](https://github.com/ROCm/TheRock/blob/main/build_tools/install_rocm_from_artifacts.py) to retrieve a pre-built hipDNN library with associated test programs. The procedure below was created using information from the following documents:
+This procedure uses the [install_rocm_from_artifacts.py](https://github.com/ROCm/TheRock/blob/main/build_tools/install_rocm_from_artifacts.py) tool to retrieve a pre-built hipDNN library with associated test programs.
+
+The procedure that follows below was created using information from the following documents:
 * TheRock [Installing Artifacts](https://github.com/ROCm/TheRock/blob/main/docs/development/installing_artifacts.md)
 * TheRock [Releases](https://github.com/ROCm/TheRock/blob/main/RELEASES.md)
 
 ### Prerequisites
 
-The install_rocm_from_artifacts.py script requires the boto3 python library, run `pip install boto3` to install this library on your system.
+The `install_rocm_from_artifacts.py` script requires the `boto3` python library, run `pip install boto3` to install this library on your system.
 
 ### Download the Install Script
 
@@ -96,7 +98,7 @@ git clone https://github.com/ROCm/TheRock.git
 
 ### Install ROCm with hipDNN Tests
 
-Refer to [Installing Artifacts](https://github.com/ROCm/TheRock/blob/main/docs/development/installing_artifacts.md) for instructions on selecting the artifact to download.
+Refer to [Installing Artifacts](https://github.com/ROCm/TheRock/blob/main/docs/development/installing_artifacts.md#finding-release-versions) for instructions on selecting the artifact to download.
 
 Be sure to include the `--hipdnn` and `--tests` option when running the script.
 

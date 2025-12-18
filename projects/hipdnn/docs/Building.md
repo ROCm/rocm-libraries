@@ -51,7 +51,7 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 
 ## Quick Start Guide
 
-Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies). Refer to the [LLVM_TOOLS_SEARCH_PREFIX](#llvm-tools-search-prefix) section later in this document for approaches to manage the multiple Clang toolchain versions required for hipDNN.
+Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies). Refer to the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) section later in this document for approaches to manage the multiple Clang toolchain versions required for hipDNN.
 
 > [!TIP]
 > 💡 See [Docker README](../dockerfiles/README.md) for details on using prebuilt binaries in Docker containers to ensure a consistent build environment.
@@ -90,7 +90,7 @@ git clone https://github.com/ROCm/rocm-libraries.git
 
 #### 3. Install hipDNN
 
-   Refer to the [Build Configurations](#build-configurations) section below for details on using on setting the install path.
+   Refer to the [Build Configurations](#build-configurations) section below for details on setting the install path.
    ```bash
    sudo ninja install
    ```
@@ -355,9 +355,9 @@ Unzip the downloaded tarball to a path with no spaces. E.g. after unzipped to `C
    ```cmd
    set PATH=C:\dist\therock\bin;%PATH%
    ```
-   It isn't necessary to add the Clang toolchain to your system PATH to perform the build as these can be specified using the [LLVM_TOOLS_SEARCH_PREFIX](#llvm-tools-search-prefix) option to cmake (refer to that section for more details).
+   It isn't necessary to add the Clang toolchain to your system PATH to perform the build as these can be specified using the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) option to cmake (refer to that section for more details).
 
-   The AMD toolchain should be discovered automatically. If not, refer to the [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm-path--rocm-cmake-path--and-cmake-install-prefix) section for additional ways to locate the toolchain.
+   The AMD toolchain should be discovered automatically. If not, refer to the [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix) section for additional ways to locate the toolchain.
 
 * Set the HIP_PLATFORM environment varilable:
    ```cmd
@@ -393,7 +393,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 * Do **NOT** open the "x64 Native Tools Command Prompt for VS 2022" as this will interfere with the ROCm SDK and Clang toolchain.
 * Do **NOT** set `ROCM_PATH` in your environment as this will interfere with toolchain detection. If used, specify it using the `-DROCM_PATH=` option to cmake.
 * When generating the project, be sure to set GPU_TARGETS to your GPU as auto-detection is not currently supported on Windows, e.g. `cmake -DGPU_TARGETS=gfx1103 ..` (replacing gfx1103 with your GPU)
-* When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That’s okay for now but it can be resolved by installing the missing version of the toolchain to a parallel directory and setting the [LLVM_TOOLS_SEARCH_PREFIX](#llvm-tools-search-prefix) variable accordingly.
+* When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That's okay for now but it can be resolved by installing the missing version of the toolchain to a parallel directory and setting the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) variable accordingly.
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
 * To reduce build time, the `-DENABLE_CLANG_TIDY=OFF` option can be used to disable clang-tidy check during development. Similarly the `-DENABLE_CLANG_FORMAT=OFF` option can be used to disable clang-format.
