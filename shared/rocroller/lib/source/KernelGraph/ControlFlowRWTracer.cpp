@@ -492,14 +492,17 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(LoadTiled const& op, int tag)
     {
+        auto user = m_graph.mapper.get<User>(tag);
 
         auto dst = m_graph.mapper.get<MacroTile>(tag);
 
         dst = only(m_graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::View>))
                   .value_or(dst);
 
-        trackConnections(tag, {dst}, ReadWrite::READ);
+        trackRegister(tag, user, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+
+        trackConnections(tag, {user, dst}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
