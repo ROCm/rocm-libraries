@@ -723,8 +723,7 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
     Args:
         timeline:       The Timeline object containing the instructions.
         kernel:         Solution object containing the kernel metadata.
-        mfma_reorder:   List of indices representing the reordering of the MFMA indices.
-                        Index into it using mfma index are scheduled by default for this kernel, value is the new 0-based position in the order.
+        mfma_reorder:   Mapping between the index of a default-scheduled MFMA and its new custom assigned index.
     """
 
     if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
