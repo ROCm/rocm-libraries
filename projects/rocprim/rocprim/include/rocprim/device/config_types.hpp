@@ -362,24 +362,13 @@ struct target_arch_descriptor
         target_arch::ID, #ID \
     }
 constexpr auto target_arch_descriptors = std::array{
-    ROCPRIM_DEF_ARCH(gfx803),
-    ROCPRIM_DEF_ARCH(gfx900),
-    ROCPRIM_DEF_ARCH(gfx906),
-    ROCPRIM_DEF_ARCH(gfx908),
-    ROCPRIM_DEF_ARCH(gfx90a),
-    ROCPRIM_DEF_ARCH(gfx942),
-    ROCPRIM_DEF_ARCH(gfx950),
-    ROCPRIM_DEF_ARCH(gfx1030),
-    ROCPRIM_DEF_ARCH(gfx1100),
-    ROCPRIM_DEF_ARCH(gfx1101),
-    ROCPRIM_DEF_ARCH(gfx1102),
-    ROCPRIM_DEF_ARCH(gfx1103),
-    ROCPRIM_DEF_ARCH(gfx1150),
-    ROCPRIM_DEF_ARCH(gfx1151),
-    ROCPRIM_DEF_ARCH(gfx1152),
-    ROCPRIM_DEF_ARCH(gfx1153),
-    ROCPRIM_DEF_ARCH(gfx1200),
-    ROCPRIM_DEF_ARCH(gfx1201),
+    ROCPRIM_DEF_ARCH(gfx803),  ROCPRIM_DEF_ARCH(gfx900),  ROCPRIM_DEF_ARCH(gfx906),
+    ROCPRIM_DEF_ARCH(gfx908),  ROCPRIM_DEF_ARCH(gfx90a),  ROCPRIM_DEF_ARCH(gfx942),
+    ROCPRIM_DEF_ARCH(gfx950),  ROCPRIM_DEF_ARCH(gfx1010), ROCPRIM_DEF_ARCH(gfx1011),
+    ROCPRIM_DEF_ARCH(gfx1012), ROCPRIM_DEF_ARCH(gfx1030), ROCPRIM_DEF_ARCH(gfx1100),
+    ROCPRIM_DEF_ARCH(gfx1101), ROCPRIM_DEF_ARCH(gfx1102), ROCPRIM_DEF_ARCH(gfx1103),
+    ROCPRIM_DEF_ARCH(gfx1150), ROCPRIM_DEF_ARCH(gfx1151), ROCPRIM_DEF_ARCH(gfx1152),
+    ROCPRIM_DEF_ARCH(gfx1153), ROCPRIM_DEF_ARCH(gfx1200), ROCPRIM_DEF_ARCH(gfx1201),
 };
 #undef ROCPRIM_DEF_ARCH
 
@@ -393,19 +382,6 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
         }
     }
     return target_arch::unknown;
-}
-
-template<class F, std::size_t... Is>
-constexpr void for_each_arch_impl(F&& f, std::index_sequence<Is...>)
-{
-    (f(std::integral_constant<target_arch, target_arch_descriptors[Is].arch>{}), ...);
-}
-
-template<class F>
-constexpr void for_each_arch(F&& f)
-{
-    for_each_arch_impl(std::forward<F>(f),
-                       std::make_index_sequence<std::size(target_arch_descriptors)>{});
 }
 
 constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
