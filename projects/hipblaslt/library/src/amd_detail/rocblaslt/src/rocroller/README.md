@@ -10,14 +10,14 @@ can contain other parameters besides the tile size. A list of `SolutionIndexPara
 in sorted order, based on what Origami predicts is the best performing kernel.
 
 If a kernel has already been generated for the specific `SolutionIndexParameters` instance that was selected,
-the kernel can be found in the cache and returned.
+the kernel can be found in the `SolutionCache` and returned.
 
 Otherwise, the rest of the `SolutionParameters` need to be selected.
 `SolutionParameters` contain all of the parameters required to generate a kernel. These parameters
 are selected based on the `KernelType` and the `SolutionIndexParameters`.
 
 Once all of the `SolutionParameters` have been selected, the kernel is generated using rocRoller. The kernel
-is then saved for reuse in the cache and returned.
+is then saved for reuse in the `SolutionCache` and returned.
 
 # Calling a rocRoller Kernel
 

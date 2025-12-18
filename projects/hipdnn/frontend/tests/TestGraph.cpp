@@ -79,16 +79,19 @@ protected:
             .set_data_type(DataType::FLOAT);
 
         auto mean = std::make_shared<TensorAttributes>();
-        mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT);
+        mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
         auto invVariance = std::make_shared<TensorAttributes>();
-        invVariance->set_uid(3).set_name("InvVariance").set_data_type(DataType::FLOAT);
+        invVariance->set_uid(3)
+            .set_name("InvVariance")
+            .set_data_type(DataType::FLOAT)
+            .set_dim({1, 2, 1, 1});
 
         auto scale = std::make_shared<TensorAttributes>();
-        scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT);
+        scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
         auto bias = std::make_shared<TensorAttributes>();
-        bias->set_uid(5).set_name("Bias").set_data_type(DataType::FLOAT);
+        bias->set_uid(5).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
 
         BatchnormInferenceAttributes batchnormAttributes;
         batchnormAttributes.set_name("BatchnormNode");
@@ -245,7 +248,7 @@ TEST_F(TestGraph, BatchnormNodeCreation)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -291,7 +294,7 @@ TEST_F(TestGraph, BatchnormBackwardNodeCreation)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto dy = std::make_shared<TensorAttributes>();
@@ -329,16 +332,23 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto mean = std::make_shared<TensorAttributes>();
+    mean->set_dim({1, 2, 1, 1});
+
     auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_dim({1, 2, 1, 1});
+
     auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 1, 1});
+
     auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({1, 2, 1, 1});
 
     mean->set_dim(derivedDims).set_stride(derivedStrides);
     invVariance->set_dim(derivedDims).set_stride(derivedStrides);
@@ -517,7 +527,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -610,7 +620,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormGraph)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -732,7 +742,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormAndPointwiseGraph)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -930,7 +940,7 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormInferenceGraph)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -1040,7 +1050,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormBackwardGraph)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto dy = std::make_shared<TensorAttributes>();
@@ -1278,7 +1288,7 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormBackwardGraph)
 
     std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     auto xPointwise = std::make_shared<TensorAttributes>();
@@ -2767,9 +2777,13 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
+    mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
 
     // Node 0: batchnorm1
     BatchnormInferenceAttributes bnAttrs1;
@@ -2778,12 +2792,6 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
 
     auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(x->get_dim());
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
-
-    // TODO: These can likely be inferred
-    mean->set_dim(x->get_dim()).set_stride(x->get_dim());
-    invVariance->set_dim(x->get_dim()).set_stride(x->get_dim());
-    scale->set_dim(derivedDims).set_stride(derivedStrides);
-    bias->set_dim(derivedDims).set_stride(derivedStrides);
 
     // Node 1: pointwise1 (depends on batchnorm1)
     PointwiseAttributes pwAttrs1;
@@ -2870,9 +2878,13 @@ TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
+    mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
 
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
@@ -2884,12 +2896,6 @@ TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
 
     auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(x->get_dim());
     auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
-
-    // TODO: These can likely be inferred
-    mean->set_dim(x->get_dim()).set_stride(x->get_dim());
-    invVariance->set_dim(x->get_dim()).set_stride(x->get_dim());
-    scale->set_dim(derivedDims).set_stride(derivedStrides);
-    bias->set_dim(derivedDims).set_stride(derivedStrides);
 
     //validate graph is good.
     auto result = graph.validate();

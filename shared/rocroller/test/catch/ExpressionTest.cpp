@@ -1935,6 +1935,104 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Reinterpret produces no instructions and changes register type",
+              "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        const auto make_expression = [&](auto type) {
+            auto r
+                = std::make_shared<Register::Value>(context.get(), Register::Type::Vector, type, 1);
+            r->allocateNow();
+            return r->expression();
+        };
+
+        SECTION("Int32 to UInt32")
+        {
+            auto a    = make_expression(DataType::Int32);
+            auto expr = Expression::reinterpret(DataType::UInt32, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::UInt32);
+        }
+
+        SECTION("Float to UInt32")
+        {
+            auto a    = make_expression(DataType::Float);
+            auto expr = Expression::reinterpret(DataType::UInt32, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::UInt32);
+        }
+
+        SECTION("UInt64 to Int64")
+        {
+            auto a    = make_expression(DataType::UInt64);
+            auto expr = Expression::reinterpret(DataType::Int64, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::Int64);
+        }
+
+        SECTION("Reinterpret in arithmetic expression, uint32 -> int32")
+        {
+            auto a = make_expression(DataType::UInt32);
+            auto b = make_expression(DataType::UInt32);
+            auto c = make_expression(DataType::Int32);
+
+            auto expr = Expression::reinterpret(DataType::Int32, a + b) + c;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v3, v0, v1
+                v_add_i32 v4, v3, v2
+            )";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Reinterpret in arithmetic expression, float -> uint32")
+        {
+            auto a = make_expression(DataType::Float);
+            auto b = make_expression(DataType::UInt32);
+
+            auto expr = Expression::reinterpret(DataType::UInt32, a) + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v2, v0, v1
+            )";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Size mismatch throws")
+        {
+            auto a = make_expression(DataType::Float);
+            CHECK_THROWS_AS(Expression::reinterpret(DataType::Int64, a), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            auto a = make_expression(DataType::UInt32);
+            CHECK_THROWS(Expression::reinterpret(DataType::None, a));
+        }
+    }
+
     TEST_CASE("Expression evaluate comparisons", "[expression]")
     {
         auto command = std::make_shared<Command>();
@@ -2487,93 +2585,115 @@ namespace ExpressionTest
 
         SECTION("Int32 to UInt32")
         {
-            int32_t value  = -1;
-            auto    result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
-            CHECK(std::get<uint32_t>(result) == 0xFFFFFFFFu);
+            auto value = literal(int32_t(-1));
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xFFFFFFFFu);
         }
 
         SECTION("UInt32 to Int32")
         {
-            uint32_t value  = 0xFFFFFFFFu;
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Int32);
-            CHECK(std::get<int32_t>(result) == -1);
+            auto value = literal(uint32_t(0xFFFFFFFFu));
+            auto expr  = reinterpret(DataType::Int32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int32);
+            CHECK(std::get<int32_t>(evaluate(expr)) == -1);
         }
 
         SECTION("Int32 to Raw32")
         {
-            int32_t value  = -1;
-            auto    result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
-            CHECK(std::get<Raw32>(result).value == 0xFFFFFFFFu);
+            auto value = literal(int32_t(-1));
+            auto expr  = reinterpret(DataType::Raw32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Raw32);
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xFFFFFFFFu);
         }
 
         SECTION("Raw32 to UInt32")
         {
-            Raw32 value(0xDEADBEEFu);
-            auto  result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
-            CHECK(std::get<uint32_t>(result) == 0xDEADBEEFu);
+            auto value = literal(Raw32(0xDEADBEEFu));
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xDEADBEEFu);
         }
 
         SECTION("Raw32 to Int32")
         {
-            Raw32 value(0x80000000u);
-            auto  result = reinterpret(CommandArgumentValue(value), DataType::Int32);
-            CHECK(std::get<int32_t>(result) == static_cast<int32_t>(0x80000000));
+            auto value = literal(Raw32(0x80000000u));
+            auto expr  = reinterpret(DataType::Int32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int32);
+            CHECK(std::get<int32_t>(evaluate(expr)) == static_cast<int32_t>(0x80000000));
         }
 
         SECTION("UInt32 to Raw32")
         {
-            uint32_t value  = 0x12345678u;
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
-            CHECK(std::get<Raw32>(result).value == 0x12345678u);
+            auto value = literal(uint32_t(0x12345678u));
+            auto expr  = reinterpret(DataType::Raw32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Raw32);
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0x12345678u);
         }
 
         SECTION("Int64 to UInt64")
         {
-            int64_t value  = -1LL;
-            auto    result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
-            CHECK(std::get<uint64_t>(result) == 0xFFFFFFFFFFFFFFFFull);
+            auto value = literal(int64_t(-1LL));
+            auto expr  = reinterpret(DataType::UInt64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt64);
+            CHECK(std::get<uint64_t>(evaluate(expr)) == 0xFFFFFFFFFFFFFFFFull);
         }
 
         SECTION("UInt64 to Int64")
         {
-            uint64_t value  = 0x8000000000000000ull;
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Int64);
-            CHECK(std::get<int64_t>(result) == static_cast<int64_t>(0x8000000000000000ull));
+            auto value = literal(uint64_t(0x8000000000000000ull));
+            auto expr  = reinterpret(DataType::Int64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int64);
+            CHECK(std::get<int64_t>(evaluate(expr)) == static_cast<int64_t>(0x8000000000000000ull));
         }
 
         SECTION("Float to UInt32")
         {
-            float value  = 1.0f;
-            auto  result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            auto value = literal(1.0f);
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
             // 1.0f in IEEE 754
-            CHECK(std::get<uint32_t>(result) == 0x3F800000u);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x3F800000u);
         }
 
         SECTION("UInt32 to Float")
         {
-            uint32_t value  = 0x40000000u; // 2.0f in IEEE 754
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Float);
-            CHECK(std::get<float>(result) == 2.0f);
+            auto value = literal(uint32_t(0x40000000u)); // 2.0f in IEEE 754
+            auto expr  = reinterpret(DataType::Float, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Float);
+            CHECK(std::get<float>(evaluate(expr)) == 2.0f);
         }
 
         SECTION("Double to UInt64")
         {
-            double value  = 1.0;
-            auto   result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
+            auto value = literal(1.0);
+            auto expr  = reinterpret(DataType::UInt64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt64);
             // 1.0 in IEEE 754 double
-            CHECK(std::get<uint64_t>(result) == 0x3FF0000000000000ull);
+            CHECK(std::get<uint64_t>(evaluate(expr)) == 0x3FF0000000000000ull);
         }
 
         SECTION("Invalid reinterpret - different sizes")
         {
-            int32_t value = 42;
-            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::Int64), FatalError);
+            auto value = literal(int32_t(42));
+            CHECK_THROWS_AS(reinterpret(DataType::Int64, value), FatalError);
         }
 
         SECTION("Invalid reinterpret - unsupported type")
         {
-            int32_t value = 42;
-            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::None), FatalError);
+            auto value = literal(int32_t(42));
+            CHECK_THROWS(reinterpret(DataType::None, value));
         }
     }
 

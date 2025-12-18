@@ -6,7 +6,6 @@
 #include "ConvolutionGraphUtils.hpp"
 #include "ConvolutionTensorBundles.hpp"
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
