@@ -10,11 +10,41 @@
 # https://pre-commit.com/#regular-expressions.
 exclude: |
   (?x)
-    # These subprojects are not yet migrated to the superrepo and have alterate
-    # sources of truth, so do not run checks on their code.
+    # ==========================================================================
+    # Opted-out projects
+    # To opt-in, remove your project from the exclusions.
+    # See CONTRIBUTING.md for detailed instructions.
+    # ==========================================================================
     projects/composablekernel/.*|
+    projects/hipblas/.*|
+    projects/hipblas-common/.*|
+    projects/hipcub/.*|
+    projects/hipfft/.*|
+    projects/hiprand/.*|
     projects/hipsolver/.*|
+    projects/hipsparse/.*|
+    projects/hipsparselt/.*|
+    projects/hiptensor/.*|
+    projects/rocblas/.*|
+    projects/rocfft/.*|
+    projects/rocprim/.*|
     projects/rocsolver/.*|
+    projects/rocsparse/.*|
+    projects/rocthrust/.*|
+    projects/rocwmma/.*|
+    shared/mxdatagenerator/.*|
+    shared/origami/.*|
+    shared/rocroller/.*|
+    shared/tensile/.*|
+    # ==========================================================================
+    # Permanent exclusions
+    # ==========================================================================
+    # Binary files
+    projects/hipdnn/.*\.bin$|
+    # Generated hipDNN FlatBuffers headers
+    projects/hipdnn/sdk/include/hipdnn_sdk/data_objects/.*_generated\.h|
+    # Reference data
+    projects/hipdnn/hipdnn_reference_data/.*|
     # Large yaml files
     projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/.*|
     # Large (20k+ LOC) source files
@@ -24,14 +54,8 @@ exclude: |
     # Large source files
     projects/miopen/src/kernels/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
-    projects/rocrand/library/.*precomputed\.(cpp|h)|
     projects/rocrand/library/.*constants\.(cpp|h)|
-    # Binary files
-    projects/hipdnn/.*\.bin$|
-    # Reference data
-    projects/hipdnn/hipdnn_reference_data/.*|
-    # Generated hipDNN FlatBuffers headers
-    projects/hipdnn/sdk/include/hipdnn_sdk/data_objects/.*_generated\.h
+    projects/rocrand/library/.*precomputed\.(cpp|h)
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -71,5 +95,7 @@ repos:
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
-      - id: cmake-format
       - id: cmake-lint
+      # cmake-format is disabled due to undesirable formatting.
+      # We can investigate changing the configuration before re-enabling or using an alternative tool.
+      # - id: cmake-format
