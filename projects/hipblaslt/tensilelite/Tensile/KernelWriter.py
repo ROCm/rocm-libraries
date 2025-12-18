@@ -2295,7 +2295,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "3wait for local write"))
             if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]):
               # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before s_barrier
-              waitLWCode.add(self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u, isNLL=(not isNGLL), beforeBarrier=True))
+              waitLWCode.add(self.getWaitcntCodeForDirectToVgpr(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, u, isNLL=(not isNGLL), beforeBarrier=True))
             elif kernel["PrefetchGlobalRead"]==2 and (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for global reads with lds"))
             syncCode.add(self._syncThreads(kernel))
