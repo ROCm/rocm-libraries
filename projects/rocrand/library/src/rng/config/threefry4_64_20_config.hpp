@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_THREEFRY4_64_20, T>
             case target_arch::gfx90a: return 256;
             case target_arch::gfx908: return 128;
             case target_arch::gfx906: return 128;
+            case target_arch::gfx1150: return 1024;
             case target_arch::gfx1201: return 128;
             default:
                 return generator_config_defaults<ROCRAND_RNG_PSEUDO_THREEFRY4_64_20, T>::threads;
@@ -64,6 +65,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_THREEFRY4_64_20, T>
             case target_arch::gfx90a: return 2048;
             case target_arch::gfx908: return 1920;
             case target_arch::gfx906: return 1792;
+            case target_arch::gfx1150: return 64;
             case target_arch::gfx1201: return 2048;
             default:
                 return generator_config_defaults<ROCRAND_RNG_PSEUDO_THREEFRY4_64_20, T>::blocks;
