@@ -486,9 +486,21 @@ public:
                                                            static_cast<float>(max));
 
         _memory.markHostModified();
-        iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-            this->setHostValue(static_cast<T>(distribution(generator)), indices);
-        });
+
+        if(isPacked())
+        {
+            auto data{_memory.hostData()};
+            for(size_t i{0}; i < _element_count; i++)
+            {
+                data[i] = static_cast<T>(distribution(generator));
+            }
+        }
+        else
+        {
+            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
+                this->setHostValue(static_cast<T>(distribution(generator)), indices);
+            });
+        }
     }
 
     bool isPacked() const override
