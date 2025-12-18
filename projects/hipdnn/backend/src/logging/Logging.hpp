@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "EnumFormatters.hpp"
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <memory>
 #include <spdlog/spdlog.h>
