@@ -32,7 +32,7 @@ Verify that all documentation is up to date:
 
 ---
 
-## Regular Tests Run From Source Build
+## Running Tests From Source Build
 
 If needed, reference the [Quick Start Guide](../Building.md#quick-start-guide) to prepare a local environment.
 
@@ -75,7 +75,7 @@ ninja check_ctest
 - **GPU Test Behavior**: All GPU tests will be skipped due to ASAN being enabled
 - **Memory Safety**: No memory leaks or violations should be detected
 
-## Regular Tests Run From TheRock Build
+## Running Tests From TheRock Builds
 
 The hipDNN library is included in ROCm development and release builds produced by [TheRock](https://github.com/ROCm/TheRock).
 
