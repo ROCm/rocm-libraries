@@ -390,9 +390,9 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                              miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
                              miopen::LogRange(os, tc.lens, "_") << "_pads_";
                              miopen::LogRange(os, tc.pads, "_") << "_strides_";
-                             miopen::LogRange(os, tc.strides, "_") << "_idx"
-                                << static_cast<int>(tc.index_type) << "_mode"
-                                << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
+                             miopen::LogRange(os, tc.strides, "_")
+                                 << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
                              return os.str();
                          });
 
@@ -406,8 +406,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                              miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
                              miopen::LogRange(os, tc.lens, "_") << "_pads_";
                              miopen::LogRange(os, tc.pads, "_") << "_strides_";
-                             miopen::LogRange(os, tc.strides, "_") << "_idx"
-                                << static_cast<int>(tc.index_type) << "_mode"
-                                << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
+                             miopen::LogRange(os, tc.strides, "_")
+                                 << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
                              return os.str();
                          });
