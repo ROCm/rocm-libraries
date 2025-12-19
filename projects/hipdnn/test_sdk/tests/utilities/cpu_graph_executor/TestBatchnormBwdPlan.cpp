@@ -16,7 +16,7 @@
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -101,7 +101,8 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap
+        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormBwdPlanBuilder<DataType::FLOAT,
                             DataType::FLOAT,
@@ -177,7 +178,8 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap
+        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormBwdPlanBuilder<DataType::FLOAT,
                             DataType::FLOAT,
