@@ -176,7 +176,10 @@ else()
       gfx1100
       gfx1101
       gfx1102
+      gfx1150
       gfx1151
+      gfx1152
+      gfx1153
       gfx12-generic
     )
     if(BUILD_ADDRESS_SANITIZER)

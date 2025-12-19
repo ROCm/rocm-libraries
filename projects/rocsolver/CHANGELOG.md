@@ -4,6 +4,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ## rocSOLVER 3.32.0 for ROCm 7.2.0
 
+### Added
+
+* Support added for the gfx1150, gfx1152, and gfx1153 architectures
+
 ### Optimized
 
 * Improved the performance of LARFB and downstream functions such as GEQRF and ORMTR.
