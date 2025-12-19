@@ -75,7 +75,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
 
         delete handle;
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "handle destroyed");
     });
 }
 
@@ -87,8 +87,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream(hipdnnHandle_t handle, hipS
         throwIfNull(handle);
 
         handle->setStream(streamId);
+        hipdnn_backend::logging::logHipDeviceInfo(streamId);
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "stream={:p}", static_cast<void*>(streamId));
     });
 }
 
@@ -129,7 +130,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
         hipdnn_backend::DescriptorFactory::destroy(descriptor);
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "descriptor destroyed");
     });
 }
 
@@ -149,7 +150,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 
         handle->getPluginResourceManager()->executeOpGraph(executionPlan, variantPack);
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "executionPlan={}", logPtr(executionPlan));
     });
 }
 
@@ -162,7 +163,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
 
         descriptor->finalize();
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "descriptor={}", logPtr(descriptor));
     });
 }
 

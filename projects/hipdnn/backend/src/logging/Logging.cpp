@@ -32,8 +32,11 @@ bool s_loggingInitialized = false; // NOLINT(readability-identifier-naming)
 const std::string S_BACKEND_LOGGER_NAME = "hipdnn_backend";
 const std::string S_CALLBACK_RECEIVER_LOGGER_NAME = "hipdnn_callback_receiver";
 
-void logSystemInfo(const std::shared_ptr<spdlog::logger>& logger)
+} // namespace
+
+void logSystemInfo()
 {
+    auto logger = getBackendLogger();
     if(!logger)
     {
         return;
@@ -54,13 +57,21 @@ void logSystemInfo(const std::shared_ptr<spdlog::logger>& logger)
                      buffer.version,
                      buffer.machine);
     }
+}
+
+void logHipDeviceInfo(hipStream_t stream)
+{
+    auto logger = getBackendLogger();
+    if(!logger)
+    {
+        return;
+    }
 
     int deviceId = 0;
-    // Get device ID from the current stream
-    hipError_t err = hipStreamGetDevice(nullptr, &deviceId);
+    hipError_t err = hipStreamGetDevice(stream, &deviceId);
     if(err != hipSuccess)
     {
-        logger->warn("Failed to get device from current stream: {}", hipGetErrorString(err));
+        logger->warn("Failed to get device from stream: {}", hipGetErrorString(err));
         return;
     }
 
@@ -84,8 +95,6 @@ void logSystemInfo(const std::shared_ptr<spdlog::logger>& logger)
         props.multiProcessorCount,
         props.clockRate);
 }
-
-} // namespace
 
 void initialize()
 {
@@ -140,7 +149,8 @@ void initialize()
 
         s_loggingInitialized = true;
 
-        logSystemInfo(backendLogger);
+        logSystemInfo();
+        logHipDeviceInfo(nullptr);
 
         return;
     }
