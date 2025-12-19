@@ -96,11 +96,11 @@ namespace rocRoller::KernelGraph
             return std::nullopt;
         }
 
-        std::vector<int> const& BestNodeOrder::downstreamTagReplacements(int node) const
+        std::vector<int> const& BestNodeOrder::aTagReplacements(int node) const
         {
             {
-                auto iter = m_downstreamTagReplacements.find(node);
-                if(iter != m_downstreamTagReplacements.end())
+                auto iter = m_aTagReplacements.find(node);
+                if(iter != m_aTagReplacements.end())
                     return iter->second;
             }
 
@@ -118,13 +118,13 @@ namespace rocRoller::KernelGraph
 
             auto nodeLoop = getLoopOp(node);
 
-            auto isLeft = [](ControlToCoordinateMapper::Connection const& c){
+            auto isLeft = [](ControlToCoordinateMapper::Connection const& c) {
                 auto arg = getNaryArgument(c);
                 return arg == NaryArgument::LHS || arg == NaryArgument::LHS_SCALE;
             };
 
             auto          connections_ = m_graph.mapper.getConnections(node);
-            auto connections = connections_ | std::views::filter(isLeft);
+            auto          connections  = connections_ | std::views::filter(isLeft);
             std::set<int> tags;
 
             for(auto const& connection : connections)
@@ -165,23 +165,23 @@ namespace rocRoller::KernelGraph
 
             std::ranges::sort(rv, TopologicalCompare(m_graph));
 
-            m_downstreamTagReplacements[node] = std::move(rv);
+            m_aTagReplacements[node] = std::move(rv);
 
             auto showEntry = [](std::pair<int, std::vector<int>> const& entry) {
                 auto const& [tag, deps] = entry;
                 return fmt::format("Multiply {}: ({})", tag, fmt::join(deps, ", "));
             };
 
-            auto iter = m_downstreamTagReplacements.find(node);
+            auto iter = m_aTagReplacements.find(node);
             Log::critical(showEntry(*iter));
 
-            return m_downstreamTagReplacements[node];
+            return m_aTagReplacements[node];
         }
 
-        std::optional<bool> BestNodeOrder::orderByDownstreamTagReplacements(int a, int b) const
+        std::optional<bool> BestNodeOrder::orderByATagReplacements(int a, int b) const
         {
-            auto const& as = downstreamTagReplacements(a);
-            auto const& bs = downstreamTagReplacements(b);
+            auto const& as = aTagReplacements(a);
+            auto const& bs = aTagReplacements(b);
 
             auto aIter = as.begin(), bIter = bs.begin();
             for(; aIter != as.end() && bIter != bs.end(); ++aIter, ++bIter)
@@ -325,7 +325,7 @@ namespace rocRoller::KernelGraph
 
         bool BestNodeOrder::operator()(int a, int b) const
         {
-            if(auto order = orderByDownstreamTagReplacements(a, b))
+            if(auto order = orderByATagReplacements(a, b))
                 return *order;
 
             if(auto order = orderByDownstreamMemoryNodes(a, b))
@@ -409,7 +409,7 @@ namespace rocRoller::KernelGraph
         {
             for(auto x : range)
             {
-                downstreamTagReplacements(x);
+                aTagReplacements(x);
                 downstreamMemoryNode(x);
                 reversedTagDependencies(x);
             }
@@ -561,7 +561,7 @@ namespace rocRoller::KernelGraph
                 return fmt::format("Multiply {}: ({})\n", tag, fmt::join(deps, ", "));
             };
 
-            auto entries = m_downstreamTagReplacements | std::views::transform(showEntry);
+            auto entries = m_aTagReplacements | std::views::transform(showEntry);
 
             Log::critical("Tag info: {}", fmt::join(entries, ""));
         }
@@ -685,6 +685,18 @@ namespace rocRoller::KernelGraph
         }
 
     }
+    KernelGraph RemoveImplicitScheduling::apply(KernelGraph const& original)
+    {
+        auto rv = original;
+
+        auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(rv);
+        for(auto& [parent, nodes] : groupedMultiplyNodes)
+        {
+            OrderMultiplyNodesDetail::breakupNodes(rv, nodes);
+        }
+
+        return rv;
+    }
 
     KernelGraph OrderMultiplyNodes::apply(KernelGraph const& original)
     {
@@ -694,11 +706,9 @@ namespace rocRoller::KernelGraph
             auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(rv);
             for(auto& [parent, nodes] : groupedMultiplyNodes)
             {
-                OrderMultiplyNodesDetail::breakupNodes(rv, nodes);
-                Log::critical(rv.control.toDOT());
-
                 {
                     OrderMultiplyNodesDetail::BestNodeOrder comp(rv);
+                    // Pre-populate cache because some STL algorithms take the comparator by value.
                     comp.populateCache(nodes);
                     OrderMultiplyNodesDetail::orderNodes(rv, nodes, comp);
                     comp.logTagData();
