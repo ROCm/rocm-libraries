@@ -446,10 +446,6 @@ def isTN(kernel):
     return kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
 
 @CallableGuard
-def isTF32(kernel):
-    return kernel["UseF32XEmulation"]
-
-@CallableGuard
 def is16bit(kernel):
     return kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()
 
@@ -767,7 +763,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
-    print('kernel', kernel)
+    # print('kernel', kernel)
     kernel["MfmaInitCVgprs"] = True
     numMfma = 144
     optSchedule = dict()
@@ -775,21 +771,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     snopCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and useLDSTr and TLDS == 1:
-        # kernel["UsePLRPack"] = False
-
-        syncTable = [
-            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
-            
-            7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-            
-            35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-            
-            71, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-            71, SBarrier(comment=""),
-            
-            110, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
-            110, SBarrier(comment="")
-        ]
+        kernel["UsePLRPack"] = True
 
         snopTable = [
             -1, SNop(0),
@@ -810,36 +792,64 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
             107, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0")
         ]
         
+        syncTable = [
+            
+            9, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for first 2 LRA0"),
+            
+            19, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for first 2 LRB0"), # dscnt=2 or 6 or 4?
+            
+            21, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for all LRA0"),
+            
+            22, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0"),
+            22, SBarrier(comment="Barrier before GRA&GRB"),
+            
+            43, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Wait for prev GRA&GRB"),
+            43, SBarrier(comment=""),
+            
+            78,SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 1st 1 LRB3 to complete"),
+            90,SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB3 to complete"),
+
+            116, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 1st 2 LRA3 to complete"),
+            127, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA3 to complete")
+
+        ]
+        
         optSchedule = {
             'SYNC': [syncTable[::2]],
+            
+            'GRIncA' : [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB' : [[3, 3, 3, 4, 4, 4, 5, 5, 5]], 
 
-            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7]],
-            'LRA3': [[111, 112, 115, 116, 117, 118, 119, 120]],
+            #  - LRA0 + PACKA0 needs to be done before 1/4 MFMAs - index 36
+            'LRA0'   : [[0, 1, 2, 3, 4, 5, 6, 7]],
+            'PackA0' : [[9]*4 + [10]*20 + [11]*4 + [12]*20 + [14]*4 + [15]*20 + [16]*24],
+            
+            #  - LBR0 + PACKB0 needs to be done before 2/4 MFMAs - index 72
+            'LRB0'   : [[11, 12, 13, 14, 15, 16]],
+            'PackB0' : [[20]*4 + [21]*20 + [23]*4 + [24]*20 + [25]*4 + [26]*20],
+            
+            'GRA'    : [[35,35, 36,36, 37,37, 38,38, 39,39, 40,40, 41,41, 42,42]],
+            # 'GRA'    : [[71]*6 +[72]*8 + [73]*2],
+            'GRB'    : [[23,23, 24,24, 25,25, 29,29, 30,30, 31,31]], 
+            # 'GRB'    : [[23]*6 + [107]*6],
+            
+            #  - LRA3 + PACKA3 needs to start after 3/4 MFMAs - index 108
+            'LRA3'   : [[108,108, 111,111, 112,112, 113,113]],
+            'PackA3' : [[115]*4 + [116]*20 + [117]*4 + [118]*20 + [119]*4 + [120]*20 + [121]*24],
+            
+            #  - LRB3 + PACKB3 needs to start after 2/4 MFMAs - index 72
+            'LRB3'   : [[72,72, 79,79, 80,80]],
+            'PackB3' : [[78]*4 + [79]*20 + [80]*4 + [81]*20 + [82]*4 + [83]*20],
 
-            'LRB0': [[8, 9, 10, 11, 12, 13]],
-            'LRB3': [[113, 114, 121, 122, 123, 124]],
+            'LRSA'   : [[34]],
+            'LRSB'   : [[34]],
 
-            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
-            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], 
+            'LWSA'   : [[107]],
+            'LWSB'   : [[107]],
 
-            'LRSA': [[34]],
-            'LRSB': [[34]],
+            'LCC'    : [[143, 143]],
 
-            'GRA': [[71]*6 +[72]*8 + [73]*2],
-            'GRB': [[73]*6 + [107]*6],
-
-            'LWSA': [[108]],
-            'LWSB': [[108]],
-
-            'LCC': [[143, 143]],
-
-            'PackA3' : [[-1]*4 + [0]*20 + [1]*4 + [2]*20 + [3]*4 + [4]*20 + [5]*24],
-            'PackB3' : [[-1]*4 + [0]*20 + [1]*4 + [2]*20 + [3]*4 + [4]*20],
-
-            'PackA0' : [[35]*4 + [36]*20 + [37]*4 + [38]*20 + [39]*4 + [40]*20 + [41]*24],
-            'PackB0' : [[35]*4 + [36]*20 + [37]*4 + [38]*20 + [39]*4 + [40]*20],
-
-            'SNOP': [snopTable[::2]]
+            'SNOP'   : [snopTable[::2]]
         }
         syncCode = syncTable[1::2]
         snopCode = snopTable[1::2]
