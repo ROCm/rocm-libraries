@@ -12,7 +12,13 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(hipdnn_plugin_sdk_tests main.cpp TestExample.cpp)
+add_executable(hipdnn_plugin_sdk_tests
+    main.cpp
+    TestPluginDataTypeHelpers.cpp
+    TestPluginException.cpp
+    TestPluginHelpers.cpp
+    TestPluginLastErrorManager.cpp
+)
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(
