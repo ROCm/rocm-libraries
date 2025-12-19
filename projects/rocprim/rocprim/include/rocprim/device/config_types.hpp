@@ -361,14 +361,17 @@ struct target_arch_descriptor
     {                        \
         target_arch::ID, #ID \
     }
-constexpr auto target_arch_descriptors = std::array{
-    ROCPRIM_DEF_ARCH(gfx803),  ROCPRIM_DEF_ARCH(gfx900),  ROCPRIM_DEF_ARCH(gfx906),
-    ROCPRIM_DEF_ARCH(gfx908),  ROCPRIM_DEF_ARCH(gfx90a),  ROCPRIM_DEF_ARCH(gfx942),
-    ROCPRIM_DEF_ARCH(gfx950),  ROCPRIM_DEF_ARCH(gfx1010), ROCPRIM_DEF_ARCH(gfx1011),
-    ROCPRIM_DEF_ARCH(gfx1012), ROCPRIM_DEF_ARCH(gfx1030), ROCPRIM_DEF_ARCH(gfx1100),
-    ROCPRIM_DEF_ARCH(gfx1101), ROCPRIM_DEF_ARCH(gfx1102), ROCPRIM_DEF_ARCH(gfx1103),
-    ROCPRIM_DEF_ARCH(gfx1150), ROCPRIM_DEF_ARCH(gfx1151), ROCPRIM_DEF_ARCH(gfx1152),
-    ROCPRIM_DEF_ARCH(gfx1153), ROCPRIM_DEF_ARCH(gfx1200), ROCPRIM_DEF_ARCH(gfx1201),
+// TEMP FIX: The size of the array should be 1 larger then the amount of items.
+constexpr std::array<target_arch_descriptor, 22> target_arch_descriptors = {
+    {
+     ROCPRIM_DEF_ARCH(gfx803), ROCPRIM_DEF_ARCH(gfx900), ROCPRIM_DEF_ARCH(gfx906),
+     ROCPRIM_DEF_ARCH(gfx908), ROCPRIM_DEF_ARCH(gfx90a), ROCPRIM_DEF_ARCH(gfx942),
+     ROCPRIM_DEF_ARCH(gfx950), ROCPRIM_DEF_ARCH(gfx1010), ROCPRIM_DEF_ARCH(gfx1011),
+     ROCPRIM_DEF_ARCH(gfx1012), ROCPRIM_DEF_ARCH(gfx1030), ROCPRIM_DEF_ARCH(gfx1100),
+     ROCPRIM_DEF_ARCH(gfx1101), ROCPRIM_DEF_ARCH(gfx1102), ROCPRIM_DEF_ARCH(gfx1103),
+     ROCPRIM_DEF_ARCH(gfx1150), ROCPRIM_DEF_ARCH(gfx1151), ROCPRIM_DEF_ARCH(gfx1152),
+     ROCPRIM_DEF_ARCH(gfx1153), ROCPRIM_DEF_ARCH(gfx1200), ROCPRIM_DEF_ARCH(gfx1201),
+     }
 };
 #undef ROCPRIM_DEF_ARCH
 

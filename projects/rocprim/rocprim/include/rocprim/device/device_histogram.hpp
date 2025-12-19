@@ -184,13 +184,8 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         max_bins = std::max(max_bins, bins[channel]);
     }
 
-    hipStreamCaptureStatus status;
-    ROCPRIM_RETURN_ON_ERROR(hipStreamIsCapturing(stream, &status));
-
-    const bool use_shared_mem = total_shared_bins <= shared_impl_max_bins;
-    // TEMP FIX: disable optimization when using hipgraphs.
-    const bool use_private_histogram
-        = target_arch == target_arch::gfx942 && hipStreamCaptureStatusActive != status;
+    const bool use_shared_mem        = total_shared_bins <= shared_impl_max_bins;
+    const bool use_private_histogram = target_arch == target_arch::gfx942;
 
     Counter*      private_histograms         = nullptr;
     unsigned int* block_id_count             = nullptr;
