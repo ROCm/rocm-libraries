@@ -145,35 +145,198 @@ install_msgpack_from_source( )
     fi
 }
 
-install_aocl_from_source( )
+# Detect and validate available AOCL/BLAS libraries
+# INPUTS:  AOCL_ROOT (env var), HOME (env var)
+# OUTPUTS: AOCL_DETECTED ("aocl_root" | "system_5x" | "none")
+# EXITS:   on error if AOCL_ROOT is set but invalid
+detect_aocl( )
 {
-    # Clean AOCL if requested (before skip check, so --clean-deps --skip-aocl removes AOCL)
+    AOCL_DETECTED="none"
+
+    # Check 1: Validate AOCL_ROOT if set (highest priority)
+    if [[ -n "${AOCL_ROOT}" ]]; then
+        printf "\033[36m==== Validating AOCL_ROOT ====\033[0m\n"
+        printf "\033[33mAOCL_ROOT is set to: ${AOCL_ROOT}\033[0m\n"
+
+        # Check for AOCL 5.x (libaocl)
+        if [[ -f "${AOCL_ROOT}/lib/libaocl.so" ]] || [[ -f "${AOCL_ROOT}/lib/libaocl.a" ]] || \
+           [[ -f "${AOCL_ROOT}/lib64/libaocl.so" ]] || [[ -f "${AOCL_ROOT}/lib64/libaocl.a" ]]; then
+            printf "\033[32m✓ Found valid AOCL 5.x at AOCL_ROOT\033[0m\n"
+            printf "\033[36m==============================\033[0m\n"
+            AOCL_DETECTED="aocl_root"
+            return 0
+        fi
+
+        # Check for AOCL 4.x BLIS structure
+        for compiler in gcc aocc; do
+            if [[ -f "${AOCL_ROOT}/${compiler}/lib_ILP64/libblis-mt.a" ]] || \
+               [[ -f "${AOCL_ROOT}/lib_ILP64/libblis-mt.a" ]]; then
+                printf "\033[32m✓ Found valid AOCL 4.x BLIS at AOCL_ROOT\033[0m\n"
+                printf "\033[36m==============================\033[0m\n"
+                AOCL_DETECTED="aocl_root"
+                return 0
+            fi
+        done
+
+        # Check for generic BLIS in AOCL_ROOT
+        if [[ -f "${AOCL_ROOT}/lib/libblis.so" ]] || [[ -f "${AOCL_ROOT}/lib/libblis.a" ]] || \
+           [[ -f "${AOCL_ROOT}/lib64/libblis.so" ]] || [[ -f "${AOCL_ROOT}/lib64/libblis.a" ]]; then
+            printf "\033[33m⚠ Found BLIS library at AOCL_ROOT (may lack ILP64 support)\033[0m\n"
+            printf "\033[36m==============================\033[0m\n"
+            AOCL_DETECTED="aocl_root"
+            return 0
+        fi
+
+        # AOCL_ROOT is set but no valid AOCL found - this is an error
+        printf "\033[31m✗ ERROR: AOCL_ROOT is set but no valid AOCL installation found!\033[0m\n"
+        printf "\033[31m  Checked: ${AOCL_ROOT}/lib*/libaocl.* (5.x)\033[0m\n"
+        printf "\033[31m  Checked: ${AOCL_ROOT}/*/lib_ILP64/libblis-mt.a (4.x)\033[0m\n"
+        printf "\033[31m  Checked: ${AOCL_ROOT}/lib*/libblis.* (generic)\033[0m\n"
+        printf "\033[33m  Either unset AOCL_ROOT or point it to a valid AOCL installation\033[0m\n"
+        printf "\033[36m==============================\033[0m\n"
+        exit 2
+    fi
+
+    # Check 2: Look for system AOCL 5.x installations
+    printf "\033[36m==== Checking for system AOCL 5.x ====\033[0m\n"
+
+    # Check $HOME/aocl/<version>/{gcc,aocc}/
+    if [[ -n "${HOME}" ]]; then
+        for compiler_dir in ${HOME}/aocl/*/*/lib/libaocl.* ${HOME}/aocl/*/*/lib64/libaocl.*; do
+            if [[ -f "${compiler_dir}" ]]; then
+                local found_dir=$(dirname "$(dirname "${compiler_dir}")")
+                printf "\033[32m✓ Found AOCL 5.x in HOME: ${found_dir}\033[0m\n"
+                printf "\033[36m======================================\033[0m\n"
+                AOCL_DETECTED="system_5x"
+                return 0
+            fi
+        done
+    fi
+
+    # Check /opt/AMD/aocl/ for 5.x installations
+    for aocl_dir in /opt/AMD/aocl/*/lib*/libaocl.*; do
+        if [[ -f "${aocl_dir}" ]]; then
+            local found_dir=$(dirname "$(dirname "${aocl_dir}")")
+            printf "\033[32m✓ Found AOCL 5.x in /opt/AMD/aocl: ${found_dir}\033[0m\n"
+            printf "\033[36m======================================\033[0m\n"
+            AOCL_DETECTED="system_5x"
+            return 0
+        fi
+    done
+
+    # Check standard system paths
+    if [[ -f "/usr/local/lib/libaocl.so" ]] || [[ -f "/usr/local/lib/libaocl.a" ]] || \
+       [[ -f "/usr/lib/libaocl.so" ]] || [[ -f "/usr/lib64/libaocl.so" ]]; then
+        printf "\033[32m✓ Found AOCL 5.x in system libraries\033[0m\n"
+        printf "\033[36m======================================\033[0m\n"
+        AOCL_DETECTED="system_5x"
+        return 0
+    fi
+
+    # Nothing found
+    printf "\033[33mNo system AOCL 5.x installation found\033[0m\n"
+    printf "\033[36m======================================\033[0m\n"
+    AOCL_DETECTED="none"
+    return 1
+}
+
+# Install CMake from pre-built binary
+# INPUTS:  $1=version (e.g., "3.26.0"), build_dir
+# OUTPUTS: cmake_executable (updated to installed version), PATH (updated)
+install_cmake( )
+{
+    local cmake_version="$1"
+    local CMAKE_REPO="https://github.com/Kitware/CMake/releases/download"
+    local CMAKE_ARCH="linux-x86_64"
+    local CMAKE_TARGZ="cmake-${cmake_version}-${CMAKE_ARCH}.tar.gz"
+    local CMAKE_INSTALL_DIR="${build_dir}/deps/cmake-${cmake_version}"
+
+    # Check if already installed
+    if [[ -f "${CMAKE_INSTALL_DIR}/bin/cmake" ]]; then
+      printf "\033[32mCMake ${cmake_version} already installed at \033[33m${CMAKE_INSTALL_DIR}\033[0m\n"
+    else
+      pushd .
+      mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
+      printf "\033[32mDownloading CMake ${cmake_version} from \033[33m${CMAKE_REPO}/v${cmake_version}/${CMAKE_TARGZ}\033[0m\n"
+      wget -nv ${CMAKE_REPO}/v${cmake_version}/${CMAKE_TARGZ}
+      tar -xzf ${CMAKE_TARGZ}
+      rm ${CMAKE_TARGZ}
+      mv cmake-${cmake_version}-${CMAKE_ARCH} cmake-${cmake_version}
+      printf "\033[32m✓ CMake ${cmake_version} successfully installed!\033[0m\n"
+      popd
+    fi
+
+    # Update cmake_executable to use the newly installed version
+    cmake_executable="${CMAKE_INSTALL_DIR}/bin/cmake"
+    export PATH="${CMAKE_INSTALL_DIR}/bin:$PATH"
+    printf "\033[32mUsing cmake from: \033[33m${cmake_executable}\033[0m\n"
+    ${cmake_executable} --version
+}
+
+# Build AOCL 5.1 from source
+# INPUTS:  cmake_executable, build_dir, cxx, cc
+# OUTPUTS: AOCL 5.1 built in ${build_dir}/deps/aocl/install_package/
+build_aocl_5_1( )
+{
+    printf "\033[32mBuilding \033[33mAOCL 5.1\033[32m from source (preferred for testing)\033[0m\n"
+
+    # Build AOCL 5.1 (cmake_executable should already be set to 3.26+ by this point)
+    pushd .
+    mkdir -p ${build_dir}/deps
+    cd ${build_dir}/deps
+    git clone --quiet -b AOCL-5.1-GA https://github.com/amd/aocl.git
+    cd aocl
+    CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON  -DENABLE_ILP64=ON  -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
+    elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
+    printf "\033[32m✓ AOCL 5.1 successfully built with ILP64 support\033[0m\n"
+    printf "\033[32m  Location: \033[33m${build_dir}/deps/aocl/install_package/lib/libaocl.so\033[0m\n"
+    popd
+}
+
+# Setup AOCL library for rocBLAS clients
+# INPUTS:  clean_deps, build_dir, skip_aocl, AOCL_DETECTED (from detect_aocl)
+# OUTPUTS: AOCL available (via detection or build), AOCL_DETECTED set
+setup_aocl( )
+{
+    # Clean AOCL if requested (before any checks)
     if [[ "${clean_deps}" == true ]] && [[ -d "${build_dir}/deps/aocl" ]]; then
       printf "\033[33mRemoving existing AOCL build (--clean-deps specified)\033[0m\n"
       rm -rf "${build_dir}/deps/aocl"
     fi
 
-    # Skip AOCL installation if requested
-    if [[ "${skip_aocl}" == true ]]; then
-      printf "\033[33mSkipping AOCL installation (--skip-aocl specified)\033[0m\n"
-      return
-    fi
+    # Detect what AOCL/BLAS is available
+    detect_aocl
+    local detection_result=$?
 
-    if [[ ! -d "${build_dir}/deps/aocl" ]]; then
-      pushd .
-      mkdir -p ${build_dir}/deps
-      cd ${build_dir}/deps
-      printf "\033[32mBuilding \033[33mAOCL 5.1\033[32m from source\033[0m\n"
-      git clone --quiet -b AOCL-5.1-GA https://github.com/amd/aocl.git
-      cd aocl
-      CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON  -DENABLE_ILP64=ON  -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
-      elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
-      printf "\033[32m✓ AOCL 5.1 successfully built with ILP64 support\033[0m\n"
-      printf "\033[32m  Location: \033[33m${build_dir}/deps/aocl/install_package/lib/libaocl.so\033[0m\n"
-      popd
-    else
-      printf "\033[32mAOCL already built at \033[33m${build_dir}/deps/aocl\033[32m (use --clean-deps to force rebuild)\033[0m\n"
-    fi
+    # Decision logic based on detection results
+    case "${AOCL_DETECTED}" in
+        aocl_root)
+            printf "\033[32mUsing AOCL at AOCL_ROOT=${AOCL_ROOT}\033[0m\n"
+            return  # CMake will find it via AOCL_ROOT environment variable
+            ;;
+        system_5x)
+            printf "\033[32mUsing system-installed AOCL 5.x (no build needed)\033[0m\n"
+            return  # CMake will find it in system paths
+            ;;
+        none)
+            # No existing AOCL found, decide what to do
+            if [[ "${skip_aocl}" == true ]]; then
+                printf "\033[33mSkipping AOCL 5.1 build (--skip-aocl specified)\033[0m\n"
+                printf "\033[33mCMake will search for: AOCL 4.x → system CBLAS\033[0m\n"
+                return  # CMake will fall back to 4.x or system BLAS
+            fi
+
+            # Default: Build AOCL 5.1 locally
+            if [[ -d "${build_dir}/deps/aocl" ]]; then
+                printf "\033[32mAOCL 5.1 already built at \033[33m${build_dir}/deps/aocl\033[0m\n"
+                printf "\033[32m(use --clean-deps to force rebuild)\033[0m\n"
+                return
+            fi
+
+            # Build AOCL 5.1
+            build_aocl_5_1
+            ;;
+    esac
 }
 
 # Take an array of packages as input, and delegate the work to the appropriate distro installer
@@ -234,20 +397,6 @@ install_packages( )
     fi
   fi
 
-  # wget and openssl are needed for cmake
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
-    if $update_cmake == true; then
-      library_dependencies_ubuntu+=("wget" "libssl-dev")
-      library_dependencies_centos_rhel+=("wget" "openssl-devel")
-      library_dependencies_centos_8+=("wget" "openssl-devel")
-      library_dependencies_rhel_8+=("wget" "openssl-devel")
-      library_dependencies_rhel_9+=("wget" "openssl-devel")
-      library_dependencies_rhel_10+=("wget" "openssl-devel")
-      library_dependencies_fedora+=("wget")
-      library_dependencies_sles+=("wget" "libopenssl-devel")
-    fi
-  fi
-
   if [[ "${build_clients}" == true ]]; then
     # dependencies to build the client
     library_dependencies_ubuntu+=( "gfortran" "libomp-dev" )
@@ -258,18 +407,6 @@ install_packages( )
     library_dependencies_rhel_10+=( "gcc-gfortran" "libgomp" )
     library_dependencies_fedora+=( "gcc-gfortran" "libgomp" )
     library_dependencies_sles+=( "gcc-fortran" "libgomp1" )
-
-    # wget is needed for blis
-    if [[ ! -e "${build_dir}/deps/blis/lib/libblis.a" ]] && [[ ! -e "/usr/local/lib/libblis.a" ]]; then
-      library_dependencies_ubuntu+=("wget")
-      library_dependencies_centos_rhel+=("wget")
-      library_dependencies_centos_8+=("wget")
-      library_dependencies_rhel_8+=("wget")
-      library_dependencies_rhel_9+=("wget")
-      library_dependencies_rhel_10+=("wget")
-      library_dependencies_fedora+=("wget")
-      library_dependencies_sles+=("wget")
-    fi
   fi
 
   case "${ID}" in
@@ -386,8 +523,11 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
                                      (Generated binaries will be located at <builddir>/release/clients/staging)
     --clients-only                   Skip building the library and only build the clients with a pre-built library.
 
-    --cmake_install                  Install minimum cmake version (3.26.0) if required.
-                                     Downloads pre-built binary to <builddir>/deps (much faster than building from source).
+    --cmake_install                  Force install of CMake 3.26.0 (even if system version is sufficient).
+                                     Downloads pre-built binary to <builddir>/deps.
+                                     Note: CMake is auto-installed when needed (no flag required):
+                                       - If system CMake < 3.24.4 (rocBLAS minimum)
+                                       - If system CMake < 3.26.0 and building AOCL 5.1
 
     -d, --dependencies               Build and install external dependencies.
                                      Dependencies are to be installed in /usr/local. This should be done only once.
@@ -409,30 +549,35 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
   Dependency Management Options:
 
     --clean-deps                     Remove existing dependency builds before building.
-                                     Affects AOCL, BLIS, googletest, and msgpack.
+                                     Affects AOCL, googletest, and msgpack.
                                      Use with --skip-aocl to clean AOCL without rebuilding it.
 
-    --skip-aocl                      Skip AOCL 5.1 automatic build; use next available BLAS library.
-                                     BLAS library search order (when building clients with -c flag):
-                                       1. AOCL 5.x unified library (libaocl.so/a)
-                                          - Built from source in <builddir>/deps/aocl/ (unless --skip-aocl)
-                                          - AOCL_ROOT environment variable location
-                                          - $HOME/aocl/*/ directories
-                                          - /opt/AMD/aocl/ directories
-                                       2. AOCL 4.x BLIS (GCC, ILP64) in /opt/AMD/aocl/
-                                       3. AOCL 4.x BLIS (AOCC) in /opt/AMD/aocl/
-                                       4. Bundled BLIS (downloaded by install.sh)
-                                       5. System CBLAS via pkg-config
+    --skip-aocl                      Skip AOCL 5.1 automatic build.
+                                     Falls back to AOCL 4.x (if installed) → system CBLAS.
+                                     Use this if you want to use an existing AOCL 4.x installation.
 
   Environment Variables:
 
     AOCL_ROOT                        Override AOCL library detection. Point to AOCL installation root.
-                                     Example: export AOCL_ROOT=$HOME/aocl/5.1.0/gcc
+                                     Supports both AOCL 5.x and 4.x installations.
+                                     install.sh validates AOCL_ROOT and errors if invalid.
+                                     Example: export AOCL_ROOT=/usr/local
+                                              export AOCL_ROOT=$HOME/aocl/5.1.0/gcc
+                                              export AOCL_ROOT=/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc
+
+  BLAS Library Selection Logic (simplified):
+
+    1. AOCL_ROOT set?        → Validate and use it (errors if invalid)
+    2. System AOCL 5.x?      → Use system installation
+    3. --skip-aocl NOT set?  → Build AOCL 5.1 locally (default, preferred for testing)
+    4. System AOCL 4.x?      → Use it (only if --skip-aocl was set)
+    5. System CBLAS?         → Use via pkg-config (OpenBLAS, etc.)
 
   Notes:
 
-    - AOCL 5.1 is built with ILP64 support (64-bit integers) for large matrix operations.
-    - Use --skip-aocl if you have a pre-installed AOCL or prefer a different BLAS library.
+    - AOCL 5.1 with ILP64 support (64-bit integers) is preferred for testing/compatibility.
+    - CI/Docker: Pre-install AOCL 5.1+ for faster builds, or let install.sh build it automatically.
+    - CMake is automatically installed when needed - no --cmake_install flag required!
     - AOCL build takes ~5-10 minutes on first run; subsequent builds reuse existing build.
     - Without ILP64 support, stress tests may fail: use --gtest_filter=-*stress* when testing.
 
@@ -537,64 +682,6 @@ set -x
 
 printf "\033[32mCreating project build directory in: \033[33m${build_dir}\033[0m\n"
 
-install_blis()
-{
-    # Clean BLIS if requested
-    if [[ "${clean_deps}" == true ]] && [[ -d "${build_dir}/deps/blis" ]]; then
-      printf "\033[33mRemoving existing BLIS build (--clean-deps specified)\033[0m\n"
-      rm -rf "${build_dir}/deps/blis"
-    fi
-
-    # Check for existing AOCL installations
-    printf "\033[36m==== BLAS Library Detection ====\033[0m\n"
-    if [[ -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]]; then
-        printf "\033[32mFound existing AOCL 4.2.0 (GCC) in /opt/AMD/aocl/\033[0m\n"
-    elif [[ -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]]; then
-        printf "\033[32mFound existing AOCL 4.1.0 (AOCC) in /opt/AMD/aocl/\033[0m\n"
-    elif [[ -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a" ]]; then
-        printf "\033[32mFound existing AOCL 4.0 (AOCC) in /opt/AMD/aocl/\033[0m\n"
-    elif [[ -e "/usr/local/lib/libblis.a" ]]; then
-        printf "\033[32mFound existing BLIS in /usr/local/lib/\033[0m\n"
-    else
-        printf "\033[33mNo existing AOCL installation found in /opt or /usr/local\033[0m\n"
-    fi
-
-    if [[ ! -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]] &&
-        [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]] &&
-        [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a"  ]] &&
-        [[ ! -e "/usr/local/lib/libblis.a" ]]; then
-        pushd .
-        #Download prebuilt AMD multithreaded blis
-        if [[ ! -e "./blis/lib/libblis.a" ]]; then
-          printf "\033[32mDownloading bundled BLIS library (fallback)...\033[0m\n"
-          case "${ID}" in
-              centos|rhel|sles|opensuse-leap)
-                  wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-centos-2.0.tar.gz
-                  ;;
-              ubuntu)
-                  wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-ubuntu-2.0.tar.gz
-                  ;;
-              *)
-                  echo "Unsupported OS for this script"
-                  wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-ubuntu-2.0.tar.gz
-                  ;;
-          esac
-
-          tar -xvf blis.tar.gz
-          rm -rf blis/amd-blis-mt
-          mv amd-blis-mt blis
-          rm blis.tar.gz
-          cd blis/lib
-          ln -sf libblis-mt.a libblis.a
-          printf "\033[32mBundled BLIS installed to ${build_dir}/deps/blis/\033[0m\n"
-        else
-          printf "\033[32mBundled BLIS already present at ${build_dir}/deps/blis/\033[0m\n"
-        fi
-        popd
-    fi
-    printf "\033[36m================================\033[0m\n"
-}
-
 # #################################################
 # default tools
 # #################################################
@@ -605,83 +692,179 @@ cxx="g++"
 cc="gcc"
 fc="gfortran"
 
+# Constants
+CMAKE_MIN_VERSION="3.24.4"  # Minimum for rocBLAS itself
+CMAKE_AOCL_MIN="3.26.0"     # Minimum for AOCL 5.1 build
+
 # #################################################
-# dependencies
+# Dependency helper functions
 # #################################################
-if [[ "${install_dependencies}" == true ]]; then
-  CMAKE_VERSION=$(${cmake_executable} --version | grep -oP '(?<=version )[^ ]*')
-  CMAKE_MIN_VERSION="3.26.0"
 
-  install_packages
+# Detect if we'll need to build AOCL 5.1
+# INPUTS:  build_clients, skip_aocl, AOCL_DETECTED (from detect_aocl), build_dir
+# OUTPUTS: will_build_aocl (true/false)
+determine_aocl_build_requirement( )
+{
+    will_build_aocl=false
 
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
-      if $update_cmake == true; then
-        pushd .
-        printf "\033[32mInstalling \033[33mcmake ${CMAKE_MIN_VERSION}\033[32m from pre-built binary\033[0m\n"
-        CMAKE_REPO="https://github.com/Kitware/CMake/releases/download"
-        CMAKE_ARCH="linux-x86_64"
-        CMAKE_TARGZ="cmake-${CMAKE_MIN_VERSION}-${CMAKE_ARCH}.tar.gz"
-        CMAKE_INSTALL_DIR="${build_dir}/deps/cmake-${CMAKE_MIN_VERSION}"
+    # AOCL only needed for clients
+    if [[ "${build_clients}" != true ]]; then
+        printf "\033[36mNot building clients - AOCL/BLAS not required\033[0m\n"
+        return 1
+    fi
 
-        # Check if already installed
-        if [[ -f "${CMAKE_INSTALL_DIR}/bin/cmake" ]]; then
-          printf "\033[32mCMake ${CMAKE_MIN_VERSION} already installed at \033[33m${CMAKE_INSTALL_DIR}\033[0m\n"
-        else
-          mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-          printf "\033[32mDownloading CMake pre-built binary from \033[33m${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}\033[0m\n"
-          wget -nv ${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}
+    # User explicitly skipped AOCL
+    if [[ "${skip_aocl}" == true ]]; then
+        return 1
+    fi
 
-          printf "\033[32mExtracting CMake to \033[33m${CMAKE_INSTALL_DIR}\033[0m\n"
-          tar -xzf ${CMAKE_TARGZ}
-          rm ${CMAKE_TARGZ}
+    # Check if AOCL already available
+    detect_aocl > /dev/null 2>&1
+    if [[ "${AOCL_DETECTED}" != "none" ]]; then
+        return 1
+    fi
 
-          # Move extracted directory to standard location
-          mv cmake-${CMAKE_MIN_VERSION}-${CMAKE_ARCH} cmake-${CMAKE_MIN_VERSION}
-          printf "\033[32mCMake ${CMAKE_MIN_VERSION} successfully installed!\033[0m\n"
+    # Check if already built locally
+    if [[ -d "${build_dir}/deps/aocl" ]]; then
+        return 1
+    fi
+
+    # Will need to build AOCL
+    will_build_aocl=true
+    printf "\033[33mDetected: Will need to build AOCL 5.1 for clients\033[0m\n"
+    return 0
+}
+
+# Determine which CMake version we need and if we need to install it
+# INPUTS:  cmake_executable, will_build_aocl, update_cmake, CMAKE_MIN_VERSION, CMAKE_AOCL_MIN
+# OUTPUTS: need_cmake_install (true/false), cmake_target_version (version string)
+# LOGIC:   - Auto-install if CMake < 3.24.4 (rocBLAS minimum)
+#          - Auto-install if CMake < 3.26.0 AND building AOCL
+#          - Install if --cmake_install (force, even if version is higher)
+determine_cmake_requirements( )
+{
+    local CMAKE_VERSION=$(${cmake_executable} --version | grep -oP '(?<=version )[^ ]*' || echo "")
+    need_cmake_install=false
+    cmake_target_version="${CMAKE_MIN_VERSION}"
+
+    # Check if system CMake meets rocBLAS minimum (3.24.4)
+    if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION 2>/dev/null || [[ "$CMAKE_VERSION" < "$CMAKE_MIN_VERSION" ]]); then
+        printf "\033[33mSystem CMake ${CMAKE_VERSION:-none} < ${CMAKE_MIN_VERSION} - will auto-install\033[0m\n"
+        need_cmake_install=true
+        cmake_target_version="${CMAKE_MIN_VERSION}"
+    fi
+
+    # Check if we need higher version for AOCL (3.26.0)
+    if [[ "${will_build_aocl}" == true ]]; then
+        if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_AOCL_MIN 2>/dev/null || [[ "$CMAKE_VERSION" < "$CMAKE_AOCL_MIN" ]]); then
+            printf "\033[33mAOCL 5.1 build requires CMake >= ${CMAKE_AOCL_MIN} - will auto-install\033[0m\n"
+            need_cmake_install=true
+            cmake_target_version="${CMAKE_AOCL_MIN}"
         fi
+    fi
 
-        # Update cmake_executable to use the newly installed version
-        cmake_executable="${CMAKE_INSTALL_DIR}/bin/cmake"
-        export PATH="${CMAKE_INSTALL_DIR}/bin:$PATH"
-        printf "\033[32mUsing cmake from: \033[33m${cmake_executable}\033[0m\n"
-        ${cmake_executable} --version
+    # User explicitly requested CMake install (force, even if version is sufficient)
+    if [[ "$update_cmake" == true ]]; then
+        printf "\033[33m--cmake_install specified - will install CMake ${CMAKE_AOCL_MIN}\033[0m\n"
+        need_cmake_install=true
+        cmake_target_version="${CMAKE_AOCL_MIN}"  # Install higher version when forced
+    fi
+}
 
-        popd
-      else
-          echo "rocBLAS requires CMake version >= ${CMAKE_MIN_VERSION} and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_MIN_VERSION} will be installed to ${build_dir}/deps"
-          exit 2
-      fi
-  fi
+# Add wget to package dependencies for all distros
+# INPUTS:  library_dependencies_* arrays (modified in place)
+# OUTPUTS: library_dependencies_* arrays (wget added)
+add_wget_dependency( )
+{
+    library_dependencies_ubuntu+=("wget")
+    library_dependencies_centos_rhel+=("wget")
+    library_dependencies_centos_8+=("wget")
+    library_dependencies_rhel_8+=("wget")
+    library_dependencies_rhel_9+=("wget")
+    library_dependencies_rhel_10+=("wget")
+    library_dependencies_fedora+=("wget")
+    library_dependencies_sles+=("wget")
+}
 
-  # cmake is needed to install msgpack
-  case "${ID}" in
-    centos|rhel|sles|opensuse-leap)
-      if [[ "${tensile_msgpack_backend}" == true ]]; then
-        install_msgpack_from_source
-      fi
-      ;;
-  esac
+# Setup CMake - install if needed
+# INPUTS:  need_cmake_install, cmake_target_version
+# OUTPUTS: cmake_executable (updated if installed)
+setup_cmake_for_build( )
+{
+    if [[ "${need_cmake_install}" == true ]]; then
+        printf "\033[32mAuto-installing CMake ${cmake_target_version}\033[0m\n"
+        install_cmake "${cmake_target_version}"
+    fi
+}
 
-  if [[ "${build_clients}" == true ]]; then
-    # The following builds googletest from source, installs into cmake default /usr/local
+# Install msgpack on distros that need it
+# INPUTS:  tensile_msgpack_backend, ID (distro name)
+# OUTPUTS: msgpack installed (side effect), build_dir/deps/msgpack-c created
+install_msgpack_if_needed( )
+{
+    if [[ "${tensile_msgpack_backend}" != true ]]; then
+        return
+    fi
+
+    case "${ID}" in
+        centos|rhel|sles|opensuse-leap)
+            install_msgpack_from_source
+            ;;
+    esac
+}
+
+# Install client dependencies (AOCL and googletest)
+# INPUTS:  build_clients, build_dir, cmake_executable, cxx, cc, fc, ROCBLAS_SRC_PATH
+# OUTPUTS: AOCL setup (via setup_aocl), googletest installed to /usr/local
+install_client_dependencies( )
+{
+    if [[ "${build_clients}" != true ]]; then
+        return
+    fi
+
     pushd .
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    install_blis
-    install_aocl_from_source
 
-    # build other deps
+    # Setup AOCL first (may be needed by client tests)
+    setup_aocl
+
+    # Build googletest from source, installs into cmake default /usr/local
     printf "\033[32mBuilding \033[33mgoogletest; installing into \033[33m/usr/local\033[0m\n"
     CXX=${cxx} CC=${cc} FC=${fc} ${cmake_executable} ${ROCBLAS_SRC_PATH}/deps
     make build_deps
     elevate_if_not_root make install_deps
     popd
+}
+
+# #################################################
+# dependencies - main flow
+# #################################################
+if [[ "${install_dependencies}" == true ]]; then
+  # Phase 1: Detect requirements
+  # Sets: will_build_aocl
+  determine_aocl_build_requirement
+
+  # Sets: need_cmake_install, cmake_target_version
+  determine_cmake_requirements
+
+  # Phase 2: Add wget if needed for CMake download
+  # Uses: need_cmake_install
+  if [[ "${need_cmake_install}" == true ]]; then
+    add_wget_dependency
   fi
-elif [[ "${build_clients}" == true ]]; then
-  pushd .
-  mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-  install_blis
-  install_aocl_from_source
-  popd
+
+  # Phase 3: Install system packages
+  # Uses: library_dependencies_* arrays (including wget if added)
+  install_packages
+
+  # Phase 4: Setup CMake
+  # Uses: need_cmake_install, cmake_target_version
+  # Updates: cmake_executable (if installed)
+  setup_cmake_for_build
+
+  # Phase 5: Install additional dependencies
+  install_msgpack_if_needed
+  install_client_dependencies
 fi
 
 # #################################################
