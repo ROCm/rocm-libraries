@@ -115,6 +115,40 @@ TEST_CASE("Origami: best_macro_tile_size", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - rank configs by latency") {
+      auto hardware = make_hardware(gpu_arch);
+      hardware.lds_capacity = 400000;
+      auto problem  = make_problem(4096, 4096, 32768);
+
+      // List 1: config A first, then config B
+      std::vector<origami::config_t> configs;
+
+      // config A[0]
+      configs.push_back(make_config(128, 128, 512, 16, 16, 128));
+      // config A[1]
+      configs.push_back(make_config(256, 256, 512, 16, 16, 128));
+      // config A[2]
+      configs.push_back(make_config(64, 64, 128, 32, 32, 64));
+
+      problem.a_dtype = origami::data_type_t::Float4;
+      problem.b_dtype = origami::data_type_t::Float4;
+      problem.a_mx_block_size = 32;
+      problem.b_mx_block_size = 32;
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+
+      REQUIRE(results.size() == configs.size());
+      // Results should be ranked, so latencies should be in ascending order (best first)
+      REQUIRE(results[0].config.mt.m == 256);
+      REQUIRE(results[1].config.mt.m == 128);
+      REQUIRE(results[2].config.mt.m == 64);
+
+    }
+  }
+}
+
 TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - workgroup mapping selection") {
