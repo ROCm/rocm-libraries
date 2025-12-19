@@ -10,7 +10,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class MockGraph : public hipdnn_plugin::IGraph
+class MockGraph : public hipdnn_plugin_sdk::IGraph
 {
 public:
     MOCK_METHOD(const hipdnn_sdk::data_objects::Graph&, getGraph, (), (const, override));
@@ -24,7 +24,7 @@ public:
                 getNode,
                 (uint32_t index),
                 (const, override));
-    MOCK_METHOD(const hipdnn_plugin::INodeWrapper&,
+    MOCK_METHOD(const hipdnn_plugin_sdk::INodeWrapper&,
                 getNodeWrapper,
                 (uint32_t index),
                 (const, override));
@@ -33,7 +33,7 @@ public:
         getTensorMap,
         (),
         (const, override));
-    MOCK_METHOD(const std::vector<std::unique_ptr<hipdnn_plugin::INodeWrapper>>&,
+    MOCK_METHOD(const std::vector<std::unique_ptr<hipdnn_plugin_sdk::INodeWrapper>>&,
                 nodeWrappers,
                 (),
                 (const, override));

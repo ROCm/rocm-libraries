@@ -709,7 +709,7 @@ namespace rocRoller
                 {
                     co_yield m_context->mem()->moveData<Dir>(
                         info.kind,
-                        colOffsetReg->subset({0}),
+                        colOffsetReg,
                         info.data->element(
                             {static_cast<int>((i * info.n + j) / info.packedAmount)}),
                         info.offset,
@@ -1113,6 +1113,7 @@ namespace rocRoller
                                                                          LoadTiled const& load,
                                                                          Transformer      coords)
         {
+            auto [macTileTag, macTile]   = m_graph->getDimension<MacroTile>(tag);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
 
             rocRoller::Log::getLogger()->debug(
@@ -1136,8 +1137,14 @@ namespace rocRoller
             uint numVgpr = numElements / (activeLanesInWave * packing);
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
+            auto memoryKind = MemoryInstructions::MemoryKind::Buffer;
+            if(macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
+            {
+                memoryKind = MemoryInstructions::MemoryKind::Global;
+            }
+
             LoadStoreTileInfo info{.tag     = tag,
-                                   .kind    = MemoryInstructions::MemoryKind::Buffer,
+                                   .kind    = memoryKind,
                                    .m       = 1,
                                    .n       = numVgpr,
                                    .data    = nullptr,
@@ -1209,6 +1216,7 @@ namespace rocRoller
                 break;
             case MemoryType::WAVE:
             case MemoryType::WAVE_SWIZZLE:
+            case MemoryType::WAVE_FROM_GLOBAL:
             {
                 switch(macTile.layoutType)
                 {
@@ -1244,6 +1252,7 @@ namespace rocRoller
                 break;
             case MemoryType::WAVE:
             case MemoryType::WAVE_SWIZZLE:
+            case MemoryType::WAVE_FROM_GLOBAL:
             {
                 switch(macTile.layoutType)
                 {

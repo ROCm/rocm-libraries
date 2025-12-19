@@ -264,6 +264,8 @@ namespace rocRoller::KernelGraph
                 return "STRIDE";
             case ComputeIndexArgument::BUFFER:
                 return "BUFFER";
+            case ComputeIndexArgument::BASEADDRESS:
+                return "BASEADDRESS";
             default:
                 return "Invalid";
             }
