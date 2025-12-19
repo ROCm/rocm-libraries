@@ -3,7 +3,7 @@
 
 #include <array>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
@@ -88,8 +88,8 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&&
 
     if(solution == nullptr || numSolutions != 1)
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                   "miopenFindSolutions returned no solutions");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "miopenFindSolutions returned no solutions");
     }
 
     _solution

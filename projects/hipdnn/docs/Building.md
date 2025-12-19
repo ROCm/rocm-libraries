@@ -109,9 +109,9 @@ cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
 
 ### Code Coverage Build
 ```bash
-cmake -GNinja -DCODE_COVERAGE=ON ..
+cmake -GNinja -DHIPDNN_ENABLE_COVERAGE=ON ..
 ninja code_coverage
-# Coverage reports will be generated in build/hipdnn_code_coverage/
+# Coverage reports will be generated in build/coverage_report/
 ```
 
 ### Address Sanitizer Build
@@ -166,7 +166,7 @@ All targets support parallel builds with ninja.
 | `install` | Install libraries and headers |
 | `format` | Auto-format all C++ source files |
 | `check_format` | Check code formatting compliance |
-| `code_coverage` | Generate test coverage reports (requires `-DCODE_COVERAGE=ON`) |
+| `code_coverage` | Generate test coverage reports (requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
 | `generate_hipdnn_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
@@ -204,6 +204,9 @@ To do a standalone build of hipDNN, you will need to set up a number of pre-requ
 
 > [!NOTE]
 > The standalone build of hipDNN requires a subset of the full environment required for building TheRock. Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
+
+#### Automated Setup Script (Optional)
+An automated PowerShell script is available to perform the steps outlined below. This script is provided as a convenience and may not work in all environments. Review the script before running it to ensure it meets your needs: [windows_build_setup.ps1](../scripts/windows/windows_build_setup.ps1).
 
 #### 1. Install Chocolatey Package Manager
 

@@ -941,6 +941,14 @@ namespace rocRoller
                 co_yield generateOp<BitFieldExtract>(dest, arg, expr);
             }
 
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Reinterpret const& expr)
+            {
+                co_yield call(dest, expr.arg);
+                AssertFatal(dest != nullptr,
+                            "Reinterpret expression must have a destination register.");
+                dest->setVariableType(expr.destinationType);
+            }
+
             Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
             {
 
@@ -1300,7 +1308,6 @@ namespace rocRoller
                    && getConsolidationCount(tree) == 0))
             {
                 // Don't use CSE in this case
-
                 tree.resize(0);
                 co_yield v.call(dest, expr);
             }
