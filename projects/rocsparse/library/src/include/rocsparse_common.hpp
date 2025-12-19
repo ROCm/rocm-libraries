@@ -229,6 +229,14 @@ namespace rocsparse
     }
 
     template <>
+    __device__ __forceinline__ rocsparse_bfloat16 fma(rocsparse_bfloat16 p,
+                                                      rocsparse_bfloat16 q,
+                                                      rocsparse_bfloat16 r)
+    {
+        return std::fma(p, q, r);
+    }
+
+    template <>
     __device__ __forceinline__ int32_t fma(int32_t p, int32_t q, int32_t r)
     {
         return p * q + r;
@@ -607,6 +615,11 @@ namespace rocsparse
     {
         ptr[0] = val;
     }
+    __device__ __forceinline__ void nontemporal_store(rocsparse_bfloat16  val,
+                                                      rocsparse_bfloat16* ptr)
+    {
+        ptr[0] = val;
+    }
 
     __device__ __forceinline__ int32_t shfl(int32_t var, int src_lane, int width = warpSize)
     {
@@ -850,6 +863,128 @@ namespace rocsparse
         if(val != static_cast<_Float16>(0))
             return atomic_add_by_CAS(
                 reinterpret_cast<half*>(base_ptr), idx, static_cast<half>(val), size);
+        return base_ptr[idx];
+    }
+
+    // Global spinlock for odd-sized bfloat16 array edge cases
+    __device__ unsigned int g_bf16_lock = 0;
+
+    __device__ rocsparse_bfloat16 atomic_add_by_CAS(rocsparse_bfloat16* base_ptr,
+                                                    int                 idx,
+                                                    rocsparse_bfloat16  val,
+                                                    int                 size)
+    {
+        // Check bounds
+        if(idx >= 0 && idx < size)
+        {
+
+            rocsparse_bfloat16* addr      = &base_ptr[idx];
+            int                 is_second = (idx & 1);
+
+            // If this is the "high" half of an odd-sized array's last element, use spinlock
+            if((size & 1) && idx == size - 1)
+            {
+                // Find the first active thread in the wavefront for this branch
+                unsigned long long int active_mask = __ballot(1);
+
+                int first_active_lane = __ffsll(active_mask) - 1;
+
+                float tmp = wfreduce_sum_mask(static_cast<float>(val), active_mask);
+
+                if(__lane_id() == first_active_lane)
+                {
+                    // Acquire spinlock
+                    while(atomicCAS(&g_bf16_lock, 0U, 1U) != 0U)
+                        ;
+
+                    // Handle unpaired last element
+                    rocsparse_bfloat16 old_val = *addr;
+                    *addr = static_cast<rocsparse_bfloat16>(static_cast<float>(old_val) + tmp);
+
+                    // Release spinlock
+                    atomicExch(&g_bf16_lock, 0U);
+
+                    tmp = static_cast<float>(old_val);
+                }
+                // Broadcast the old value from first_lane to all active threads
+                tmp = __shfl(tmp, first_active_lane);
+
+                return static_cast<rocsparse_bfloat16>(tmp);
+            }
+
+            // Safe to do paired atomic CAS
+            unsigned int* float_addr = (unsigned int*)((uintptr_t)addr & ~3);
+            unsigned int  old        = *float_addr;
+            unsigned int  assumed;
+            unsigned int  new_val;
+
+            do
+            {
+                assumed = old;
+
+                // Extract both halves (bfloat16 is stored as upper 16 bits of float representation)
+                rocsparse_bfloat16 bf_low;
+                rocsparse_bfloat16 bf_high;
+                bf_low.data  = (unsigned short)assumed;
+                bf_high.data = (unsigned short)(assumed >> 16);
+
+                // Add to the appropriate half
+                if(is_second)
+                {
+                    bf_high = static_cast<rocsparse_bfloat16>(static_cast<float>(bf_high)
+                                                              + static_cast<float>(val));
+                }
+                else
+                {
+                    bf_low = static_cast<rocsparse_bfloat16>(static_cast<float>(bf_low)
+                                                             + static_cast<float>(val));
+                }
+
+                // Pack back
+                new_val = ((unsigned int)bf_high.data << 16) | (unsigned int)bf_low.data;
+
+                old = atomicCAS(float_addr, assumed, new_val);
+            } while(assumed != old);
+
+            rocsparse_bfloat16 result;
+            result.data = (unsigned short)(is_second ? (old >> 16) : old);
+            return result;
+        }
+        else
+        {
+            return static_cast<rocsparse_bfloat16>(0.0f);
+        }
+    }
+
+    template <typename T>
+    __device__ __forceinline__ rocsparse_bfloat16
+        atomic_add(rocsparse_bfloat16* base_ptr, int idx, int size, T val)
+    {
+        rocsparse_bfloat16 result
+            = atomic_add_by_CAS(reinterpret_cast<rocsparse_bfloat16*>(base_ptr),
+                                idx,
+                                static_cast<rocsparse_bfloat16>(static_cast<float>(val)),
+                                size);
+        rocsparse_bfloat16 ret;
+        ret.data = result.data;
+        return ret;
+    }
+
+    template <typename T>
+    __device__ __forceinline__ rocsparse_bfloat16
+        atomic_add_check(rocsparse_bfloat16* base_ptr, int idx, int size, T val)
+    {
+        if(val != static_cast<T>(0))
+        {
+            rocsparse_bfloat16 result
+                = atomic_add_by_CAS(reinterpret_cast<rocsparse_bfloat16*>(base_ptr),
+                                    idx,
+                                    static_cast<rocsparse_bfloat16>(static_cast<float>(val)),
+                                    size);
+            rocsparse_bfloat16 ret;
+            ret.data = result.data;
+            return ret;
+        }
         return base_ptr[idx];
     }
 
@@ -2391,6 +2526,56 @@ namespace rocsparse
                 if(lid >= j)
                 {
                     val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_bfloat16 wfsegmented_reduce(const int32_t      row,
+                                                                     rocsparse_bfloat16 val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t            left_row   = __shfl_up(row, j);
+            const float              left_val_f = __shfl_up(static_cast<float>(val), j);
+            const rocsparse_bfloat16 left_val   = static_cast<rocsparse_bfloat16>(left_val_f);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val = static_cast<rocsparse_bfloat16>(static_cast<float>(val)
+                                                          + static_cast<float>(left_val));
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_bfloat16 wfsegmented_reduce(const int64_t      row,
+                                                                     rocsparse_bfloat16 val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t            left_row   = __shfl_up(row, j);
+            const float              left_val_f = __shfl_up(static_cast<float>(val), j);
+            const rocsparse_bfloat16 left_val   = static_cast<rocsparse_bfloat16>(left_val_f);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val = static_cast<rocsparse_bfloat16>(static_cast<float>(val)
+                                                          + static_cast<float>(left_val));
                 }
             }
         }

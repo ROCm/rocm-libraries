@@ -230,7 +230,7 @@ namespace rocsparse
 
             if(row != rowp1 && row >= 0)
             {
-                y[row] = y[row] + shared_val[tid];
+                y[row] = y[row] + static_cast<Y>(shared_val[tid]);
             }
 
             __syncthreads();
