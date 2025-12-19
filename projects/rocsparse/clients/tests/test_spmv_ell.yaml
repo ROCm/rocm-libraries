@@ -294,7 +294,7 @@ Tests:
   N: [89, 496, 928]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
 
 - name: spmv_ell
@@ -306,7 +306,7 @@ Tests:
   N: [89, 496, 928]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
 
 - name: spmv_ell

@@ -522,7 +522,7 @@ Tests:
   N: [65, 210, 818]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_nnzsplit]
@@ -536,7 +536,7 @@ Tests:
   N: [65, 210, 818]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_nnzsplit]

@@ -277,8 +277,8 @@ Tests:
   N: [31254]
   block_dim: [4, 8, 16]
   alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: *all_rocsparse_direction
+  baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
 
 - name: spmv_bsr
@@ -290,8 +290,8 @@ Tests:
   N: [31254]
   block_dim: [4, 8, 16]
   alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: *all_rocsparse_direction
+  baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
 
 - name: spmv_bsr
