@@ -71,6 +71,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
 
     find_package(hip REQUIRED)
     find_package(hipdnn_sdk CONFIG REQUIRED)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 
     # Setup testing dependencies & tests for standalone build
     include(Dependencies)
