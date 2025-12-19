@@ -47,7 +47,7 @@
 class Timer
 {
 public:
-    Timer() {};
+    Timer(){};
     void start(const bool enabled = true)
     {
         if(!enabled)
@@ -80,7 +80,7 @@ private:
 class Timer2
 {
 public:
-    Timer2() {};
+    Timer2(){};
     void start(const bool enabled = true)
     {
         if(!enabled)
