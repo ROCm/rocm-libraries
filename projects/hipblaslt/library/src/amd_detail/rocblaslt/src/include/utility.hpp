@@ -410,24 +410,24 @@ inline size_t blockSize(RocblasltContractionProblem::ScalingFormat s)
     switch(s)
     {
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_2:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8:
             return 32;
         default:
             return 1;
     }
 }
 
-inline std::vector<size_t> scaleShuffleTile(RocblasltContractionProblem::ScalingFormat s)
+inline std::vector<size_t> preSwizzleSizeForScale(RocblasltContractionProblem::ScalingFormat s)
 {
-    // Returns shuffle tile as {tileMN, tileK}
-    // subTileK is calculated from machineInstruction.k / scaleBlockSize
+    // Returns preSwizzleTile for scale format
+    // When preSwizzleTile is set:
+    // - MI instruction is forced to 16x16x128
+    // - swizzleScale must be enabled
     switch (s)
     {
-        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
-            return {64, 4};
-        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_2:
-            return {32, 8};
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8:
+            // MI instruction is forced to 16x16x128, so the third element is 4 (i.e., 128/scaleBlockSize)
+            return {32, 8, 4};
         default:
             return {};
     }

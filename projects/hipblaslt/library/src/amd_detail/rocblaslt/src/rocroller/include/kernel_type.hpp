@@ -30,13 +30,20 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
+/**
+ * @brief ScaleType
+ *
+ * Scale parameters for a matrix (A or B).
+ * - preSwizzleTile: Pre-swizzle tile configuration {tileMN, tileK, subTileK}
+ *   Similar to scaleShuffleTileA/B in rocRoller's TypeParameters.
+ */
 struct ScaleType
 {
     rocRoller::Operations::ScaleMode mode;
     size_t blockRowSize = 32u;
     size_t blockColSize = 1u;
     rocRoller::DataType type = rocRoller::DataType::E8M0;
-    std::vector<size_t> shuffleTile;
+    std::vector<size_t> preSwizzleTile;  // {tileMN, tileK, subTileK} for pre-swizzled scale data
 
     auto operator<=>(const ScaleType& other) const = default;
 };

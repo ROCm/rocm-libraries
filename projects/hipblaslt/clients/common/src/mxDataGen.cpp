@@ -48,8 +48,8 @@ std::vector<T> preSwizzleScale(std::vector<T> const&      input,
                                size_t                     scaleCols,
                                std::vector<size_t> const& tile)
 {
-    if(tile.size() != 2)
-        throw std::runtime_error("preSwizzleScale: tile must have exactly 2 elements {tileMN, tileK}");
+    if(tile.size() != 3)
+        throw std::runtime_error("preSwizzleScale: tile must have exactly 3 elements");
 
     auto tileMN = tile[0];
     auto tileK  = tile[1];
@@ -59,7 +59,7 @@ std::vector<T> preSwizzleScale(std::vector<T> const&      input,
 
     // Always use 16x16x128 MI for pre-swizzled data
     // subTileK = MI.k / scaleBlockSize = 128 / 32 = 4
-    size_t subTileK = 4;
+    size_t subTileK = tile[2];
 
     std::cout << "Pre-swizzling scale data with tile: " << tileMN << "x" << tileK << " (subTileK=" << subTileK << ")" << std::endl;
 
@@ -353,7 +353,7 @@ std::vector<float> generateData(T                              dgen,
                                 int                            elementsPerMXBlock,
                                 bool                           isTranspose,
                                 bool                           isMatrixA,
-                                std::vector<size_t> const&     shuffleTile)
+                                std::vector<size_t> const&     preSwizzleTile)
 {
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
@@ -364,9 +364,8 @@ std::vector<float> generateData(T                              dgen,
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-    // Apply pre-swizzle to scale data if shuffleTile is provided
-    // shuffleTile format: {tileMN, tileK}
-    if(shuffleTile.size() == 2)
+    // Apply pre-swizzle to scale data if preSwizzleTile is provided
+    if(preSwizzleTile.size() == 3)
     {
         // Calculate scale tensor dimensions
         // sizes = {rowSize, colSize} where:
@@ -376,7 +375,7 @@ std::vector<float> generateData(T                              dgen,
         size_t scaleRows = sizes[0] / elementsPerMXBlock; // K / blockSize
         size_t scaleCols = sizes[1];                      // M or N
 
-        scaleBytes = preSwizzleScale(scaleBytes, scaleRows, scaleCols, shuffleTile);
+        scaleBytes = preSwizzleScale(scaleBytes, scaleRows, scaleCols, preSwizzleTile);
     }
 #endif
 
@@ -442,7 +441,7 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                    DGen::index_t           colSize,
                                    DGen::index_t           stride,
                                    bool                    isTranspose,
-                                   const std::vector<size_t>& shuffleTile,
+                                   const std::vector<size_t>& preSwizzleTile,
                                    int const               scaleBlockRowSize,
                                    int const               scaleBlockColSize,
                                    bool                    isMatrixA,
@@ -484,7 +483,7 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  shuffleTile);
+                                                                  preSwizzleTile);
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -499,7 +498,7 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  shuffleTile);
+                                                                  preSwizzleTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3_EXT)
     {
@@ -514,7 +513,7 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  shuffleTile);
+                                                                  preSwizzleTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2_EXT)
     {
@@ -529,7 +528,7 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  shuffleTile);
+                                                                  preSwizzleTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
     {
@@ -544,7 +543,7 @@ std::vector<float> generateMXInput(hipDataType             dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  shuffleTile);
+                                                                  preSwizzleTile);
     }
     else
     {

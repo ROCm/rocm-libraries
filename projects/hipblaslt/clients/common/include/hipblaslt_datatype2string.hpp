@@ -65,8 +65,7 @@ typedef enum class _hipblaslt_scaling_format
     Scalar = 1,
     Vector = 2,
     Block_32_UE8M0  = 3,
-    Block_32_UE8M0_64_4_4 = 1000,
-    Block_32_UE8M0_32_8_2 = 1001,
+    Block_32_UE8M0_32_8 = 1001,
 } hipblaslt_scaling_format;
 
 inline bool isBlockScaling(hipblaslt_scaling_format s)
@@ -81,28 +80,26 @@ inline int blockSize(hipblaslt_scaling_format s)
     switch (s)
     {
         case hipblaslt_scaling_format::Block_32_UE8M0:
-        case hipblaslt_scaling_format::Block_32_UE8M0_64_4_4:
-        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_2:
+        case hipblaslt_scaling_format::Block_32_UE8M0_32_8:
             return 32;
         default:
             return 1;
     }
 }
 
-inline std::vector<size_t> scaleShuffleTile(hipblaslt_scaling_format s)
+inline std::vector<size_t> preSwizzleSizeForScale(hipblaslt_scaling_format s)
 {
-    // Returns shuffle tile as {tileMN, tileK}
-    // subTileK is calculated from machineInstruction.k / scaleBlockSize
+    // Returns preSwizzleSize for scale as {swizzleTileMN, 256 / swizzleTileMN, matrixInstruction.k / scaleBlockSize}
     switch (s)
     {
-        case hipblaslt_scaling_format::Block_32_UE8M0_64_4_4:
-            return {64, 4};
-        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_2:
-            return {32, 8};
+        // preSwizzleSize: {swizzleTileMN, 256 / swizzleTileMN, matrixInstruction.k / scaleBlockSize}
+        case hipblaslt_scaling_format::Block_32_UE8M0_32_8:
+            return {32, 8, 4};
         default:
             return {};
     }
 }
+
 
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
                                               hipblaslt_activation_type   act)

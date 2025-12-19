@@ -82,7 +82,7 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
 }};
 
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
-constexpr auto generateTileList() {
+auto generateTileList() {
     std::array<origami::tile_tuple, possibleTileSizes.size()> tileList{};
 
     for (size_t i = 0; i < possibleTileSizes.size(); ++i) {
@@ -116,7 +116,7 @@ using TileListGeneratorFn = std::vector<origami::tile_tuple>(*)();
 
 template <rocRoller::DataType A, rocRoller::DataType B>
 std::vector<origami::tile_tuple> generateTileListWrapper() {
-    constexpr auto arr = generateTileList<A, B>();
+    auto arr = generateTileList<A, B>();
     return {arr.begin(), arr.end()};
 }
 

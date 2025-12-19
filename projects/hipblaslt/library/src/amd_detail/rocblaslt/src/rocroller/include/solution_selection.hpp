@@ -62,19 +62,19 @@ struct MachineInstructionSize
 /**
  * @brief SwizzleTileSize
  *
- * The swizzle tile size used for scale tensor swizzling.
- * For shuffle tile {tileMN, tileK, subTileK}:
- * - m, n = tileMN (from shuffleTile[0])
- * - k, l = tileK = 256 / tileMN (from shuffleTile[1])
+ * The swizzle tile size used for swizzling scale data in SolutionParameters.
+ * Uses {m, k, n, l} order to match rocRoller's MKNLTuple.
  *
- * The relationship: tileMN * tileK = 256 (minimal swizzle tile elements)
+ * Constraints:
+ * - Now only supports m == n && k == l.
+ * - The swizzle tile size has to be compatible with the pre-swizzled scale data when using pre-swizzled scale data.
  */
 struct SwizzleTileSize
 {
-    int m = 64;  // For matrix A scale (M direction)
-    int n = 64;  // For matrix A/B scale (common)
-    int k = 4;   // For matrix A scale (K direction)
-    int l = 4;   // For matrix B scale (L direction, same as K)
+    int m;  // For matrix A scale (M direction)
+    int k;   // For matrix A scale (K direction)
+    int n;  // For matrix B scale (N direction)
+    int l;   // For matrix B scale (L/K direction)
 };
 
 /**
@@ -100,34 +100,34 @@ SolutionIndexParameters indexToParameters(int index);
 size_t maxNumberSolutions();
 
 /**
- * @brief Pick machine instruction based on data types, workgroup tile, and shuffle tile
+ * @brief Pick machine instruction based on data types, workgroup tile, and pre-swizzle configuration
  *
- * When pre-swizzled scale data is used (shuffle tile is non-empty), always use
- * 16x16x128 MI instruction for compatibility.
+ * When pre-swizzled scale data is used (preSwizzleTileMN != 0), the MI instruction
+ * is constrained to 16x16x128 for compatibility with the pre-swizzled data layout.
  *
  * @param typeA Data type of matrix A
  * @param typeB Data type of matrix B
  * @param wgt Workgroup tile size
- * @param shuffleTileMN The tileMN value from shuffle tile (0 if no shuffle tile)
+ * @param preSwizzleTileMN The tileMN value from preSwizzleTile (0 if no pre-swizzle)
  * @return MachineInstructionSize The selected machine instruction dimensions
  */
 inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
                                      rocRoller::DataType typeB,
                                      WorkGroupTileSize wgt,
-                                     size_t shuffleTileMN = 0) {
+                                     size_t preSwizzleTileMN = 0) {
     if (typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16) {
         return {32, 32, 8, 1};
     } else if (typeA == rocRoller::DataType::Float) {
         return {32, 32, 2, 1};
     } else {
-        assert((shuffleTileMN == 0 || shuffleTileMN == 64 || shuffleTileMN == 32) &&
-               "shuffleTileMN must be 0, 64, or 32");
-        // For pre-swizzled scale data, always use 16x16x128 MI
-        if (shuffleTileMN != 0) {
+        // For pre-swizzled scale data, MI instruction must be 16x16x128
+        // This ensures subTileK = MI.k / scaleBlockSize = 128 / 32 = 4
+        if (preSwizzleTileMN != 0) {
+            assert(preSwizzleTileMN == 32 && "preSwizzleTileMN must be 32 for pre-swizzled data");
             return {16, 16, 128, 1};
         }
 
-        // Default selection logic when no shuffle tile constraint
+        // Default selection logic when no pre-swizzle constraint
         if ((typeA == rocRoller::DataType::FP6 || typeA == rocRoller::DataType::BF6 ||
              typeB == rocRoller::DataType::FP6 || typeB == rocRoller::DataType::BF6) &&
             ((wgt.m == 256 && wgt.n == 64) || (wgt.m == 64 && wgt.n == 256))) {

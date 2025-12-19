@@ -1896,7 +1896,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               A_col[i],
                                               lda[i],
                                               transA == HIPBLAS_OP_T,
-                                              scaleShuffleTile(arg.scaleA),
+                                              preSwizzleSizeForScale(arg.scaleA),
                                               blockSize(arg.scaleA),
                                               1,
                                               true,
@@ -1949,7 +1949,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               B_col[i],
                                               ldb[i],
                                               transB == HIPBLAS_OP_T,
-                                              scaleShuffleTile(arg.scaleB),
+                                              preSwizzleSizeForScale(arg.scaleB),
                                               1,
                                               blockSize(arg.scaleB),
                                               false,
@@ -2247,13 +2247,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
             }
-            else if (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_64_4_4)
+            else if (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8)
             {
-                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT;
-            }
-            else if (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_2)
-            {
-                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_32_8_2_EXT;
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_32_8_EXT;
             }
 
             if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
@@ -2283,13 +2279,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
             }
-            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_64_4_4)
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8)
             {
-                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_64_4_4_EXT;
-            }
-            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_2)
-            {
-                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_32_8_2_EXT;
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0_32_8_EXT;
             }
 
             if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)

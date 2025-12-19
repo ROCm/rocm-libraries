@@ -466,8 +466,7 @@ struct RocblasltContractionProblem
         Scalar,
         Vector,
         Block_32_UE8M0,
-        Block_32_UE8M0_64_4_4,
-        Block_32_UE8M0_32_8_2,
+        Block_32_UE8M0_32_8,
     };
 
     hipblasOperation_t trans_a;

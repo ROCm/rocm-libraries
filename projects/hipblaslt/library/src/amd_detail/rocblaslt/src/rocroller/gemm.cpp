@@ -125,11 +125,12 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
             if (gemm->kernelType.scaleTypeA.blockColSize != 1)
                 rv <<"x"<<gemm->kernelType.scaleTypeA.blockColSize;
             rv << "_";
-            if (gemm->kernelType.scaleTypeA.shuffleTile.size() == 2)
+            if (gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3)
             {
-                rv << "SWA" << gemm->kernelType.scaleTypeA.shuffleTile[0];
-                rv << "x" << gemm->kernelType.scaleTypeA.shuffleTile[1];
-                rv << "_";
+                rv << "PSTA_" << gemm->kernelType.scaleTypeA.preSwizzleTile[0];
+                rv << "x" << gemm->kernelType.scaleTypeA.preSwizzleTile[1];
+                rv << "x" << gemm->kernelType.scaleTypeA.preSwizzleTile[2];
+            rv << "_";
             }
         }
     }
@@ -144,10 +145,12 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
             if (gemm->kernelType.scaleTypeB.blockRowSize != 1)
                 rv <<"x"<<gemm->kernelType.scaleTypeB.blockRowSize;
             rv << "_";
-            if (gemm->kernelType.scaleTypeB.shuffleTile.size() == 2)
+
+            if (gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3)
             {
-                rv << "SWB" << gemm->kernelType.scaleTypeB.shuffleTile[0];
-                rv << "x" << gemm->kernelType.scaleTypeB.shuffleTile[1];
+                rv << "PSTB_" << gemm->kernelType.scaleTypeB.preSwizzleTile[0];
+                rv << "x" << gemm->kernelType.scaleTypeB.preSwizzleTile[1];
+                rv << "x" << gemm->kernelType.scaleTypeB.preSwizzleTile[2];
                 rv << "_";
             }
         }
@@ -223,17 +226,17 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
         auto scaleInputA = tagLoadScaleA;
 
-        if (gemm->kernelType.scaleTypeA.shuffleTile.size() == 2)
+        auto validPreSwizzleTileA = gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3 || gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 0;
+        AssertFatal(validPreSwizzleTileA, "Invalid preSwizzleTile", ShowValue(gemm->kernelType.scaleTypeA.preSwizzleTile));
+
+        // auto validSwizzleTileA = gemm->swizzleTileSize.m == gemm->swizzleTileSize.n && gemm->swizzleTileSize.k == gemm->swizzleTileSize.l && gemm->swizzleTile.
+
+        if (gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3)
         {
-            // Reconstruct 3-element shuffleTile for SubTileTranspose
-            // shuffleTile format: {tileMN, tileK}
-            // Always use MI 16x16x128, so subTileK = 128/32 = 4
-            auto tileMN = gemm->kernelType.scaleTypeA.shuffleTile[0];
-            auto tileK = gemm->kernelType.scaleTypeA.shuffleTile[1];
-            size_t subTileK = 4;
-            std::vector<size_t> shuffleTile3 = {tileMN, tileK, subTileK};
+            auto validSwizzleTileA = gemm->swizzleTileSize.m != 0 && gemm.swizzleTileSize.k != 0;
+            AssertFatal(validSwizzleTileA, "Pre-swizzled scale tile is not compatible with swizzle tile A", ShowValue(gemm->swizzleTileSize));
             scaleInputA = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *tagLoadScaleA, shuffleTile3));
+                                    *tagLoadScaleA, gemm->kernelType.scaleTypeA.preSwizzleTile));
         }
 
         tagBlockScaleA = mulInputA = command->addOperation(rocRoller::Operations::BlockScale(
@@ -254,17 +257,15 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
         auto scaleInputB = tagLoadScaleB;
 
-        if (gemm->kernelType.scaleTypeB.shuffleTile.size() == 2)
+        auto validPreSwizzleTileB = gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3 || gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 0;
+        AssertFatal(validPreSwizzleTileB, "Invalid preSwizzleTile", ShowValue(gemm->kernelType.scaleTypeB.preSwizzleTile));
+
+        if (gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3)
         {
-            // Reconstruct 3-element shuffleTile for SubTileTranspose
-            // shuffleTile format: {tileMN, tileK}
-            // Always use MI 16x16x128, so subTileK = 128/32 = 4
-            auto tileMN = gemm->kernelType.scaleTypeB.shuffleTile[0];
-            auto tileK = gemm->kernelType.scaleTypeB.shuffleTile[1];
-            size_t subTileK = 4;
-            std::vector<size_t> shuffleTile3 = {tileMN, tileK, subTileK};
+            auto validSwizzleTileB = gemm->swizzleTileSize.n != 0 && gemm->swizzleTileSize.l != 0;
+            AssertFatal(validSwizzleTileB, "Pre-swizzled scale tile is not compatible with swizzle tile B", ShowValue(gemm->swizzleTileSize));
             scaleInputB = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *tagLoadScaleB, shuffleTile3));
+                                    *tagLoadScaleB, gemm->kernelType.scaleTypeB.preSwizzleTile));
         }
 
         tagBlockScaleB = mulInputB = command->addOperation(rocRoller::Operations::BlockScale(
@@ -545,15 +546,15 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
          static_cast<uint>(gemm->workgroupTile.n / gemm->machineInstruction.n
                            / wavetilePerWavefrontN)});
 
-    AssertFatal(gemm->kernelType.scaleTypeA.shuffleTile.size()
-                == gemm->kernelType.scaleTypeB.shuffleTile.size(),
+    AssertFatal(gemm->kernelType.scaleTypeA.preSwizzleTile.size()
+                == gemm->kernelType.scaleTypeB.preSwizzleTile.size(),
                 "A and B must have the same shuffle parameter");
 
     // -------------------------------------------------------------
     // Create CommandKernel
 
     std::string kernelName    = genKernelName(gemm);
-    auto        context       = Context::ForDefaultHipDevice(kernelName, {{.scaleSkipPermlane = gemm->kernelType.scaleTypeA.shuffleTile.size() == 2 && gemm->kernelType.scaleTypeB.shuffleTile.size() == 2}});
+    auto        context       = Context::ForDefaultHipDevice(kernelName, {{.scaleSkipPermlane = gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3 && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3}});
     auto        commandKernel = std::make_shared<CommandKernel>(command, kernelName);
     commandKernel->setContext(context);
     commandKernel->setCommandParameters(params);

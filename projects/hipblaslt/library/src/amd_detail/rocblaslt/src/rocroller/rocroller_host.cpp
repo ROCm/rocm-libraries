@@ -87,9 +87,7 @@ inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat sc
         return "2";
     case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         return "3";
-    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_64_4_4:
-        return "1000";
-    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_2:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8:
         return "1001";
     default:
         return "";
@@ -413,7 +411,7 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
         kernelType.scaleTypeA.blockRowSize = blockSize(prob.scaleAType);
         kernelType.scaleTypeA.blockColSize = 1;
         kernelType.scaleTypeA.type = getScaleDataType(prob.scaleAType);
-        kernelType.scaleTypeA.shuffleTile = scaleShuffleTile(prob.scaleAType);
+        kernelType.scaleTypeA.preSwizzleTile = preSwizzleSizeForScale(prob.scaleAType);
     }
 
     if (isBlockScaling(prob.scaleBType))
@@ -421,8 +419,8 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
         kernelType.scaleTypeB.mode = rocRoller::Operations::ScaleMode::Separate;         
         kernelType.scaleTypeB.blockRowSize = 1;
         kernelType.scaleTypeB.blockColSize = blockSize(prob.scaleBType);
-        kernelType.scaleTypeB.type = getScaleDataType(prob.scaleBType);
-        kernelType.scaleTypeB.shuffleTile = scaleShuffleTile(prob.scaleBType);
+        kernelType.scaleTypeB.type = getScaleDataType(prob.scaleBType); 
+        kernelType.scaleTypeB.preSwizzleTile = preSwizzleSizeForScale(prob.scaleBType);
     }
 
     return kernelType;
