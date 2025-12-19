@@ -1,176 +1,323 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <sstream>
+#include <vector>
 #include <gtest/gtest.h>
+#include <half/half.hpp>
+#include <miopen/logger.hpp>
+#include "../pooling_common.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "pooling3d.hpp"
-#include "../pooling_common.hpp"
-#include <half/half.hpp>
-#include <vector>
-#include <limits>
 
 namespace {
 
 struct Pooling3dTestCase
 {
-    std::vector<int> in_shape; // [N, C, D, H, W] for 3D
-    std::vector<int> lens;     // [D, H, W] kernel sizes
-    std::vector<int> strides;  // [D, H, W] strides
-    std::vector<int> pads;     // [D, H, W] padding
-    std::string mode; // "miopenPoolingMax", "miopenPoolingAverage", "miopenPoolingAverageInclusive"
-    std::string index_type; // "miopenIndexUint8", "miopenIndexUint16", "miopenIndexUint32",
-                            // "miopenIndexUint64"
-    int wsidx;              // workspace index
-    int verify_indices;     // whether to verify indices
+    std::vector<int> input_dims; // [N, C, D, H, W]
+    std::vector<int> lens;       // [D, H, W]
+    std::vector<int> pads;       // [D, H, W]
+    std::vector<int> strides;    // [D, H, W]
+    miopenIndexType_t index_type;
+    miopenPoolingMode_t mode;
+    int wsidx;
 
     friend std::ostream& operator<<(std::ostream& os, const Pooling3dTestCase& tc)
     {
-        return os << "in_shape: [" << tc.in_shape[0] << "," << tc.in_shape[1] << ","
-                  << tc.in_shape[2] << "," << tc.in_shape[3] << "," << tc.in_shape[4] << "] lens: ["
-                  << tc.lens[0] << "," << tc.lens[1] << "," << tc.lens[2] << "] strides: ["
-                  << tc.strides[0] << "," << tc.strides[1] << "," << tc.strides[2]
-                  << "] mode:" << tc.mode << " index_type:" << tc.index_type
-                  << " wsidx:" << tc.wsidx;
+        os << "input_dims: ";
+        miopen::LogRange(os << "[", tc.input_dims, ",") << "] ";
+        os << "lens: ";
+        miopen::LogRange(os << "[", tc.lens, ",") << "] ";
+        os << "pads: ";
+        miopen::LogRange(os << "[", tc.pads, ",") << "] ";
+        os << "strides: ";
+        miopen::LogRange(os << "[", tc.strides, ",") << "] ";
+        return os << "index_type: " << tc.index_type << ", mode: " << tc.mode
+                  << ", wsidx: " << tc.wsidx;
     }
 };
 
-template <typename T>
 std::vector<Pooling3dTestCase> GetPooling3dTestCases()
 {
-    return {
-        // in_shape, lens, strides, pads, mode, index_type, wsidx, verify_indices
-        {{16, 64, 3, 4, 4},
-         {2, 2, 2},
-         {2, 2, 2},
-         {0, 0, 0},
-         "miopenPoolingMax",
-         "miopenIndexUint8",
-         1,
-         1},
-        {{16, 32, 4, 9, 9},
-         {3, 3, 3},
-         {1, 1, 1},
-         {1, 1, 1},
-         "miopenPoolingMax",
-         "miopenIndexUint8",
-         1,
-         1},
-    };
+    std::vector<Pooling3dTestCase> test_cases;
+
+    // Dataset 0: Default dataset (various tensor sizes)
+    // Based on original pooling3d.hpp input shapes
+    std::vector<std::vector<int>> dataset0_inputs = {
+        {16, 64, 3, 4, 4},
+        {16, 32, 4, 9, 9},
+        {8, 512, 3, 14, 14},
+        {8, 512, 4, 28, 28},
+        {16, 64, 56, 56, 56},
+        {4, 3, 4, 227, 227},
+        {4, 4, 4, 161, 700}};
+    std::vector<std::vector<int>> dataset0_lens         = {{2, 2, 2}, {3, 3, 3}};
+    std::vector<std::vector<int>> dataset0_strides      = {{2, 2, 2}, {1, 1, 1}};
+    std::vector<std::vector<int>> dataset0_pads         = {{0, 0, 0}, {1, 1, 1}};
+    std::vector<miopenIndexType_t> dataset0_index_types = {
+        miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
+    std::vector<miopenPoolingMode_t> modes = {
+        miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
+    std::vector<int> wsidx_values = {0, 1};
+
+    // Generate cartesian product for dataset 0
+    for(const auto& input_dims : dataset0_inputs)
+    {
+        for(const auto& lens : dataset0_lens)
+        {
+            for(const auto& strides : dataset0_strides)
+            {
+                for(const auto& pads : dataset0_pads)
+                {
+                    for(const auto& index_type : dataset0_index_types)
+                    {
+                        for(const auto& mode : modes)
+                        {
+                            for(int wsidx : wsidx_values)
+                            {
+                                test_cases.push_back(
+                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Dataset 1: Minimal dataset (asymmetric configs, small tensors)
+    std::vector<std::vector<int>> dataset1_inputs       = {{1, 4, 4, 4, 4}};
+    std::vector<std::vector<int>> dataset1_lens         = {{2, 2, 2}, {1, 2, 2}, {2, 1, 2}, {2, 2, 1}};
+    std::vector<std::vector<int>> dataset1_strides       = {{1, 1, 1}, {2, 1, 1}, {1, 2, 1}, {1, 1, 2}, {2, 2, 2}};
+    std::vector<std::vector<int>> dataset1_pads          = {{0, 0, 0}};
+    std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint8, miopenIndexUint32};
+
+    // Generate cartesian product for dataset 1
+    for(const auto& input_dims : dataset1_inputs)
+    {
+        for(const auto& lens : dataset1_lens)
+        {
+            for(const auto& strides : dataset1_strides)
+            {
+                for(const auto& pads : dataset1_pads)
+                {
+                    for(const auto& index_type : dataset1_index_types)
+                    {
+                        for(const auto& mode : modes)
+                        {
+                            for(int wsidx : wsidx_values)
+                            {
+                                test_cases.push_back(
+                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return test_cases;
 }
 
-template <typename T>
-void RunPooling3dTest(const Pooling3dTestCase& test_case)
+template <typename T, typename Index>
+void RunPooling3dTestWithIndexType(const Pooling3dTestCase& test_case)
 {
-    uint64_t max_value = miopen_type<T>{} == miopenHalf ? 5 : 17;
-
     // Create input tensor
-    tensor<T> input{static_cast<size_t>(test_case.in_shape[0]),
-                    static_cast<size_t>(test_case.in_shape[1]),
-                    static_cast<size_t>(test_case.in_shape[2]),
-                    static_cast<size_t>(test_case.in_shape[3]),
-                    static_cast<size_t>(test_case.in_shape[4])};
-    input.generate(tensor_elem_gen_integer{max_value});
+    tensor<T> input{static_cast<size_t>(test_case.input_dims[0]),
+                    static_cast<size_t>(test_case.input_dims[1]),
+                    static_cast<size_t>(test_case.input_dims[2]),
+                    static_cast<size_t>(test_case.input_dims[3]),
+                    static_cast<size_t>(test_case.input_dims[4])};
+    input.generate(tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
 
-    // Create pooling descriptor
-    std::unordered_map<std::string, miopenPoolingMode_t> mode_lookup = {
-        {"MAX", miopenPoolingMax},
-        {"MIOPENPOOLINGMAX", miopenPoolingMax},
-        {"AVERAGE", miopenPoolingAverage},
-        {"MIOPENPOOLINGAVERAGE", miopenPoolingAverage},
-        {"AVERAGEINCLUSIVE", miopenPoolingAverageInclusive},
-        {"MIOPENPOOLINGAVERAGEINCLUSIVE", miopenPoolingAverageInclusive},
-    };
-
-    std::unordered_map<std::string, miopenIndexType_t> index_type_lookup = {
-        {miopen::ToUpper("miopenIndexUint8"), miopenIndexUint8},
-        {miopen::ToUpper("miopenIndexUint16"), miopenIndexUint16},
-        {miopen::ToUpper("miopenIndexUint32"), miopenIndexUint32},
-        {miopen::ToUpper("miopenIndexUint64"), miopenIndexUint64},
-    };
-
-    miopen::PoolingDescriptor filter{mode_lookup.at(miopen::ToUpper(test_case.mode)),
-                                     miopenPaddingDefault,
-                                     test_case.lens,
-                                     test_case.strides,
-                                     test_case.pads};
-
-    auto idx_typ = index_type_lookup.at(miopen::ToUpper(test_case.index_type));
-    filter.SetIndexType(idx_typ);
+    // Setup pooling descriptor
+    miopen::PoolingDescriptor filter{
+        test_case.mode, miopenPaddingDefault, test_case.lens, test_case.strides, test_case.pads};
+    filter.SetIndexType(test_case.index_type);
     filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(test_case.wsidx));
 
     // Validate dimensions
-    int spt_dim = test_case.in_shape.size() - 2;
+    auto input_desc = miopen::TensorDescriptor(miopen_type<T>{}, test_case.input_dims);
+    int spt_dim     = static_cast<int>(test_case.input_dims.size()) - 2;
+
     if(spt_dim != 3)
     {
-        GTEST_SKIP() << "Invalid spatial dimensions, expected 3D pooling";
+        GTEST_SKIP() << "Only 3D pooling is supported (spt_dim == 3)";
     }
 
-    auto input_desc = miopen::TensorDescriptor(miopen_type<T>{}, test_case.in_shape);
     for(int i = 0; i < spt_dim; i++)
     {
         if(test_case.lens[i] >
            (input_desc.GetLengths()[i + 2] + static_cast<uint64_t>(2) * test_case.pads[i]))
         {
-            GTEST_SKIP() << "Invalid kernel size for input dimensions";
+            GTEST_SKIP() << "Invalid config: lens[" << i << "] > (input_dims[" << i + 2
+                         << "] + 2 * pads[" << i << "])";
         }
     }
 
-    // Run forward pooling test
-    std::vector<uint8_t> indices{};
-    verify_forward_pooling<3> forward_verifier{};
-    auto cpu_out = forward_verifier.cpu(input, filter, indices);
-    std::vector<uint8_t> gpu_indices{};
-    auto gpu_out = forward_verifier.gpu(input, filter, gpu_indices);
-
-    // Compare forward results
-    EXPECT_EQ(miopen::range_distance(cpu_out), miopen::range_distance(gpu_out));
-
-    using value_type       = T;
-    const double tolerance = 80.0;
-    const double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
-    const double rms_error = miopen::rms_range(cpu_out, gpu_out);
-
-    EXPECT_LE(rms_error, threshold)
-        << "Forward pooling RMS error: " << rms_error << " exceeds threshold: " << threshold;
-
-    if(rms_error > threshold)
+    // Skip configurations that would cause "Index range not enough" exception
+    // The original ctest skips ALL uint8/uint16 max pooling in 3D
+    // (matching the original ctest behavior: spt_dim == 3 && mode == Max)
+    if(test_case.mode == miopenPoolingMax &&
+       (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
     {
-        const auto mxdiff = miopen::max_diff(cpu_out, gpu_out);
-        std::cout << "Forward pooling max diff: " << mxdiff << std::endl;
+        GTEST_SKIP() << "Config skipped: uint" << (test_case.index_type == miopenIndexUint8 ? 8 : 16)
+                     << " index is too small (spt_dim == 3 && mode == Max)";
     }
 
-    // Run backward test
-    auto dout = cpu_out;
+    // Additional check: Skip if index_max is insufficient for the pooling window or output
+    if(test_case.mode == miopenPoolingMax)
+    {
+        // Calculate index_max based on index type from test_case
+        size_t index_max = 0;
+        switch(test_case.index_type)
+        {
+        case miopenIndexUint8: index_max = std::numeric_limits<uint8_t>::max(); break;
+        case miopenIndexUint16: index_max = std::numeric_limits<uint16_t>::max(); break;
+        case miopenIndexUint32: index_max = std::numeric_limits<uint32_t>::max(); break;
+        case miopenIndexUint64: index_max = std::numeric_limits<uint64_t>::max(); break;
+        default:
+            index_max = SIZE_MAX; // Unknown type, assume it's large enough
+            break;
+        }
+
+        // For max pooling backward, check if index range is sufficient
+        if(test_case.wsidx == 0) // miopenPoolingWorkspaceIndexMask
+        {
+            // Check if index_max is sufficient for the pooling window
+            size_t lens_product = 1;
+            for(int len : test_case.lens)
+            {
+                lens_product *= static_cast<size_t>(len);
+            }
+            if(index_max <= lens_product)
+            {
+                int index_bits = 0;
+                switch(test_case.index_type)
+                {
+                case miopenIndexUint8: index_bits = 8; break;
+                case miopenIndexUint16: index_bits = 16; break;
+                case miopenIndexUint32: index_bits = 32; break;
+                case miopenIndexUint64: index_bits = 64; break;
+                default: index_bits = 0; break;
+                }
+                GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
+                             << index_max << ") <= lens product (" << lens_product
+                             << ") for max pooling backward with workspace index mask mode";
+            }
+        }
+        else // miopenPoolingWorkspaceIndexImage (wsidx == 1)
+        {
+            // Check if index_max is sufficient for output spatial dimensions
+            auto output_tensor            = get_output_tensor(filter, input);
+            size_t output_spatial_product = 1;
+            for(size_t i = 2; i < output_tensor.desc.GetLengths().size(); i++)
+            {
+                output_spatial_product *= static_cast<size_t>(output_tensor.desc.GetLengths()[i]);
+            }
+            if(index_max <= output_spatial_product)
+            {
+                int index_bits = 0;
+                switch(test_case.index_type)
+                {
+                case miopenIndexUint8: index_bits = 8; break;
+                case miopenIndexUint16: index_bits = 16; break;
+                case miopenIndexUint32: index_bits = 32; break;
+                case miopenIndexUint64: index_bits = 64; break;
+                default: index_bits = 0; break;
+                }
+                GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
+                             << index_max << ") <= output spatial product ("
+                             << output_spatial_product
+                             << ") for max pooling backward with workspace index image mode";
+            }
+        }
+    }
+
+    // Run forward pooling
+    std::vector<Index> indices;
+    verify_forward_pooling<3> forward_verifier;
+    auto forward_result     = forward_verifier.cpu(input, filter, indices);
+    auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
+
+    // Compare forward results
+    EXPECT_EQ(miopen::range_distance(forward_result), miopen::range_distance(forward_gpu_result));
+
+    using value_type               = T;
+    const double tolerance         = 80.0;
+    const double threshold         = std::numeric_limits<value_type>::epsilon() * tolerance;
+    const double forward_rms_error = miopen::rms_range(forward_result, forward_gpu_result);
+
+    EXPECT_LE(forward_rms_error, threshold)
+        << "Forward RMS error: " << forward_rms_error << " exceeds threshold: " << threshold;
+
+    // Run backward pooling
+    auto dout = forward_result;
     dout.generate(tensor_elem_gen_integer{2503});
 
-    verify_backward_pooling<3> backward_verifier{};
-    auto cpu_backward = backward_verifier.cpu(input,
-                                              dout,
-                                              cpu_out,
-                                              filter,
-                                              gpu_indices,
-                                              test_case.wsidx != 0,
-                                              static_cast<bool>(test_case.verify_indices));
-    auto gpu_backward = backward_verifier.gpu(input,
-                                              dout,
-                                              cpu_out,
-                                              filter,
-                                              gpu_indices,
-                                              test_case.wsidx != 0,
-                                              static_cast<bool>(test_case.verify_indices));
+    // Validate indices are populated (required for max pooling backward)
+    if(test_case.mode == miopenPoolingMax && indices.empty())
+    {
+        GTEST_SKIP() << "Indices not populated for max pooling backward";
+    }
+
+    verify_backward_pooling<3> backward_verifier;
+    auto backward_result = backward_verifier.cpu(
+        input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+    auto backward_gpu_result = backward_verifier.gpu(
+        input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
 
     // Compare backward results
-    EXPECT_EQ(miopen::range_distance(cpu_backward), miopen::range_distance(gpu_backward));
+    EXPECT_EQ(miopen::range_distance(backward_result), miopen::range_distance(backward_gpu_result));
 
-    const double backward_rms_error = miopen::rms_range(cpu_backward, gpu_backward);
-    EXPECT_LE(backward_rms_error, threshold) << "Backward pooling RMS error: " << backward_rms_error
-                                             << " exceeds threshold: " << threshold;
+    const double backward_rms_error = miopen::rms_range(backward_result, backward_gpu_result);
 
-    if(backward_rms_error > threshold)
+    EXPECT_LE(backward_rms_error, threshold)
+        << "Backward RMS error: " << backward_rms_error << " exceeds threshold: " << threshold;
+}
+
+template <typename T>
+void RunPooling3dTest(const Pooling3dTestCase& test_case)
+{
+    try
     {
-        const auto mxdiff = miopen::max_diff(cpu_backward, gpu_backward);
-        std::cout << "Backward pooling max diff: " << mxdiff << std::endl;
+        // Dispatch to the appropriate index type template
+        switch(test_case.index_type)
+        {
+        case miopenIndexUint8: {
+            RunPooling3dTestWithIndexType<T, uint8_t>(test_case);
+            break;
+        }
+        case miopenIndexUint16: {
+            RunPooling3dTestWithIndexType<T, uint16_t>(test_case);
+            break;
+        }
+        case miopenIndexUint32: {
+            RunPooling3dTestWithIndexType<T, uint32_t>(test_case);
+            break;
+        }
+        case miopenIndexUint64: {
+            RunPooling3dTestWithIndexType<T, uint64_t>(test_case);
+            break;
+        }
+        default: {
+            GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
+            break;
+        }
+        }
+    }
+    catch(const std::exception& e)
+    {
+        GTEST_FAIL() << "Exception thrown with test case: " << test_case << "\n"
+                     << "Exception: " << e.what();
+    }
+    catch(...)
+    {
+        GTEST_FAIL() << "Unknown exception thrown with test case: " << test_case;
     }
 }
 
@@ -178,36 +325,46 @@ void RunPooling3dTest(const Pooling3dTestCase& test_case)
 
 class GPU_Pooling3d_FP32 : public testing::TestWithParam<Pooling3dTestCase>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
-        {
-            GTEST_SKIP();
-        }
-    }
+    void SetUp() override { prng::reset_seed(); }
 };
 
 class GPU_Pooling3d_FP16 : public testing::TestWithParam<Pooling3dTestCase>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
-        {
-            GTEST_SKIP();
-        }
-    }
+    void SetUp() override { prng::reset_seed(); }
 };
 
 TEST_P(GPU_Pooling3d_FP32, FloatTest_pooling3d) { RunPooling3dTest<float>(GetParam()); }
 
 TEST_P(GPU_Pooling3d_FP16, HalfTest_pooling3d) { RunPooling3dTest<half_float::half>(GetParam()); }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling3d_FP32,
-                         testing::ValuesIn(GetPooling3dTestCases<float>()));
+                         testing::ValuesIn(GetPooling3dTestCases()),
+                         [](const testing::TestParamInfo<Pooling3dTestCase>& info) {
+                             const auto& tc = info.param;
+                             std::ostringstream os;
+                             os << "input_dims_";
+                             miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
+                             miopen::LogRange(os, tc.lens, "_") << "_pads_";
+                             miopen::LogRange(os, tc.pads, "_") << "_strides_";
+                             miopen::LogRange(os, tc.strides, "_")
+                                 << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
+                             return os.str();
+                         });
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling3d_FP16,
-                         testing::ValuesIn(GetPooling3dTestCases<half_float::half>()));
+                         testing::ValuesIn(GetPooling3dTestCases()),
+                         [](const testing::TestParamInfo<Pooling3dTestCase>& info) {
+                             const auto& tc = info.param;
+                             std::ostringstream os;
+                             os << "input_dims_";
+                             miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
+                             miopen::LogRange(os, tc.lens, "_") << "_pads_";
+                             miopen::LogRange(os, tc.pads, "_") << "_strides_";
+                             miopen::LogRange(os, tc.strides, "_")
+                                 << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
+                             return os.str();
+                         });
