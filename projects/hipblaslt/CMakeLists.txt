@@ -520,8 +520,7 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
         DESTINATION ${CMAKE_INSTALL_DATADIR}/hipblaslt/samples
         COMPONENT samples
         FILES_MATCHING
-        PATTERN "*.cpp"
-        PATTERN "*.h"
+        PATTERN "*.cpp|*.h"
         PATTERN "CMakeLists.txt" EXCLUDE
     )
     rocm_package_setup_client_component(samples)
@@ -559,7 +558,9 @@ if(HIPBLASLT_ENABLE_COVERAGE)
                                         GTEST_LISTENER=NO_PASS_LINE_IN_LOG
                                         $<TARGET_FILE:hipblaslt-test>
                                         --precompile=hipblaslt-test-precompile.db
+        COMMENT "Running hipblaslt testcases for coverage report"
       )
+
       find_program(
         LLVM_PROFDATA
         llvm-profdata
@@ -581,5 +582,6 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
         COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
         COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMENT "Generating code coverage report"
       )
 endif()
