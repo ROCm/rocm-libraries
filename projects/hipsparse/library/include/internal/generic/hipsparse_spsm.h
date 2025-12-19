@@ -297,7 +297,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       void*                       externalBuffer);
 #elif (CUDART_VERSION >= 11031)
 HIPSPARSE_DEPRECATED_MSG(
-    "This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
+    "This routine will be removed in a future release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseOperation_t        opA,
