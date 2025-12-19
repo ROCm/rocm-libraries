@@ -155,11 +155,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
     }
     AssertFatal(kLoop != -1 && kLoopTail != -1, ShowValue(kLoop), ShowValue(kLoopTail));
 
-    { // TODO: remove
-        std::ofstream file("HoistLoopInvariantTest_graph.dot");
-        file << graph.toDOT(false);
-    }
-
     SECTION("buildCoordinateLoopMapping")
     {
         auto loopMapping = kg::buildCoordinateLoopMapping(graph, tracer);
