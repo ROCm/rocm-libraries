@@ -161,15 +161,15 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
         &derivedStrides,
         &derivedDims));
 
-    auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
-        builder,
-        1, // x uid
-        5, // mean uid
-        6, // inv_variance uid
-        3, // scale uid
-        4, // bias uid
-        2 // y uid
-    );
+    auto bnormAttributes
+        = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(builder,
+                                                                                  1, // x uid
+                                                                                  5, // mean uid
+                                                                                  6, // variance uid
+                                                                                  3, // scale uid
+                                                                                  4, // bias uid
+                                                                                  2 // y uid
+        );
 
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
     auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
