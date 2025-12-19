@@ -222,8 +222,6 @@ namespace rocRoller
 
             NaryArgumentColouring rv;
 
-            constexpr bool colourSetCoordinates = true;
-
             // Create tracer and build dependencies
             auto tracer = ControlFlowRWTracer(graph, start);
             tracer.buildDependencies();
@@ -286,7 +284,7 @@ namespace rocRoller
 
                     current = -1;
 
-                    if(colourSetCoordinates && parent)
+                    if(parent)
                     {
                         auto maybeSetCoordinate
                             = graph.control.get<CG::SetCoordinate>(parent.value());
@@ -305,8 +303,7 @@ namespace rocRoller
                     return CT::isEdge<CT::Index>(edge) || CT::isEdge<CT::Segment>(edge);
                 };
 
-                int current = coord;
-                // Segment and Index edges are from 'thirsty' to 'well'.
+                int  current = coord;
                 auto maybeFollow
                     = only(graph.coordinates.getOutputNodeIndices(current, followPredicate));
                 while(maybeFollow)
