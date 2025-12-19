@@ -6,9 +6,12 @@
 #include <limits>
 #include <sstream>
 #include <vector>
+
 #include <gtest/gtest.h>
 #include <half/half.hpp>
+
 #include <miopen/logger.hpp>
+
 #include "../pooling_common.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
