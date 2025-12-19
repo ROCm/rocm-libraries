@@ -236,7 +236,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
 
         if(firstDownstreamNode != -1)
         {
-            Log::info("test setup placing before {}", firstDownstreamNode, assign);
             insertBefore(graph, firstDownstreamNode, assign, assign);
         }
         CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
@@ -248,9 +247,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
         int newAssign;
         {
             const auto connections = graph.mapper.getCoordinateConnections(coord);
-            Log::info("controls: {}",
-                      connections
-                          | std::views::transform(&ControlToCoordinateMapper::Connection::control));
             REQUIRE(connections.size() == 1);
             newAssign = connections[0].control;
         }
@@ -258,9 +254,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
         {
             const auto loopStack   = controlStack(kLoop, graph);
             const auto assignStack = controlStack(newAssign, graph);
-
-            Log::info("loopstack: {}", loopStack);
-            Log::info("assignstack: {}", assignStack);
 
             REQUIRE(loopStack.size() == assignStack.size());
 
@@ -301,7 +294,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
 
         if(firstDownstreamNode != -1)
         {
-            Log::info("test setup placing before {}", firstDownstreamNode, assign);
             insertBefore(graph, firstDownstreamNode, assign, assign);
         }
 
@@ -316,9 +308,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
         {
             const auto loopStack   = controlStack(kLoop, graph);
             const auto assignStack = controlStack(assign, graph);
-
-            Log::info("loopstack: {}", loopStack);
-            Log::info("assignstack: {}", assignStack);
 
             REQUIRE(loopStack.size() + 1 == assignStack.size());
 
