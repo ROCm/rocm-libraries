@@ -28,7 +28,7 @@ cmake_minimum_required(VERSION 3.15)
 project(origami-python VERSION 0.1.0 LANGUAGES CXX)
 
 # Find Python
-find_package(Python 3.7 COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
 
 # Option to control origami library source
 option(ORIGAMI_BUILD_FROM_SOURCE "Build origami from source instead of finding installed version" ON)
