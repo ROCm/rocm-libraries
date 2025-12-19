@@ -165,34 +165,19 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     {
         auto loopMapping = kg::buildCoordinateLoopMapping(graph, tracer);
 
+        for(auto child : accumulatorMacroTiles(a))
         {
-            // coord 510 is a MacroTile
-            CHECK(loopMapping[510].size() > 0);
-            CHECK_NOTHROW(graph.coordinates.getNode<MacroTile>(510));
-
-            // written in k loop and tail loop
-            bool foundKLoop    = false;
-            bool foundTailLoop = false;
-            for(const auto& [loop, writes] : loopMapping[510])
+            for(const auto tag : graph.coordinates.getInputNodeIndices(child, isEdge<Duplicate>))
             {
-                auto str = Graph::variantToString(graph.control.getElement(loop));
-                if(str.find("KLoop") != std::string::npos)
-                    foundKLoop = true;
-                if(str.find("KLoopTail") != std::string::npos)
-                    foundTailLoop = true;
-                CHECK(writes.size() >= 8); // written at least 8 times in each loop
+                CAPTURE(child);
+                CHECK(loopMapping.at(tag).count(kLoop) > 0);
+                CHECK(loopMapping.at(tag).at(kLoop).size() == 16);
+                CHECK(loopMapping.at(tag).count(kLoopTail) > 0);
+                CHECK(loopMapping.at(tag).at(kLoopTail).size() == 8);
             }
-            CHECK(foundKLoop);
-            CHECK(foundTailLoop);
+            break; // second encountered macro tile and beyond are not used in kloop[tail]
         }
         CHECK(loopMapping.size() == 140);
-    }
-
-    SECTION("test")
-    {
-        graph.mapper.getConnections(1122);
-        signal(SIGTRAP, SIG_IGN);
-        raise(SIGTRAP);
     }
 
     SECTION("countCoordinateWritesInLoop")
