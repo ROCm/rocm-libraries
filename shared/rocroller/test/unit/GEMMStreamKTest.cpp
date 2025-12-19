@@ -31,6 +31,8 @@
 
 #include "GEMMTestBase.hpp"
 
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
+
 namespace GEMMTests
 {
     using namespace rocRoller;
@@ -135,12 +137,7 @@ namespace GEMMTests
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        if(m_context->targetArchitecture().target().isRDNAGPU())
-        {
-            gemm.waveM = 16;
-            gemm.waveN = 16;
-            gemm.waveK = 16;
-        }
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
@@ -176,12 +173,7 @@ namespace GEMMTests
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        if(m_context->targetArchitecture().target().isRDNAGPU())
-        {
-            gemm.waveM = 16;
-            gemm.waveN = 16;
-            gemm.waveK = 16;
-        }
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
