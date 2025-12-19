@@ -423,6 +423,20 @@ std::vector<LayerNormTestCase> LayerNormTestConfigs()
     // clang-format on
 }
 
+template <typename T>
+static constexpr auto mantissa_bits = std::is_same_v<T, float>              ? 23
+                                      : std::is_same_v<T, half_float::half> ? 10
+                                                                            : 7;
+
+template <typename T>
+auto get_threshold(size_t size)
+{
+    // Take the greater of twice a random walk of floating point errors in the accumulator type
+    // or one floating point error in the buffer type
+    return std::max(2.0 * std::sqrt(size) / (1 << mantissa_bits<float>),
+                    1.0 / (1 << mantissa_bits<T>));
+}
+
 template <typename T = float>
 struct LayerNormFwdTest : public ::testing::TestWithParam<LayerNormTestCase>
 {
@@ -523,13 +537,7 @@ protected:
 
     void Verify()
     {
-        // Take the greater of twice a random walk of floating point errors in the accumulator type
-        // or one floating point error in the buffer type
-        auto mantissa_bits = std::is_same<T, float>::value              ? 23
-                             : std::is_same<T, half_float::half>::value ? 10
-                                                                        : 7;
-        auto threshold =
-            std::max(2.0 * std::sqrt(output.GetSize()) / (1 << 23), 1.0 / (1 << mantissa_bits));
+        auto threshold = get_threshold<T>(output.GetSize());
 
         auto error = miopen::rms_range(ref_output, output);
         EXPECT_TRUE(miopen::range_distance(ref_output) == miopen::range_distance(output));
@@ -707,13 +715,7 @@ protected:
 
     void Verify()
     {
-        // Take the greater of twice a random walk of floating point errors in the accumulator type
-        // or one floating point error in the buffer type
-        auto mantissa_bits = std::is_same<T, float>::value              ? 23
-                             : std::is_same<T, half_float::half>::value ? 10
-                                                                        : 7;
-        auto threshold =
-            std::max(2.0 * std::sqrt(dx.GetSize()) / (1 << 23), 1.0 / (1 << mantissa_bits));
+        auto threshold = get_threshold<T>(dx.GetSize());
 
         auto error = miopen::rms_range(ref_dx, dx);
         EXPECT_TRUE(miopen::range_distance(ref_dx) == miopen::range_distance(dx));
