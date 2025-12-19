@@ -127,8 +127,6 @@ std::vector<TensorsConfig> TensorsConfigs()
             }
         }
     }
-
-    return configs;
 #else
     int N = 1;
     int C = 1;
@@ -143,9 +141,8 @@ std::vector<TensorsConfig> TensorsConfigs()
     H = 64;
     W = 16;
     insertTestCase(N, C, H, W);
-
-    return configs;
 #endif
+    return configs;
 }
 
 template <typename T>
@@ -155,18 +152,19 @@ struct OpTensorLeadingOnesGenericTest
 protected:
     void SetUp() override
     {
-        auto&& handle                                 = get_handle();
-        std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
-
         data_type = miopen_type<T>{};
+
+        std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
 
         // Generate elements in tensors
         tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
-            tensor_elem_gen_integer{17});
+            tensor_elem_gen_integer{});
         tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
-            tensor_elem_gen_integer{17});
-        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides};
+            tensor_elem_gen_integer{});
+        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
+            [](auto...) { return 1; });
 
+        auto&& handle = get_handle();
         // Write the device tensors
         tensA_dev = handle.Write(tensA.data);
         tensB_dev = handle.Write(tensB.data);
@@ -179,10 +177,10 @@ protected:
         auto first_not_one = std::find_if(
             tensorsConfig.blens.rbegin(), tensorsConfig.blens.rend(), [](int i) { return i != 1; });
         auto d = std::distance(tensorsConfig.blens.begin(), first_not_one.base());
+        num_wg = first_not_one != tensorsConfig.blens.rend()
+                     ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
+                     : 1;
 
-        num_wg      = first_not_one != tensorsConfig.blens.rend()
-                          ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
-                          : 1;
         work_per_wg = std::accumulate(tensorsConfig.aclens.begin() + d,
                                       tensorsConfig.aclens.end(),
                                       1,
@@ -229,13 +227,19 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_LEADING_ONES_GENERIC";
 
-        std::string program_name       = "MIOpenTensorKernels.cl";
+        std::string program_name{"MIOpenTensorKernels.cl"};
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel(
             kernel_name, network_config_ocl, program_name, kernel_name, vld, vgd, params)(
             tensA_dev.get(),
+            tensorsConfig.acstrides[0], // a_nstride
+            tensorsConfig.acstrides[1], // a_cstride
+            tensorsConfig.acstrides[2], // a_hstride
             tensB_dev.get(),
+            tensorsConfig.bstrides[0], // b_nstride
+            tensorsConfig.bstrides[1], // b_cstride
+            tensorsConfig.bstrides[2], // b_hstride
             tensC_dev.get(),
             tensorsConfig.aclens[1],    // c_c
             tensorsConfig.aclens[2],    // c_h
@@ -243,13 +247,13 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             tensorsConfig.acstrides[2], // c_hstride
-            work_per_wg,
             alpha0,
             alpha1,
             beta,
-            0L, // Aoffset
-            0L, // Boffset
-            0L, // Coffset
+            work_per_wg,
+            0LL, // Aoffset
+            0LL, // Boffset
+            0LL, // Coffset
             num_wg,
             bitmap);
 
@@ -260,7 +264,13 @@ protected:
                     kernel_name,
                     network_config_ocl,
                     tensA_dev.get(),
+                    tensorsConfig.acstrides[0],
+                    tensorsConfig.acstrides[1],
+                    tensorsConfig.acstrides[2],
                     tensB_dev.get(),
+                    tensorsConfig.bstrides[0],
+                    tensorsConfig.bstrides[1],
+                    tensorsConfig.bstrides[2],
                     tensC_dev.get(),
                     tensorsConfig.aclens[1],
                     tensorsConfig.aclens[2],
@@ -268,13 +278,13 @@ protected:
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     tensorsConfig.acstrides[2],
-                    work_per_wg,
                     alpha0,
                     alpha1,
                     beta,
-                    0L,
-                    0L,
-                    0L,
+                    work_per_wg,
+                    0LL,
+                    0LL,
+                    0LL,
                     num_wg,
                     bitmap);
 #endif
@@ -283,36 +293,42 @@ protected:
     void runHIP() // run HIP kernel
     {
         auto&& handle = get_handle();
-        tensC_dev     = handle.Write(tensC.data);
+        // Write data to device tensor
+        tensC_dev = handle.Write(tensC.data);
 
         params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) +
                  " -DMAX_NUM_WG=" + std::to_string(max_num_wg);
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_LEADING_ONES_GENERIC";
 
-        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
+        std::string program_name{"MIOpenTensorKernelsHip.cpp"};
         std::string network_config_hip = network_config + "-hip";
 
         handle.AddKernel(
             kernel_name, network_config_hip, program_name, kernel_name, vld, vgd, params)(
             tensA_dev.get(),
+            uint64_t(0),                // Aoffset
+            tensorsConfig.acstrides[0], // a_nstride
+            tensorsConfig.acstrides[1], // a_cstride
+            tensorsConfig.acstrides[2], // a_hstride
             tensB_dev.get(),
+            uint64_t(0),               // Boffset
+            tensorsConfig.bstrides[0], // b_nstride
+            tensorsConfig.bstrides[1], // b_cstride
+            tensorsConfig.bstrides[2], // b_hstride
             tensC_dev.get(),
-            tensC_dev.get(),
+            uint64_t(0),                // Coffset
             tensorsConfig.aclens[1],    // c_c
             tensorsConfig.aclens[2],    // c_h
             tensorsConfig.aclens[3],    // c_w
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             tensorsConfig.acstrides[2], // c_hstride
-            work_per_wg,
             alpha0,
             alpha1,
             beta,
-            0L, // Aoffset
-            0L, // Boffset
-            0L, // Coffset
             num_wg,
+            work_per_wg,
             bitmap);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
@@ -322,22 +338,28 @@ protected:
                     kernel_name,
                     network_config_hip,
                     tensA_dev.get(),
+                    uint64_t(0),
+                    tensorsConfig.acstrides[0],
+                    tensorsConfig.acstrides[1],
+                    tensorsConfig.acstrides[2],
                     tensB_dev.get(),
+                    uint64_t(0),
+                    tensorsConfig.bstrides[0],
+                    tensorsConfig.bstrides[1],
+                    tensorsConfig.bstrides[2],
                     tensC_dev.get(),
+                    uint64_t(0),
                     tensorsConfig.aclens[1],
                     tensorsConfig.aclens[2],
                     tensorsConfig.aclens[3],
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     tensorsConfig.acstrides[2],
-                    work_per_wg,
                     alpha0,
                     alpha1,
                     beta,
-                    0L,
-                    0L,
-                    0L,
                     num_wg,
+                    work_per_wg,
                     bitmap);
 #endif
     }

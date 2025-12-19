@@ -75,19 +75,13 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     // 2) Fallback table by architecture family
     if(maxTotalSize == 0)
-    {
         maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
-    }
 
     int C = 4;
     int H = 8;
     int W = 8;
     for(int N = 32; N <= maxTotalSize / (C * H * W); N *= 2)
-    {
         insertTestCase(N, C, H, W);
-    }
-
-    return configs;
 #else
     int N = 16;
     int C = 1;
@@ -104,9 +98,8 @@ std::vector<TensorsConfig> TensorsConfigs()
     H = 16;
     W = 16;
     insertTestCase(N, C, H, W);
-
-    return configs;
 #endif
+    return configs;
 }
 
 template <typename T>
@@ -126,7 +119,7 @@ protected:
         tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
             tensor_elem_gen_integer{});
         tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
-            tensor_elem_gen_integer{2});
+            [](auto...) { return 1; });
 
         auto&& handle = get_handle();
         // Write the device tensors
@@ -251,10 +244,6 @@ protected:
             bitmap);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
-        std::cout << "OCL:";
-        for(size_t i = 0; i < 16; ++i)
-            std::cout << ' ' << tensC_ocl.data[i];
-        std::cout << '\n';
 
 #if PERF_ENABLE
         ph.perfTest(handle,
@@ -308,17 +297,13 @@ protected:
             alpha0,
             alpha1,
             beta,
-            0LL, // Aoffset
-            0LL, // Boffset
-            0LL, // Coffset
+            uint64_t(0), // Aoffset
+            uint64_t(0), // Boffset
+            uint64_t(0), // Coffset
             num_wg,
             bitmap);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
-        std::cout << "HIP:";
-        for(size_t i = 0; i < 16; ++i)
-            std::cout << ' ' << tensC_hip.data[i];
-        std::cout << '\n';
 
 #if PERF_ENABLE
         ph.perfTest(handle,
@@ -336,9 +321,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    0LL,
-                    0LL,
-                    0LL,
+                    uint64_t(0),
+                    uint64_t(0),
+                    uint64_t(0),
                     num_wg,
                     bitmap);
 #endif
@@ -405,7 +390,7 @@ protected:
     PerfHelper ph;
 #endif
 };
-/*
+
 using GPU_OpTensorLeadingOnesTest_FP16 = OpTensorLeadingOnesTest<half_float::half>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP16, PortTest)
@@ -421,7 +406,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-*/
+
 using GPU_OpTensorLeadingOnesTest_FP32 = OpTensorLeadingOnesTest<float>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP32, PortTest)
@@ -437,7 +422,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-/*
+
 using GPU_OpTensorLeadingOnesTest_FP64 = OpTensorLeadingOnesTest<double>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP64, PortTest)
@@ -453,4 +438,3 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-*/
