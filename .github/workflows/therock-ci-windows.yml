@@ -105,6 +105,12 @@ jobs:
           git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
+      - name: Patch rocm-libraries
+        run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          rm ./TheRock/patches/amd-mainline/rocm-libraries/003*.patch
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
