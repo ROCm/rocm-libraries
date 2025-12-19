@@ -31,31 +31,33 @@
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/Utilities/Concepts.hpp>
 
-namespace rocRoller
+namespace rocRoller::KernelGraph
 {
-    /**
-      *         ForLoop
-      *
-      *      v body
-      *   Multiply
-      *      v
-      *   Multiply
-      *      v
-      *   Multiply
-      *      v
-      *   Multiply
-      *      v
-      *
-      *
-      *
-      */
-
-    namespace KernelGraph
+    namespace ScheduleMultiplyAndLDSDetail
     {
+        /**
+         * Glossary: Within this file, a 'chain' refers to
+         * 
+         *  - a series of nodes of the same type that are all directly connected to each other
+         *    with Sequence edges, or
+         *  - a vector containing the node IDs of those nodes, or
+         *  - a vector containing the node IDs ot those nodes, but filtered according to
+         *    some criteria.
+         */
+
         using vec  = std::vector<int>;
         using vec2 = std::vector<vec>;
         using vec3 = std::vector<vec2>;
 
+        /**
+         * Identifies groups within `nodes` that are directly connected in a linear chain.
+         * 
+         * If the connections between `nodes` is:
+         * 
+         * 1 -> 2 -> 3 -> 4 -> NOP -> 5 -> 6 -> 7 -> 8
+         * 
+         * This would return 2 vectors, {1, 2, 3, 4} and {5, 6, 7, 8}.
+         */
         vec2 makeChains(KernelGraph const& graph, std::vector<int> nodes)
         {
             std::ranges::sort(nodes, TopologicalCompare(graph));
@@ -85,29 +87,11 @@ namespace rocRoller
 
             for(int i = 1; i < nodes.size(); i++)
             {
-                // The current chain can continue if
-                // - There is a direct sequence edge between the last element and the current one, or
-                // - There is a Barrier node directly between them.
 
                 if(!graph.control.findEdge(currentChain.back(), nodes[i]))
                 {
-                    // auto barrier
-                    //     = graph.control
-                    //           .getOutputNodeIndices<ControlGraph::Sequence>(currentChain.back())
-                    //           .filter(isBarrier)
-                    //           .only();
-
-                    // if(barrier
-                    //    && !graph.control.getOutputNodeIndices<ControlGraph::Sequence>(*barrier)
-                    //            .filter([&nodes, &i](int x) { return x == nodes[i]; })
-                    //            .empty())
-                    // {
-                    // }
-                    // else
-                    {
-                        rv.push_back(std::move(currentChain));
-                        currentChain.clear();
-                    }
+                    rv.push_back(std::move(currentChain));
+                    currentChain.clear();
                 }
 
                 currentChain.push_back(nodes[i]);
@@ -118,6 +102,15 @@ namespace rocRoller
             return rv;
         }
 
+        /**
+         * Given a SetCoordinate node, find the actual memory node associated with it.
+         * Given a memory node, just return that node.
+         * 
+         * SetCoordinate(3) -> Body -> SetCoordinate(4) -> Body -> LoadLDSTile(5)
+         * 
+         * getLDSNode(graph, 3) should return 5.
+         * getLDSNode(graph, 5) should also return 5.
+         */
         int getLDSNode(KernelGraph const& graph, int node)
         {
             while(auto body = graph.control.getOutputNodeIndices<ControlGraph::Body>(node).only())
@@ -128,6 +121,10 @@ namespace rocRoller
             return node;
         }
 
+        /**
+         * Get the data type associated with the memory node associated with the
+         * SetCoordinate node.
+         */
         DataType getLDSType(KernelGraph const& graph, int node)
         {
             node = getLDSNode(graph, node);
@@ -159,6 +156,11 @@ namespace rocRoller
             return fmt::format("{{{}}}", fmt::join(formatted, ", "));
         }
 
+        /**
+         * Given a chain of (multiply) nodes, modify it to only contain those nodes that are the
+         * last nodes that read a DataFlowTag. Returns a parallel vector containing the data
+         * types read by each node.
+         */
         ChainTypes filterLastCoordinateReads(KernelGraph const& graph, vec& chain)
         {
             ControlFlowRWTracer tracer(graph);
@@ -174,6 +176,7 @@ namespace rocRoller
                 return DataType::None;
             };
 
+            // Map from coord to the last op that uses that coord.
             std::unordered_map<int, int> lastUses;
 
             for(auto op : chain)
@@ -186,6 +189,7 @@ namespace rocRoller
                 }
             }
 
+            // Map from op to the count of each data type used by it.
             std::unordered_map<int, std::map<DataType, int>> lastUsedTypes;
 
             for(auto const& [coord, op] : lastUses)
@@ -218,20 +222,15 @@ namespace rocRoller
             chain = newChain;
 
             return rv;
-
-            // auto lastNodes = [&]() {
-            //     auto value = [](auto const& x) { return x.second; };
-            //     auto tmp   = lastUses | std::views::transform(value);
-            //     return std::unordered_set(tmp.begin(), tmp.end());
-            // }();
-
-            // auto isLast = [&](int x) { return lastNodes.contains(x); };
-
-            // auto tmp = chain | std::views::filter(isLast);
-            // auto newChain = std::vector(tmp.begin(), tmp.end());
-            // chain = newChain;
         }
 
+        /**
+         * Given a graph,
+         * 
+         * - Finds chains of multiply nodes
+         * - Filters those chains to only the ones that are the last reads of some tag.
+         * - Returns those chains as well as info about the data types of those tags.
+         */
         std::tuple<vec2, std::vector<ChainTypes>>
             findMultiplyChainsAndCoords(KernelGraph const& graph)
         {
@@ -296,29 +295,29 @@ namespace rocRoller
             return makeChains(graph, std::move(nodes));
         }
 
-        vec2 findLoadStoreChains(KernelGraph const& graph)
-        {
-            auto isLoadOrStoreTile = [&](int idx) -> bool {
-                auto visitor = [](auto const& op) -> bool {
-                    using T = std::decay_t<decltype(op)>;
+        // vec2 findLoadStoreChains(KernelGraph const& graph)
+        // {
+        //     auto isLoadOrStoreTile = [&](int idx) -> bool {
+        //         auto visitor = [](auto const& op) -> bool {
+        //             using T = std::decay_t<decltype(op)>;
 
-                    return CIsAnyOf<T,
-                                    ControlGraph::Barrier,
-                                    ControlGraph::LoadTileDirect2LDS,
-                                    ControlGraph::LoadTiled,
-                                    ControlGraph::StoreLDSTile,
-                                    ControlGraph::LoadLDSTile>;
-                };
+        //             return CIsAnyOf<T,
+        //                             ControlGraph::Barrier,
+        //                             ControlGraph::LoadTileDirect2LDS,
+        //                             ControlGraph::LoadTiled,
+        //                             ControlGraph::StoreLDSTile,
+        //                             ControlGraph::LoadLDSTile>;
+        //         };
 
-                auto node = graph.control.get<ControlGraph::Operation>(idx).value();
-                return std::visit(visitor, node);
-            };
+        //         auto node = graph.control.get<ControlGraph::Operation>(idx).value();
+        //         return std::visit(visitor, node);
+        //     };
 
-            auto nodes = graph.control.getNodes().filter(isLoadOrStoreTile).to<std::vector>();
-            getImmediateBodyParents(graph, nodes);
+        //     auto nodes = graph.control.getNodes().filter(isLoadOrStoreTile).to<std::vector>();
+        //     getImmediateBodyParents(graph, nodes);
 
-            return makeChains(graph, std::move(nodes));
-        }
+        //     return makeChains(graph, std::move(nodes));
+        // }
 
         std::string abbrev(LayoutType t)
         {
@@ -582,14 +581,44 @@ namespace rocRoller
             return rv;
         }
 
+        /**
+         * Given groups of chains (grouped by node type), identifies which chains of different
+         * types are parallel to each other. Returns sets of chains that each contain at least 2
+         * chains and are parallel to each other.
+         * 
+         * E.g. Input:
+         * 
+         * {
+         *     {
+         *         {chain of multiply A}, {chain of multiply B}, chain of multiply C}},
+         *     {
+         *         {chain of LoadLDSTile E}, {chain of LoadLDSTile F},
+         *         {chain of LoadLDSTile G}, {chain of LoadLDSTile H}},
+         *     }
+         * }
+         * 
+         * Let's say that:
+         *     * Chain E is not parallel to anything because it's before the K loop
+         *       (it's for prefetching)
+         *     * Chain A is parallel to chain F
+         *     * Chain B is parallel to chain G
+         *     * Chain C is parallel to chain H
+         * 
+         * The return value should be:
+         * {
+         *      { {chain A}, {chain F} },
+         *      { {chain B}, {chain G} },
+         *      { {chain C}, {chain H} }
+         * }
+         * 
+         * TODO: This *might* reverse the order of each set (i.e. {{chain F}, {chain A}})
+         * Verify if this is the case and update the comment if so.
+         */
         vec3 identifyParallelChains(KernelGraph const& graph, vec3 groups)
         {
             vec3 rv;
             if(groups.empty())
                 return rv;
-
-            // rv.push_back(std::move(groups.back()));
-            // groups.pop_back();
 
             while(!groups.empty())
             {
@@ -675,19 +704,6 @@ namespace rocRoller
             return rv;
         }
 
-        vec3 identifyParallelMultiplyAndLDSChains(KernelGraph const& graph)
-        {
-            auto multiplyChains = findMultiplyChains(graph);
-            auto ldsChains      = findLoadLDSChains(graph);
-            // auto loadChains     = findLoadTiledChains(graph);
-
-            Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
-            Log::debug("LDS chains: \n{}", showChains(ldsChains));
-            // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
-
-            return identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains)});
-        }
-
         struct ParallelChainSet
         {
             vec multiplyChain;
@@ -696,9 +712,6 @@ namespace rocRoller
             ChainTypes            multiplyTagTypes;
             std::vector<DataType> ldsChainTypes;
         };
-
-        // requires std::ranges::forward_range<Range>;
-        // requires std::convertible_to<std::ranges::range_value_t<Range>, Of>;
 
         template <std::ranges::forward_range ARange, std::ranges::forward_range BRange>
         Generator<
@@ -766,51 +779,51 @@ namespace rocRoller
             return rv;
         }
 
-        vec3 identifyParallelMultiplyD2LDSAndLDSChains(KernelGraph const& graph)
-        {
-            auto multiplyChains = findMultiplyChains(graph);
-            auto ldsChains      = findLoadLDSChains(graph);
-            auto d2Chains       = findD2LDSChains(graph);
-            // auto loadChains     = findLoadTiledChains(graph);
+        // vec3 identifyParallelMultiplyD2LDSAndLDSChains(KernelGraph const& graph)
+        // {
+        //     auto multiplyChains = findMultiplyChains(graph);
+        //     auto ldsChains      = findLoadLDSChains(graph);
+        //     auto d2Chains       = findD2LDSChains(graph);
+        //     // auto loadChains     = findLoadTiledChains(graph);
 
-            Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
-            Log::debug("LDS chains: \n{}", showChains(ldsChains));
-            Log::debug("D2LDS chains: \n{}", showChains(d2Chains));
-            // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
+        //     Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
+        //     Log::debug("LDS chains: \n{}", showChains(ldsChains));
+        //     Log::debug("D2LDS chains: \n{}", showChains(d2Chains));
+        //     // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
 
-            return identifyParallelChains(
-                graph, {std::move(multiplyChains), std::move(ldsChains), std::move(d2Chains)});
-        }
+        //     return identifyParallelChains(
+        //         graph, {std::move(multiplyChains), std::move(ldsChains), std::move(d2Chains)});
+        // }
 
-        vec3 identifyParallelMultiplyAndLoadStoreChains(KernelGraph const& graph)
-        {
-            auto multiplyChains  = findMultiplyChains(graph);
-            auto loadStoreChains = findLoadStoreChains(graph);
-            // auto ldsChains      = findLoadLDSChains(graph);
+        // vec3 identifyParallelMultiplyAndLoadStoreChains(KernelGraph const& graph)
+        // {
+        //     auto multiplyChains  = findMultiplyChains(graph);
+        //     auto loadStoreChains = findLoadStoreChains(graph);
+        //     // auto ldsChains      = findLoadLDSChains(graph);
 
-            Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
-            Log::debug("D2LDS chains: \n{}", showChains(loadStoreChains));
-            // Log::debug("LDS chains: \n{}", showChains(ldsChains));
-            // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
+        //     Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
+        //     Log::debug("D2LDS chains: \n{}", showChains(loadStoreChains));
+        //     // Log::debug("LDS chains: \n{}", showChains(ldsChains));
+        //     // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
 
-            return identifyParallelChains(graph,
-                                          {std::move(multiplyChains), std::move(loadStoreChains)});
-        }
+        //     return identifyParallelChains(graph,
+        //                                   {std::move(multiplyChains), std::move(loadStoreChains)});
+        // }
 
-        vec3 identifyParallelMultiplyAndD2LDSChains(KernelGraph const& graph)
-        {
-            auto multiplyChains = findMultiplyChains(graph);
-            auto d2ldsChains    = findD2LDSChains(graph);
-            // auto ldsChains      = findLoadLDSChains(graph);
+        // vec3 identifyParallelMultiplyAndD2LDSChains(KernelGraph const& graph)
+        // {
+        //     auto multiplyChains = findMultiplyChains(graph);
+        //     auto d2ldsChains    = findD2LDSChains(graph);
+        //     // auto ldsChains      = findLoadLDSChains(graph);
 
-            Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
-            Log::debug("D2LDS chains: \n{}", showChains(d2ldsChains));
-            // Log::debug("LDS chains: \n{}", showChains(ldsChains));
-            // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
+        //     Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
+        //     Log::debug("D2LDS chains: \n{}", showChains(d2ldsChains));
+        //     // Log::debug("LDS chains: \n{}", showChains(ldsChains));
+        //     // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
 
-            return identifyParallelChains(graph,
-                                          {std::move(multiplyChains), std::move(d2ldsChains)});
-        }
+        //     return identifyParallelChains(graph,
+        //                                   {std::move(multiplyChains), std::move(d2ldsChains)});
+        // }
 
         /**
           *
@@ -820,287 +833,287 @@ namespace rocRoller
           *
           */
 
-        void ScheduleMultiplyAndLDSLTR(KernelGraph& graph, vec3 const& groups, int factor)
-        {
+        // void ScheduleMultiplyAndLDSLTR(KernelGraph& graph, vec3 const& groups, int factor)
+        // {
 
-            for(auto const& group : groups)
-            {
-                AssertFatal(group.size() > 1, ShowValue(group.size()));
-                auto sizes = group | std::views::transform([](auto const& c) { return c.size(); });
-                auto groupGCD = std::reduce(
-                    sizes.begin(), sizes.end(), *sizes.begin(), std::gcd<size_t, size_t>);
+        //     for(auto const& group : groups)
+        //     {
+        //         AssertFatal(group.size() > 1, ShowValue(group.size()));
+        //         auto sizes = group | std::views::transform([](auto const& c) { return c.size(); });
+        //         auto groupGCD = std::reduce(
+        //             sizes.begin(), sizes.end(), *sizes.begin(), std::gcd<size_t, size_t>);
 
-                auto tmp = sizes | std::views::transform([factor, groupGCD](size_t size) {
-                               return (size * factor) / groupGCD;
-                           });
+        //         auto tmp = sizes | std::views::transform([factor, groupGCD](size_t size) {
+        //                        return (size * factor) / groupGCD;
+        //                    });
 
-                std::vector clusterSizes(tmp.begin(), tmp.end());
+        //         std::vector clusterSizes(tmp.begin(), tmp.end());
 
-                std::vector<size_t> idxs(group.size(), 0);
+        //         std::vector<size_t> idxs(group.size(), 0);
 
-                bool anyLeft = false;
+        //         bool anyLeft = false;
 
-                std::vector<int> upstreamNodes;
-                // std::optional<int> nop;
+        //         std::vector<int> upstreamNodes;
+        //         // std::optional<int> nop;
 
-                do
-                {
-                    anyLeft = false;
+        //         do
+        //         {
+        //             anyLeft = false;
 
-                    if(!upstreamNodes.empty())
-                    {
-                        AssertFatal(upstreamNodes.size() == group.size(),
-                                    ShowValue(upstreamNodes.size()),
-                                    ShowValue(group.size()));
-                        for(size_t clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
-                        {
-                            for(size_t clusterIdx2 = clusterIdx + 1; clusterIdx2 < group.size();
-                                clusterIdx++)
-                            {
-                                // for(auto upstreamNode : upstreamNodes)
-                                for(size_t clusterIdx2 = clusterIdx + 1; clusterIdx2 < group.size();
-                                    clusterIdx++)
-                                    if(idxs[clusterIdx2] < group[clusterIdx2].size())
-                                    {
-                                        auto upstreamNode = upstreamNodes[clusterIdx];
-                                        if(upstreamNode > 0)
-                                        {
-                                            graph.control.chain<ControlGraph::Sequence>(
-                                                upstreamNode,
-                                                group[clusterIdx2][idxs[clusterIdx2]]);
-                                        }
+        //             if(!upstreamNodes.empty())
+        //             {
+        //                 AssertFatal(upstreamNodes.size() == group.size(),
+        //                             ShowValue(upstreamNodes.size()),
+        //                             ShowValue(group.size()));
+        //                 for(size_t clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
+        //                 {
+        //                     for(size_t clusterIdx2 = clusterIdx + 1; clusterIdx2 < group.size();
+        //                         clusterIdx++)
+        //                     {
+        //                         // for(auto upstreamNode : upstreamNodes)
+        //                         for(size_t clusterIdx2 = clusterIdx + 1; clusterIdx2 < group.size();
+        //                             clusterIdx++)
+        //                             if(idxs[clusterIdx2] < group[clusterIdx2].size())
+        //                             {
+        //                                 auto upstreamNode = upstreamNodes[clusterIdx];
+        //                                 if(upstreamNode > 0)
+        //                                 {
+        //                                     graph.control.chain<ControlGraph::Sequence>(
+        //                                         upstreamNode,
+        //                                         group[clusterIdx2][idxs[clusterIdx2]]);
+        //                                 }
 
-                                        anyLeft = true;
-                                    }
-                            }
-                        }
-                        upstreamNodes.clear();
+        //                                 anyLeft = true;
+        //                             }
+        //                     }
+        //                 }
+        //                 upstreamNodes.clear();
 
-                        if(!anyLeft)
-                            break;
-                    }
+        //                 if(!anyLeft)
+        //                     break;
+        //             }
 
-                    anyLeft = false;
+        //             anyLeft = false;
 
-                    // nop = graph.control.addElement(ControlGraph::NOP());
+        //             // nop = graph.control.addElement(ControlGraph::NOP());
 
-                    for(size_t clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
-                    {
-                        auto endIdx  = idxs[clusterIdx] + clusterSizes[clusterIdx];
-                        auto lastIdx = endIdx - 1;
+        //             for(size_t clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
+        //             {
+        //                 auto endIdx  = idxs[clusterIdx] + clusterSizes[clusterIdx];
+        //                 auto lastIdx = endIdx - 1;
 
-                        if(lastIdx < group[clusterIdx].size())
-                        {
-                            upstreamNodes.push_back(group[clusterIdx][lastIdx]);
+        //                 if(lastIdx < group[clusterIdx].size())
+        //                 {
+        //                     upstreamNodes.push_back(group[clusterIdx][lastIdx]);
 
-                            anyLeft = true;
-                        }
-                        else
-                        {
-                            upstreamNodes.push_back(-1);
-                        }
+        //                     anyLeft = true;
+        //                 }
+        //                 else
+        //                 {
+        //                     upstreamNodes.push_back(-1);
+        //                 }
 
-                        idxs[clusterIdx] = endIdx;
-                    }
+        //                 idxs[clusterIdx] = endIdx;
+        //             }
 
-                } while(anyLeft);
-            }
-        }
+        //         } while(anyLeft);
+        //     }
+        // }
 
-        vec3 fixupGroups(vec3 groups)
-        {
-            for(auto& group : groups)
-            {
-                vec fixed(group[1].begin() + 2, group[1].end());
-                group[1] = fixed;
-            }
+        // vec3 fixupGroups(vec3 groups)
+        // {
+        //     for(auto& group : groups)
+        //     {
+        //         vec fixed(group[1].begin() + 2, group[1].end());
+        //         group[1] = fixed;
+        //     }
 
-            return groups;
-        }
+        //     return groups;
+        // }
 
-        void distributeParallelChainsUpward(KernelGraph& graph, vec3 groups, int factor)
-        {
-            for(auto const& group : groups)
-            {
-                AssertFatal(group.size() > 1, ShowValue(group.size()));
+        // void distributeParallelChainsUpward(KernelGraph& graph, vec3 groups, int factor)
+        // {
+        //     for(auto const& group : groups)
+        //     {
+        //         AssertFatal(group.size() > 1, ShowValue(group.size()));
 
-                auto theSizes
-                    = group | std::views::transform([](auto const& c) { return c.size(); });
-                std::vector<int> sizes(theSizes.begin(), theSizes.end());
-                auto             maxSize = std::ranges::max(sizes);
+        //         auto theSizes
+        //             = group | std::views::transform([](auto const& c) { return c.size(); });
+        //         std::vector<int> sizes(theSizes.begin(), theSizes.end());
+        //         auto             maxSize = std::ranges::max(sizes);
 
-                std::vector<float> expectedNodes(group.size(), 0.f);
-                std::vector<int>   seenNodes(group.size(), 0);
+        //         std::vector<float> expectedNodes(group.size(), 0.f);
+        //         std::vector<int>   seenNodes(group.size(), 0);
 
-                auto done = [&]() {
-                    for(int idx = 0; idx < group.size(); idx++)
-                    {
-                        if(seenNodes[idx] < sizes[idx])
-                            return false;
-                    }
-                    return true;
-                };
+        //         auto done = [&]() {
+        //             for(int idx = 0; idx < group.size(); idx++)
+        //             {
+        //                 if(seenNodes[idx] < sizes[idx])
+        //                     return false;
+        //             }
+        //             return true;
+        //         };
 
-                for(int incr = 0; !done(); ++incr)
-                {
-                    for(int idx = group.size() - 1; idx >= 0; --idx)
-                    {
-                        expectedNodes[idx] = static_cast<float>(incr * sizes[idx]) / maxSize;
-                        // auto floor         = static_cast<int>(expectedNodes[idx]);
-                        auto floor = CeilDivide(incr * sizes[idx], maxSize);
-                        if(floor >= seenNodes[idx])
-                        {
-                            if(idx + 1 < group.size() && seenNodes.back() < sizes.back()
-                               && seenNodes[idx] < sizes[idx])
-                            {
-                                auto a = group.back().at(seenNodes.back());
-                                auto b = group[idx].at(seenNodes[idx]);
-                                Log::debug("back[{}] -> group[{}][{}] aka {} -> {}",
-                                           seenNodes.back(),
-                                           idx,
-                                           seenNodes.at(idx),
-                                           a,
-                                           b);
-                                graph.control.chain<ControlGraph::Sequence>(a, b);
-                            }
+        //         for(int incr = 0; !done(); ++incr)
+        //         {
+        //             for(int idx = group.size() - 1; idx >= 0; --idx)
+        //             {
+        //                 expectedNodes[idx] = static_cast<float>(incr * sizes[idx]) / maxSize;
+        //                 // auto floor         = static_cast<int>(expectedNodes[idx]);
+        //                 auto floor = CeilDivide(incr * sizes[idx], maxSize);
+        //                 if(floor >= seenNodes[idx])
+        //                 {
+        //                     if(idx + 1 < group.size() && seenNodes.back() < sizes.back()
+        //                        && seenNodes[idx] < sizes[idx])
+        //                     {
+        //                         auto a = group.back().at(seenNodes.back());
+        //                         auto b = group[idx].at(seenNodes[idx]);
+        //                         Log::debug("back[{}] -> group[{}][{}] aka {} -> {}",
+        //                                    seenNodes.back(),
+        //                                    idx,
+        //                                    seenNodes.at(idx),
+        //                                    a,
+        //                                    b);
+        //                         graph.control.chain<ControlGraph::Sequence>(a, b);
+        //                     }
 
-                            seenNodes[idx] = floor;
-                        }
-                    }
+        //                     seenNodes[idx] = floor;
+        //                 }
+        //             }
 
-                    Log::debug("exp: ({}), seen: ({}) / ({})",
-                               fmt::join(expectedNodes, ", "),
-                               fmt::join(seenNodes, ", "),
-                               fmt::join(sizes, ", "));
-                }
-            }
-        }
+        //             Log::debug("exp: ({}), seen: ({}) / ({})",
+        //                        fmt::join(expectedNodes, ", "),
+        //                        fmt::join(seenNodes, ", "),
+        //                        fmt::join(sizes, ", "));
+        //         }
+        //     }
+        // }
 
-        void ScheduleMultiplyAndLDSUpward(KernelGraph& graph, vec3 groups, int factor)
-        {
-            // groups = fixupGroups(groups);
+        // void ScheduleMultiplyAndLDSUpward(KernelGraph& graph, vec3 groups, int factor)
+        // {
+        //     // groups = fixupGroups(groups);
 
-            for(auto const& group : groups)
-            {
-                AssertFatal(group.size() > 1, ShowValue(group.size()));
-                auto sizes = group | std::views::transform([](auto const& c) { return c.size(); });
-                auto groupGCD = std::reduce(
-                    sizes.begin(), sizes.end(), *sizes.begin(), std::gcd<size_t, size_t>);
+        //     for(auto const& group : groups)
+        //     {
+        //         AssertFatal(group.size() > 1, ShowValue(group.size()));
+        //         auto sizes = group | std::views::transform([](auto const& c) { return c.size(); });
+        //         auto groupGCD = std::reduce(
+        //             sizes.begin(), sizes.end(), *sizes.begin(), std::gcd<size_t, size_t>);
 
-                auto tmp = sizes | std::views::transform([factor, groupGCD](size_t size) {
-                               return (size * factor) / groupGCD;
-                           });
+        //         auto tmp = sizes | std::views::transform([factor, groupGCD](size_t size) {
+        //                        return (size * factor) / groupGCD;
+        //                    });
 
-                std::vector clusterSizes(tmp.begin(), tmp.end());
-                Log::debug(
-                    "Cluster: ({}) -> ({})", fmt::join(sizes, ", "), fmt::join(clusterSizes, ", "));
+        //         std::vector clusterSizes(tmp.begin(), tmp.end());
+        //         Log::debug(
+        //             "Cluster: ({}) -> ({})", fmt::join(sizes, ", "), fmt::join(clusterSizes, ", "));
 
-                std::vector<int> firstIdxs(group.size(), 0);
-                std::vector<int> lastIdxs(group.size(), 0);
-                std::vector<int> nextIdxs(group.size(), 0);
+        //         std::vector<int> firstIdxs(group.size(), 0);
+        //         std::vector<int> lastIdxs(group.size(), 0);
+        //         std::vector<int> nextIdxs(group.size(), 0);
 
-                bool any = false;
-                do
-                {
-                    any = false;
+        //         bool any = false;
+        //         do
+        //         {
+        //             any = false;
 
-                    for(int clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
-                    {
-                        nextIdxs[clusterIdx] = firstIdxs[clusterIdx] + clusterSizes[clusterIdx];
-                        lastIdxs[clusterIdx] = nextIdxs[clusterIdx] - 1;
-                    }
+        //             for(int clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
+        //             {
+        //                 nextIdxs[clusterIdx] = firstIdxs[clusterIdx] + clusterSizes[clusterIdx];
+        //                 lastIdxs[clusterIdx] = nextIdxs[clusterIdx] - 1;
+        //             }
 
-                    for(int clusterIdx = 0; clusterIdx + 1 < group.size(); clusterIdx++)
-                    {
-                        if(lastIdxs[clusterIdx + 1] < group[clusterIdx + 1].size()
-                           && nextIdxs[clusterIdx] < group[clusterIdx].size())
-                        {
-                            any         = true;
-                            auto before = group[clusterIdx + 1][lastIdxs[clusterIdx + 1]];
-                            auto after  = group[clusterIdx][nextIdxs[clusterIdx]];
+        //             for(int clusterIdx = 0; clusterIdx + 1 < group.size(); clusterIdx++)
+        //             {
+        //                 if(lastIdxs[clusterIdx + 1] < group[clusterIdx + 1].size()
+        //                    && nextIdxs[clusterIdx] < group[clusterIdx].size())
+        //                 {
+        //                     any         = true;
+        //                     auto before = group[clusterIdx + 1][lastIdxs[clusterIdx + 1]];
+        //                     auto after  = group[clusterIdx][nextIdxs[clusterIdx]];
 
-                            graph.control.chain<ControlGraph::Sequence>(before, after);
-                        }
-                    }
+        //                     graph.control.chain<ControlGraph::Sequence>(before, after);
+        //                 }
+        //             }
 
-                    std::swap(firstIdxs, nextIdxs);
+        //             std::swap(firstIdxs, nextIdxs);
 
-                } while(any);
-            }
-        }
+        //         } while(any);
+        //     }
+        // }
 
-        void ScheduleMultiplyAndLDSNop(KernelGraph& graph,
-                                      vec3 const&  groups,
-                                      int          factor,
-                                      vec          slip = {})
-        {
-            for(auto const& group : groups)
-            {
-                AssertFatal(group.size() > 1, ShowValue(group.size()));
-                auto sizes = group | std::views::transform([](auto const& c) { return c.size(); });
-                auto groupGCD = std::reduce(
-                    sizes.begin(), sizes.end(), *sizes.begin(), std::gcd<size_t, size_t>);
+        // void ScheduleMultiplyAndLDSNop(KernelGraph& graph,
+        //                                vec3 const&  groups,
+        //                                int          factor,
+        //                                vec          slip = {})
+        // {
+        //     for(auto const& group : groups)
+        //     {
+        //         AssertFatal(group.size() > 1, ShowValue(group.size()));
+        //         auto sizes = group | std::views::transform([](auto const& c) { return c.size(); });
+        //         auto groupGCD = std::reduce(
+        //             sizes.begin(), sizes.end(), *sizes.begin(), std::gcd<size_t, size_t>);
 
-                auto tmp = sizes | std::views::transform([factor, groupGCD](size_t size) {
-                               return (size * factor) / groupGCD;
-                           });
+        //         auto tmp = sizes | std::views::transform([factor, groupGCD](size_t size) {
+        //                        return (size * factor) / groupGCD;
+        //                    });
 
-                std::vector clusterSizes(tmp.begin(), tmp.end());
+        //         std::vector clusterSizes(tmp.begin(), tmp.end());
 
-                std::vector<int> idxs(group.size(), 0);
-                if(!slip.empty())
-                    idxs = slip;
+        //         std::vector<int> idxs(group.size(), 0);
+        //         if(!slip.empty())
+        //             idxs = slip;
 
-                // bool first = true;
-                bool anyLeft = false;
+        //         // bool first = true;
+        //         bool anyLeft = false;
 
-                std::optional<int> nop;
+        //         std::optional<int> nop;
 
-                do
-                {
-                    anyLeft = false;
+        //         do
+        //         {
+        //             anyLeft = false;
 
-                    if(nop)
-                    {
-                        for(int clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
-                        {
-                            if(idxs[clusterIdx] < group[clusterIdx].size())
-                            {
-                                graph.control.chain<ControlGraph::Sequence>(
-                                    *nop, group[clusterIdx][idxs[clusterIdx]]);
+        //             if(nop)
+        //             {
+        //                 for(int clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
+        //                 {
+        //                     if(idxs[clusterIdx] < group[clusterIdx].size())
+        //                     {
+        //                         graph.control.chain<ControlGraph::Sequence>(
+        //                             *nop, group[clusterIdx][idxs[clusterIdx]]);
 
-                                anyLeft = true;
-                            }
-                        }
+        //                         anyLeft = true;
+        //                     }
+        //                 }
 
-                        if(!anyLeft)
-                            break;
-                    }
+        //                 if(!anyLeft)
+        //                     break;
+        //             }
 
-                    anyLeft = false;
+        //             anyLeft = false;
 
-                    nop = graph.control.addElement(ControlGraph::NOP());
+        //             nop = graph.control.addElement(ControlGraph::NOP());
 
-                    for(int clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
-                    {
-                        auto endIdx  = idxs[clusterIdx] + clusterSizes[clusterIdx];
-                        auto lastIdx = endIdx - 1;
+        //             for(int clusterIdx = 0; clusterIdx < group.size(); clusterIdx++)
+        //             {
+        //                 auto endIdx  = idxs[clusterIdx] + clusterSizes[clusterIdx];
+        //                 auto lastIdx = endIdx - 1;
 
-                        if(lastIdx < group[clusterIdx].size())
-                        {
-                            graph.control.chain<ControlGraph::Sequence>(group[clusterIdx][lastIdx],
-                                                                        *nop);
+        //                 if(lastIdx < group[clusterIdx].size())
+        //                 {
+        //                     graph.control.chain<ControlGraph::Sequence>(group[clusterIdx][lastIdx],
+        //                                                                 *nop);
 
-                            anyLeft = true;
-                        }
+        //                     anyLeft = true;
+        //                 }
 
-                        idxs[clusterIdx] = endIdx;
-                    }
-                    // first = false;
+        //                 idxs[clusterIdx] = endIdx;
+        //             }
+        //             // first = false;
 
-                } while(anyLeft);
-            }
-        }
+        //         } while(anyLeft);
+        //     }
+        // }
 
         void distributeChains(KernelGraph& graph, std::vector<ParallelChainSet> const& chainSets)
         {
@@ -1161,75 +1174,77 @@ namespace rocRoller
                 Log::debug("LDS type counts: {{{}}}", toString(ldsTypeCounts));
             }
         }
+    }
 
-        KernelGraph ScheduleMultiplyAndLDS::apply(KernelGraph const& original)
+    KernelGraph ScheduleMultiplyAndLDS::apply(KernelGraph const& original)
+    {
+        using namespace ScheduleMultiplyAndLDSDetail;
+
+        auto rv = original;
+
+        auto theEdge = rv.control.findEdge(288, 31024);
+        AssertFatal(theEdge);
+        rv.control.deleteElement(*theEdge);
+        rv.control.chain<ControlGraph::Sequence>(30473, 31024);
+
+        auto something = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
+
+        for(auto chainSet : something)
         {
-            auto rv = original;
-
-            auto theEdge = rv.control.findEdge(288, 31024);
-            AssertFatal(theEdge);
-            rv.control.deleteElement(*theEdge);
-            rv.control.chain<ControlGraph::Sequence>(30473, 31024);
-
-            auto something = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
-
-            for(auto chainSet : something)
-            {
-                auto ts = [](auto x) { return toString(x); };
-                Log::debug("Chains:\nMultiplies: {{{}}}({})\nTypes: {}({})\nLDS: "
-                           "{{{}}}({})\nTypes: {}({})",
-                           fmt::join(chainSet.multiplyChain, ", "),
-                           chainSet.multiplyChain.size(),
-                           toString(chainSet.multiplyTagTypes),
-                           chainSet.multiplyTagTypes.size(),
-                           fmt::join(chainSet.ldsChain, ", "),
-                           chainSet.ldsChain.size(),
-                           fmt::join(chainSet.ldsChainTypes | std::views::transform(ts), ", "),
-                           chainSet.ldsChainTypes.size());
-            }
-
-            distributeChains(rv, something);
-            return rv;
-
-            if(false)
-            {
-                auto groups = identifyParallelMultiplyAndLoadStoreChains(rv);
-                Log::debug(showGroups(groups));
-
-                // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
-                distributeParallelChainsUpward(rv, groups, 1);
-            }
-            else if(false)
-            {
-                {
-                    auto groups = identifyParallelMultiplyAndD2LDSChains(rv);
-                    Log::debug(showGroups(groups));
-
-                    ScheduleMultiplyAndLDSNop(rv, groups, 1);
-                }
-
-                removeRedundantSequenceEdges(rv);
-
-                {
-                    auto groups = identifyParallelMultiplyAndLDSChains(rv);
-                    Log::debug(showGroups(groups));
-
-                    // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
-                    ScheduleMultiplyAndLDSUpward(rv, groups, 1);
-                }
-            }
-            else
-            {
-                {
-                    auto groups = identifyParallelMultiplyAndLDSChains(rv);
-                    Log::debug(showGroups(groups));
-
-                    // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
-                    distributeParallelChainsUpward(rv, groups, 1);
-                }
-            }
-
-            return rv;
+            auto ts = [](auto x) { return toString(x); };
+            Log::debug("Chains:\nMultiplies: {{{}}}({})\nTypes: {}({})\nLDS: "
+                       "{{{}}}({})\nTypes: {}({})",
+                       fmt::join(chainSet.multiplyChain, ", "),
+                       chainSet.multiplyChain.size(),
+                       toString(chainSet.multiplyTagTypes),
+                       chainSet.multiplyTagTypes.size(),
+                       fmt::join(chainSet.ldsChain, ", "),
+                       chainSet.ldsChain.size(),
+                       fmt::join(chainSet.ldsChainTypes | std::views::transform(ts), ", "),
+                       chainSet.ldsChainTypes.size());
         }
+
+        distributeChains(rv, something);
+        return rv;
+
+        // if(false)
+        // {
+        //     auto groups = identifyParallelMultiplyAndLoadStoreChains(rv);
+        //     Log::debug(showGroups(groups));
+
+        //     // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
+        //     distributeParallelChainsUpward(rv, groups, 1);
+        // }
+        // else if(false)
+        // {
+        //     {
+        //         auto groups = identifyParallelMultiplyAndD2LDSChains(rv);
+        //         Log::debug(showGroups(groups));
+
+        //         ScheduleMultiplyAndLDSNop(rv, groups, 1);
+        //     }
+
+        //     removeRedundantSequenceEdges(rv);
+
+        //     {
+        //         auto groups = identifyParallelMultiplyAndLDSChains(rv);
+        //         Log::debug(showGroups(groups));
+
+        //         // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
+        //         ScheduleMultiplyAndLDSUpward(rv, groups, 1);
+        //     }
+        // }
+        // else
+        // {
+        //     {
+        //         auto groups = identifyParallelMultiplyAndLDSChains(rv);
+        //         Log::debug(showGroups(groups));
+
+        //         // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
+        //         distributeParallelChainsUpward(rv, groups, 1);
+        //     }
+        // }
+
+        // return rv;
     }
 }

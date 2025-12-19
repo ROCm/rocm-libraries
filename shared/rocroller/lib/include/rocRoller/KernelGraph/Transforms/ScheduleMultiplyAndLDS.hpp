@@ -33,6 +33,15 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        /**
+         * For certain kernels, each subIter should have three parallel chains of nodes:
+         * LoadTileDirect2LDS, Multiply, LoadLDSTile.
+         * 
+         * ScheduleMultiplyAndLDS will create Sequence edges between the Multiply and
+         * LoadLDSTile chains in order to allow the AliasDataFlowTags transform to find more
+         * aliases.
+         * 
+         */
         class ScheduleMultiplyAndLDS : public GraphTransform
         {
         public:
