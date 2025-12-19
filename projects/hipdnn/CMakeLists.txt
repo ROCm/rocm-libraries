@@ -105,7 +105,7 @@ option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from sc
 )
 option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
-option(CODE_COVERAGE "Build with code coverage flags" OFF)
+option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(WIN32)
@@ -131,7 +131,8 @@ include(cmake/Tests.cmake)
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
 set(EXTRA_LINK_OPTIONS)
-if(CODE_COVERAGE)
+if(HIPDNN_ENABLE_COVERAGE)
+    message(VERBOSE "Enabling compile flags for coverage-mapping")
     list(PREPEND EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
     list(PREPEND EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
 endif()
@@ -184,24 +185,16 @@ if(HIP_DNN_BUILD_PLUGINS)
     add_subdirectory(plugins)
 endif()
 
-# keep this after all build folder have been added so they have a chance to register their tests
-# using append_test_to_check_target
-
 if(NOT HIP_DNN_SKIP_TESTS)
-    create_test_name_validation_target()
-
-    finalize_custom_check_target()
-    finalize_unit_check_target()
-    finalize_integration_check_target()
-
-    add_dependencies(check validate_test_names)
-    add_dependencies(check_ctest validate_test_names)
+    # keep this after all build folder have been added so they have a chance to register their tests
+    # using append_test_to_check_target
+    finalize_test_targets()
 endif()
 
 # keep this after all the targets have been added that could use the HIP language compiler.
 add_clang_tidy_custom_target()
 
-if(CODE_COVERAGE)
+if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
     if(HIP_DNN_BUILD_PLUGINS)
@@ -234,21 +227,69 @@ if(CODE_COVERAGE)
         ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT}
     )
 
-    add_custom_target(
-        code_coverage
-        COMMAND cd ${CMAKE_BINARY_DIR} && find . -name \"*.profraw\" -print0 | xargs -0
-                ${LLVM_PROFDATA_BINARY} merge -sparse -o ./hipdnn.profdata
-        COMMAND ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS} -instr-profile=./hipdnn.profdata
-                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" > ./code_cov_hipdnn.report
-        COMMAND
-            ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
-            -instr-profile=./hipdnn.profdata
-            -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
-            --output-dir=./hipdnn_coverage_html
-        DEPENDS check
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Generating code coverage report"
-    )
+    # Helper function to create a code coverage target
+    # ~~~
+    # Parameters:
+    #   TARGET_NAME - Name of the coverage target to create
+    #   DEPENDS_TARGET - The target that must be built before generating
+    #                    coverage (required, use "" for no dependency)
+    # ~~~
+    function(add_custom_coverage_target TARGET_NAME DEPENDS_TARGET)
+        # Build the DEPENDS clause
+        set(DEPENDS_CLAUSE "")
+        if(NOT "${DEPENDS_TARGET}" STREQUAL "")
+            set(DEPENDS_CLAUSE DEPENDS ${DEPENDS_TARGET})
+        endif()
+
+        # cmake-format: off
+        add_custom_target(
+            ${TARGET_NAME}
+            COMMAND find . -name "*.profraw" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge
+                    -sparse -o ./coverage_report/hipdnn.profdata
+            COMMAND
+                ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage_report/hipdnn.profdata
+                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
+                ./coverage_report/code_cov_hipdnn.report
+            COMMAND
+                ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage_report/hipdnn.profdata
+                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
+                --output-dir=coverage_report
+            COMMAND
+                ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage_report/hipdnn.profdata --format=lcov >
+                ./coverage_report/coverage.info
+            ${DEPENDS_CLAUSE}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Generating code coverage report"
+            VERBATIM
+            USES_TERMINAL
+        )
+        # cmake-format: on
+    endfunction()
+
+    if(HIP_DNN_SKIP_TESTS)
+        message(
+            WARNING
+                "\nThe code coverage targets depend on test targets but test targets don't exist because HIP_DNN_SKIP_TESTS is enabled."
+        )
+    else()
+        add_custom_coverage_target(code_coverage check) # code_coverage depends on 'check'
+        add_custom_coverage_target(unit-coverage unit-check) # unit-coverage depends on 'unit-check'
+        add_custom_coverage_target(integration-coverage integration-check) # ... 'integration-check'
+
+        # Make alias to target coverage
+        add_custom_target(
+            coverage DEPENDS code_coverage COMMENT "Alias for code_coverage to match mathci"
+        )
+    endif()
+
+    # Create a coverage target that does not depend on any other target and will use the coverage
+    # data that already exists on disk from prior / manual target runs performed before this target
+    # is run.
+    add_custom_coverage_target(current-coverage "")
+
 endif()
 
 if(NOT HIP_DNN_SKIP_TESTS)

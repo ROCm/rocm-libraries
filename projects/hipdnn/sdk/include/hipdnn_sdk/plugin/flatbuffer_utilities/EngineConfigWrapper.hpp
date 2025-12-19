@@ -7,7 +7,6 @@
 #include <memory>
 
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 
 namespace hipdnn_plugin
 {
@@ -62,8 +61,7 @@ private:
     {
         if(!isValid())
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Engine config is not valid");
+            throw std::invalid_argument("Engine config is not valid");
         }
     }
 
