@@ -7,14 +7,15 @@
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
-#include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "engines/MiopenEngine.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
 
 using namespace miopen_legacy_plugin;
+using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin;
 
 TEST(TestMiopenEngine, ConstructorAndId)
