@@ -111,7 +111,7 @@ int main()
     size_t                    x_size = N * size_t(incx);
     size_t                    y_size = N * size_t(incy);
 
-    double gpu_time_used;
+    double gpu_time_used = 0.0;
 
     hipblasHandle_t handle;
     hipblasCreate(&handle);
