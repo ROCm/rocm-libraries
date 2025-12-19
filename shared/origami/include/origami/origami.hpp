@@ -55,9 +55,9 @@ prediction_result_t select_config(const problem_t& problem,
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param skGrid StreamK grid size.
- * @return std::tuple<size_t, size_t>
+ * @return workgroup_mapping_t Workgroup mapping parameters (wgmxccchunk, wgmxcc, wgm).
  */
-std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
+ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const config_t& config,
                                               size_t skGrid);

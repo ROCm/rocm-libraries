@@ -41,9 +41,9 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
  */
 
 workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
-                                              const hardware_t& hardware,
-                                              const config_t& config,
-                                              size_t skGrid) {
+                                             const hardware_t& hardware,
+                                             const config_t& config,
+                                             size_t skGrid) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -66,8 +66,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   int32_t defaultWGM = ceil(std::sqrt(numCUsPerXCD));
 
   // Number of output MTs per split and batch
-  size_t numMT_M = safe_ceil_div(M, MT_M);
-  size_t numMT_N = safe_ceil_div(N, MT_N);
+  size_t numMT_M = math::safe_ceil_div(M, MT_M);
+  size_t numMT_N = math::safe_ceil_div(N, MT_N);
   size_t numMTs = numMT_M * numMT_N;
 
   // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
@@ -176,7 +176,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     for (auto wgm : wgmList) {
       auto wgmL2Estimate = 0;
       auto slabTiles = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
-      auto slabCount = safe_ceil_div(numMT_N, wgm);
+      auto slabCount = math::safe_ceil_div(numMT_N, wgm);
       auto edgeSlabWidth = numMT_N - (slabCount - 1) * wgm;
       auto numXCDUsed = std::min(numXCD, numWGs);
 

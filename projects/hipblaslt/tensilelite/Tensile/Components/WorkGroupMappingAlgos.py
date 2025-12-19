@@ -99,6 +99,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
         # We need to get WGMXCC from WGM
         # This value will be used as number of XCCs for both chunked and non-chunked remapping
+        SgprWGMXCC = writer.sgprPool.checkOut(1)
         module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
         module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
         module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1, comment="No mapping if WGMXCC <= 1"))
@@ -129,7 +130,6 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         new    = x + offset + g * group
         """
         with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
-            SgprWGMXCC = tmpSgprRes.idx
             SgprX      = tmpSgprRes.idx + 1
             SgprG      = tmpSgprRes.idx + 2
             SgprQ      = tmpSgprRes.idx + 3
@@ -142,9 +142,6 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
-            module.addComment0("remap WGs if WGMXCC > 1")
-            module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1))
-            module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
             module.addComment0("divmod(old_wg, WGMXCC)")
             module.add(scalarUInt24DivideAndRemainder(qReg=SgprX, rReg=SgprG, dReg="WorkGroup0", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
             module.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
@@ -160,8 +157,9 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(SgprX), src1=sgpr(SgprO)))
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(SgprG), src1=sgpr(group)))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr)))
-            # Skip
-            module.add(label_skipWGMXCC)
+        # Skip
+        writer.sgprPool.checkIn(SgprWGMXCC)
+        module.add(label_skipWGMXCC)
     else:
         with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
             tmpSgpr      = tmpSgprRes.idx
@@ -353,7 +351,6 @@ def chiplet_transform_chunked(writer, kernel, sgprNumXCC, sgprIndex, sgprNumWG, 
     writer.sgprPool.checkIn(sgprLocalId)
     writer.sgprPool.checkIn(sgprTmp)
     writer.sgprPool.checkIn(sgprTmp2)
-    writer.sgprPool.checkIn(sgprNumXCC)
     writer.vgprPool.checkIn(tmpVgpr)
 
     return module
