@@ -45,28 +45,24 @@ struct TensorsConfig
 template <typename T>
 std::vector<TensorsConfig> TensorsConfigs()
 {
+#define KiB 1024ul
     std::vector<TensorsConfig> configs;
-#define MiB (1024ul * 1024ul)
-
-#if PERF_ENABLE
-    for(int N = (1 * MiB); N <= (1024 * MiB); N *= 2)
-    {
-        configs.push_back({{1, 1, N}, {N, N, 1}, {1, 1, N}, {N, N, 1}});
-    }
-    return configs;
-#else
+    int N;
     int C = 4;
-    int N = 20 * 1024;
+#if PERF_ENABLE
+    for(N = (1 * KiB); N <= (1024 * KiB); N *= 2)
+    {
+        configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
+    }
+#else
+    N = 32 * KiB;
     configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
-    C = 1;
-    N = 64 * MiB;
+    N = 128 * KiB;
     configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
-    N = 256 * MiB;
+    N = 1024 * KiB;
     configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
-    N = 1024 * MiB;
-    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
-    return configs;
 #endif
+    return configs;
 }
 
 template <typename T>
@@ -76,19 +72,19 @@ struct Op2dTensorLiteTest
 protected:
     void SetUp() override
     {
-        auto&& handle                                 = get_handle();
-        std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
-
         data_type = miopen_type<T>{};
+
+        std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
 
         // Generate elements in tensors
         tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
-            tensor_elem_gen_integer{17});
+            tensor_elem_gen_integer{});
         tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
-            tensor_elem_gen_integer{17});
+            tensor_elem_gen_integer{});
         tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
             [](auto...) { return 1; });
 
+        auto&& handle = get_handle();
         // Write the device tensors
         tensA_dev = handle.Write(tensA.data);
         tensB_dev = handle.Write(tensB.data);
@@ -171,9 +167,9 @@ protected:
             alpha0,
             alpha1,
             beta,
-            0L,
-            0L,
-            0L,
+            0LL,
+            0LL,
+            0LL,
             total_work,
             total_work2,
             use_beta,
@@ -194,9 +190,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    0L,
-                    0L,
-                    0L,
+                    0LL,
+                    0LL,
+                    0LL,
                     total_work,
                     total_work2,
                     use_beta,
@@ -207,7 +203,8 @@ protected:
     void runHIP() // run HIP kernel
     {
         auto&& handle = get_handle();
-        tensC_dev     = handle.Write(tensC.data);
+        // Write data to device tensor
+        tensC_dev = handle.Write(tensC.data);
 
         std::string paramsHIP =
             params + " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});

@@ -810,8 +810,8 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
                                           const uint64_t Aoffset,
                                           const uint64_t Boffset,
                                           const uint64_t Coffset,
-                                          const long total_work,
-                                          const long total_work2,
+                                          const size_t total_work,
+                                          const size_t total_work2,
                                           const int use_beta,
                                           const int use_bias)
 {
