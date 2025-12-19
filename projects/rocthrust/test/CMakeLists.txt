@@ -350,6 +350,16 @@ endif()
 # install location and renamed "CTestTestfile.cmake" (below).
 set(CTEST_RESOURCE_SPEC_FILE "${CMAKE_BINARY_DIR}/resources.json")
 
+add_executable(enum_devices ${CMAKE_SOURCE_DIR}/test/enum_devices.cpp)
+target_link_libraries(enum_devices PRIVATE hip::host)
+add_custom_command(
+    TARGET enum_devices
+    POST_BUILD
+    COMMAND enum_devices resources.json
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Generating resources.json file"
+)
+
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
@@ -359,7 +369,7 @@ rocm_install(
 
 # Generate the resource spec file at install time
 rocm_install(
-    CODE "execute_process(COMMAND cmake -P ${CMAKE_SOURCE_DIR}/cmake/GenerateResourceSpec.cmake
-                          WORKING_DIRECTORY  \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}\")"
+    CODE "execute_process(COMMAND ${CMAKE_BINARY_DIR}/test/enum_devices
+                                  \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/resources.json)"
     COMPONENT tests
 )

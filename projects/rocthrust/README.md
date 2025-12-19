@@ -199,7 +199,7 @@ variable. CTest Resource Allocation requires a resource spec file.
 
 #### Auto resource spec generation
 
-A utility script, `GenerateResourceSpec.cmake`, is called when you run `cmake -DBUILD_TEST=ON`. It will generate the
+A custom command is called when you run `cmake -DBUILD_TEST=ON`, which will generate the
 resource spec file, named `resources.json`, that describes the GPU resources available on your system. In addition,
 each test defines the GPU resource it requires through the `RESOURCE_GROUPS` property. Then when you run `ctest` with
 parallel jobs:
