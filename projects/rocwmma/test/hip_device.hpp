@@ -30,7 +30,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #if ROCWMMA_BENCHMARK_TESTS
-#include <rocm_smi/rocm_smi.h>
+#include <amd_smi/amdsmi.h>
 #endif // ROCWMMA_BENCHMARK_TESTS
 #include <rocwmma/internal/constants.hpp>
 
