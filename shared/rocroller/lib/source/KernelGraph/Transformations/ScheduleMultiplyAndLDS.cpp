@@ -816,6 +816,7 @@ namespace rocRoller::KernelGraph
 
         auto rv = original;
 
+        // TODO: Remove this hack (don't add this edge in the first place!)
         auto theEdge = rv.control.findEdge(288, 31024);
         AssertFatal(theEdge);
         rv.control.deleteElement(*theEdge);

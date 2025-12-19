@@ -638,6 +638,7 @@ namespace rocRoller
             auto unrollCoord  = findUnrollNeighbour(graph, forLoopCoord).value();
 
             auto getUserOrder = [](KernelGraph const& graph, int forLoop) -> std::vector<int> {
+                // TODO: Remove this hack (identify the user coords for the different tensors in global memory instead of hard coding)
                 return {1, 3, 2, 4};
             };
             auto userOrder = getUserOrder(graph, forLoop);
@@ -756,6 +757,7 @@ namespace rocRoller
                     ldsByUserAndSmallK[{user, smallk}].push_back(dchain);
                 }
 
+                // TODO: Remove this hack (identify the user coords for the different tensors in LDS instead of hard coding)
                 auto userA = 15, userAScale = 4323, userB = 23, userBScale = 4440;
 
                 auto mixDataAndScale = [&](int dataUser, int scaleUser){
