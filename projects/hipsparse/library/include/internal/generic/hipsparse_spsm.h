@@ -353,8 +353,8 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  row order and \f$C\f$ is column order and vice versa). When running on an AMD system with the rocSPARSE backend, the kernels
 *  solve the system assuming the matrices \f$B\f$ and \f$C\f$ are in row order as this provides the best memory access. This
 *  means that if the matrix \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column
-*  order as this is equivalent to being in row order), then internally memory copies and/or transposing of data may be performed
-*  to get them into the correct order (possbily using extra buffer size). Once computation is completed, additional memory copies
+*  order as this is equivalent to being in row order), then internally memory copies and/or transposing of data might be performed
+*  to get them into the correct order (possibly using extra buffer size). Once computation is completed, additional memory copies
 *  and/or transposing of data may be performed to get them back into the user arrays. For best performance and smallest required
 *  temporary storage buffers on an AMD system, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column
 *  order if \f$B\f$ is being transposed).
