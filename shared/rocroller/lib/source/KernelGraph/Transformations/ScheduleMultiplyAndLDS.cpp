@@ -24,15 +24,12 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/KernelGraph/Transforms/ClusterParallelChains.hpp>
+#include <rocRoller/KernelGraph/Transforms/ScheduleMultiplyAndLDS.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 #include <rocRoller/Graph/GraphUtilities.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/Utilities/Concepts.hpp>
-
-#define debug critical
-#define Debug Critical
 
 namespace rocRoller
 {
@@ -823,7 +820,7 @@ namespace rocRoller
           *
           */
 
-        void clusterParallelChainsLTR(KernelGraph& graph, vec3 const& groups, int factor)
+        void ScheduleMultiplyAndLDSLTR(KernelGraph& graph, vec3 const& groups, int factor)
         {
 
             for(auto const& group : groups)
@@ -979,7 +976,7 @@ namespace rocRoller
             }
         }
 
-        void clusterParallelChainsUpward(KernelGraph& graph, vec3 groups, int factor)
+        void ScheduleMultiplyAndLDSUpward(KernelGraph& graph, vec3 groups, int factor)
         {
             // groups = fixupGroups(groups);
 
@@ -1032,7 +1029,7 @@ namespace rocRoller
             }
         }
 
-        void clusterParallelChainsNop(KernelGraph& graph,
+        void ScheduleMultiplyAndLDSNop(KernelGraph& graph,
                                       vec3 const&  groups,
                                       int          factor,
                                       vec          slip = {})
@@ -1165,7 +1162,7 @@ namespace rocRoller
             }
         }
 
-        KernelGraph ClusterParallelChains::apply(KernelGraph const& original)
+        KernelGraph ScheduleMultiplyAndLDS::apply(KernelGraph const& original)
         {
             auto rv = original;
 
@@ -1199,7 +1196,7 @@ namespace rocRoller
                 auto groups = identifyParallelMultiplyAndLoadStoreChains(rv);
                 Log::debug(showGroups(groups));
 
-                // clusterParallelChainsNop(rv, groups, 1, {0, 8});
+                // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
                 distributeParallelChainsUpward(rv, groups, 1);
             }
             else if(false)
@@ -1208,7 +1205,7 @@ namespace rocRoller
                     auto groups = identifyParallelMultiplyAndD2LDSChains(rv);
                     Log::debug(showGroups(groups));
 
-                    clusterParallelChainsNop(rv, groups, 1);
+                    ScheduleMultiplyAndLDSNop(rv, groups, 1);
                 }
 
                 removeRedundantSequenceEdges(rv);
@@ -1217,8 +1214,8 @@ namespace rocRoller
                     auto groups = identifyParallelMultiplyAndLDSChains(rv);
                     Log::debug(showGroups(groups));
 
-                    // clusterParallelChainsNop(rv, groups, 1, {0, 8});
-                    clusterParallelChainsUpward(rv, groups, 1);
+                    // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
+                    ScheduleMultiplyAndLDSUpward(rv, groups, 1);
                 }
             }
             else
@@ -1227,7 +1224,7 @@ namespace rocRoller
                     auto groups = identifyParallelMultiplyAndLDSChains(rv);
                     Log::debug(showGroups(groups));
 
-                    // clusterParallelChainsNop(rv, groups, 1, {0, 8});
+                    // ScheduleMultiplyAndLDSNop(rv, groups, 1, {0, 8});
                     distributeParallelChainsUpward(rv, groups, 1);
                 }
             }

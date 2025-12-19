@@ -33,15 +33,15 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        class ClusterParallelChains : public GraphTransform
+        class ScheduleMultiplyAndLDS : public GraphTransform
         {
         public:
-            ClusterParallelChains() = default;
+            ScheduleMultiplyAndLDS() = default;
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
-                return "ClusterParallelChains";
+                return "ScheduleMultiplyAndLDS";
             }
 
             inline std::vector<GraphConstraint> preConstraints() const override
