@@ -1,11 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <vector>
 #include <gtest/gtest.h>
 #include <half/half.hpp>
-#include <limits>
 #include <miopen/logger.hpp>
-#include <vector>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "../pooling_common.hpp"
@@ -187,6 +189,83 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
         {
             GTEST_SKIP() << "Invalid config: lens[" << i << "] > (input_dims[" << i + 2
                          << "] + 2 * pads[" << i << "])";
+        }
+    }
+
+    // Skip configurations that would cause "Index range not enough" exception
+    // This happens when the index type doesn't have enough range for max pooling backward
+    if(test_case.mode == miopenPoolingMax)
+    {
+        // Calculate index_max based on index type from test_case
+        size_t index_max = 0;
+        switch(test_case.index_type)
+        {
+        case miopenIndexUint8:
+            index_max = std::numeric_limits<uint8_t>::max();
+            break;
+        case miopenIndexUint16:
+            index_max = std::numeric_limits<uint16_t>::max();
+            break;
+        case miopenIndexUint32:
+            index_max = std::numeric_limits<uint32_t>::max();
+            break;
+        case miopenIndexUint64:
+            index_max = std::numeric_limits<uint64_t>::max();
+            break;
+        default:
+            index_max = SIZE_MAX; // Unknown type, assume it's large enough
+            break;
+        }
+
+        // For max pooling backward, check if index range is sufficient
+        if(test_case.wsidx == 0) // miopenPoolingWorkspaceIndexMask
+        {
+            // Check if index_max is sufficient for the pooling window
+            size_t lens_product = 1;
+            for(int len : test_case.lens)
+            {
+                lens_product *= static_cast<size_t>(len);
+            }
+            if(index_max <= lens_product)
+            {
+                int index_bits = 0;
+                switch(test_case.index_type)
+                {
+                case miopenIndexUint8: index_bits = 8; break;
+                case miopenIndexUint16: index_bits = 16; break;
+                case miopenIndexUint32: index_bits = 32; break;
+                case miopenIndexUint64: index_bits = 64; break;
+                default: index_bits = 0; break;
+                }
+                GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
+                             << index_max << ") <= lens product (" << lens_product
+                             << ") for max pooling backward with workspace index mask mode";
+            }
+        }
+        else // miopenPoolingWorkspaceIndexImage (wsidx == 1)
+        {
+            // Check if index_max is sufficient for output spatial dimensions
+            auto output_tensor = get_output_tensor(filter, input);
+            size_t output_spatial_product = 1;
+            for(size_t i = 2; i < output_tensor.desc.GetLengths().size(); i++)
+            {
+                output_spatial_product *= static_cast<size_t>(output_tensor.desc.GetLengths()[i]);
+            }
+            if(index_max <= output_spatial_product)
+            {
+                int index_bits = 0;
+                switch(test_case.index_type)
+                {
+                case miopenIndexUint8: index_bits = 8; break;
+                case miopenIndexUint16: index_bits = 16; break;
+                case miopenIndexUint32: index_bits = 32; break;
+                case miopenIndexUint64: index_bits = 64; break;
+                default: index_bits = 0; break;
+                }
+                GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
+                             << index_max << ") <= output spatial product (" << output_spatial_product
+                             << ") for max pooling backward with workspace index image mode";
+            }
         }
     }
 
