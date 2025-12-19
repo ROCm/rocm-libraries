@@ -118,7 +118,6 @@ if(HIPBLASLT_ENABLE_HOST)
         find_library(rocTracer roctx64 REQUIRED)
         get_filename_component(ROCTRACER_LIB_DIR ${rocTracer} DIRECTORY)
         get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
-    
         find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h"
             HINTS ${ROCTRACER_ROOT_DIR}
             PATH_SUFFIXES include
