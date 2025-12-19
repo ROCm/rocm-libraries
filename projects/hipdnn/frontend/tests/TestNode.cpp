@@ -28,7 +28,6 @@ public:
     }
     FakeAttributes attributes;
 };
-}
 
 TEST(TestNode, PostValidateNodeComputeDataType)
 {
@@ -52,26 +51,65 @@ TEST(TestNode, PostValidateNodeComputeDataType)
     }
 }
 
-TEST(TestNode, PostValidateNodeTensors)
+enum class TensorAttributeValidity
 {
-    GraphAttributes graphAttributes;
-    FakeAttributes nodeAttributes;
+    VALID,
+    INVALID
+};
 
-    auto validTensorAttribute = std::make_shared<TensorAttributes>();
-    validTensorAttribute->set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 3, 4})
-        .set_stride({1, 2, 3, 4});
+struct FakeNodeParams
+{
+    std::vector<TensorAttributeValidity> inputs;
+    std::vector<TensorAttributeValidity> outputs;
+    ErrorCode expectedResult;
+};
 
-    auto invalidTensorAttribute = std::make_shared<TensorAttributes>();
-    invalidTensorAttribute->set_dim({1, 2, 3, 4}).set_stride({1, 2, 3});
+class TestNodePostValidateNodeTensors : public ::testing::TestWithParam<FakeNodeParams>
+{
+protected:
+    void SetUp() override
+    {
+        auto param = GetParam();
 
+        auto validTensorAttribute = std::make_shared<TensorAttributes>();
+        validTensorAttribute->set_data_type(DataType::FLOAT)
+            .set_dim({1, 2, 3, 4})
+            .set_stride({1, 2, 3, 4});
+
+        auto invalidTensorAttribute = std::make_shared<TensorAttributes>();
+        invalidTensorAttribute->set_dim({1, 2, 3, 4}).set_stride({1, 2, 3});
+
+        _attributes.set_compute_data_type(DataType::FLOAT);
+        int64_t id = 0;
+        for(const auto& input : param.inputs)
+        {
+            _attributes.inputs[id++] = (input == TensorAttributeValidity::VALID)
+                                           ? validTensorAttribute
+                                           : invalidTensorAttribute;
+        }
+        for(const auto& output : param.outputs)
+        {
+            _attributes.outputs[id++] = (output == TensorAttributeValidity::VALID)
+                                            ? validTensorAttribute
+                                            : invalidTensorAttribute;
+        }
+        _expectedResult = param.expectedResult;
+    }
+
+    GraphAttributes _graphAttributes;
+    FakeAttributes _attributes;
+    ErrorCode _expectedResult;
+};
+
+TEST_P(TestNodePostValidateNodeTensors, Correctness)
+{
     auto tensorsToString
         = [&](const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensors) {
               std::string ret = "[";
 
               for(const auto& [id, tensor] : tensors)
               {
-                  std::string isValid = (tensor == validTensorAttribute) ? "VALID" : "INVALID";
+                  std::string isValid = (tensor->validate().is_good()) ? "VALID" : "INVALID";
                   ret += isValid + ", ";
               }
 
@@ -84,39 +122,27 @@ TEST(TestNode, PostValidateNodeTensors)
               return ret;
           };
 
-    auto toAttributes = [&](const std::vector<std::shared_ptr<TensorAttributes>>& inputs,
-                            const std::vector<std::shared_ptr<TensorAttributes>>& outputs) {
-        FakeAttributes attributes;
-        attributes.set_compute_data_type(DataType::FLOAT);
-        int64_t id = 0;
-        for(const auto& input : inputs)
-        {
-            attributes.inputs[id++] = input;
-        }
-        for(const auto& output : outputs)
-        {
-            attributes.outputs[id++] = output;
-        }
+    std::string caseString = "Inputs: " + tensorsToString(_attributes.inputs)
+                             + " Outputs: " + tensorsToString(_attributes.outputs);
+    FakeNode node(std::move(_attributes), _graphAttributes);
 
-        return attributes;
-    };
+    auto nodes = node.getNodeOutputTensorAttributes();
 
-    std::vector<std::pair<FakeAttributes, ErrorCode>> expectedResults
-        = {{toAttributes({}, {validTensorAttribute}), ErrorCode::OK},
-           {toAttributes({invalidTensorAttribute}, {validTensorAttribute}), ErrorCode::OK},
-           {toAttributes({invalidTensorAttribute}, {invalidTensorAttribute}),
-            ErrorCode::ATTRIBUTE_NOT_SET},
-           {toAttributes({}, {validTensorAttribute, invalidTensorAttribute}),
-            ErrorCode::ATTRIBUTE_NOT_SET}};
+    EXPECT_EQ(node.post_validate_node().code, _expectedResult) << caseString;
+}
 
-    for(auto [attributes, errorCode] : expectedResults)
-    {
-        std::string caseString = "Inputs: " + tensorsToString(attributes.inputs)
-                                 + " Outputs: " + tensorsToString(attributes.outputs);
-        FakeNode node(std::move(attributes), graphAttributes);
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestNodePostValidateNodeTensors,
+    ::testing::Values(
+        FakeNodeParams{{}, {TensorAttributeValidity::VALID}, ErrorCode::OK},
+        FakeNodeParams{
+            {TensorAttributeValidity::INVALID}, {TensorAttributeValidity::VALID}, ErrorCode::OK},
+        FakeNodeParams{{TensorAttributeValidity::INVALID},
+                       {TensorAttributeValidity::INVALID},
+                       ErrorCode::ATTRIBUTE_NOT_SET},
+        FakeNodeParams{{},
+                       {TensorAttributeValidity::VALID, TensorAttributeValidity::INVALID},
+                       ErrorCode::ATTRIBUTE_NOT_SET}));
 
-        auto nodes = node.getNodeOutputTensorAttributes();
-
-        EXPECT_EQ(node.post_validate_node().code, errorCode) << caseString;
-    }
 }
