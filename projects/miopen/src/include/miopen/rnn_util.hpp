@@ -107,7 +107,7 @@ inline miopen::HipEventPtr make_hip_fast_event()
     hipEventCreateWithFlags(&result, hipEventDisableTiming);
     return miopen::HipEventPtr{result};
 }
-#endif //#if MIOPEN_BACKEND_HIP
+#endif // #if MIOPEN_BACKEND_HIP
 
 void LSTMForwardHiddenStateUpdate(const Handle& handle,
                                   miopenDataType_t rnn_data_type,
