@@ -5,8 +5,8 @@ SPDX-License-Identifier: MIT
 
 #include "logging/Logging.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/test_utilities/HipErrorHandler.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 
 int main(int argc, char** argv)
 {
@@ -16,7 +16,7 @@ int main(int argc, char** argv)
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
-    listeners.Append(new hipdnn_sdk::test_utilities::HipErrorHandler);
+    listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
     return RUN_ALL_TESTS();
 }

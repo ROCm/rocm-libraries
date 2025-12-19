@@ -53,6 +53,8 @@ static const std::vector<std::string> symptomatic_tokens = {
     "real_forward_len_16384_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_16386_odist_8193_ioffset_0_0_ooffset_0_0",
     "real_forward_len_32768_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_32770_odist_16385_ioffset_0_0_ooffset_0_0",
     "real_forward_len_65536_half_ip_batch_2_istride_1_R_ostride_1_HI_idist_65538_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_65536_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_65538_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_16384_half_ip_batch_2_istride_1_R_ostride_1_HI_idist_16386_odist_8193_ioffset_0_0_ooffset_0_0",
 #endif
     // common  to both backends
 };

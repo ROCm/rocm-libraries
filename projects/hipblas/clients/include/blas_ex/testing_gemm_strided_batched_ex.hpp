@@ -105,12 +105,22 @@ void testing_gemm_strided_batched_ex_bad_arg(const Arguments& arg)
     device_strided_batch_matrix<To> dC(M, N, ldc, stride_C, batch_count);
 
     device_vector<Tex> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Ts                 h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
+    Ts                 h_alpha, h_beta, h_one, h_zero;
 
-    if constexpr(std::is_same_v<Tex, hipblasHalf>)
-        h_one = float_to_half(1.0f);
-    else if constexpr(is_complex<Tex>)
-        h_one = {1, 0};
+    if constexpr(is_complex<Tex>)
+    {
+        h_alpha = {1.0, 0.0};
+        h_beta  = {2.0, 0.0};
+        h_one   = {1.0, 0.0};
+        h_zero  = {0.0, 0.0};
+    }
+    else
+    {
+        h_alpha = Ts(1.0f);
+        h_beta  = Ts(2.0f);
+        h_one   = Ts(1.0f);
+        h_zero  = Ts(0.0f);
+    }
 
     const Ts* alpha = &h_alpha;
     const Ts* beta  = &h_beta;
@@ -430,7 +440,7 @@ void testing_gemm_strided_batched_ex(const Arguments& arg)
         return;
     }
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_matrix(hA, arg, hipblas_client_alpha_sets_nan, hipblas_general_matrix, true);

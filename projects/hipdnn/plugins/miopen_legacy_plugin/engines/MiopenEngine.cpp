@@ -20,19 +20,8 @@ int64_t MiopenEngine::id() const
 }
 
 bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
-                                const hipdnn_plugin::IGraph& opGraph) const
+                                const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
-    auto& graph = opGraph.getGraph();
-    auto hasFloatComputeDataType = [](const hipdnn_sdk::data_objects::Node* node) {
-        return node->compute_data_type() == hipdnn_sdk::data_objects::DataType::FLOAT;
-    };
-    if(graph.nodes() != nullptr
-       && !std::all_of(graph.nodes()->begin(), graph.nodes()->end(), hasFloatComputeDataType))
-    {
-        HIPDNN_LOG_ERROR("MIOpen only supports nodes with an fp32 compute_data_type");
-        return false;
-    }
-
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
     for(const auto& planBuilder : _planBuilders)
@@ -59,7 +48,7 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 }
 
 size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin::IGraph& opGraph) const
+                                      const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
@@ -74,7 +63,7 @@ size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
 
 void MiopenEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin::IGraph& opGraph,
+    const hipdnn_plugin_sdk::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     for(const auto& planBuilder : _planBuilders)

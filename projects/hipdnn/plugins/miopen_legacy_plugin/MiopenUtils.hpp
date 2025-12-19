@@ -6,10 +6,10 @@
 #include <optional>
 #include <unordered_map>
 
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <miopen/miopen.h>
 
@@ -29,10 +29,24 @@
     {                                                                                   \
         if(status != miopenStatusSuccess)                                               \
         {                                                                               \
-            throw hipdnn_plugin::HipdnnPluginException(                                 \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(                             \
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                    \
                 "MIOpen error occurred: " + std::string(miopenGetErrorString(status))); \
         }                                                                               \
+    } while(0)
+
+#define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                               \
+    do                                                                                    \
+    {                                                                                     \
+        try                                                                               \
+        {                                                                                 \
+            statement;                                                                    \
+        }                                                                                 \
+        catch(hipdnn_plugin_sdk::HipdnnPluginException error)                             \
+        {                                                                                 \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(error.getStatus(),             \
+                                                           message + error.getMessage()); \
+        }                                                                                 \
     } while(0)
 
 namespace miopen_legacy_plugin::miopen_utils
@@ -46,7 +60,7 @@ struct ActivationParams
     double gamma;
 };
 
-std::optional<ActivationParams>
+ActivationParams
     mapPointwiseModeToMiopenActivation(const hipdnn_sdk::data_objects::PointwiseAttributes& attrs);
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
