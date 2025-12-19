@@ -170,7 +170,7 @@ Before searching for the tool using it's standard name, a search will be made fo
 
 #### LLVM_TOOLS_SEARCH_PREFIX
 
-As an alternative to the agove, `LLVM_TOOLS_SEARCH_PREFIX` can be set as a prefix for the folder path where the Clang tools are installed, such that `${LLVM_TOOLS_SEARCH_PREFIX}18/bin` is where the Clang version 18 tools are located, and `${LLVM_TOOLS_SEARCH_PREFIX}20/bin` is where the Clang version 20 tools are located. The CMake configuration step will automatically select the required version for each tool from these folders. For example with `-DLLVM_TOOLS_SEARCH_PREFIX=c:\tools\clang` the the following folders will be searched for Clang tools (depending on the version of each tool that is needed):
+As an alternative to the above, `LLVM_TOOLS_SEARCH_PREFIX` can be set as a prefix for the folder path where the Clang tools are installed, such that `${LLVM_TOOLS_SEARCH_PREFIX}18/bin` is where the Clang version 18 tools are located, and `${LLVM_TOOLS_SEARCH_PREFIX}20/bin` is where the Clang version 20 tools are located. The CMake configuration step will automatically select the required version for each tool from these folders. For example with `-DLLVM_TOOLS_SEARCH_PREFIX=c:\tools\clang` the the following folders will be searched for Clang tools (depending on the version of each tool that is needed):
 * `c:\tools\clang18\bin`
 * `c:\tools\clang20\bin`
 * `c:\tools\clang\bin`
