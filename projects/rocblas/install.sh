@@ -412,8 +412,29 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
                                      Affects AOCL, BLIS, googletest, and msgpack.
                                      Use with --skip-aocl to clean AOCL without rebuilding it.
 
-    --skip-aocl                      Skip AOCL installation; use next available BLAS library
-                                     (AOCL-BLIS from /opt, bundled BLIS, or system BLAS).
+    --skip-aocl                      Skip AOCL 5.1 automatic build; use next available BLAS library.
+                                     BLAS library search order (when building clients with -c flag):
+                                       1. AOCL 5.x unified library (libaocl.so/a)
+                                          - Built from source in <builddir>/deps/aocl/ (unless --skip-aocl)
+                                          - AOCL_ROOT environment variable location
+                                          - $HOME/aocl/*/ directories
+                                          - /opt/AMD/aocl/ directories
+                                       2. AOCL 4.x BLIS (GCC, ILP64) in /opt/AMD/aocl/
+                                       3. AOCL 4.x BLIS (AOCC) in /opt/AMD/aocl/
+                                       4. Bundled BLIS (downloaded by install.sh)
+                                       5. System CBLAS via pkg-config
+
+  Environment Variables:
+
+    AOCL_ROOT                        Override AOCL library detection. Point to AOCL installation root.
+                                     Example: export AOCL_ROOT=$HOME/aocl/5.1.0/gcc
+
+  Notes:
+
+    - AOCL 5.1 is built with ILP64 support (64-bit integers) for large matrix operations.
+    - Use --skip-aocl if you have a pre-installed AOCL or prefer a different BLAS library.
+    - AOCL build takes ~5-10 minutes on first run; subsequent builds reuse existing build.
+    - Without ILP64 support, stress tests may fail: use --gtest_filter=-*stress* when testing.
 
 EOF
 }
