@@ -713,7 +713,6 @@ auto GenCases(int batchNormMode, bool full = false)
                               ::testing::ValuesIn({double{0.5}}),
                               ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"}}));
 }
-
 template <class T>
 struct na_fusion_test : public testing::TestWithParam<TestCase>
 {
