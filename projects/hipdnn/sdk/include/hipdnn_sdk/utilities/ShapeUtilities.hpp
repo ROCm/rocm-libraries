@@ -208,7 +208,7 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
                              std::plus<>(),
                              [](size_t len, size_t stride) { return (len - 1) * stride; });
 
-    return count == space;
+    return count == space + 1;
 }
 
 // Gets the derived (per channel) shape from a full Tensor shape.

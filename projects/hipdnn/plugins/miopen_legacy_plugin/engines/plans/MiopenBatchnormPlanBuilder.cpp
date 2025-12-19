@@ -398,7 +398,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         try
         {
             checkBatchnormTensorConfigSupported(bnInfAttr, opGraph.getTensorMap());
-            checkBatchnormBwdActivationModeSupported(actAttr);
+            checkBatchnormFwdActivationModeSupported(actAttr);
         }
         catch(const hipdnn_plugin::HipdnnPluginException& e)
         {
