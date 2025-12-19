@@ -229,29 +229,41 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
 template <typename T>
 void RunPooling2dTest(const Pooling2dTestCase& test_case)
 {
-    // Dispatch to the appropriate index type template
-    switch(test_case.index_type)
+    try
     {
-    case miopenIndexUint8: {
-        RunPooling2dTestWithIndexType<T, uint8_t>(test_case);
-        break;
+        // Dispatch to the appropriate index type template
+        switch(test_case.index_type)
+        {
+        case miopenIndexUint8: {
+            RunPooling2dTestWithIndexType<T, uint8_t>(test_case);
+            break;
+        }
+        case miopenIndexUint16: {
+            RunPooling2dTestWithIndexType<T, uint16_t>(test_case);
+            break;
+        }
+        case miopenIndexUint32: {
+            RunPooling2dTestWithIndexType<T, uint32_t>(test_case);
+            break;
+        }
+        case miopenIndexUint64: {
+            RunPooling2dTestWithIndexType<T, uint64_t>(test_case);
+            break;
+        }
+        default: {
+            GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
+            break;
+        }
+        }
     }
-    case miopenIndexUint16: {
-        RunPooling2dTestWithIndexType<T, uint16_t>(test_case);
-        break;
+    catch(const std::exception& e)
+    {
+        GTEST_FAIL() << "Exception thrown with test case: " << test_case << "\n"
+                     << "Exception: " << e.what();
     }
-    case miopenIndexUint32: {
-        RunPooling2dTestWithIndexType<T, uint32_t>(test_case);
-        break;
-    }
-    case miopenIndexUint64: {
-        RunPooling2dTestWithIndexType<T, uint64_t>(test_case);
-        break;
-    }
-    default: {
-        GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
-        break;
-    }
+    catch(...)
+    {
+        GTEST_FAIL() << "Unknown exception thrown with test case: " << test_case;
     }
 }
 
@@ -271,6 +283,12 @@ TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { RunPooling2dTest<float>(GetPar
 
 TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { RunPooling2dTest<half_float::half>(GetParam()); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP32, testing::ValuesIn(GetPooling2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Pooling2d_FP32,
+                         testing::ValuesIn(GetPooling2dTestCases()),
+                         testing::PrintToStringParamName());
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP16, testing::ValuesIn(GetPooling2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Pooling2d_FP16,
+                         testing::ValuesIn(GetPooling2dTestCases()),
+                         testing::PrintToStringParamName());
