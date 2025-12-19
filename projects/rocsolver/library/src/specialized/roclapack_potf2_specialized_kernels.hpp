@@ -413,7 +413,6 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
     assert(AA != nullptr);
     assert(info != nullptr);
 
-    // TODO: offset A here based on block/tid?
     T* const A = load_ptr_batch(AA, bid, shiftA, strideA);
     INFO* const info_bid = info + bid;
 
@@ -426,7 +425,7 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
     // load A to registers
     T Arg[(NB * (NB + 1)) / 2] = {0};
 
-    // TODO: incrementing idx instead of idx_lower
+    I arg_idx = 0;
     for(I j = 0; j < NB; j++)
     {
         for(I i = j; i < NB; i++)
@@ -436,20 +435,23 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             if(col < n && row < n && row >= col)
             {
                 const auto idx = col * lda + row;
-                Arg[idx_lower<I>(i, j, NB)] = A[idx];
+                Arg[arg_idx] = A[idx];
             }
+
+            arg_idx++;
         }
     }
 
     // Panel Cholesky decomposition
+    arg_idx = 0;
     for(I j = 0; j < NB; j++)
     {
         // load panel to lds
-        for(I i = j; i < NB; i++)
+        for(I i = 0; i < NB - j; i++)
         {
-            const auto row = (i - j) * PANEL_SIZE + tidx;
+            const auto row = i * PANEL_SIZE + tidx;
             const auto idx = tidy * ldash + row;
-            Ash[idx] = Arg[idx_lower<I>(i, j, NB)];
+            Ash[idx] = Arg[arg_idx + i];
         }
 
         __syncthreads();
@@ -523,6 +525,7 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
         }
 
         // update trailing matrix
+        I karg_idx = arg_idx + NB - j;
         for(I k = j + 1; k < NB; k++)
         {
             for(I i = k; i < NB; i++)
@@ -532,18 +535,20 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
 
                 for(I p = 0; p < PANEL_SIZE; p++)
                 {
-                    Arg[idx_lower<I>(i, k, NB)] -= Ash[row + p * ldash] * conj(Ash[col + p * ldash]);
+                    Arg[karg_idx + i - k] -= Ash[row + p * ldash] * conj(Ash[col + p * ldash]);
                 }
             }
+            karg_idx += NB - k;
         }
 
         // write panel back to registers
-        for(I i = j; i < NB; i++)
+        for(I i = 0; i < NB - j; i++)
         {
-            const auto row = (i - j) * PANEL_SIZE + tidx;
+            const auto row = i * PANEL_SIZE + tidx;
             const auto idx = tidy * ldash + row;
-            Arg[idx_lower<I>(i, j, NB)] = Ash[idx];
+            Arg[arg_idx + i] = Ash[idx];
         }
+        arg_idx += NB - j;
 
         __syncthreads();
 
@@ -552,6 +557,7 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
     }
 
     // write A from registers
+    arg_idx = 0;
     for(I j = 0; j < NB; j++)
     {
         for(I i = j; i < NB; i++)
@@ -561,8 +567,10 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
             if(col < n && row < n && row >= col)
             {
                 const auto idx = col * lda + row;
-                A[idx] = Arg[idx_lower<I>(i, j, NB)];
+                A[idx] = Arg[arg_idx];
             }
+
+            arg_idx++;
         }
     }
 }
