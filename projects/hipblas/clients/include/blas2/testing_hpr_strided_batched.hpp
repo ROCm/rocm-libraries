@@ -216,7 +216,7 @@ void testing_hpr_strided_batched(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dx.memcheck());
     CHECK_DEVICE_ALLOCATION(d_alpha.memcheck());
 
-    double hipblas_error_host, hipblas_error_device;
+    double hipblas_error_host{0}, hipblas_error_device{0};
 
     U h_alpha = arg.get_alpha<U>();
 
@@ -281,7 +281,7 @@ void testing_hpr_strided_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double gpu_time_used;
+        double gpu_time_used{0};
         CHECK_HIP_ERROR(dAp.transfer_from(hAp));
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));

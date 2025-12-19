@@ -42,7 +42,8 @@
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
-#include <origami/streamk.hpp>
+#include "origami/origami.hpp"
+#include "origami/streamk.hpp"
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
@@ -166,7 +167,7 @@ namespace TensileLite
 
     struct StreamKSettings
     {
-        origami::streamk::reduction_type reduction = origami::streamk::reduction_type::Tree;
+        origami::reduction_t reduction = origami::reduction_t::tree;
         size_t grid = 0;
     };
 
@@ -183,7 +184,7 @@ namespace TensileLite
         using Problem       = ContractionProblemGemm;
         using Inputs        = ContractionInputs;
         using GroupedInputs = ContractionGroupedInputs;
-        using ParamsCache  = CacheMap<std::pair<int32_t, uint32_t>, Problem>;
+        using ParamsCache  = CacheMap<std::pair<int32_t, int32_t>, Problem>;
 
         /**
          * Indicate a solution is equally or estimatedly matched.
@@ -217,6 +218,11 @@ namespace TensileLite
             return kernelName;
         }
         virtual bool isFallbackForHW(Hardware const&) const;
+
+        bool isStreamK() const
+        {
+            return sizeMapping.streamK > 0;
+        }
 
         //! Estimates based on problem size, solution tile, and  machine hardware
         //! charz:
@@ -290,8 +296,8 @@ namespace TensileLite
         void calculateGrid(dim3& workGroupSize,
                            dim3& numWorkGroups,
                            ContractionSolution::Problem const& problem) const;
-        origami::streamk::reduction_type getSKReduction(Problem const& problem, Hardware const& hardware) const;
-        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type& reductionStrat) const;
+        origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;
+        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::reduction_t reductionStrat) const;
         size_t partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -566,9 +572,9 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
-                                                      Hardware const* hardware, 
-                                                      uint32_t        skgrid) const;
+        std::pair<int32_t, int32_t> calculateAutoWGM(Problem const&  problem,
+                                                     Hardware const* hardware,
+                                                     uint32_t        skgrid) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
     };
 
