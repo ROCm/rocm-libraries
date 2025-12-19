@@ -263,12 +263,12 @@ TEST_CASE("GEMM: calculate_work_utilization unit test", "[gemm]") {
       auto result_very_small  = origami::calculate_work_utilization(problem_very_small, config);
       REQUIRE(result_very_small == Approx(0.0007152).epsilon(1e-4));
 
-      // Test 4: Test with very large problems
+      // Test 5: Test with very large problems
       auto problem_very_large = make_problem(409601, 409601, 4095);
       auto result_very_large  = origami::calculate_work_utilization(problem_very_large, config);
       REQUIRE(result_very_large == Approx(0.998).epsilon(1e-3));
 
-      // Test 5: Test with skinny matrices
+      // Test 6: Test with skinny matrices
       auto problem_skinny = make_problem(128, 81920, 1024);  // Small M, Big N
       auto result_skinny  = origami::calculate_work_utilization(problem_skinny, config);
       REQUIRE(result_skinny == 0.5);
