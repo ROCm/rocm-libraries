@@ -111,7 +111,8 @@ TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
                                                  dims,
                                                  TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap
+        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormFwdInferenceSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

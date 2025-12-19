@@ -15,7 +15,7 @@ using namespace miopen_legacy_plugin;
 TEST(TestBatchnormFwdTrainingActivParams, InitializesRequiredTensorsFromValidGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -38,7 +38,7 @@ TEST(TestBatchnormFwdTrainingActivParams, InitializesRequiredTensorsFromValidGra
 TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -61,7 +61,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
 TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVariancePresent)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -81,7 +81,7 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVariancePresent)
 TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVarianceMissing)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(false);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -100,7 +100,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenRunningStatsProvided)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         true, true); // with mean/variance and running stats
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -112,13 +112,13 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenRunningStatsProvided)
 
     // Should throw because running stats are provided
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, HasRunningStatsReturnsFalseWhenNotProvided)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -221,7 +221,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTe
                                                       &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -340,7 +340,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenBnOutputDoesNotMatchActivati
                                                       &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -351,7 +351,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenBnOutputDoesNotMatchActivati
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredXTensor)
@@ -450,7 +450,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredXTensor)
                                                       &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -461,7 +461,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredXTensor)
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredScaleTensor)
@@ -555,7 +555,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredScaleTensor)
                                                       &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -566,7 +566,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredScaleTensor)
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredBiasTensor)
@@ -660,7 +660,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredBiasTensor)
                                                       &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -671,14 +671,14 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredBiasTensor)
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, AcceptsReluFwdActivation)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         false, false, hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();

@@ -16,7 +16,7 @@ namespace hipdnn_sdk_test_utils
 struct PointwiseUnaryTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
 {
     PointwiseUnaryTensorBundle(
-        const hipdnn_plugin::INodeWrapper& node,
+        const hipdnn_plugin_sdk::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)
@@ -32,7 +32,7 @@ struct PointwiseUnaryTensorBundle : public hipdnn_test_sdk::utilities::GraphTens
 struct PointwiseBinaryTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
 {
     PointwiseBinaryTensorBundle(
-        const hipdnn_plugin::INodeWrapper& node,
+        const hipdnn_plugin_sdk::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)

@@ -165,7 +165,7 @@ void BatchnormFwdInferencePlan::execute(
     //         invVarianceBuffer.ptr,
     //         epsilon));
     // }
-    throw hipdnn_plugin::HipdnnPluginException(
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
         "BatchnormFwdInferencePlan execution is currently disabled due to implementation issues "
         "with the BatchnormInference op.");
