@@ -120,12 +120,12 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
 
     const auto [a, b, c, d] = example.getOperationTags();
 
-    /** Yields macro tiles encountered by following edges */
-    auto macroTiles = [&](auto op) -> Generator<int> {
+    /** Yields accumulator macro tile tags encountered by following output edges */
+    auto accumulatorMacroTiles = [&](auto commandTag) -> Generator<int> {
         for(auto tag : graph.coordinates.getNodes<User>())
         {
             const auto user = graph.coordinates.get<User>(tag).value();
-            if(user.commandTag == op)
+            if(user.commandTag == commandTag)
             {
                 auto tags = graph.coordinates.followEdges<DataFlowEdge>({tag});
                 for(auto t : tags)
@@ -133,7 +133,11 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
                     const auto node = graph.coordinates.getNode(t);
                     if(std::holds_alternative<MacroTile>(node))
                     {
-                        co_yield t;
+                        const auto& macroTile = std::get<MacroTile>(node);
+                        if(macroTile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+                        {
+                            co_yield t;
+                        }
                     }
                 }
             }
@@ -195,14 +199,8 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     {
         {
             bool didACheck = false;
-            for(auto tag : macroTiles(a))
+            for(auto tag : accumulatorMacroTiles(a))
             {
-                const auto node = graph.coordinates.getNode(tag);
-                if(!std::holds_alternative<MacroTile>(node))
-                    continue;
-                const auto& macroTile = std::get<MacroTile>(node);
-                if(macroTile.layoutType != LayoutType::MATRIX_ACCUMULATOR)
-                    continue;
                 CAPTURE(tag);
                 CHECK(countCoordinateWritesInLoop(graph, kLoop, tag, tracer) == 16);
                 for(const auto upstream :
@@ -213,7 +211,7 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
                     CHECK(countCoordinateWritesInLoop(graph, kLoopTail, upstream, tracer) == 8);
                     didACheck = true;
                 }
-                break; // second macro tile and beyond are not used in kloop[tail]
+                break; // second encountered macro tile and beyond are not used in kloop[tail]
             }
             CHECK(didACheck);
         }
