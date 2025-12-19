@@ -624,6 +624,107 @@ TEST(TestShapeUtils, IsTensorPackedFalseForNonPackedTensor)
     EXPECT_FALSE(isTensorPacked(shape5D, nonPackedStrides5D));
 }
 
+TEST(TestShapeUtils, IsTensorPackedEmptyTensor)
+{
+    // Empty tensors are considered packed
+    std::vector<int64_t> emptyDims = {};
+    std::vector<int64_t> emptyStrides = {};
+    EXPECT_TRUE(isTensorPacked(emptyDims, emptyStrides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedSingleDimension)
+{
+    // Single dimension tensors are packed if stride is 1
+    std::vector<int64_t> dims = {10};
+    std::vector<int64_t> strides = {1};
+    EXPECT_TRUE(isTensorPacked(dims, strides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedWithDimensionSizeOne)
+{
+    // Dimensions with size 1 - stride is irrelevant for that dimension
+    std::vector<int64_t> dims1 = {1, 3, 4};
+    std::vector<int64_t> strides1 = {12, 4, 1}; // Standard packed
+    EXPECT_TRUE(isTensorPacked(dims1, strides1));
+
+    std::vector<int64_t> dims2 = {1, 3, 4};
+    std::vector<int64_t> strides2 = {100, 4, 1}; // Large stride for size-1 dim, still packed
+    EXPECT_TRUE(isTensorPacked(dims2, strides2));
+
+    std::vector<int64_t> dims3 = {2, 1, 4};
+    std::vector<int64_t> strides3 = {4, 100, 1}; // Large stride for size-1 dim, still packed
+    EXPECT_TRUE(isTensorPacked(dims3, strides3));
+}
+
+TEST(TestShapeUtils, IsTensorPackedRowMajorVsColumnMajor)
+{
+    // Both row-major and column-major 2x3 matrices should be packed
+    std::vector<int64_t> dims = {2, 3};
+
+    // Row-major: strides = [3, 1]
+    std::vector<int64_t> rowMajorStrides = {3, 1};
+    EXPECT_TRUE(isTensorPacked(dims, rowMajorStrides));
+
+    // Column-major: strides = [1, 2]
+    std::vector<int64_t> colMajorStrides = {1, 2};
+    EXPECT_TRUE(isTensorPacked(dims, colMajorStrides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedWithNegativeStrides)
+{
+    // Negative strides are valid for reversed tensor dimensions
+    // A 2x3 tensor with reversed first dimension: strides = [-3, 1]
+    // The math still works: count = 6, space = (2-1)*(-3) + (3-1)*1 = -3 + 2 = -1
+    // So count != space + 1 (6 != 0), which means it's not packed
+    std::vector<int64_t> dims = {2, 3};
+    std::vector<int64_t> negativeStrides = {-3, 1};
+    // With negative strides, the tensor is typically not packed in the standard sense
+    EXPECT_FALSE(isTensorPacked(dims, negativeStrides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedMismatchedSizes)
+{
+    // Mismatched dims and strides should throw
+    std::vector<int64_t> dims = {2, 3, 4};
+    std::vector<int64_t> strides = {12, 4}; // Only 2 strides for 3 dims
+    EXPECT_THROW(isTensorPacked(dims, strides), std::invalid_argument);
+}
+
+TEST(TestShapeUtils, IsTensorPackedOverlappingStrides)
+{
+    // Strides that cause overlap (e.g., both dimensions have stride 1)
+    std::vector<int64_t> dims = {2, 3};
+    std::vector<int64_t> overlappingStrides = {1, 1};
+    // count = 6, space = (2-1)*1 + (3-1)*1 = 1 + 2 = 3, count != space+1 (6 != 4)
+    EXPECT_FALSE(isTensorPacked(dims, overlappingStrides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedAllOnesShape)
+{
+    // Shape with all 1s should be packed
+    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> strides = {1, 1, 1, 1};
+    EXPECT_TRUE(isTensorPacked(dims, strides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedLargeTensor)
+{
+    // Test with a larger tensor
+    std::vector<int64_t> dims = {4, 16, 32, 64};
+    auto strides = generateStrides(dims);
+    EXPECT_TRUE(isTensorPacked(dims, strides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedCustomPackedLayout)
+{
+    // Custom packed layout (not standard NCHW/NHWC but still contiguous)
+    std::vector<int64_t> dims = {2, 3, 4};
+    // Order: [2, 0, 1] means dimension 2 is innermost, then 0, then 1
+    std::vector<int64_t> customOrder = {2, 0, 1};
+    auto customStrides = generateStrides(dims, customOrder);
+    EXPECT_TRUE(isTensorPacked(dims, customStrides));
+}
+
 TEST(TestShapeUtils, GetDerivedShape5DValid)
 {
     std::vector<int64_t> shape = {2, 4, 8, 16, 32};
