@@ -276,6 +276,75 @@ void RunPooling3dTest(const Pooling3dTestCase& test_case)
 
 } // namespace
 
+// Helper function to estimate memory requirements for a test case
+// Returns estimated memory in bytes needed for input, output, and workspace
+size_t EstimateMemoryRequirements(const Pooling3dTestCase& test_case, size_t element_size)
+{
+    // Calculate input tensor size
+    size_t input_size = element_size;
+    for(int dim : test_case.input_dims)
+    {
+        input_size *= static_cast<size_t>(dim);
+    }
+
+    // Estimate output tensor size based on pooling parameters
+    // Output spatial dimensions: floor((input + 2*pad - lens) / stride) + 1
+    size_t output_spatial = 1;
+    for(int i = 0; i < 3; i++)
+    {
+        int out_dim = (test_case.input_dims[i + 2] + 2 * test_case.pads[i] - test_case.lens[i]) /
+                          test_case.strides[i] +
+                      1;
+        output_spatial *= static_cast<size_t>(out_dim);
+    }
+    size_t output_size = element_size * static_cast<size_t>(test_case.input_dims[0]) *
+                         static_cast<size_t>(test_case.input_dims[1]) * output_spatial;
+
+    // For max pooling, add workspace for indices
+    size_t workspace_size = 0;
+    if(test_case.mode == miopenPoolingMax)
+    {
+        // Index workspace: depends on wsidx mode
+        if(test_case.wsidx == 0)
+        {
+            // Workspace index mask: size of pooling window per output element
+            size_t window_size = 1;
+            for(int len : test_case.lens)
+            {
+                window_size *= static_cast<size_t>(len);
+            }
+            // Index type size
+            size_t index_size = 1;
+            switch(test_case.index_type)
+            {
+            case miopenIndexUint8: index_size = 1; break;
+            case miopenIndexUint16: index_size = 2; break;
+            case miopenIndexUint32: index_size = 4; break;
+            case miopenIndexUint64: index_size = 8; break;
+            default: index_size = 4; break;
+            }
+            workspace_size = output_size * window_size * index_size / element_size;
+        }
+        else
+        {
+            // Workspace index image: one index per output element
+            size_t index_size = 1;
+            switch(test_case.index_type)
+            {
+            case miopenIndexUint8: index_size = 1; break;
+            case miopenIndexUint16: index_size = 2; break;
+            case miopenIndexUint32: index_size = 4; break;
+            case miopenIndexUint64: index_size = 8; break;
+            default: index_size = 4; break;
+            }
+            workspace_size = output_size * index_size / element_size;
+        }
+    }
+
+    // Total estimate: input + output + workspace + overhead (1.5x for safety)
+    return static_cast<size_t>((input_size + output_size + workspace_size) * 1.5);
+}
+
 // Helper function to perform early skip checks that don't require tensor creation
 void CheckPooling3dTestCase(const Pooling3dTestCase& test_case)
 {
@@ -285,6 +354,19 @@ void CheckPooling3dTestCase(const Pooling3dTestCase& test_case)
     if(spt_dim != 3)
     {
         GTEST_SKIP() << "Only 3D pooling is supported (spt_dim == 3)";
+    }
+
+    // Estimate memory requirements and skip if too large
+    // Conservative threshold: 1.5 GB to prevent out-of-memory errors on GPUs with limited memory
+    const size_t memory_threshold_bytes = 1500ULL * 1024 * 1024; // 1.5 GB
+    size_t estimated_memory_fp32 = EstimateMemoryRequirements(test_case, sizeof(float));
+    size_t estimated_memory_fp16 = EstimateMemoryRequirements(test_case, 2); // half is 2 bytes
+
+    if(estimated_memory_fp32 > memory_threshold_bytes || estimated_memory_fp16 > memory_threshold_bytes)
+    {
+        GTEST_SKIP() << "Test case requires too much memory (estimated: "
+                     << (estimated_memory_fp32 / (1024 * 1024)) << " MB for FP32, "
+                     << (estimated_memory_fp16 / (1024 * 1024)) << " MB for FP16). Skipping to avoid OOM.";
     }
 
     // Check kernel size vs input dimensions
