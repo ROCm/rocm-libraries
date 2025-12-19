@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 from abc import abstractmethod
-from typing import Any
+from typing import Any, Optional
 import unittest
 
 from test_CustomSchedule import create_base_kernel, ScheduleInfo
@@ -50,7 +50,7 @@ class CMSValidationTestBase(unittest.TestCase):
         """
         raise NotImplementedError("Subclasses must implement validation_function")
     
-    def setUp(self, kernel_updates: dict[str, Any] | None = None):
+    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
         """Initialize kernel and compute number of VMFMAs."""
         self.kernel = create_base_kernel()
         if kernel_updates:
@@ -69,7 +69,7 @@ class CMSValidationTestBase(unittest.TestCase):
         nglshift: int,
         nllshift: int,
         codePathIdx: int,
-        expected_message: str | None,
+        expected_message: Optional[str] = None,
         nllZeroDscnt: bool = False,
         mfmaReorder: list[int] = None,
         snopCode: list[Any] = None,
