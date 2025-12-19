@@ -131,7 +131,12 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
     // Validate all other tensors match
     for(size_t i = 1; i < tensors.size(); ++i)
     {
-        if(tensors[i].strideOrder != referenceStrideOrder)
+        // Check if tensor has degenerate dimensions (all dims are 1)
+        // Degenerate tensors with strides [1,1,1,1] are layout-agnostic
+        bool isDegenerate = std::all_of(tensors[i].dims.begin(), tensors[i].dims.end(),
+                                       [](int64_t d) { return d == 1; });
+        
+        if(!isDegenerate && tensors[i].strideOrder != referenceStrideOrder)
         {
             throw hipdnn_plugin::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,

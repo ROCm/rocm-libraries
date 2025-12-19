@@ -204,7 +204,7 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
         = std::inner_product(dims.begin(),
                              dims.end(),
                              strides.begin(),
-                             static_cast<size_t>(1),
+                             static_cast<size_t>(0),
                              std::plus<>(),
                              [](size_t len, size_t stride) { return (len - 1) * stride; });
 

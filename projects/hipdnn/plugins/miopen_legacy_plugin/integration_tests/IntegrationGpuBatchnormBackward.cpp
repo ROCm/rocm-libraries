@@ -84,7 +84,7 @@ protected:
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         auto scaleAttr = graph::makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims, layout.strideOrder));
         scaleAttr.set_uid(BatchnormBwdTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
@@ -93,12 +93,12 @@ protected:
         if(!CalcStats)
         {
             auto meanAttr = graph::makeTensorAttributes(
-                "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
+                "mean", intermediateDataType, derivedDims, generateStrides(derivedDims, layout.strideOrder));
             meanAttr.set_uid(BatchnormBwdTensorIds::MEAN_UID);
             auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
             auto invVarianceAttr = graph::makeTensorAttributes(
-                "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
+                "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims, layout.strideOrder));
             invVarianceAttr.set_uid(BatchnormBwdTensorIds::INV_VARIANCE_UID);
             auto invVarianceTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));

@@ -89,12 +89,12 @@ protected:
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto scaleAttr = graph::makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims, layout.strideOrder));
         scaleAttr.set_uid(BatchnormFwdTrainingActivTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr = graph::makeTensorAttributes(
-            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims, layout.strideOrder));
         biasAttr.set_uid(BatchnormFwdTrainingActivTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -114,7 +114,7 @@ protected:
             auto prevRunningMeanAttr = graph::makeTensorAttributes("prev_running_mean",
                                                                    intermediateDataType,
                                                                    derivedDims,
-                                                                   generateStrides(derivedDims));
+                                                                   generateStrides(derivedDims, layout.strideOrder));
             prevRunningMeanAttr.set_uid(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID);
             prevRunningMeanTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningMeanAttr));
@@ -123,7 +123,7 @@ protected:
                 = graph::makeTensorAttributes("prev_running_variance",
                                               intermediateDataType,
                                               derivedDims,
-                                              generateStrides(derivedDims));
+                                              generateStrides(derivedDims, layout.strideOrder));
             prevRunningVarianceAttr.set_uid(
                 BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID);
             prevRunningVarianceTensorAttr

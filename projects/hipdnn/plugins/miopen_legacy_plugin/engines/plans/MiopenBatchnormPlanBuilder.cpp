@@ -300,10 +300,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             return false;
         }
 
-        // Check if batchnorm training node has running statistics
-        // API mismatch: hipDNN graph API uses separate prev/next buffers for running statistics,
-        // but MIOpen requires single IN/OUT buffers. This cannot be correctly bridged without
-        // either updating MIOpen API or implementing buffer copy operations.
         const auto& node = opGraph.getNode(0);
 
         // Only batchnorm training (BatchnormAttributes) has running statistics
@@ -321,7 +317,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             }
         }
 
-        // Note: BN Fwd inference temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
         if(node.attributes_type()
            == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
         {
@@ -329,8 +324,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             return false;
         }
 
-        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
-        // checks manually.
         try
         {
             switch(node.attributes_type())
