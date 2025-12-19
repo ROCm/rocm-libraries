@@ -2168,17 +2168,17 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     elif isNN(kernel) and useLDSTr and TLDS==1:
         optSchedule = {
 
-            'SYNC'   : [[-1,3, 10,10, 26,27, 45,45]],
+            'SYNC'   : [[-1,3, 12,12, 26,27, 45,45]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
             'GRIncB' : [[22,22,24,24,25,25,26,27,27]],
 
-            'LRA0'   : [[0,0,2,2,3,3,4,4]],  ## -2 is place holder
+            'LRA0'   : [[0,0,2,2,3,3,5,6]],  ## -2 is place holder
 
-            'LRB0'   : [[8,11,13,15,17,19,21],   ## After LRA0, we can mix LRB0 and GRA
-                        [9,12,14,16,18,20,22]],
+            'LRB0'   : [[8,10,13,15,17,19,21],   ## After LRA0, we can mix LRB0 and GRA
+                        [9,11,14,16,18,20,22]],
             ## GRA should start after LRA0 is done.
-            'GRA'    : [[10,11, 14,14, 17,17, 20,20],
-                        [11,12, 15,15, 18,18, 21,21]],
+            'GRA'    : [[10,12, 14,14, 17,17, 20,20],
+                        [11,13, 15,15, 18,18, 21,21]],
 
             ## GRB should start after LRB0 is done
             'GRB'    : [[28,28, 31,31, 34,34, 37,37, 40,40, 43,43, 46,46],  # m0 inc is part of GRA/GRB
@@ -2199,7 +2199,7 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
         # note: syncCode needs to be
         syncCode = [SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for necessary prior LRA1/LRB1 before starting main loop"),
                     SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
-                    SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+                    SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="Wait for LRB0/GRA to complete to start GRB/LRA1"),
                     SBarrier(comment=""),
