@@ -43,6 +43,7 @@ class CXXCompiler(object):
                  use_ccache=False, use_warnings=False, compile_env=None,
                  cxx_type=None, cxx_version=None):
         self.source_lang = 'c++'
+        self.compile_timeout = 100
         self.path = path
         self.first_arg = first_arg or ''
         self.flags = list(flags or [])
@@ -315,32 +316,32 @@ class CXXCompiler(object):
     def preprocess(self, source_files, out=None, flags=[], cwd=None):
         cmd = self.preprocessCmd(source_files, out, flags)
         out, err, rc = libcudacxx.util.executeCommand(cmd, env=self.compile_env,
-                                                  cwd=cwd)
+                                                  cwd=cwd, timeout=self.compile_timeout)
         return cmd, out, err, rc
 
     def checkCompileFlag(self, source_files, out=None, flags=[], cwd=None):
         cmd = self.compileCmd(source_files, out, flags, self.CM_CheckCompileFlag)
         out, err, rc = libcudacxx.util.executeCommand(cmd, env=self.compile_env,
-                                                  cwd=cwd)
+                                                  cwd=cwd, timeout=self.compile_timeout)
         return cmd, out, err, rc
 
     def compile(self, source_files, out=None, flags=[], cwd=None):
         cmd = self.compileCmd(source_files, out, flags, self.CM_Compile)
         out, err, rc = libcudacxx.util.executeCommand(cmd, env=self.compile_env,
-                                                  cwd=cwd)
+                                                  cwd=cwd, timeout=self.compile_timeout)
         return cmd, out, err, rc
 
     def link(self, source_files, out=None, flags=[], cwd=None):
         cmd = self.linkCmd(source_files, out, flags)
         out, err, rc = libcudacxx.util.executeCommand(cmd, env=self.compile_env,
-                                                  cwd=cwd)
+                                                  cwd=cwd, timeout=self.compile_timeout)
         return cmd, out, err, rc
 
     def compileLink(self, source_files, out=None, flags=[],
                     cwd=None):
         cmd = self.compileLinkCmd(source_files, out, flags)
         out, err, rc = libcudacxx.util.executeCommand(cmd, env=self.compile_env,
-                                                  cwd=cwd)
+                                                  cwd=cwd, timeout=self.compile_timeout)
         return cmd, out, err, rc
 
     def compileLinkTwoSteps(self, source_file, out=None, object_file=None,
@@ -373,7 +374,7 @@ class CXXCompiler(object):
             if rc != 0:
                 return ("unknown", (0, 0, 0), "c++03")
             out, err, rc = libcudacxx.util.executeCommand(exe, env=self.compile_env,
-                                                    cwd=cwd)
+                                                    cwd=cwd, timeout=self.compile_timeout)
             version = None
             try:
                 version = eval(out)
@@ -502,7 +503,7 @@ class CXXCompiler(object):
         if '-v' in cmd:
             cmd.remove('-v')
         out, err, rc = libcudacxx.util.executeCommand(
-            cmd, input=libcudacxx.util.to_bytes('#error\n'))
+            cmd, input=libcudacxx.util.to_bytes('#error\n'), timeout=self.compile_timeout)
         assert rc != 0
         if flag in err:
             return False
