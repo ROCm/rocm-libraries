@@ -39,34 +39,114 @@ struct Pooling2dTestCase
 
 std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 {
-    return {
-        // Dataset 0: Default dataset (various tensor sizes)
-        // input_dims, lens, pads, strides, index_type, mode, wsidx
-        {{5, 32, 8, 8}, {2, 2}, {0, 0}, {2, 2}, miopenIndexUint8, miopenPoolingMax, 1},
-        {{5, 32, 8, 8}, {3, 3}, {1, 1}, {1, 1}, miopenIndexUint8, miopenPoolingAverage, 1},
-        {{10, 3, 32, 32}, {2, 2}, {0, 0}, {2, 2}, miopenIndexUint8, miopenPoolingMax, 0},
-        {{10, 3, 32, 32}, {3, 3}, {1, 1}, {1, 1}, miopenIndexUint8, miopenPoolingAverage, 1},
-        {{2, 64, 112, 112}, {2, 2}, {0, 0}, {2, 2}, miopenIndexUint8, miopenPoolingMax, 1},
-        {{4, 3, 224, 224}, {3, 3}, {1, 1}, {1, 1}, miopenIndexUint8, miopenPoolingAverage, 0},
+    std::vector<Pooling2dTestCase> test_cases;
 
-        // Dataset 1: Minimal dataset (asymmetric configs, small tensors)
-        {{1, 4, 4, 4}, {2, 2}, {0, 0}, {1, 1}, miopenIndexUint8, miopenPoolingMax, 0},
-        {{1, 4, 4, 4}, {2, 2}, {0, 0}, {2, 2}, miopenIndexUint8, miopenPoolingAverage, 1},
-        {{1, 4, 4, 4}, {1, 2}, {0, 0}, {1, 1}, miopenIndexUint8, miopenPoolingMax, 1},
-        {{1, 4, 4, 4}, {2, 1}, {0, 0}, {2, 1}, miopenIndexUint8, miopenPoolingAverage, 0},
-        {{1, 4, 4, 4}, {2, 2}, {0, 0}, {1, 2}, miopenIndexUint8, miopenPoolingMax, 1},
-        {{1, 4, 4, 4}, {2, 2}, {0, 0}, {2, 1}, miopenIndexUint8, miopenPoolingAverage, 0},
+    // Dataset 0: Default dataset (various tensor sizes)
+    // Limited to 9 input shapes (matching generate_multi_data_limited with limit_multiplier=9)
+    std::vector<std::vector<int>> dataset0_inputs = {
+        {1, 19, 1024, 2048}, {10, 3, 32, 32}, {5, 32, 8, 8}, {2, 1024, 12, 12},
+        {4, 3, 231, 231},    {8, 3, 227, 227}, {1, 384, 13, 13}, {1, 96, 27, 27},
+        {2, 160, 7, 7}}; // First 9 from the original 18
+    std::vector<std::vector<int>> dataset0_lens = {{2, 2}, {3, 3}};
+    std::vector<std::vector<int>> dataset0_strides = {{2, 2}, {1, 1}};
+    std::vector<std::vector<int>> dataset0_pads = {{0, 0}, {1, 1}};
+    std::vector<miopenIndexType_t> dataset0_index_types = {
+        miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
+    std::vector<miopenPoolingMode_t> modes = {
+        miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
+    std::vector<int> wsidx_values = {0, 1};
 
-        // Additional coverage: different index types and modes
-        {{5, 32, 8, 8}, {2, 2}, {0, 0}, {2, 2}, miopenIndexUint32, miopenPoolingMax, 1},
-        {{5, 32, 8, 8},
-         {3, 3},
-         {1, 1},
-         {1, 1},
-         miopenIndexUint32,
-         miopenPoolingAverageInclusive,
-         0},
-    };
+    // Generate cartesian product for dataset 0
+    for(const auto& input_dims : dataset0_inputs)
+    {
+        for(const auto& lens : dataset0_lens)
+        {
+            for(const auto& strides : dataset0_strides)
+            {
+                for(const auto& pads : dataset0_pads)
+                {
+                    for(const auto& index_type : dataset0_index_types)
+                    {
+                        for(const auto& mode : modes)
+                        {
+                            for(int wsidx : wsidx_values)
+                            {
+                                test_cases.push_back(
+                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Dataset 1: Minimal dataset (asymmetric configs, small tensors)
+    std::vector<std::vector<int>> dataset1_inputs = {{1, 4, 4, 4}};
+    std::vector<std::vector<int>> dataset1_lens = {{2, 2}, {1, 2}, {2, 1}};
+    std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
+    std::vector<std::vector<int>> dataset1_pads = {{0, 0}}; // WORKAROUND_ISSUE_1670
+    std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint8, miopenIndexUint32};
+
+    // Generate cartesian product for dataset 1
+    for(const auto& input_dims : dataset1_inputs)
+    {
+        for(const auto& lens : dataset1_lens)
+        {
+            for(const auto& strides : dataset1_strides)
+            {
+                for(const auto& pads : dataset1_pads)
+                {
+                    for(const auto& index_type : dataset1_index_types)
+                    {
+                        for(const auto& mode : modes)
+                        {
+                            for(int wsidx : wsidx_values)
+                            {
+                                test_cases.push_back(
+                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Dataset 2: Wide window dataset
+    std::vector<std::vector<int>> dataset2_inputs = {
+        {1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
+    std::vector<std::vector<int>> dataset2_lens = {{35, 35}, {100, 100}, {255, 255}, {410, 400}};
+    std::vector<std::vector<int>> dataset2_strides = {{1, 1}};
+    std::vector<std::vector<int>> dataset2_pads = {{0, 0}};
+    std::vector<miopenIndexType_t> dataset2_index_types = {miopenIndexUint32};
+
+    // Generate cartesian product for dataset 2
+    for(const auto& input_dims : dataset2_inputs)
+    {
+        for(const auto& lens : dataset2_lens)
+        {
+            for(const auto& strides : dataset2_strides)
+            {
+                for(const auto& pads : dataset2_pads)
+                {
+                    for(const auto& index_type : dataset2_index_types)
+                    {
+                        for(const auto& mode : modes)
+                        {
+                            for(int wsidx : wsidx_values)
+                            {
+                                test_cases.push_back(
+                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return test_cases;
 }
 
 template <typename T, typename Index>
