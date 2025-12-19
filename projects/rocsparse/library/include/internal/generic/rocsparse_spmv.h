@@ -116,6 +116,7 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
 *  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
 *  </table>
 *

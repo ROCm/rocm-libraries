@@ -201,8 +201,29 @@ namespace rocsparse
                       rocsparse_datatype_f32_r),
 
          CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i64,
                       rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
                       rocsparse_datatype_f16_r,
                       rocsparse_datatype_f16_r,
                       rocsparse_datatype_f32_r),
@@ -212,7 +233,7 @@ namespace rocsparse
                       rocsparse_indextype_i64,
                       rocsparse_datatype_f16_r,
                       rocsparse_datatype_f16_r,
-                      rocsparse_datatype_f32_r),
+                      rocsparse_datatype_f16_r),
 
          CSCMV_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i32,

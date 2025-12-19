@@ -216,7 +216,7 @@ namespace rocsparse
                     val = rocsparse::conj(val);
                 }
 
-                rocsparse::atomic_add(&y[col], static_cast<T>(val) * row_val);
+                rocsparse::atomic_add(y, col, n, static_cast<T>(val) * row_val);
             }
         }
     }
@@ -274,7 +274,7 @@ namespace rocsparse
                         val = rocsparse::conj(val);
                     }
 
-                    rocsparse::atomic_add(&y[col], static_cast<T>(val) * row_val);
+                    rocsparse::atomic_add(y, col, n, static_cast<T>(val) * row_val);
                 }
             }
         }

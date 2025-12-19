@@ -590,6 +590,9 @@ INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, flo
 INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE(float, int32_t, int32_t, float, float, float);
 INSTANTIATE(float, int64_t, int32_t, float, float, float);
 INSTANTIATE(float, int64_t, int64_t, float, float, float);
