@@ -167,6 +167,7 @@ namespace rocRoller::KernelGraph
         Log::debug("HoistLoopInvariant: Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
         insertBefore(kgraph, loopNode, hoistedNode, hoistedNode);
         kgraph.control.setElement(nodeToHoist, NOP{});
+        kgraph.mapper.purge(nodeToHoist);
         return hoistedNode;
     }
 

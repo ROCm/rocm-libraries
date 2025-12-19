@@ -66,7 +66,7 @@ TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expressio
     }
 }
 
-TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]")
+TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
 {
     using namespace rocRoller;
     using namespace rocRoller::KernelGraph;
@@ -220,33 +220,54 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
 
     SECTION("valid hoist")
     {
-        int testCoordTag = graph.coordinates.addElement(Linear{});
+        int coord = graph.coordinates.addElement(Linear{});
 
         auto constantExpr = Expression::literal(42.0f);
 
         Assign assignOp;
         assignOp.expression = constantExpr;
 
-        int assignNodeTag = graph.control.addElement(assignOp);
+        int assign = graph.control.addElement(assignOp);
 
-        graph.mapper.connect(assignNodeTag, testCoordTag, NaryArgument::DEST);
+        graph.mapper.connect(assign, coord, NaryArgument::DEST);
 
         const auto firstDownstreamNode
             = graph.control.getOutputNodeIndices<Body>(kLoop).take(1).only().value();
 
         if(firstDownstreamNode != -1)
         {
-            Log::info("test setup placing before {}", firstDownstreamNode, assignNodeTag);
-            insertBefore(graph, firstDownstreamNode, assignNodeTag, assignNodeTag);
+            Log::info("test setup placing before {}", firstDownstreamNode, assign);
+            insertBefore(graph, firstDownstreamNode, assign, assign);
         }
-
         graph = transform<HoistLoopInvariant>(graph);
 
+        const auto newTracer = ControlFlowRWTracer(graph);
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, newTracer) == 0);
+
+        int newAssign;
         {
-            std::ofstream file("HoistLoopInvariantTest_after.dot");
-            file << graph.toDOT(false);
+            const auto connections = graph.mapper.getCoordinateConnections(coord);
+            Log::info("controls: {}",
+                      connections
+                          | std::views::transform(&ControlToCoordinateMapper::Connection::control));
+            REQUIRE(connections.size() == 1);
+            newAssign = connections[0].control;
         }
 
-        // TODO: add checks
+        {
+            const auto loopStack   = controlStack(kLoop, graph);
+            const auto assignStack = controlStack(newAssign, graph);
+
+            Log::info("loopstack: {}", loopStack);
+            Log::info("assignstack: {}", assignStack);
+
+            REQUIRE(loopStack.size() == assignStack.size());
+
+            // Expect same control stack excluding itself
+            for(size_t i = 0; i < loopStack.size() - 1; ++i)
+            {
+                CHECK(loopStack[i] == assignStack[i]);
+            }
+        }
     }
 }
