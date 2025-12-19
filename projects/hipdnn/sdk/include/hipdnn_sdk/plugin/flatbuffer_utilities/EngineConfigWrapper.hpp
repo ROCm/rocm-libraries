@@ -8,7 +8,7 @@
 
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
 
-namespace hipdnn_plugin
+namespace hipdnn_plugin_sdk
 {
 
 class IEngineConfig
