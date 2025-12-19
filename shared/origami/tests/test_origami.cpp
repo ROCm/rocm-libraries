@@ -399,28 +399,28 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
 
       // Test 3: Test tie-breaking with arithmetic intensity (TODO: Find the pair which has same
       // latency but different AI)
-      std::vector<origami::config_t> indentical_latency_configs;
-      indentical_latency_configs.push_back(make_config(64, 128, 64, 32, 32, 8, 1, 6, 0, 0));
-      indentical_latency_configs.push_back(make_config(128, 64, 64, 32, 32, 8, 1, 6, 0, 0));
-      // indentical_latency_configs.push_back(make_config(192, 160, 32, 32, 32, 8, 1, 6, 0, 0));
-      // auto indentical_ai_results = origami::rank_configs(problem, hardware,
-      // indentical_latency_configs);
+      std::vector<origami::config_t> identical_latency_configs;
+      identical_latency_configs.push_back(make_config(64, 128, 64, 32, 32, 8, 1, 6, 0, 0));
+      identical_latency_configs.push_back(make_config(128, 64, 64, 32, 32, 8, 1, 6, 0, 0));
+      // identical_latency_configs.push_back(make_config(192, 160, 32, 32, 32, 8, 1, 6, 0, 0));
+      // auto identical_ai_results = origami::rank_configs(problem, hardware,
+      // identical_latency_configs);
 
       // Test 4: Test tie-breaking with problem dimension preferences
-      std::vector<origami::config_t> indentical_ai_configs;
-      indentical_ai_configs.push_back(make_config(128, 64, 128, 32, 32, 8, 1, 6, 0, 0));
-      indentical_ai_configs.push_back(make_config(64, 128, 128, 32, 32, 8, 1, 6, 0, 0));
+      std::vector<origami::config_t> identical_ai_configs;
+      identical_ai_configs.push_back(make_config(128, 64, 128, 32, 32, 8, 1, 6, 0, 0));
+      identical_ai_configs.push_back(make_config(64, 128, 128, 32, 32, 8, 1, 6, 0, 0));
 
       auto problem_m_greater_than_n = make_problem(2048, 1024, 1024);
       auto results_m_greater_than_n =
-          origami::rank_configs(problem_m_greater_than_n, hardware, indentical_ai_configs);
-      REQUIRE(indentical_ai_configs[0].mt.m ==
+          origami::rank_configs(problem_m_greater_than_n, hardware, identical_ai_configs);
+      REQUIRE(identical_ai_configs[0].mt.m ==
               results_m_greater_than_n[0].config.mt.m);  // If M > N, prefer tiles with larger MT_M
 
       auto problem_n_greater_than_m = make_problem(1024, 4096, 1024);
       auto results_n_greater_than_m =
-          origami::rank_configs(problem_n_greater_than_m, hardware, indentical_ai_configs);
-      // REQUIRE(indentical_ai_configs[1].mt.n == results_n_greater_than_m[0].config.mt.n); //If N >
+          origami::rank_configs(problem_n_greater_than_m, hardware, identical_ai_configs);
+      // REQUIRE(identical_ai_configs[1].mt.n == results_n_greater_than_m[0].config.mt.n); //If N >
       // M, prefer tiles with larger MT_N
 
       auto problem_m_equals_n = make_problem(1024, 1024, 1024);
