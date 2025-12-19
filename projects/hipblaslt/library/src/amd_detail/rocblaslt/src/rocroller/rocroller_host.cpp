@@ -450,7 +450,6 @@ rocblaslt_status
         std::cerr << e.what() << std::endl;
         return rocblaslt_status_not_implemented;
     }
-    std::cout << "Kernel generated: " << params->toString() << std::endl;
 
     return rocblaslt_status_success;
 }

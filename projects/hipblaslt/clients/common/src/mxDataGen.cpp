@@ -54,14 +54,12 @@ std::vector<T> preSwizzleScale(std::vector<T> const&      input,
     auto tileMN = tile[0];
     auto tileK  = tile[1];
 
-    if(tileMN != 64 && tileMN != 32)
-        throw std::runtime_error("preSwizzleScale: tileMN must be 64 or 32");
+    if(tileMN != 32)
+        throw std::runtime_error("preSwizzleScale: tileMN must be 32");
 
     // Always use 16x16x128 MI for pre-swizzled data
     // subTileK = MI.k / scaleBlockSize = 128 / 32 = 4
     size_t subTileK = tile[2];
-
-    std::cout << "Pre-swizzling scale data with tile: " << tileMN << "x" << tileK << " (subTileK=" << subTileK << ")" << std::endl;
 
     if(tileK % 4 != 0)
         throw std::runtime_error("preSwizzleScale: tileK must be a multiple of 4");
@@ -96,15 +94,8 @@ std::vector<T> preSwizzleScale(std::vector<T> const&      input,
 
     // Determine dimension order based on tile configuration
     // Always uses subTileK = 4 (MI 16x16x128)
-    std::vector<size_t> dimOrder;
-    if(tileMN == 64)
-    {
-        dimOrder = {6, 1, 2, 3, 4, 5, 0, 7};
-    }
-    else // tileMN == 32
-    {
-        dimOrder = {6, 2, 1, 3, 4, 5, 0, 7};
-    }
+    std::vector<size_t> dimOrder = {6, 2, 1, 3, 4, 5, 0, 7};
+
 
     // Compute destination strides using the shuffled dimension order
     // This matches rocRoller's TensorDescriptor::ShuffledNoPadding

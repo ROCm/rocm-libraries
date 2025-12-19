@@ -230,6 +230,16 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                    || !std::has_single_bit(static_cast<uint>(wgt.n))))
                 continue;
 
+            // pre-swizzled scald data requires the wgt.m >= 128 and wgt.n >= 128 to be able to turn on SwizzleScale
+            if (kernelType.scaleTypeA.preSwizzleTile.size() == 3 && (wgt.m < 128))
+                continue;
+            if (kernelType.scaleTypeB.preSwizzleTile.size() == 3 && (wgt.n < 128))
+                continue;
+            // wgt.k has to be at least 256 when scale data is pre-swizzled
+            if (kernelType.scaleTypeA.preSwizzleTile.size() == 3 && kernelType.scaleTypeB.preSwizzleTile.size() == 3 && wgt.k < 256)
+                continue;
+
+
             params.push_back({wgt, true, false});
 
             if (prob.k < USE_WORKGROUP_MAPPING_K_SIZE)

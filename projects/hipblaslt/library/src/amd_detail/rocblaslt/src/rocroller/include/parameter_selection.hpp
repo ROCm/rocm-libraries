@@ -33,8 +33,6 @@
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 
-#include <vector>
-
 
 /**
  * @brief Solution Parameters
@@ -161,7 +159,8 @@ inline int selectSwizzleTileMN(
     int numNTilesPerWave = workgroupTile.n / mi.n / numWavesY;
 
     // Possible swizzle tile MN values
-    std::vector<int> possibleSwizzleTileMN = {32, 64};
+    // If workgroupTile.k < 256, swizzleTileMN must be 64
+    std::vector<int> possibleSwizzleTileMN = (workgroupTile.k < 256) ? std::vector<int>{64} : std::vector<int>{32, 64};
     std::vector<int> validSwizzleTileMN;
 
     for (int swizzleTileMN : possibleSwizzleTileMN)
@@ -170,18 +169,12 @@ inline int selectSwizzleTileMN(
         int minMTilesPerWave = swizzleTileMN / mi.m;
         int minNTilesPerWave = swizzleTileMN / mi.n;
 
-        std::cout << "numMTilesPerWave: " << numMTilesPerWave << std::endl;
-        std::cout << "numNTilesPerWave: " << numNTilesPerWave << std::endl;
-        std::cout << "minMTilesPerWave: " << minMTilesPerWave << std::endl;
-        std::cout << "minNTilesPerWave: " << minNTilesPerWave << std::endl;
-
         // Check divisibility
         bool validM = (minMTilesPerWave > 0) && (numMTilesPerWave % minMTilesPerWave == 0);
         bool validN = (minNTilesPerWave > 0) && (numNTilesPerWave % minNTilesPerWave == 0);
 
         if (validM && validN)
         {
-            std::cout << "validSwizzleTileMN: " << swizzleTileMN << std::endl;
             validSwizzleTileMN.push_back(swizzleTileMN);
         }
     }
@@ -190,11 +183,6 @@ inline int selectSwizzleTileMN(
     {
         return 0;  // Error: no valid swizzle tile size
     }
-
-    // if (validSwizzleTileMN.size() == 1)
-    // {
-    //     return validSwizzleTileMN[0];
-    // }
 
     // If both 32 and 64 are valid, prefer 64
     return validSwizzleTileMN.back();
@@ -256,13 +244,9 @@ inline int selectSwizzleTileK(
         // Compute minimum K tiles per wave
         int minKTilesPerWave = swizzleTileK / miKScale;
 
-        std::cout << "numKTilesPerWave: " << numKTilesPerWave << std::endl;
-        std::cout << "minKTilesPerWave: " << minKTilesPerWave << std::endl;
-
         // Check divisibility
         if (minKTilesPerWave > 0 && numKTilesPerWave % minKTilesPerWave == 0)
         {
-            std::cout << "validSwizzleTileK: " << swizzleTileK << std::endl;
             validSwizzleTileK.push_back(swizzleTileK);
         }
     }
@@ -299,14 +283,6 @@ inline SwizzleTileSize selectSwizzleTileSize(
     int                           scaleBlockSize,
     const std::vector<size_t>&    preSwizzleTileSize)
 {
-    std::cout << "selectSwizzleTileSize: workgroupTile: " << workgroupTile.m << "x" << workgroupTile.n << "x" << workgroupTile.k << std::endl;
-    std::cout << "selectSwizzleTileSize: mi: " << mi.m << "x" << mi.n << "x" << mi.k << std::endl;
-    std::cout << "selectSwizzleTileSize: workgroupSizeX: " << workgroupSizeX << std::endl;
-    std::cout << "selectSwizzleTileSize: workgroupSizeY: " << workgroupSizeY << std::endl;
-    std::cout << "selectSwizzleTileSize: unroll: " << unroll << std::endl;
-    std::cout << "selectSwizzleTileSize: scaleBlockSize: " << scaleBlockSize << std::endl;
-    std::cout << "selectSwizzleTileSize: preSwizzleTileSize.size(): " << preSwizzleTileSize.size() << std::endl;
-
     SwizzleTileSize result = {0, 0, 0, 0};
 
     int swizzleTileMN = selectSwizzleTileMN(workgroupTile, mi, workgroupSizeX, workgroupSizeY, preSwizzleTileSize);

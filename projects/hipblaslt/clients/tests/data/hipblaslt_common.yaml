@@ -489,37 +489,6 @@ Real precisions 1 bytes: &real_precisions_mx
   - &mxf4_mxf4_precision_dst_bfp16
     { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
 
-# MX Datatypes with Pre-Swizzle for 16x16x128 MI (scaleA/B: 1001 = Block_32_UE8M0_32_8)
-# These precision definitions use the swizzle tile {32, 8} for scale data pre-swizzling
-# Compatible with 16x16x128 machine instruction tiles (miKScale=128/32=4)
-Real precisions MX with preswizzled data: &real_precisions_mx_preswizzle_32x8
-  - &mxf8_mxfp8_precision_dst_fp32_preswizzle_32x8
-    { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf8_mxfp8_precision_dst_fp16_preswizzle_32x8
-    { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf8_mxfp8_precision_dst_bf16_preswizzle_32x8
-    { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf8_mxbfp8_precision_dst_fp32_preswizzle_32x8
-    { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf8_mxbfp8_precision_dst_fp16_preswizzle_32x8
-    { a_type: f8_r, b_type: bf8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxbf8_mxbfp8_precision_dst_fp32_preswizzle_32x8
-    { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxbf8_mxbfp8_precision_dst_fp16_preswizzle_32x8
-    { a_type: bf8_r, b_type: bf8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf6_mxf6_precision_dst_fp32_preswizzle_32x8
-    { a_type: f6_r, b_type: f6_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf6_mxf6_precision_dst_fp16_preswizzle_32x8
-    { a_type: f6_r, b_type: f6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxbf6_mxbf6_precision_dst_fp32_preswizzle_32x8
-    { a_type: bf6_r, b_type: bf6_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxbf6_mxbf6_precision_dst_fp16_preswizzle_32x8
-    { a_type: bf6_r, b_type: bf6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf4_mxf4_precision_dst_fp32_preswizzle_32x8
-    { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  - &mxf4_mxf4_precision_dst_fp16_preswizzle_32x8
-    { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-
 # rocRoller predicate
 rocRoller predicate: &rocroller_predicate
   - &unrollKPredicate

@@ -138,7 +138,6 @@ std::shared_ptr<SolutionParameters>
     else if(solutionIndexParameters.workgroupTile.m >= 128
         && solutionIndexParameters.workgroupTile.n >= 128)
     {
-        std::cout << "swizzleScale: true" << std::endl;
         gemm->swizzleScale  = true;
         // Use BufferToVGPR for swizzle scale (matches rocRoller client --loadScale_A BufferToVGPR)
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
@@ -236,11 +235,6 @@ std::shared_ptr<SolutionParameters>
             gemm->prefetchInFlight,
             gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize,
             gemm->kernelType.scaleTypeA.preSwizzleTile);
-        std::cout << "swizzleTileSize: " << gemm->swizzleTileSize.m << "x" << gemm->swizzleTileSize.k << "x" << gemm->swizzleTileSize.n << "x" << gemm->swizzleTileSize.l << std::endl;
-        // AssertFatal(gemm->swizzleTileSize.m == gemm->swizzleTileSize.n && gemm->swizzleTileSize.k == gemm->swizzleTileSize.l,
-        //             "swizzleTileSize must be symmetric");
-        //             AssertFatal(gemm->swizzleTileSize.m != -1 && gemm->swizzleTileSize.k != -1,
-        //                         "swizzleTileSize must be valid");
     }
 
 

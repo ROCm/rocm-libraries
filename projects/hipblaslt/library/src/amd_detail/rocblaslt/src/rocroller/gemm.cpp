@@ -233,8 +233,11 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
         if (gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3)
         {
-            auto validSwizzleTileA = gemm->swizzleTileSize.m != 0 && gemm->swizzleTileSize.k != 0;
+            AssertFatal(gemm->kernelType.scaleTypeA.preSwizzleTile[0] == 32 && gemm->kernelType.scaleTypeA.preSwizzleTile[1] == 8 && gemm->kernelType.scaleTypeA.preSwizzleTile[2] == 4, 
+                "Pre-swizzled scale tile is not compatible with swizzle tile A", ShowValue(gemm->kernelType.scaleTypeA.preSwizzleTile));
+            auto validSwizzleTileA = gemm->swizzleTileSize.m == 32 && gemm->swizzleTileSize.k == 8;
             AssertFatal(validSwizzleTileA, "Pre-swizzled scale tile is not compatible with swizzle tile A", ShowValue(gemm->swizzleTileSize.m), ShowValue(gemm->swizzleTileSize.k));
+
             scaleInputA = command->addOperation(rocRoller::Operations::SubTileTranspose(
                                     *tagLoadScaleA, gemm->kernelType.scaleTypeA.preSwizzleTile));
         }
@@ -262,7 +265,9 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
         if (gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3)
         {
-            auto validSwizzleTileB = gemm->swizzleTileSize.n != 0 && gemm->swizzleTileSize.l != 0;
+            AssertFatal(gemm->kernelType.scaleTypeB.preSwizzleTile[0] == 32 && gemm->kernelType.scaleTypeB.preSwizzleTile[1] == 8 && gemm->kernelType.scaleTypeB.preSwizzleTile[2] == 4, 
+                "Pre-swizzled scale tile is not compatible with swizzle tile B", ShowValue(gemm->kernelType.scaleTypeB.preSwizzleTile));
+            auto validSwizzleTileB = gemm->swizzleTileSize.n == 32 && gemm->swizzleTileSize.l == 8;
             AssertFatal(validSwizzleTileB, "Pre-swizzled scale tile is not compatible with swizzle tile B", ShowValue(gemm->swizzleTileSize.n), ShowValue(gemm->swizzleTileSize.l));
             scaleInputB = command->addOperation(rocRoller::Operations::SubTileTranspose(
                                     *tagLoadScaleB, gemm->kernelType.scaleTypeB.preSwizzleTile));
