@@ -6,16 +6,14 @@
 #include "HipdnnStatus.h"
 #include "LastErrorManager.hpp"
 
-// TODO: remove
-#include <iostream>
 #include <spdlog/fmt/fmt.h>
+
 namespace hipdnn_backend
 {
 
 template <typename T>
 std::string logPtr(T* ptr)
 {
-    std::cout << "Logging ptr\n";
     // This function is not invoked if the macro is a no-op.
     if(ptr != nullptr)
     {
