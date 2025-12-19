@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_bsrilu02_bad_arg(void)
+void testing_bsrilu02_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                    mb        = 100;
@@ -340,7 +340,7 @@ void testing_bsrilu02_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_bsrilu02(Arguments argus)
+void testing_bsrilu02(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                    m         = argus.M;
@@ -369,7 +369,7 @@ hipsparseStatus_t testing_bsrilu02(Arguments argus)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse does not support m == 0 for csr2bsr
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -385,7 +385,7 @@ hipsparseStatus_t testing_bsrilu02(Arguments argus)
     if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // m can be modifed if we read in a matrix from a file
@@ -754,8 +754,6 @@ hipsparseStatus_t testing_bsrilu02(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_BSRILU02_HPP

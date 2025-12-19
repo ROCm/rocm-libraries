@@ -3,14 +3,14 @@
 #pragma once
 
 #include <algorithm>
+#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_sdk/utilities/StringUtil.hpp>
 #include <numeric>
 #include <ranges>
 #include <stdexcept>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 // Check broadcastability: input can be broadcast to output
@@ -119,25 +119,71 @@ inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
     return strideOrder;
 }
 
-// Extracts stride order from existing strides
-// The stride order indicates the memory layout priority (lower values = higher priority)
-// For example, strides [8, 1, 4] would produce order [2, 0, 1]
-// This is the inverse operation of generateStrides
+// Deduces the stride order from existing strides (assumes common/standard layouts).
+// The returned stride order indicates the memory layout priority (lower values = higher priority).
+// For example, strides [8, 1, 4] would produce order [2, 0, 1].
+// Attempts to determine between NC...W and N...WC layouts, defaulting to NC...W when uncertain.
+// For example, strides [1, 1, 1, 1] would produce order [3, 2, 1, 0].
+// A warning log will be added when input strides are not unique.
+// This is the inverse operation of generateStrides.
 inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strides)
 {
-    std::vector<int64_t> strideOrder(strides.size());
-    std::vector<size_t> indices(strides.size());
+    size_t numDims = strides.size();
+    std::vector<size_t> indices(numDims);
+    std::vector<int64_t> strideOrder(numDims);
     std::iota(indices.begin(), indices.end(), 0);
+    bool stridesAreUnique = true;
 
-    // Sort indices by their corresponding stride values (ascending)
-    std::sort(indices.begin(), indices.end(), [&strides](size_t a, size_t b) {
-        return strides[a] < strides[b];
-    });
-
-    // Assign order based on sorted indices
-    for(size_t i = 0; i < indices.size(); ++i)
+    if(strides.empty())
     {
-        strideOrder[indices[i]] = static_cast<int64_t>(i);
+        return {};
+    }
+
+    // Attempt to determine between N...C layouts and N...W layouts.
+    auto posFirstMax = static_cast<size_t>(
+        std::distance(strides.begin(), std::max_element(strides.begin(), strides.end())));
+    auto posFirstMin = static_cast<size_t>(
+        std::distance(strides.begin(), std::min_element(strides.begin(), strides.end())));
+
+    if(posFirstMax == 0 && posFirstMin == 1)
+    {
+        // N is amongst the largest strides and C is amongst the shortest.
+        for(size_t i = 2; i < numDims; ++i)
+        {
+            if(strides[i] > strides[posFirstMin])
+            {
+                // C is smaller than at least one of D, H, or W. Assume N...WC memory
+                // layout and force C to the end of the list before stable_sort() so
+                // that it's handled properly in case of duplicate minimum stride lengths.
+                indices.erase(indices.begin() + 1);
+                indices.push_back(1);
+                break;
+            }
+        }
+    }
+
+    // Sort indices by their corresponding stride values (descending; aligns with NC...W layout)
+    std::stable_sort(
+        indices.begin(), indices.end(), [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
+            if(strides[a] == strides[b])
+            {
+                stridesAreUnique = false;
+            }
+            return strides[a] > strides[b];
+        });
+
+    // Assign order based on sorted stride indices from longest strides to shortest.
+    for(size_t i = 0; i < numDims; ++i)
+    {
+        strideOrder[indices[i]] = static_cast<int64_t>(numDims - i - 1);
+    }
+
+    if(!stridesAreUnique)
+    {
+        HIPDNN_LOG_WARN("extractStrideOrder(): Stride lengths {} are not unique, the deduced "
+                        "stride order {} may not be correct",
+                        vecToString(strides),
+                        vecToString(strideOrder));
     }
 
     return strideOrder;
@@ -264,5 +310,4 @@ inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
     return inChannels / wChannels;
 }
 
-}
-}
+} // namespace hipdnn_sdk::utilities

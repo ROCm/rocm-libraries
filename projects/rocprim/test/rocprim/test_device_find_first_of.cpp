@@ -295,6 +295,12 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
 
 TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));

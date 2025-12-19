@@ -43,8 +43,9 @@ namespace rocRoller
         class AssignComputeIndex : public GraphTransform
         {
         public:
-            AssignComputeIndex(ContextPtr context)
+            AssignComputeIndex(ContextPtr context, CommandPtr command = nullptr)
                 : m_context(context)
+                , m_command(command)
             {
             }
 
@@ -57,6 +58,7 @@ namespace rocRoller
 
         private:
             ContextPtr m_context;
+            CommandPtr m_command;
         };
     }
 }

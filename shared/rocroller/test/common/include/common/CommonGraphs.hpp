@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include <map>
 #include <vector>
 
 #include <rocRoller/CommandSolution.hpp>
@@ -39,6 +40,7 @@
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 
 #include <common/GEMMProblem.hpp>
 
@@ -202,7 +204,7 @@ namespace rocRollerTest
             void setTileSize(int m, int n, int k);
             void setMFMA(int m, int n, int k, int b);
             void setUseLDS(bool a, bool b, bool d);
-            void setUnroll(unsigned int unrollX, unsigned int unrollY);
+            void setUnroll(unsigned int unrollX, unsigned int unrollY, unsigned int unrollK = 0);
             void setStreamK(rocRoller::StreamKMode streamKMode);
             void setPrefetch(bool prefetch,
                              int  prefetchInFlight,
@@ -228,6 +230,9 @@ namespace rocRollerTest
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
             rocRoller::Operations::OperationTag m_tagNumWGs;
+
+            std::map<rocRoller::Operations::ScratchPolicy, rocRoller::Operations::OperationTag>
+                m_scratchTags;
 
             CommandPtr m_command;
         };

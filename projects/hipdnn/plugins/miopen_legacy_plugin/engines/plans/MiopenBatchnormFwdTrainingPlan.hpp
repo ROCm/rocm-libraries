@@ -7,7 +7,7 @@
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp"
 #include "PlanInterface.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <optional>
 
 namespace miopen_legacy_plugin
@@ -18,6 +18,12 @@ class BatchnormFwdTrainingParams
 public:
     BatchnormFwdTrainingParams(
         const hipdnn_sdk::data_objects::BatchnormAttributes& attributes,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    BatchnormFwdTrainingParams(
+        const hipdnn_sdk::data_objects::BatchnormAttributes& attributes,
+        const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
@@ -44,6 +50,9 @@ public:
     const MiopenTensor& nextRunningMean() const;
     const MiopenTensor& nextRunningVariance() const;
 
+    const std::optional<miopen_utils::ActivationParams>& optActivation() const;
+    const std::optional<MiopenTensor>& activationOut() const;
+
 private:
     MiopenTensor _x;
     MiopenTensor _y;
@@ -62,6 +71,10 @@ private:
     std::optional<MiopenTensor> _nextRunningMean;
     std::optional<MiopenTensor> _nextRunningVariance;
     bool _hasRunningStats{false};
+
+    // Optional activation fusion
+    std::optional<miopen_utils::ActivationParams> _optActivation;
+    std::optional<MiopenTensor> _activationOut;
 };
 
 class BatchnormFwdTrainingPlan : public IPlan

@@ -9,9 +9,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace hipdnn_tests
-{
-namespace plugin_constants
+namespace hipdnn_tests::plugin_constants
 {
 // Test plugin directory constants relative to backend library location
 inline const std::string& getTestPluginDefaultDir()
@@ -94,6 +92,4 @@ inline const std::string& testIncompleteApiPluginPath()
         = getPluginPath(TEST_INCOMPLETE_API_PLUGIN_NAME);
     return s_testIncompleteApiPluginPath;
 }
-
-} // namespace plugin_constants
-} // namespace hipdnn_tests
+} // namespace hipdnn_tests::plugin_constants

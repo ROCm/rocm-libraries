@@ -417,7 +417,6 @@ auto GetContext(miopen::Handle* handle, const miopen::conv::ProblemDescription& 
 {
     auto tmp = miopen::ExecutionContext{handle};
     problem.SetupFloats(tmp);
-    problem.SetupComputeType(tmp);
     return tmp;
 }
 

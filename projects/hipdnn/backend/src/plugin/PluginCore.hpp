@@ -16,15 +16,13 @@
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "PlatformUtils.hpp"
 #include "logging/Logging.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
-#include <hipdnn_sdk/plugin/PluginDataTypeHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 
 #include "HipdnnException.hpp"
 #include "SharedLibrary.hpp"
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 // The PluginBase is the base class for all plugins.
@@ -279,5 +277,4 @@ private:
     std::set<std::filesystem::path> _defaultPluginPaths;
 };
 
-} // namespace plugin
-} // namespace hipdnn_backend
+} // namespace hipdnn_backend::plugin

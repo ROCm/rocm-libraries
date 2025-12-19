@@ -27,48 +27,10 @@
 #include <miopen/env.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
-#include <algorithm>
-#include <limits>
-
-// Workaround for MLOpen issue 1430. Vega20 fails to access GPU memory
-// larger than the return value of GetMaxMemoryAllocSize() of Vega10.
-// Due to historical reasons, this W/A is applied to all targets.
-// We are going to keep it as is until the new GEMM backend
-// is used instead of rocBLAS. See also issue #2809.
-#define WORKAROUND_MLOPEN_ISSUE_1430 1
-
-// Double the limit for FP32, for GemmFwdRest and GemmBwdRest solvers only.
-// See issues #2789 and #2808.
-//
-// IMPORTANT: The limit can only be increased for the "rest-of" kind GEMM solvers,
-// since there are dependencies between the applicability of GEMM solvers.
-// For example, expanding the applicability of GemmFwd1x1_0_1 will result
-// in narrowing the applicability of GemmFwdRest. This side effect will
-// lead to errors unless the databases are re-tuned.
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_WORKAROUND_ISSUE_2789)
-
 namespace miopen {
 namespace solver {
 namespace conv {
 namespace gemm {
-
-std::size_t MaxMemAllocSz(const Handle& h,
-                          const miopen::conv::ProblemDescription& problem,
-                          bool double_limit_for_fp32)
-{
-    const auto m = h.GetMaxMemoryAllocSize();
-#if WORKAROUND_MLOPEN_ISSUE_1430
-    auto limit = static_cast<std::size_t>(7287183769);
-    if(!env::disabled(MIOPEN_WORKAROUND_ISSUE_2789))
-    {
-        if(problem.IsFp32() && double_limit_for_fp32)
-            limit *= 2;
-    }
-    return std::min(m, limit);
-#else
-    return m;
-#endif
-}
 
 bool IsAnyBufferBf16(const TensorDescriptor& xDesc,
                      const TensorDescriptor& yDesc,

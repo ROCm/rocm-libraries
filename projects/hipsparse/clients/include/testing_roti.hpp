@@ -86,7 +86,7 @@ void testing_roti_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_roti(Arguments argus)
+void testing_roti(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
@@ -109,7 +109,7 @@ hipsparseStatus_t testing_roti(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, N);
+    hipsparseInitIndex(hx_ind.data(), nnz, idx_base, N + idx_base);
     hipsparseInit<T>(hx_val_1, 1, nnz);
     hipsparseInit<T>(hy_1, 1, N);
 
@@ -227,8 +227,6 @@ hipsparseStatus_t testing_roti(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_ROTI_HPP

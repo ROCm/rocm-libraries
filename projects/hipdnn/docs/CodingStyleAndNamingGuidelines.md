@@ -116,8 +116,15 @@ If later you add invariants or non-trivial behavior, consider converting to a cl
 ## 10. Namespaces
 
 - lower_snake_case with single underscores
+- Nested namespaces should be defined on the same line, e.g.
+  ```
+  namespace hipdnn_sdk::test_utilities::pointwise
+  {
+    ...
+  } // namespace hipdnn_sdk::test_utilities::pointwise
+- Do not use redundant namespace qualifiers (e.g. do not use `hipdnn_sdk::` qualifier when inside the `hipdnn_sdk` namespace).
 - Most code should fit generally within a few namespaces
-  - `hipdnn_<component>`: (eg. hipdnn_frontend) Contains all basic code required for the component
+  - `hipdnn_<component>`: (e.g. hipdnn_frontend) Contains all basic code required for the component
     - `utilities`: Contains code that can aid and assist in using component code
     - `test_utilities`: Contains code that can aid and assist in testing component code
 
@@ -136,7 +143,7 @@ Rules below apply ONLY to the TestSuite name (first parameter of `TEST` / `TEST_
 
 ### 11.2 Unit Tests
 
-In most cases unit style tests should be named so the directly mirror the class under test.  If the class is named `MyClass`, then the test suite should be named `TestMyClass`.  In general these kinds of tests should try to avoid using anything that requires Gpu support.  This is not always possible, in the cases where Gpu support is required, the test suite should be named `TestGpuMyClass`.
+In most cases unit style tests should be named so they directly mirror the class under test.  If the class is named `MyClass`, then the test suite should be named `TestMyClass`.  In general these kinds of tests should try to avoid using anything that requires Gpu support.  This is not always possible, in the cases where Gpu support is required, the test suite should be named `TestGpuMyClass`.
 
 #### Naming Examples
 
@@ -166,7 +173,7 @@ IntegrationGraphFusion
 ```
 
 #### File Naming
-For integration tests, the main test suite might be named `IntegrationGpuFeatureX` but have several child suites like `IntegrationGpuFeatureXFp32` and `IntegrationGpuFeatureXBfp16`. The parent suite name is the primary suite, so the file name should be `IntegrationGpuFeatureX.cpp`. 
+For integration tests, the main test suite might be named `IntegrationGpuFeatureX` but have several child suites like `IntegrationGpuFeatureXFp32` and `IntegrationGpuFeatureXBfp16`. The parent suite name is the primary suite, so the file name should be `IntegrationGpuFeatureX.cpp`.
 
 ### 11.4 Test Case Naming
 
@@ -261,14 +268,24 @@ The CI pipeline automatically runs clang-tidy on all pull requests to ensure com
 
 ### 15.2 Test Naming Enforcement Tool
 
-*[Placeholder: A dedicated test naming enforcement tool is planned to automatically validate that all test names follow the conventions outlined in Section 10]*
+A dedicated test naming enforcement tool is available to automatically validate that all test names follow the conventions outlined in Section 11.
 
-This tool will:
-- Parse all test files and extract TEST/TEST_F suite names
-- Validate ordering of keywords (Integration, Gpu, Feature, Layout, Datatype)
-- Check for prohibited underscores in test suite names
-- Generate reports on non-compliant test names
-- Integrate with CI to block merges with invalid test names
+The tool is located at `cmake/scripts/test_name_validator.py` and is integrated into the build system.
+
+To run the validation manually:
+```bash
+ninja validate_test_names
+```
+
+> [!NOTE]
+> This validation also runs automatically as part of the `ninja check` target.
+
+This tool:
+- Parses all test executables to extract test names
+- Validates ordering of keywords (Integration, Gpu, Feature, Layout, Datatype)
+- Checks for prohibited underscores in test suite names
+- Generates reports on non-compliant test names
+- Is integrated with CI to block merges with invalid test names
 
 ---
 

@@ -12,9 +12,7 @@
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 template <class T>
@@ -107,5 +105,4 @@ private:
     bool _packed;
 };
 
-}
-}
+} // namespace hipdnn_sdk::utilities

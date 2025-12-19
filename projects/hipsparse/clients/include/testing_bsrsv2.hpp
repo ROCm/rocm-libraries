@@ -418,7 +418,7 @@ void testing_bsrsv2_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_bsrsv2(Arguments argus)
+void testing_bsrsv2(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                    m         = argus.M;
@@ -455,7 +455,7 @@ hipsparseStatus_t testing_bsrsv2(Arguments argus)
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse does not support m == 0 for csr2bsr
         // cusparse does not support asynchronous execution if block_dim == 1
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -471,7 +471,7 @@ hipsparseStatus_t testing_bsrsv2(Arguments argus)
     if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     int mb = (m + block_dim - 1) / block_dim;
@@ -690,14 +690,14 @@ hipsparseStatus_t testing_bsrsv2(Arguments argus)
         {
             verify_hipsparse_status_zero_pivot(pivot_status_1,
                                                "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
 
         if(hposition_2 != -1)
         {
             verify_hipsparse_status_zero_pivot(pivot_status_2,
                                                "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
 
         unit_check_near(1, mb * block_dim, 1, hy_gold.data(), hy_1.data());
@@ -786,8 +786,6 @@ hipsparseStatus_t testing_bsrsv2(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_BSRSV2_HPP

@@ -8,10 +8,9 @@
 #include <stdexcept>
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 
-namespace hipdnn_plugin
+namespace hipdnn_plugin_sdk
 {
 
 /*
@@ -32,6 +31,7 @@ public:
         = 0;
     virtual const hipdnn_sdk::data_objects::Node& getNode(uint32_t index) const = 0;
     virtual const INodeWrapper& getNodeWrapper(uint32_t index) const = 0;
+    virtual const std::vector<std::unique_ptr<INodeWrapper>>& nodeWrappers() const = 0;
     virtual const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const
         = 0;
@@ -112,26 +112,20 @@ public:
     {
         throwIfNotValid();
 
-        if(_nodeWrappers.empty())
-        {
-            auto nodes = _shallowGraph->nodes();
-            if(nodes == nullptr)
-            {
-                throw std::out_of_range("No nodes in graph");
-            }
-
-            _nodeWrappers.reserve(nodes->size());
-            for(const auto node : *nodes)
-            {
-                _nodeWrappers.push_back(std::make_unique<NodeWrapper>(node));
-            }
-        }
+        lazyInitNodeWrappers();
 
         if(index >= _nodeWrappers.size())
         {
             throw std::out_of_range("Index out of range for graph nodes");
         }
         return *_nodeWrappers[index];
+    }
+
+    const std::vector<std::unique_ptr<INodeWrapper>>& nodeWrappers() const override
+    {
+        lazyInitNodeWrappers();
+
+        return _nodeWrappers;
     }
 
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
@@ -161,8 +155,25 @@ private:
     {
         if(!isValid())
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Graph is not valid");
+            throw std::invalid_argument("Graph is not valid");
+        }
+    }
+
+    void lazyInitNodeWrappers() const
+    {
+        if(_nodeWrappers.empty())
+        {
+            auto nodes = _shallowGraph->nodes();
+            if(nodes == nullptr)
+            {
+                throw std::out_of_range("No nodes in graph");
+            }
+
+            _nodeWrappers.reserve(nodes->size());
+            for(const auto node : *nodes)
+            {
+                _nodeWrappers.push_back(std::make_unique<NodeWrapper>(node));
+            }
         }
     }
 

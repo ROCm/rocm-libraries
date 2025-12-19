@@ -52,14 +52,18 @@ namespace Tensile
         gfx1030,
         gfx1031,
         gfx1032,
+        gfx1033,
         gfx1034,
         gfx1035,
+        gfx1036,
         gfx1100,
         gfx1101,
         gfx1102,
         gfx1103,
         gfx1150,
         gfx1151,
+        gfx1152,
+        gfx1153,
         gfx1200,
         gfx1201,
         All
@@ -98,10 +102,14 @@ namespace Tensile
             return "TensileLibrary_*_gfx1031";
         case LazyLoadingInit::gfx1032:
             return "TensileLibrary_*_gfx1032";
+        case LazyLoadingInit::gfx1033:
+            return "TensileLibrary_*_gfx1033";
         case LazyLoadingInit::gfx1034:
             return "TensileLibrary_*_gfx1034";
         case LazyLoadingInit::gfx1035:
             return "TensileLibrary_*_gfx1035";
+        case LazyLoadingInit::gfx1036:
+            return "TensileLibrary_*_gfx1036";
         case LazyLoadingInit::gfx1100:
             return "TensileLibrary_*_gfx1100";
         case LazyLoadingInit::gfx1101:
@@ -114,6 +122,10 @@ namespace Tensile
             return "TensileLibrary_*_gfx1150";
         case LazyLoadingInit::gfx1151:
             return "TensileLibrary_*_gfx1151";
+        case LazyLoadingInit::gfx1152:
+            return "TensileLibrary_*_gfx1152";
+        case LazyLoadingInit::gfx1153:
+            return "TensileLibrary_*_gfx1153";
         case LazyLoadingInit::gfx1200:
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:

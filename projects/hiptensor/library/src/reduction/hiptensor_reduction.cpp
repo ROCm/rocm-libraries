@@ -29,6 +29,8 @@
 
 #include <hiptensor/hiptensor.h>
 
+#include <hiptensor/hiptensor.h>
+
 #include "handle.hpp"
 #include "hip_device.hpp"
 #include "logger.hpp"
