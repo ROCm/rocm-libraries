@@ -4,14 +4,14 @@
 // This file is part of the test plugin implementation.
 // It contains the API functions for the test engine plugin.
 
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginHelpers.hpp>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 
 #include "EnginePluginApiImpl.hpp"
 #include "EnginePluginHandle.hpp"
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 #ifdef THROW_IF_NULL
 #error "THROW_IF_NULL is already defined"
@@ -40,7 +40,7 @@ void checkHandleValidity(hipdnnEnginePluginHandle_t handle)
 extern "C" hipdnnPluginStatus_t
     hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         if(maxEngines != 0)
         {
             THROW_IF_NULL(engineIds);
@@ -53,7 +53,7 @@ extern "C" hipdnnPluginStatus_t
 
 extern "C" hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         THROW_IF_NULL(handle);
         *handle = new HipdnnEnginePluginHandle{nullptr};
     });
@@ -61,7 +61,7 @@ extern "C" hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandl
 
 extern "C" hipdnnPluginStatus_t hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         delete handle;
     });
@@ -70,7 +70,7 @@ extern "C" hipdnnPluginStatus_t hipdnnEnginePluginDestroy(hipdnnEnginePluginHand
 extern "C" hipdnnPluginStatus_t hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle,
                                                             hipStream_t stream)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         handle->stream = stream;
     });
@@ -83,7 +83,7 @@ extern "C" hipdnnPluginStatus_t
                                              uint32_t maxEngines,
                                              uint32_t* numEngines)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         THROW_IF_NULL(opGraph);
         if(maxEngines != 0)
@@ -102,7 +102,7 @@ extern "C" hipdnnPluginStatus_t
                                        const hipdnnPluginConstData_t* opGraph,
                                        hipdnnPluginConstData_t* engineDetails)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         checkEngineIdValidity(engineId);
         THROW_IF_NULL(opGraph);
@@ -116,7 +116,7 @@ extern "C" hipdnnPluginStatus_t
     hipdnnEnginePluginDestroyEngineDetails(hipdnnEnginePluginHandle_t handle,
                                            hipdnnPluginConstData_t* engineDetails)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         THROW_IF_NULL(engineDetails);
 
@@ -130,7 +130,7 @@ extern "C" hipdnnPluginStatus_t
                                        const hipdnnPluginConstData_t* opGraph,
                                        size_t* workspaceSize)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         THROW_IF_NULL(engineConfig);
         THROW_IF_NULL(opGraph);
@@ -145,7 +145,7 @@ extern "C" hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionC
     hipdnnEnginePluginExecutionContext_t executionContext,
     size_t* workspaceSize)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         THROW_IF_NULL(executionContext);
         THROW_IF_NULL(workspaceSize);
@@ -160,7 +160,7 @@ extern "C" hipdnnPluginStatus_t
                                              const hipdnnPluginConstData_t* opGraph,
                                              hipdnnEnginePluginExecutionContext_t* executionContext)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         THROW_IF_NULL(engineConfig);
         THROW_IF_NULL(opGraph);
@@ -174,7 +174,7 @@ extern "C" hipdnnPluginStatus_t
     hipdnnEnginePluginDestroyExecutionContext(hipdnnEnginePluginHandle_t handle,
                                               hipdnnEnginePluginExecutionContext_t executionContext)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         THROW_IF_NULL(executionContext);
 
@@ -189,7 +189,7 @@ extern "C" hipdnnPluginStatus_t
                                      const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                      uint32_t numDeviceBuffers)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         checkHandleValidity(handle);
         THROW_IF_NULL(executionContext);
         // Workspace can be null if the workspace size is zero.

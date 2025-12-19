@@ -3,9 +3,9 @@
 
 #include "MiopenUtils.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 
 using namespace miopen_legacy_plugin;
 using namespace miopen_utils;
@@ -26,7 +26,7 @@ TEST(TestMiopenUtils, FindDeviceBufferThrowsIfNotFound)
 
     EXPECT_THROW(
         miopen_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, TensorDataTypeToMiopenDataType)
@@ -43,7 +43,7 @@ TEST(TestMiopenUtils, TensorDataTypeToMiopenDataTypeThrowsOnUnsupported)
     // Use a value not in the enum
     EXPECT_THROW(miopen_utils::tensorDataTypeToMiopenDataType(
                      static_cast<hipdnn_sdk::data_objects::DataType>(-1)),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
@@ -73,7 +73,7 @@ TEST(TestMiopenUtils, FindTensorAttributesThrowsIfNotFound)
     auto attrMap = std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>{};
 
     EXPECT_THROW(miopen_utils::findTensorAttributes(attrMap, 1),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, GetSpatialDimCountReturnsCorrectValue)
@@ -103,7 +103,8 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
     auto attrPtr1 = flatbuffers::GetRoot<hipdnn_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(miopen_utils::getSpatialDimCount(*attrPtr1), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(miopen_utils::getSpatialDimCount(*attrPtr1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeStandardRelu)
@@ -131,7 +132,8 @@ TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipOnly)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    ASSERT_THROW(mapPointwiseModeToMiopenActivation(*attr), hipdnn_plugin::HipdnnPluginException);
+    ASSERT_THROW(mapPointwiseModeToMiopenActivation(*attr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeReluZeroLowerClipOnly)
@@ -343,7 +345,7 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithInvalidBeta)
         builder.GetBufferPointer());
 
     ASSERT_THROW(miopen_utils::mapPointwiseModeToMiopenActivation(*attr),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeAbs)
@@ -384,5 +386,5 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
         builder.GetBufferPointer());
 
     ASSERT_THROW(miopen_utils::mapPointwiseModeToMiopenActivation(*attr),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }

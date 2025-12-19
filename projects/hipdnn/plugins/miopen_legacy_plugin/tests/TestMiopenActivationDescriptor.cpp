@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenActivationDescriptor.hpp"
@@ -351,7 +351,8 @@ TEST(TestMiopenActivationDescriptor, ThrowsOnSoftplusWithInvalidBeta)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenActivationDescriptor activDesc(*attr), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(MiopenActivationDescriptor activDesc(*attr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenActivationDescriptor, CreatesAbs)
@@ -397,7 +398,8 @@ TEST(TestMiopenActivationDescriptor, ThrowsOnUnsupportedMode)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenActivationDescriptor activDesc(*attr), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(MiopenActivationDescriptor activDesc(*attr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenActivationDescriptor, ClampTakesPrecedenceOverClippedRelu)
