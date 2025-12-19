@@ -36,7 +36,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 * Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code mentioned above.
 
-* Removed deprecated `IteratorWrapper::operator<<`, `ThreadReduceTernaryTree`, `If`, `IsPointer`, `IsVolatile`, `RemoveQualifiers`, `ThreadReduceBinaryTree`, `ThreadReduceTernaryTree`.
+* Removed deprecated `IteratorWrapper::operator<<`, `If`, `IsPointer`, `IsVolatile`, `RemoveQualifiers`.
 
 ## hipCUB-4.2.0 for ROCm 7.2
  

@@ -60,6 +60,8 @@ public:
 
   int test_member_variable = 0; ///< A test member variable.
 
+  [[deprecated]] static constexpr int test_member_constant = 42; ///< A test member constant.
+
   template <typename X, typename Y>
   using test_type_alias = test_class<X, Y>;
 
