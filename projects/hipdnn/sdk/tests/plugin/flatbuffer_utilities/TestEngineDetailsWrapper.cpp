@@ -6,7 +6,7 @@
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 flatbuffers::FlatBufferBuilder buildValidEngineDetailsBuffer(int64_t engineId)
 {

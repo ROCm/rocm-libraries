@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginLastErrorManager.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 
 #include <iostream>
 
@@ -15,7 +15,7 @@
 #define LOG_API_SUCCESS(func_name, format, ...) \
     HIPDNN_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
 
-namespace hipdnn_plugin
+namespace hipdnn_plugin_sdk
 {
 
 template <typename T>
@@ -50,4 +50,4 @@ hipdnnPluginStatus_t tryCatch(F f)
     }
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
-} // namespace hipdnn_plugin
+} // namespace hipdnn_plugin_sdk

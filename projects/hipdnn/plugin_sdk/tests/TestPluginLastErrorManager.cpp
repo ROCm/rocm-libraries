@@ -5,10 +5,10 @@
 
 #define HIPDNN_PLUGIN_STATIC_DEFINE
 
-#include <hipdnn_sdk/plugin/PluginDataTypeHelpers.hpp>
-#include <hipdnn_sdk/plugin/PluginLastErrorManager.hpp>
+#include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 // NOLINTNEXTLINE
 thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";

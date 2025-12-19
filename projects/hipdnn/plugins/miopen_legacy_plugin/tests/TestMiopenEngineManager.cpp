@@ -6,7 +6,7 @@
 #include <memory>
 #include <set>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -18,7 +18,7 @@
 
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 using ::testing::Return;
 
 TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
@@ -135,7 +135,7 @@ TEST(TestMiopenEngineManager, ThrowsOnInvalidEngineId)
 
     HipdnnEnginePluginHandle dummyHandle = {};
     EXPECT_THROW(manager.getEngineDetails(dummyHandle, mockGraph, 999, engineDetails),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
@@ -161,7 +161,7 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeThrowsOnInvalidEngineId)
     MockGraph mockGraph;
 
     EXPECT_THROW(manager.getWorkspaceSize(dummyHandle, 999, mockGraph),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
@@ -194,5 +194,5 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextThrowsOnInvalidEngineId)
     EXPECT_CALL(mockEngineConfig, engineId()).Times(testing::AnyNumber()); // Uninteresting call
     EXPECT_THROW(
         manager.initializeExecutionContext(dummyHandle, mockGraph, mockEngineConfig, execCtx),
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
