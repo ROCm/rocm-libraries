@@ -16,6 +16,7 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_backend
 {
@@ -563,28 +564,23 @@ hipdnnEnginePluginExecutionContext_t EngineExecutionContextWrapper::get() const
 
 std::string EnginePluginResourceManager::toString() const
 {
-    std::string str = "EnginePluginResourceManager: [";
-    if(_pm)
+    if(!_pm)
     {
-        str += "loadedPlugins=" + std::to_string(_pm->getLoadedPluginFiles().size());
-        str += ", loadedPluginPaths=[";
-        auto paths = _pm->getLoadedPluginFiles();
-        for(auto it = paths.begin(); it != paths.end(); ++it)
-        {
-            str += it->string();
-            if(std::next(it) != paths.end())
-            {
-                str += ", ";
-            }
-        }
-        str += "]";
+        return "EnginePluginResourceManager: [loadedPlugins=0]";
     }
-    else
+
+    auto loadedPlugins = _pm->getLoadedPluginFiles();
+
+    std::vector<std::string> pluginPathStrings;
+    pluginPathStrings.reserve(loadedPlugins.size());
+    for(const auto& path : loadedPlugins)
     {
-        str += "loadedPlugins=0";
+        pluginPathStrings.push_back(path.string());
     }
-    str += "]";
-    return str;
+
+    return fmt::format("EnginePluginResourceManager: [loadedPlugins={}, loadedPluginPaths=[{}]]",
+                       loadedPlugins.size(),
+                       fmt::join(pluginPathStrings, ", "));
 }
 
 } // namespace plugin

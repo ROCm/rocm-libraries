@@ -15,11 +15,23 @@ template <typename T>
 std::string logPtr(T* ptr)
 {
     // This function is not invoked if the macro is a no-op.
-    if(ptr != nullptr)
+    if(ptr == nullptr)
+    {
+        return fmt::format("{:p}", static_cast<void*>(ptr));
+    }
+
+    try
     {
         return ptr->toString();
     }
-    return fmt::format("{:p}", static_cast<void*>(ptr));
+    catch(const std::exception& e)
+    {
+        return fmt::format("InvalidPtr[{:p}] ({})", static_cast<void*>(ptr), e.what());
+    }
+    catch(...)
+    {
+        return fmt::format("InvalidPtr[{:p}] (Unknown exception)", static_cast<void*>(ptr));
+    }
 }
 
 template <class F>

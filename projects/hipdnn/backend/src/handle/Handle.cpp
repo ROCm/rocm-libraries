@@ -30,22 +30,11 @@ std::shared_ptr<EnginePluginResourceManager> hipdnnHandle::getPluginResourceMana
 std::string hipdnnHandle::toString() const
 {
     std::string str = "hipdnnHandle: [";
-    if(_stream != nullptr)
-    {
-        str += "stream=" + fmt::format("{:p}", static_cast<void*>(_stream));
-    }
-    else
-    {
-        str += "stream=null";
-    }
-    if(_pluginResourceManager != nullptr)
-    {
-        str += ", " + _pluginResourceManager->toString();
-    }
-    else
-    {
-        str += ", pluginResourceManager=null";
-    }
+    str += "stream="
+           + (_stream != nullptr ? fmt::format("{:p}", static_cast<void*>(_stream)) : "null");
+    str += ", "
+           + (_pluginResourceManager != nullptr ? _pluginResourceManager->toString()
+                                                : "pluginResourceManager=null");
     str += "]";
     return str;
 }

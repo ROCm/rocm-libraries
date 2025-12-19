@@ -289,23 +289,10 @@ hipdnnBackendDescriptorType_t EngineHeuristicDescriptor::getStaticType()
 
 std::string EngineHeuristicDescriptor::toString() const
 {
-    std::string str = "EngineHeuristicDescriptor: [";
-    if(_heuristicModeSet)
-    {
-        str += "heuristicMode=" + std::to_string(_heuristicMode);
-    }
-    else
-    {
-        str += "heuristicMode=unset";
-    }
-    if(_graph)
-    {
-        str += ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()));
-    }
-    else
-    {
-        str += ", graph=null";
-    }
+    std::string str = "EngineHeuristicDescriptor: [heuristicMode=";
+    str += _heuristicModeSet ? std::to_string(_heuristicMode) : "unset";
+    str += _graph ? ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()))
+                  : ", graph=null";
     str += "]";
     return str;
 }

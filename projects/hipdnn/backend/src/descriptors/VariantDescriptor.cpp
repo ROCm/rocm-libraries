@@ -172,17 +172,10 @@ hipdnnBackendDescriptorType_t VariantDescriptor::getStaticType()
 
 std::string VariantDescriptor::toString() const
 {
-    std::string str = "VariantDescriptor: [";
-    str += "numDataPointers=" + std::to_string(_dataPointers.size());
+    std::string str = "VariantDescriptor: [numDataPointers=" + std::to_string(_dataPointers.size());
     str += ", numUniqueIds=" + std::to_string(_uniqueIds.size());
-    if(_workspace != nullptr)
-    {
-        str += ", workspace=" + fmt::format("{:p}", _workspace);
-    }
-    else
-    {
-        str += ", workspace=null";
-    }
+    str += _workspace != nullptr ? ", workspace=" + fmt::format("{:p}", _workspace)
+                                 : ", workspace=null";
     str += "]";
     return str;
 }
