@@ -44,12 +44,18 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     // Dataset 0: Default dataset (various tensor sizes)
     // Limited to 9 input shapes (matching generate_multi_data_limited with limit_multiplier=9)
     std::vector<std::vector<int>> dataset0_inputs = {
-        {1, 19, 1024, 2048}, {10, 3, 32, 32}, {5, 32, 8, 8}, {2, 1024, 12, 12},
-        {4, 3, 231, 231},    {8, 3, 227, 227}, {1, 384, 13, 13}, {1, 96, 27, 27},
+        {1, 19, 1024, 2048},
+        {10, 3, 32, 32},
+        {5, 32, 8, 8},
+        {2, 1024, 12, 12},
+        {4, 3, 231, 231},
+        {8, 3, 227, 227},
+        {1, 384, 13, 13},
+        {1, 96, 27, 27},
         {2, 160, 7, 7}}; // First 9 from the original 18
-    std::vector<std::vector<int>> dataset0_lens = {{2, 2}, {3, 3}};
-    std::vector<std::vector<int>> dataset0_strides = {{2, 2}, {1, 1}};
-    std::vector<std::vector<int>> dataset0_pads = {{0, 0}, {1, 1}};
+    std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
+    std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
+    std::vector<std::vector<int>> dataset0_pads         = {{0, 0}, {1, 1}};
     std::vector<miopenIndexType_t> dataset0_index_types = {
         miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
     std::vector<miopenPoolingMode_t> modes = {
@@ -82,10 +88,10 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     }
 
     // Dataset 1: Minimal dataset (asymmetric configs, small tensors)
-    std::vector<std::vector<int>> dataset1_inputs = {{1, 4, 4, 4}};
-    std::vector<std::vector<int>> dataset1_lens = {{2, 2}, {1, 2}, {2, 1}};
-    std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
-    std::vector<std::vector<int>> dataset1_pads = {{0, 0}}; // WORKAROUND_ISSUE_1670
+    std::vector<std::vector<int>> dataset1_inputs       = {{1, 4, 4, 4}};
+    std::vector<std::vector<int>> dataset1_lens         = {{2, 2}, {1, 2}, {2, 1}};
+    std::vector<std::vector<int>> dataset1_strides      = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
+    std::vector<std::vector<int>> dataset1_pads         = {{0, 0}}; // WORKAROUND_ISSUE_1670
     std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint8, miopenIndexUint32};
 
     // Generate cartesian product for dataset 1
@@ -116,9 +122,9 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     // Dataset 2: Wide window dataset
     std::vector<std::vector<int>> dataset2_inputs = {
         {1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
-    std::vector<std::vector<int>> dataset2_lens = {{35, 35}, {100, 100}, {255, 255}, {410, 400}};
+    std::vector<std::vector<int>> dataset2_lens    = {{35, 35}, {100, 100}, {255, 255}, {410, 400}};
     std::vector<std::vector<int>> dataset2_strides = {{1, 1}};
-    std::vector<std::vector<int>> dataset2_pads = {{0, 0}};
+    std::vector<std::vector<int>> dataset2_pads    = {{0, 0}};
     std::vector<miopenIndexType_t> dataset2_index_types = {miopenIndexUint32};
 
     // Generate cartesian product for dataset 2
