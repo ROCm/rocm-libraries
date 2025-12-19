@@ -235,7 +235,7 @@ std::shared_ptr<SolutionParameters>
             gemm->workgroupSizeY,
             gemm->prefetchInFlight,
             gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize,
-            hasPreSwizzle);
+            gemm->kernelType.scaleTypeA.preSwizzleTile);
         std::cout << "swizzleTileSize: " << gemm->swizzleTileSize.m << "x" << gemm->swizzleTileSize.k << "x" << gemm->swizzleTileSize.n << "x" << gemm->swizzleTileSize.l << std::endl;
         // AssertFatal(gemm->swizzleTileSize.m == gemm->swizzleTileSize.n && gemm->swizzleTileSize.k == gemm->swizzleTileSize.l,
         //             "swizzleTileSize must be symmetric");

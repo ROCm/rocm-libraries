@@ -117,14 +117,14 @@ std::shared_ptr<SolutionParameters>
 /**
  * @brief Select the swizzle tile size in M/N dimension
  *
- * For pre-swizzled data, always returns 32.
+ * For pre-swizzled data, returns preSwizzleTileSize[0] (tileMN).
  * Otherwise, selects from {32, 64} based on divisibility constraints.
  *
  * @param workgroupTile Workgroup tile size {m, n, k}
  * @param mi Machine instruction size {m, n, k}
  * @param workgroupSizeX Workgroup size in X dimension
  * @param workgroupSizeY Workgroup size in Y dimension
- * @param isPreSwizzled Whether the scale data is pre-swizzled
+ * @param preSwizzleTileSize Pre-swizzle tile configuration {tileMN, tileK, subTileK}, or empty if no pre-swizzle
  * @return Selected swizzle tile MN size, or -1 if no valid size found
  */
 inline int selectSwizzleTileMN(
@@ -132,12 +132,12 @@ inline int selectSwizzleTileMN(
     const MachineInstructionSize& mi,
     int                           workgroupSizeX,
     int                           workgroupSizeY,
-    bool                          isPreSwizzled)
+    const std::vector<size_t>&    preSwizzleTileSize)
 {
-    // For pre-swizzled data, always return 32
-    if (isPreSwizzled)
+    // For pre-swizzled data, return tileMN from preSwizzleTileSize
+    if (preSwizzleTileSize.size() == 3)
     {
-        return 32;
+        return static_cast<int>(preSwizzleTileSize[0]);
     }
 
     // Validate inputs
@@ -203,7 +203,7 @@ inline int selectSwizzleTileMN(
 /**
  * @brief Select the swizzle tile size in K dimension
  *
- * For swizzleTileMN == 32, always returns 8.
+ * For pre-swizzled data, returns preSwizzleTileSize[1] (tileK).
  * Otherwise, selects from {4, 8, 16} based on divisibility constraints.
  *
  * @param workgroupTile Workgroup tile size {m, n, k}
@@ -211,6 +211,7 @@ inline int selectSwizzleTileMN(
  * @param unroll Unroll factor (prefetchInFlight)
  * @param scaleBlockSize Scale block size (e.g., 32)
  * @param swizzleTileMN The selected swizzle tile MN value
+ * @param preSwizzleTileSize Pre-swizzle tile configuration {tileMN, tileK, subTileK}, or empty if no pre-swizzle
  * @return Selected swizzle tile K size, or -1 if no valid size found
  */
 inline int selectSwizzleTileK(
@@ -218,12 +219,16 @@ inline int selectSwizzleTileK(
     const MachineInstructionSize& mi,
     int                           unroll,
     int                           scaleBlockSize,
-    int                           swizzleTileMN)
+    int                           swizzleTileMN,
+    const std::vector<size_t>&    preSwizzleTileSize)
 {
-    // For swizzleTileMN == 32, always return 8
-    if (swizzleTileMN == 32)
+    // For pre-swizzled data, return tileK from preSwizzleTileSize
+    if (preSwizzleTileSize.size() == 3)
     {
-        return 8;
+        if (swizzleTileMN == 32)
+         return 8;
+        else
+         return 0;
     }
 
     // Validate inputs
@@ -282,7 +287,7 @@ inline int selectSwizzleTileK(
  * @param workgroupSizeY Workgroup size in Y dimension
  * @param unroll Unroll factor (prefetchInFlight)
  * @param scaleBlockSize Scale block size (e.g., 32)
- * @param isPreSwizzled Whether the scale data is pre-swizzled
+ * @param preSwizzleTileSize Pre-swizzle tile configuration {tileMN, tileK, subTileK}, or empty if no pre-swizzle
  * @return SwizzleTileSize with valid values, or all -1 if no valid size found
  */
 inline SwizzleTileSize selectSwizzleTileSize(
@@ -292,7 +297,7 @@ inline SwizzleTileSize selectSwizzleTileSize(
     int                           workgroupSizeY,
     int                           unroll,
     int                           scaleBlockSize,
-    bool                          isPreSwizzled)
+    const std::vector<size_t>&    preSwizzleTileSize)
 {
     std::cout << "selectSwizzleTileSize: workgroupTile: " << workgroupTile.m << "x" << workgroupTile.n << "x" << workgroupTile.k << std::endl;
     std::cout << "selectSwizzleTileSize: mi: " << mi.m << "x" << mi.n << "x" << mi.k << std::endl;
@@ -300,17 +305,17 @@ inline SwizzleTileSize selectSwizzleTileSize(
     std::cout << "selectSwizzleTileSize: workgroupSizeY: " << workgroupSizeY << std::endl;
     std::cout << "selectSwizzleTileSize: unroll: " << unroll << std::endl;
     std::cout << "selectSwizzleTileSize: scaleBlockSize: " << scaleBlockSize << std::endl;
-    std::cout << "selectSwizzleTileSize: isPreSwizzled: " << isPreSwizzled << std::endl;
+    std::cout << "selectSwizzleTileSize: preSwizzleTileSize.size(): " << preSwizzleTileSize.size() << std::endl;
 
     SwizzleTileSize result = {0, 0, 0, 0};
 
-    int swizzleTileMN = selectSwizzleTileMN(workgroupTile, mi, workgroupSizeX, workgroupSizeY, isPreSwizzled);
+    int swizzleTileMN = selectSwizzleTileMN(workgroupTile, mi, workgroupSizeX, workgroupSizeY, preSwizzleTileSize);
     if (swizzleTileMN < 0)
     {
         return result;
     }
 
-    int swizzleTileK = selectSwizzleTileK(workgroupTile, mi, unroll, scaleBlockSize, swizzleTileMN);
+    int swizzleTileK = selectSwizzleTileK(workgroupTile, mi, unroll, scaleBlockSize, swizzleTileMN, preSwizzleTileSize);
     if (swizzleTileK < 0)
     {
         return result;
