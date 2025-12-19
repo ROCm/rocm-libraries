@@ -200,18 +200,10 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
         size_t index_max = 0;
         switch(test_case.index_type)
         {
-        case miopenIndexUint8:
-            index_max = std::numeric_limits<uint8_t>::max();
-            break;
-        case miopenIndexUint16:
-            index_max = std::numeric_limits<uint16_t>::max();
-            break;
-        case miopenIndexUint32:
-            index_max = std::numeric_limits<uint32_t>::max();
-            break;
-        case miopenIndexUint64:
-            index_max = std::numeric_limits<uint64_t>::max();
-            break;
+        case miopenIndexUint8: index_max = std::numeric_limits<uint8_t>::max(); break;
+        case miopenIndexUint16: index_max = std::numeric_limits<uint16_t>::max(); break;
+        case miopenIndexUint32: index_max = std::numeric_limits<uint32_t>::max(); break;
+        case miopenIndexUint64: index_max = std::numeric_limits<uint64_t>::max(); break;
         default:
             index_max = SIZE_MAX; // Unknown type, assume it's large enough
             break;
@@ -245,7 +237,7 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
         else // miopenPoolingWorkspaceIndexImage (wsidx == 1)
         {
             // Check if index_max is sufficient for output spatial dimensions
-            auto output_tensor = get_output_tensor(filter, input);
+            auto output_tensor            = get_output_tensor(filter, input);
             size_t output_spatial_product = 1;
             for(size_t i = 2; i < output_tensor.desc.GetLengths().size(); i++)
             {
@@ -263,7 +255,8 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
                 default: index_bits = 0; break;
                 }
                 GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
-                             << index_max << ") <= output spatial product (" << output_spatial_product
+                             << index_max << ") <= output spatial product ("
+                             << output_spatial_product
                              << ") for max pooling backward with workspace index image mode";
             }
         }
