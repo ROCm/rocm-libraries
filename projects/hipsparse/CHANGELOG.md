@@ -15,8 +15,8 @@ Documentation for hipSPARSE is available at
 Users should use `hipsparseSpSM_solve_ex()` instead.
 
 ### Resolved issues
-* In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter. This does not match the NVIDIA CUDA cuSPARSE API. We have added a `hipsparseSpSM_solve_ex()` routine that properly matches the
-NVIDIA CUDA cuSPARSE `cusparseSpSM_solve()` API. The previous routine `hipsparseSpSM_solve()` has been 
+* In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter, which does not match the NVIDIA CUDA cuSPARSE API. The `hipsparseSpSM_solve_ex()` routine has been added to properly match the
+NVIDIA CUDA cuSPARSE `cusparseSpSM_solve()` API. The original `hipsparseSpSM_solve()` routine has been 
 deprecated and will be removed in a future release.
 
 ## hipSPARSE 4.2.0 for ROCm 7.2.0
