@@ -64,9 +64,13 @@ After install.sh completes, CMake searches for BLAS libraries in this order:
 ```
 1. Local build:     ${BUILD_DIR}/deps/aocl/install_package/lib/libaocl.*
 2. AOCL_ROOT:       $AOCL_ROOT/lib*/libaocl.*
-3. System AOCL 5.x: $HOME/aocl/*, /opt/AMD/aocl/*, /usr/local, /usr
-4. System AOCL 4.x: /opt/AMD/aocl/aocl-linux-*/lib_ILP64/libblis-mt.a
-5. System CBLAS:    via pkg-config (OpenBLAS, etc.)
+3. System AOCL 5.x: $HOME/aocl/*/*/lib*/libaocl.*
+4. System AOCL 5.x: /opt/AMD/aocl/[0-9]*/lib*/libaocl.*
+5. Legacy AOCL 4.x: /opt/AMD/aocl/aocl-linux-*/lib*/libaocl.* (rare)
+6. System AOCL 4.x: /opt/AMD/aocl/aocl-linux-*/gcc/lib_ILP64/libblis-mt.a
+7. System AOCL 4.x: /opt/AMD/aocl/aocl-linux-*/aocc/lib*/libblis-mt.a
+8. Bundled BLIS:    ${BUILD_DIR}/deps/amd-blis/lib*/libblis-mt.a
+9. System CBLAS:    via pkg-config (OpenBLAS, etc.)
 ```
 
 ## Implementation Notes

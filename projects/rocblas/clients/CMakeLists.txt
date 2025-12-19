@@ -22,11 +22,13 @@
 
 cmake_minimum_required( VERSION 3.16.8 )
 
+# Apply OpenMP settings and RPATH configuration to a target
+# Handles both BUILD and INSTALL RPATH for OpenMP and BLAS libraries
 function( apply_omp_settings lib_target_ )
   # Collect RPATH entries for both BUILD and INSTALL
   set(build_rpath_list "")
   set(install_rpath_list "")
-  
+
   # Add OpenMP library paths
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
     list(APPEND build_rpath_list "${HIP_CLANG_ROOT}/lib")
@@ -37,7 +39,7 @@ function( apply_omp_settings lib_target_ )
     list(APPEND install_rpath_list "$ORIGIN/../llvm/${openmp_LIB_DIR}")
     target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}> )
   endif()
-  
+
   # Add AOCL library path if it's a shared library (.so)
   if (BLAS_LIBRARY MATCHES "\\.so$")
     get_filename_component(blas_lib_dir "${BLAS_LIBRARY}" DIRECTORY)
@@ -49,14 +51,14 @@ function( apply_omp_settings lib_target_ )
       list(APPEND install_rpath_list "${blas_lib_dir}")
     endif()
   endif()
-  
+
   # Apply collected RPATH entries if any
   if (build_rpath_list)
     list(REMOVE_DUPLICATES build_rpath_list)
     string(REPLACE ";" ":" build_rpath_str "${build_rpath_list}")
     set_target_properties( ${lib_target_} PROPERTIES BUILD_RPATH "${build_rpath_str}" )
   endif()
-  
+
   if (install_rpath_list)
     list(REMOVE_DUPLICATES install_rpath_list)
     string(REPLACE ";" ":" install_rpath_str "${install_rpath_list}")
@@ -64,6 +66,8 @@ function( apply_omp_settings lib_target_ )
   endif()
 endfunction()
 
+# Search for AOCL 4.x BLIS library for the specified compiler (gcc or aocc)
+# Sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope if found
 function(find_libblis compiler)
   file(GLOB DIRS "/opt/AMD/aocl/aocl-linux-${compiler}-*")
   list(SORT DIRS)
@@ -86,6 +90,83 @@ function(find_libblis compiler)
   endforeach()
 endfunction()
 
+# Helper: Search $HOME/aocl for AOCL 5.x libaocl libraries
+# Sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope if found
+function(find_libaocl_in_home)
+  if(NOT DEFINED ENV{HOME})
+    return()
+  endif()
+
+  file(GLOB AOCL_DIRS "$ENV{HOME}/aocl/*/*") # e.g. $HOME/aocl/5.1.0/gcc
+  foreach(dir IN LISTS AOCL_DIRS)
+    foreach(libdir IN ITEMS lib lib64)
+      foreach(ext IN ITEMS so a)
+        set(candidate "${dir}/${libdir}/libaocl.${ext}")
+        if(EXISTS "${candidate}")
+          set(BLAS_LIBRARY "${candidate}" PARENT_SCOPE)
+          if(EXISTS "${dir}/include_ILP64")
+            set(BLIS_INCLUDE_DIR "${dir}/include_ILP64" PARENT_SCOPE)
+          elseif(EXISTS "${dir}/include")
+            set(BLIS_INCLUDE_DIR "${dir}/include" PARENT_SCOPE)
+          endif()
+          message(STATUS "✓ Found AOCL 5.x unified library (in $HOME/aocl/)")
+          message(STATUS "  Location: ${candidate}")
+          return()
+        endif()
+      endforeach()
+    endforeach()
+  endforeach()
+endfunction()
+
+# Helper: Search /opt/AMD/aocl for AOCL 5.x or 4.x libaocl libraries
+# Sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope if found
+function(find_libaocl_in_opt_amd)
+  # First, try AOCL 5.x version-based directories (e.g., /opt/AMD/aocl/5.1.0/)
+  file(GLOB OPT_AOCL5_DIRS "/opt/AMD/aocl/[0-9]*")
+  list(SORT OPT_AOCL5_DIRS)
+  list(REVERSE OPT_AOCL5_DIRS) # Prefer newer versions
+  foreach(dir IN LISTS OPT_AOCL5_DIRS)
+    foreach(libdir IN ITEMS lib lib64)
+      foreach(ext IN ITEMS so a)
+        set(candidate "${dir}/${libdir}/libaocl.${ext}")
+        if(EXISTS "${candidate}")
+          set(BLAS_LIBRARY "${candidate}" PARENT_SCOPE)
+          if(EXISTS "${dir}/include_ILP64")
+            set(BLIS_INCLUDE_DIR "${dir}/include_ILP64" PARENT_SCOPE)
+          elseif(EXISTS "${dir}/include")
+            set(BLIS_INCLUDE_DIR "${dir}/include" PARENT_SCOPE)
+          endif()
+          message(STATUS "✓ Found AOCL 5.x unified library (in /opt/AMD/aocl/)")
+          message(STATUS "  Location: ${candidate}")
+          return()
+        endif()
+      endforeach()
+    endforeach()
+  endforeach()
+
+  # Second, try legacy AOCL 4.x aocl-linux-* directories (rare for libaocl)
+  file(GLOB OPT_AOCL_DIRS "/opt/AMD/aocl/aocl-linux-*")
+  list(SORT OPT_AOCL_DIRS)
+  list(REVERSE OPT_AOCL_DIRS) # Prefer newer versions
+  foreach(dir IN LISTS OPT_AOCL_DIRS)
+    foreach(libdir IN ITEMS lib lib64)
+      foreach(ext IN ITEMS so a)
+        set(candidate "${dir}/${libdir}/libaocl.${ext}")
+        if(EXISTS "${candidate}")
+          set(BLAS_LIBRARY "${candidate}" PARENT_SCOPE)
+          if(EXISTS "${dir}/include_ILP64")
+            set(BLIS_INCLUDE_DIR "${dir}/include_ILP64" PARENT_SCOPE)
+          elseif(EXISTS "${dir}/include")
+            set(BLIS_INCLUDE_DIR "${dir}/include" PARENT_SCOPE)
+          endif()
+          message(STATUS "✓ Found AOCL 4.x unified library (in /opt/AMD/aocl/)")
+          message(STATUS "  Location: ${candidate}")
+          return()
+        endif()
+      endforeach()
+    endforeach()
+  endforeach()
+endfunction()
 
 # Unified AOCL (libaocl) detection ---
 # Looks for libaocl.{so,a} and sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope.
@@ -125,48 +206,20 @@ function(find_libaocl)
   endif()
 
   # 3) Default AOCL 5.x install location: $HOME/aocl/<version>/{aocc|gcc}/lib{,64}
-  if(DEFINED ENV{HOME})
-    file(GLOB AOCL_DIRS "$ENV{HOME}/aocl/*/*") # e.g. $HOME/aocl/5.1.0/gcc
-    foreach(dir IN LISTS AOCL_DIRS)
-      foreach(libdir IN ITEMS lib lib64)
-        foreach(ext IN ITEMS so a)
-          set(candidate "${dir}/${libdir}/libaocl.${ext}")
-          if(EXISTS "${candidate}")
-            set(BLAS_LIBRARY "${candidate}" PARENT_SCOPE)
-            if(EXISTS "${dir}/include_ILP64")
-              set(BLIS_INCLUDE_DIR "${dir}/include_ILP64" PARENT_SCOPE)
-            elseif(EXISTS "${dir}/include")
-              set(BLIS_INCLUDE_DIR "${dir}/include" PARENT_SCOPE)
-            endif()
-            message(STATUS "✓ Found AOCL 5.x unified library (in $HOME/aocl/)")
-            message(STATUS "  Location: ${candidate}")
-            return()
-          endif()
-        endforeach()
-      endforeach()
-    endforeach()
+  find_libaocl_in_home()
+  if(BLAS_LIBRARY)
+    set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
+    return()
   endif()
 
-  # 4) Legacy: /opt AOCL trees (rare for libaocl, still check)
-  file(GLOB OPT_AOCL_DIRS "/opt/AMD/aocl/aocl-linux-*")
-  foreach(dir IN LISTS OPT_AOCL_DIRS)
-    foreach(libdir IN ITEMS lib lib64)
-      foreach(ext IN ITEMS so a)
-        set(candidate "${dir}/${libdir}/libaocl.${ext}")
-        if(EXISTS "${candidate}")
-          set(BLAS_LIBRARY "${candidate}" PARENT_SCOPE)
-          if(EXISTS "${dir}/include_ILP64")
-            set(BLIS_INCLUDE_DIR "${dir}/include_ILP64" PARENT_SCOPE)
-          elseif(EXISTS "${dir}/include")
-            set(BLIS_INCLUDE_DIR "${dir}/include" PARENT_SCOPE)
-          endif()
-          message(STATUS "✓ Found AOCL library (in /opt/AMD/aocl/)")
-          message(STATUS "  Location: ${candidate}")
-          return()
-        endif()
-      endforeach()
-    endforeach()
-  endforeach()
+  # 4) System AOCL in /opt/AMD/aocl (searches 5.x then 4.x)
+  find_libaocl_in_opt_amd()
+  if(BLAS_LIBRARY)
+    set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
+    return()
+  endif()
 endfunction()
 
 # Search for bundled BLIS libraries built by install.sh
@@ -199,7 +252,7 @@ function(find_system_cblas)
   if (NOT PKG_CONFIG_FOUND)
     message(FATAL_ERROR "Could not find libaocl/libblis and pkg-config is not available")
   endif()
-  
+
   pkg_search_module(PKGBLAS cblas)
   if (PKGBLAS_FOUND)
     set(BLAS_LIBRARY "${PKGBLAS_LIBRARIES}" PARENT_SCOPE)
@@ -221,7 +274,7 @@ function(setup_blas_library)
   set(BLAS_LIBRARY "" PARENT_SCOPE)
   set(BLIS_INCLUDE_DIR "" PARENT_SCOPE)
   set(WARN_NOT_ILP64_PREFERRED false PARENT_SCOPE)
-  
+
   # 1. Try AOCL unified library (libaocl)
   find_libaocl()
   if (BLAS_LIBRARY)
@@ -229,7 +282,7 @@ function(setup_blas_library)
     set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
     return()
   endif()
-  
+
   # 2. Try AOCL-BLIS with GCC (preferred, ILP64)
   find_libblis(gcc)
   if (BLAS_LIBRARY)
@@ -237,7 +290,7 @@ function(setup_blas_library)
     set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
     return()
   endif()
-  
+
   # 3. Try AOCL-BLIS with AOCC
   find_libblis(aocc)
   if (BLAS_LIBRARY)
@@ -246,7 +299,7 @@ function(setup_blas_library)
     set(WARN_NOT_ILP64_PREFERRED true PARENT_SCOPE)
     return()
   endif()
-  
+
   # 4. Try bundled builds or system BLIS
   find_bundled_blis()
   if (BLAS_LIBRARY)
@@ -255,7 +308,7 @@ function(setup_blas_library)
     set(WARN_NOT_ILP64_PREFERRED "${WARN_NOT_ILP64_PREFERRED}" PARENT_SCOPE)
     return()
   endif()
-  
+
   # 5. Last resort: try pkg-config cblas
   find_system_cblas()
   set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
@@ -441,33 +494,39 @@ set( ROCBLAS_COMMON "${PROJECT_BINARY_DIR}/staging/rocblas_common.yaml")
 add_custom_command( OUTPUT "${ROCBLAS_COMMON}"
                     COMMAND ${CMAKE_COMMAND} -E copy include/rocblas_common.yaml "${ROCBLAS_COMMON}"
                     DEPENDS include/rocblas_common.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_common.yaml to staging" )
 
 set( ROCBLAS_TEMPLATE "${PROJECT_BINARY_DIR}/staging/rocblas_template.yaml")
 add_custom_command( OUTPUT "${ROCBLAS_TEMPLATE}"
                     COMMAND ${CMAKE_COMMAND} -E copy include/rocblas_template.yaml "${ROCBLAS_TEMPLATE}"
                     DEPENDS include/rocblas_template.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_template.yaml to staging" )
 
 set( ROCBLAS_GENERAL_YAML "${PROJECT_BINARY_DIR}/staging/rocblas_general.yaml")
 add_custom_command( OUTPUT "${ROCBLAS_GENERAL_YAML}"
                     COMMAND ${CMAKE_COMMAND} -E copy include/rocblas_general.yaml "${ROCBLAS_GENERAL_YAML}"
                     DEPENDS include/rocblas_general.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_general.yaml to staging" )
 
 set( ROCBLAS_GENTEST "${PROJECT_BINARY_DIR}/staging/rocblas_gentest.py")
 add_custom_command( OUTPUT "${ROCBLAS_GENTEST}"
                     COMMAND ${CMAKE_COMMAND} -E copy common/rocblas_gentest.py "${ROCBLAS_GENTEST}"
                     DEPENDS common/rocblas_gentest.py
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_gentest.py to staging" )
 
 set( ROCBLAS_CLIENTS_README "${PROJECT_BINARY_DIR}/staging/rocblas_clients_readme.txt")
 add_custom_command( OUTPUT "${ROCBLAS_CLIENTS_README}"
                     COMMAND ${CMAKE_COMMAND} -E copy rocblas_clients_readme.txt "${ROCBLAS_CLIENTS_README}"
                     DEPENDS rocblas_clients_readme.txt
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_clients_readme.txt to staging" )
 
-add_custom_target( rocblas-common DEPENDS "${ROCBLAS_COMMON}" "${ROCBLAS_TEMPLATE}" "${ROCBLAS_GENERAL_YAML}" "${ROCBLAS_GENTEST}" "${ROCBLAS_CLIENTS_README}" )
+add_custom_target( rocblas-common DEPENDS "${ROCBLAS_COMMON}" "${ROCBLAS_TEMPLATE}" "${ROCBLAS_GENERAL_YAML}" "${ROCBLAS_GENTEST}" "${ROCBLAS_CLIENTS_README}"
+                   COMMENT "Building rocblas-common files" )
 
 rocm_install(
   FILES ${ROCBLAS_COMMON} ${ROCBLAS_TEMPLATE} ${ROCBLAS_GENERAL_YAML}
@@ -492,16 +551,16 @@ rocm_install(
 if (BUILD_CLIENTS AND BLAS_LIBRARY MATCHES "\\.so$" AND BLAS_LIBRARY MATCHES "${BUILD_DIR}/deps/aocl")
   # Get the directory containing the AOCL library
   get_filename_component(aocl_lib_dir "${BLAS_LIBRARY}" DIRECTORY)
-  
+
   # Find all shared libraries in the AOCL lib directory
   file(GLOB AOCL_SHARED_LIBS "${aocl_lib_dir}/*.so*")
-  
+
   if(AOCL_SHARED_LIBS)
     message(STATUS "Installing AOCL shared libraries to package:")
     foreach(lib ${AOCL_SHARED_LIBS})
       message(STATUS "  ${lib}")
     endforeach()
-    
+
     rocm_install(
       FILES ${AOCL_SHARED_LIBS}
       DESTINATION "${CMAKE_INSTALL_LIBDIR}"
