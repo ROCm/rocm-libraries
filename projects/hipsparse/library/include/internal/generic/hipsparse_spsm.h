@@ -282,7 +282,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_DEPRECATED_MSG(
-    "This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
+    "This routine will be removed in a future release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseOperation_t        opA,
@@ -297,7 +297,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       void*                       externalBuffer);
 #elif(CUDART_VERSION >= 11031)
 HIPSPARSE_DEPRECATED_MSG(
-    "This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
+    "This routine will be removed in a future release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseOperation_t        opA,
@@ -347,15 +347,15 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  \ref hipsparseSpSM_analysis which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes
 *  the computation by calling \p hipsparseSpSM_solve_ex. The buffer size and analysis routines only need to be called once
 *  for a given sparse matrix \f$op(A)\f$ while the computation can be called repeatedly with different \f$B\f$ and \f$C\f$
-*  matrices. Once all calls to \p hipsparseSpSM_solve_ex are complete, the temporary buffer can be deallocated.
+*  matrices. After all calls to \p hipsparseSpSM_solve_ex are complete, the temporary buffer can be deallocated.
 *
 *  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
 *  row order and \f$C\f$ is column order and vice versa). When running on an AMD system with the rocSPARSE backend, the kernels
 *  solve the system assuming the matrices \f$B\f$ and \f$C\f$ are in row order as this provides the best memory access. This
 *  means that if the matrix \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column
-*  order as this is equivalent to being in row order), then internally memory copies and/or transposing of data may be performed
-*  to get them into the correct order (possbily using extra buffer size). Once computation is completed, additional memory copies
-*  and/or transposing of data may be performed to get them back into the user arrays. For best performance and smallest required
+*  order as this is equivalent to being in row order), then internally memory copies and/or transposing of data might be performed
+*  to get them into the correct order (possibly using extra buffer size). Once computation is completed, additional memory copies
+*  and/or transposing of data might be performed to get them back into the user arrays. For the best performance and smallest required
 *  temporary storage buffers on an AMD system, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column
 *  order if \f$B\f$ is being transposed).
 *
@@ -375,7 +375,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *
 *  \note This routine correctly matches the parameter list of the corresponding cusparse API \p cusparseSpSM_solve. The routine
 *  \ref hipsparseSpSM_solve incorrectly passed the external buffer as the last parameter. Users looking for an exact match in the 
-*  parameters should \ref hipsparseSpSM_solve_ex instead of \ref hipsparseSpSM_solve.
+*  parameters should use \ref hipsparseSpSM_solve_ex instead of \ref hipsparseSpSM_solve.
 *
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
