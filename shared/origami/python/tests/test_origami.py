@@ -28,8 +28,6 @@
 import pytest
 import origami
 import csv
-import os
-from pathlib import Path
 from .conftest import create_config_list
 
 
