@@ -8,7 +8,9 @@ Documentation for hipSPARSE is available at
 ### Added
 
 * Added sliced ELL format support to the `hipsparseSpMV` routine.
-* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
+* Added brain half float mixed precision to `hipsparseSpMV` where A, X, and Y use bfloat16 and the compute type use float.
+* Added half float mixed precision to `hipsparseSpMV` where A, X, and Y use float16 and the compute type use float.
 
 ## hipSPARSE 4.2.0 for ROCm 7.2.0
 
