@@ -262,7 +262,7 @@ def run_cli(  # noqa: C901
 
     env = dict(os.environ)
     env["ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS"] = "1"
-    # env["ROCROLLER_AUDIT_CONTROL_TRACERS"] = "1"
+    env["ROCROLLER_AUDIT_CONTROL_TRACERS"] = "1"
 
     rundir = rrperf.utils.get_work_dir(rundir, build_dir)
     rundir.mkdir(parents=True, exist_ok=True)

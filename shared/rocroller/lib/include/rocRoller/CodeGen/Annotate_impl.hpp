@@ -81,7 +81,7 @@ namespace rocRoller
     }
 
     inline AddLocation::AddLocation(std::source_location loc)
-        : AddLocation({SourceLocationPart::File, SourceLocationPart::Line}, std::move(loc))
+        : AddLocation({SourceLocationPart::Line}, std::move(loc))
     {
     }
 

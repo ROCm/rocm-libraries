@@ -81,7 +81,7 @@ namespace rocRoller
                 msg << std::setw(4) << i << ": ";
                 if(m_registers[i].expired())
                 {
-                    msg << " (free)" << std::endl;
+                    msg << " (free)";
                 }
                 else
                 {
@@ -96,6 +96,8 @@ namespace rocRoller
 
                     msg << "(" << iter->second << "): " << iter->first->descriptiveComment("");
                 }
+
+                msg << std::endl;
             }
 
             return msg.str();
@@ -113,16 +115,6 @@ namespace rocRoller
                         ShowValue(alloc->registerCount()));
 
             allocate(alloc, std::move(registers));
-
-            auto curFree = currentlyFree();
-            if(m_minFree < 0 || curFree < m_minFree)
-            {
-                m_minFree = curFree;
-
-                std::ofstream file(fmt::format("regs_{}.txt", rocRoller::Register::toString(m_regType)));
-
-                file << toString();
-            }
         }
 
         inline void Allocator::allocate(AllocationPtr alloc, std::vector<int> const& registers)

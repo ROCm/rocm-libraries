@@ -78,10 +78,7 @@ namespace rocRoller
 
         inline std::string toString(const Operation& x)
         {
-            auto rv = std::visit(OperationToStringVisitor{}, x);
-            if(rv.size() > 200)
-                return rv.substr(0, 200);
-            return rv;
+            return std::visit(OperationToStringVisitor{}, x);
         }
 
         template <typename T>

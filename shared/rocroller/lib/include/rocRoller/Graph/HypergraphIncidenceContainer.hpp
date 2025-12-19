@@ -27,7 +27,6 @@
 #pragma once
 
 #include <map>
-#include <unordered_set>
 #include <vector>
 
 #include <rocRoller/Serialization/Base_fwd.hpp>
@@ -99,8 +98,7 @@ namespace rocRoller
              */
             size_t getDstCount(int tag) const;
 
-            std::string toDOTSection(std::string const&             prefix = "",
-                                     std::unordered_set<int> const& omit   = {}) const;
+            std::string toDOTSection(std::string const& prefix = "") const;
 
         private:
             template <typename T1, typename T2, typename T3>
