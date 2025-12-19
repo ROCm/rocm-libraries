@@ -988,22 +988,27 @@ namespace TensileLite
                 auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
-                    auto wgm_pred = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
-                                                            sizes[0],
-                                                            sizes[1],
-                                                            sizes[3],
-                                                            sizes[2],
-                                                            sizeMapping.macroTile.x,
-                                                            sizeMapping.macroTile.y,
-                                                            sizeMapping.depthU,
-                                                            sizeMapping.nonTemporalA,
-                                                            sizeMapping.nonTemporalB,
-                                                            skgrid,
-                                                            false);
+                    origami::problem_t origami_problem = {
+                        .size  = {sizes[0], sizes[1], sizes[3]},
+                        .batch = sizes[2],
+                    };
+                    origami::config_t origami_config = {
+                        .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                          static_cast<size_t>(sizeMapping.macroTile.y),
+                                          static_cast<size_t>(sizeMapping.depthU)},
+                        .cache_hints_a = sizeMapping.nonTemporalA,
+                        .cache_hints_b = sizeMapping.nonTemporalB,
+                    };
                     
-                    defaultWGMXCCCHUNK = std::get<0>(wgm_pred);
-                    defaultWGMXCC      = std::get<1>(wgm_pred);
-                    defaultWGM         = std::get<2>(wgm_pred);
+                    origami::workgroup_mapping_t prediction_results = 
+                        origami::select_workgroup_mapping(origami_problem, 
+                                                          *(hipAMDGPU->analyticalHardware), 
+                                                          origami_config, 
+                                                          skgrid);
+                    
+                    defaultWGM         = prediction_results.wgm;
+                    defaultWGMXCC      = prediction_results.wgmxcc;
+                    defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
 
                     // Add to cache only if dynamically calculated.
                     paramsCache.add(std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
@@ -1062,9 +1067,9 @@ namespace TensileLite
         // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
         assert(std::fabs(defaultWGM) < 1024);
         // WGMXCC should be in this range: [1, 2, 3, ..., 63]
-        assert(defaultWGMXCC > 0 && defaultWGMXCC < 64);
+        assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
         // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
-        assert(defaultWGMXCCCHUNK < 1024);
+        assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
         
         return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
     }
