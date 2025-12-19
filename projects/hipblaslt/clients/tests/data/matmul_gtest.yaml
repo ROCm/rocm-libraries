@@ -132,18 +132,28 @@ Tests:
   alpha: 2
   beta: 3
 
-- name: matmul_grid_limit_single
-  category: pre_checkin
+- name: matmul_grid_limit_real
+  category: nightly
   function:
-    matmul: *single_precision
-  matrix_size: *grid_limit_matrix_size_single
+    matmul: *real_precisions
+  matrix_size: *grid_limit_matrix_size_real
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0
+  gpu_arch: '120[0-1]'
+
+- name: matmul_grid_limit_real_1b
+  category: nightly
+  function:
+    matmul: *real_precisions_1b
+  matrix_size: *grid_limit_matrix_size_real
   transA_transB: *transA_transB_range
   alpha: 1
   beta: 0
   gpu_arch: '120[0-1]'
 
 - name: matmul_grid_limit_double
-  category: pre_checkin
+  category: nightly
   function:
     matmul: *double_precision
   matrix_size: *grid_limit_matrix_size_double
@@ -2144,23 +2154,6 @@ Tests:
   beta: [0,1]
   requested_solution_num: -1
   unit_check: 1
-
-# Test case for launch limits
-# Review: should this be enabled on CI?
-# It requires a lot of memory and takes a little while to run.
-# - name: matmul_launch_limits
-#   category: nightly
-#   function:
-#     matmul: *hpa_bf16_precision
-#   matrix_size:
-#     - { M:  262144,   N:  131072,    K:  1024 }
-#   algo_method: [1]
-#   transA: T
-#   transB: N
-#   alpha: 1
-#   beta: 0
-#   requested_solution_num: -1
-#   unit_check: 0
 
 - name: matmul_heuristic_all_solutions_real_1byte_fnuz
   category: nightly

@@ -138,6 +138,7 @@ function(_finalize_check_target_internal TARGET_NAME COMMAND_VAR DEPENDS_VAR)
         DEPENDS ${${DEPENDS_VAR}}
         VERBATIM
         COMMENT "Running ${TARGET_NAME}"
+        USES_TERMINAL
     )
     message(STATUS "Created ${TARGET_NAME} target")
 endfunction() # _finalize_check_target_internal
@@ -166,8 +167,8 @@ enable_testing() # Cmake wont discover or run tests without this line
 # Add a check_ctest target which will run all tests discovered by gtest_discover_tests via ctest.
 add_custom_target(
     check_ctest COMMAND ${CMAKE_COMMAND} -E env ${TEST_ENVIRONMENT} ${CMAKE_CTEST_COMMAND}
-                        --output-on-failure -C ${CMAKE_CFG_INTDIR}
-    COMMENT "Running tests via ctest"
+                        --output-on-failure -C ${CMAKE_CFG_INTDIR} COMMENT "Running tests via ctest"
+    USES_TERMINAL
 )
 
 # Internal function to add a GTest target
@@ -214,9 +215,9 @@ function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 endfunction() # _add_gtest_target_internal
 
 # Adds a generic test target
-function(add_target_to_check_targets TARGET WORKING_DIR)
+function(add_unclassified_test_target TARGET WORKING_DIR)
     _add_gtest_target_internal(test ${TARGET} ${WORKING_DIR})
-endfunction() # add_target_to_check_targets
+endfunction() # add_unclassified_test_target
 
 # Adds a unit test target
 function(add_unit_test_target TARGET WORKING_DIR)

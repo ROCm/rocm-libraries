@@ -7,7 +7,7 @@
 
 #include <gmock/gmock.h>
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "engines/EngineInterface.hpp"
 
@@ -20,7 +20,7 @@ public:
     MOCK_METHOD(int64_t, id, (), (const, override));
     MOCK_METHOD(bool,
                 isApplicable,
-                (HipdnnEnginePluginHandle & handle, const hipdnn_plugin::IGraph& opGraph),
+                (HipdnnEnginePluginHandle & handle, const hipdnn_plugin_sdk::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
@@ -28,13 +28,13 @@ public:
                 (const, override));
     MOCK_METHOD(size_t,
                 getWorkspaceSize,
-                (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph),
+                (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph),
                 (const, override));
 
     MOCK_METHOD(void,
                 initializeExecutionContext,
                 (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_plugin::IGraph& opGraph,
+                 const hipdnn_plugin_sdk::IGraph& opGraph,
                  HipdnnEnginePluginExecutionContext& executionContext),
                 (const, override));
 };
