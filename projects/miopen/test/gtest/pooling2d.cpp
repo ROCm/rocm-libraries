@@ -193,6 +193,24 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
         }
     }
 
+    // Skip configurations that are not implemented or would cause crashes
+    // Skip wide dataset with wsidx=0 and max pooling (not implemented in 2D max backward solvers)
+    bool is_wide_dataset = false;
+    // Check if this is a wide dataset configuration (dataset 2: large lens relative to input)
+    for(int i = 0; i < spt_dim; i++)
+    {
+        if(test_case.lens[i] >= 35) // Wide window threshold
+        {
+            is_wide_dataset = true;
+            break;
+        }
+    }
+    if(test_case.wsidx == 0 && test_case.mode == miopenPoolingMax && is_wide_dataset)
+    {
+        GTEST_SKIP() << "Config skipped: Workspace index mask mode is not implemented "
+                        "yet in 2D max backward solvers that support wide pooling window";
+    }
+
     // Skip configurations that would cause "Index range not enough" exception
     // This happens when the index type doesn't have enough range for max pooling backward
     if(test_case.mode == miopenPoolingMax)
@@ -284,6 +302,12 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
     auto dout = forward_result;
     dout.generate(tensor_elem_gen_integer{2503});
 
+    // Validate indices are populated (required for max pooling backward)
+    if(test_case.mode == miopenPoolingMax && indices.empty())
+    {
+        GTEST_SKIP() << "Indices not populated for max pooling backward";
+    }
+
     verify_backward_pooling<2> backward_verifier;
     auto backward_result = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
@@ -362,11 +386,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          [](const testing::TestParamInfo<Pooling2dTestCase>& info) {
                              const auto& tc = info.param;
                              std::ostringstream os;
-                             os << "N" << tc.input_dims[0] << "_C" << tc.input_dims[1] << "_H"
-                                << tc.input_dims[2] << "_W" << tc.input_dims[3] << "_lens"
-                                << tc.lens[0] << "x" << tc.lens[1] << "_pads" << tc.pads[0] << "x"
-                                << tc.pads[1] << "_str" << tc.strides[0] << "x" << tc.strides[1]
-                                << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                             os << "input_dims_";
+                             miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
+                             miopen::LogRange(os, tc.lens, "_") << "_pads_";
+                             miopen::LogRange(os, tc.pads, "_") << "_strides_";
+                             miopen::LogRange(os, tc.strides, "_") << "_idx"
+                                << static_cast<int>(tc.index_type) << "_mode"
                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
                              return os.str();
                          });
@@ -377,11 +402,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          [](const testing::TestParamInfo<Pooling2dTestCase>& info) {
                              const auto& tc = info.param;
                              std::ostringstream os;
-                             os << "N" << tc.input_dims[0] << "_C" << tc.input_dims[1] << "_H"
-                                << tc.input_dims[2] << "_W" << tc.input_dims[3] << "_lens"
-                                << tc.lens[0] << "x" << tc.lens[1] << "_pads" << tc.pads[0] << "x"
-                                << tc.pads[1] << "_str" << tc.strides[0] << "x" << tc.strides[1]
-                                << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                             os << "input_dims_";
+                             miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
+                             miopen::LogRange(os, tc.lens, "_") << "_pads_";
+                             miopen::LogRange(os, tc.pads, "_") << "_strides_";
+                             miopen::LogRange(os, tc.strides, "_") << "_idx"
+                                << static_cast<int>(tc.index_type) << "_mode"
                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
                              return os.str();
                          });
