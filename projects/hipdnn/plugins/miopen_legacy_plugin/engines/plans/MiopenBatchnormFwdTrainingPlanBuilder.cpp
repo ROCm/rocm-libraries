@@ -308,7 +308,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");
         return true;
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;

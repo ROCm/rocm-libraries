@@ -159,7 +159,7 @@ auto getNodeAttrsLogErrors(const hipdnn_plugin::IGraph& opGraph)
     {
         return getNodeAttrs(opGraph);
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return {};
@@ -316,7 +316,7 @@ bool nodeAttrsCheckTensorsLogErrors(
         nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, tensorMap);
         return true;
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -371,7 +371,7 @@ bool checkComputeTypesLogErrors(
         checkComputeTypes(graph, convAttr, biasAttr, tensorMap);
         return true;
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -413,7 +413,7 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
         ConvFwdBiasActivPlan plan(handle, std::move(params), true, false);
         return true;
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
