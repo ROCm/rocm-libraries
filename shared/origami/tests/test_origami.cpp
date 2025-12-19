@@ -586,8 +586,8 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto skGrid_small  = (1024 + 256 - 1) / 256 * (1024 + 256 - 1) / 256;
       auto out_wgm_problem_small =
           origami::select_workgroup_mapping(problem_small, hardware, config, skGrid_small);
-      REQUIRE(std::get<0>(out_wgm_batch) == hardware.NUM_XCD);
-      REQUIRE(std::get<1>(out_wgm_batch) == 1);
+      REQUIRE(std::get<0>(out_wgm_problem_small) == hardware.NUM_XCD);
+      REQUIRE(std::get<1>(out_wgm_problem_small) == 1);
 
       // Test 4: Test cases where splitFactor is multiple of NUM_XCD
       auto out_wgm_split_multiple_num_xcd =
@@ -595,7 +595,7 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(std::get<0>(out_wgm_split_multiple_num_xcd) == 1);
       REQUIRE(std::get<1>(out_wgm_split_multiple_num_xcd) == 1);
 
-      // Test 5: Test cases tall cases (M >> N) with numMT_N <= 8
+      // Test 5: Test tall matrix case (M >> N) with numMT_N <= 8
       auto problem_tall = make_problem(409600, 256, 256);
       auto skGrid_tall  = (409600 + 256 - 1) / 256 * (256 + 256 - 1) / 256;
       auto out_wgm_tall =
