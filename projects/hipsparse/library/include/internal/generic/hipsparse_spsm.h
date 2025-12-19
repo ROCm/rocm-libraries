@@ -102,7 +102,7 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpSMAlg_t          alg,
                                            hipsparseSpSMDescr_t        spsmDescr,
                                            size_t*                     pBufferSizeInBytes);
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -171,7 +171,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr,
                                          void*                       externalBuffer);
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseOperation_t        opA,
@@ -295,7 +295,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseSpSMAlg_t          alg,
                                       hipsparseSpSMDescr_t        spsmDescr,
                                       void*                       externalBuffer);
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_DEPRECATED_MSG(
     "This routine will be removed in a fucture release. Use hipsparseSpSM_solve_ex going forward")
 HIPSPARSE_EXPORT
@@ -415,7 +415,7 @@ hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipDataType                 computeType,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr);
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipsparseOperation_t        opA,
