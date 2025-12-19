@@ -375,7 +375,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *
 *  \note This routine correctly matches the parameter list of the corresponding cusparse API \p cusparseSpSM_solve. The routine
 *  \ref hipsparseSpSM_solve incorrectly passed the external buffer as the last parameter. Users looking for an exact match in the 
-*  parameters should \ref hipsparseSpSM_solve_ex instead of \ref hipsparseSpSM_solve.
+*  parameters should use \ref hipsparseSpSM_solve_ex instead of \ref hipsparseSpSM_solve.
 *
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
