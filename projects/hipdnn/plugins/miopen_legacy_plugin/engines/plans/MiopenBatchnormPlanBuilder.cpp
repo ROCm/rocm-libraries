@@ -3,7 +3,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <miopen/miopen.h>
 #include <string>
 #include <unordered_set>

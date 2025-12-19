@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 
 namespace hipdnn_plugin_sdk
 {

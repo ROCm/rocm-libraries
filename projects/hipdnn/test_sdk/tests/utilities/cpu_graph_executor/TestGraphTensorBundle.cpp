@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "BatchnormGraphUtils.hpp"
-#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
@@ -13,7 +13,7 @@ using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 using namespace ::testing;
-using namespace hipdnn_data_sdk_test_utils;
+using namespace hipdnn_sdk_test_utils;
 
 class TestGraphTensorBundle : public ::testing::Test
 {

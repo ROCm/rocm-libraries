@@ -18,7 +18,7 @@ using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 using namespace ::testing;
-using namespace hipdnn_data_sdk_test_utils;
+using namespace hipdnn_sdk_test_utils;
 
 class TestBatchnormBwdPlan : public ::testing::Test
 {

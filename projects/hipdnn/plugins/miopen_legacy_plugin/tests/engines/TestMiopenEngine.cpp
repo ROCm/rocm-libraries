@@ -6,7 +6,7 @@
 #include <set>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 

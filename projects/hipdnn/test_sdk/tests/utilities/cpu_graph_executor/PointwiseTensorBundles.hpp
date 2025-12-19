@@ -6,7 +6,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 

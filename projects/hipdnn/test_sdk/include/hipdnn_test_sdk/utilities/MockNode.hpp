@@ -5,7 +5,7 @@
 
 #include <gmock/gmock.h>
 
-#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
