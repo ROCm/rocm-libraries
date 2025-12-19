@@ -34,6 +34,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
+#include <Tensile/TensorOps.hpp>
 
 namespace fs = std::filesystem;
 

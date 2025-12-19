@@ -3,17 +3,19 @@
 
 include(GoogleTest)
 
+if(HIP_DNN_SKIP_TESTS)
+    message(STATUS "Skipping HIP-DNN Backend Unit tests")
+    return()
+endif()
+
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
 # TODO Do not enable HIP language globally, use HIP RTC instead. The library does not contain any
 # HIP code (or any other device code). It is required only for hipdnn_test_engine_plugin1.
 enable_language(HIP)
-
-if(HIP_DNN_SKIP_TESTS)
-    message(STATUS "Skipping HIP-DNN Backend Unit tests")
-    return()
-endif()
+# Verify that we're using AMD/ROCm HIP compiler.
+verifyamdrocmcompiler(${CMAKE_HIP_COMPILER} "HIP")
 
 set(TEST_PLUGIN1_NAME "hipdnn_test_plugin1")
 set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
@@ -48,7 +50,7 @@ target_link_libraries(
     GTest::gmock
     Threads::Threads
     hipdnn_backend_private
-    hipdnn_sdk
+    hipdnn_test_sdk
     ${CMAKE_DL_LIBS}
 )
 

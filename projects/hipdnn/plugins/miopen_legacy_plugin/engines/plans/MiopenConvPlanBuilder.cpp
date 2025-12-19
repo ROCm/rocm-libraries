@@ -48,7 +48,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -83,7 +83,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -119,7 +119,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -226,6 +226,13 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
         HIPDNN_LOG_INFO("Convolution plan builder is applicable only for single node graphs. Graph "
                         "has {} nodes",
                         opGraph.nodeCount());
+        return false;
+    }
+
+    if(opGraph.getNode(0).compute_data_type() != hipdnn_sdk::data_objects::DataType::FLOAT)
+    {
+        HIPDNN_LOG_ERROR("Convolution plan builder only supports nodes with an fp32 "
+                         "compute_data_type");
         return false;
     }
 

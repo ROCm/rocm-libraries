@@ -11,9 +11,43 @@ endif()
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
-enable_language(HIP)
 
-add_executable(hipdnn_test_sdk_tests main.cpp TestExample.cpp)
+add_executable(
+    hipdnn_test_sdk_tests
+    main.cpp
+    utilities/TestCpuFpReferenceBatchnorm.cpp
+    utilities/TestCpuFpReferenceConvolution.cpp
+    utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
+    utilities/TestCpuFpReferenceUtilities.cpp
+    utilities/TestCpuFpReferenceValidation.cpp
+    utilities/TestCpuReferencePointwise.cpp
+    utilities/TestFlatbufferDatatypeMapping.cpp
+    utilities/TestFlatbufferTensorAttributesUtils.cpp
+    utilities/TestLoggingUtils.cpp
+    utilities/TestScopedDirectory.cpp
+    utilities/TestScopedEnvironmentVariableSetter.cpp
+    utilities/TestSeeds.cpp
+    utilities/TestVectorLoggingUtils.cpp
+    utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
+    utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
+    utilities/cpu_graph_executor/TestBatchnormFwdInferenceSignatureKey.cpp
+    utilities/cpu_graph_executor/TestBatchnormTrainPlan.cpp
+    utilities/cpu_graph_executor/TestBatchnormTrainSignatureKey.cpp
+    utilities/cpu_graph_executor/TestConvolutionBwdPlan.cpp
+    utilities/cpu_graph_executor/TestConvolutionBwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestConvolutionWrwPlan.cpp
+    utilities/cpu_graph_executor/TestConvolutionWrwSignatureKey.cpp
+    utilities/cpu_graph_executor/TestConvolutionFwdPlan.cpp
+    utilities/cpu_graph_executor/TestConvolutionFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
+    utilities/cpu_graph_executor/TestFusedOperationsCpuGraphExecutor.cpp
+    utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
+    utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
+    utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
+    utilities/cpu_graph_executor/TestPointwisePlan.cpp
+    utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
+)
 
 target_compile_options(hipdnn_test_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(

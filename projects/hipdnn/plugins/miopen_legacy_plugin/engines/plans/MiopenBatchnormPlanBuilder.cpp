@@ -3,7 +3,7 @@
 
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <miopen/miopen.h>
 #include <string>
 #include <unordered_set>
@@ -54,7 +54,7 @@ auto getBatchnormBackwardFusionNodeAttrsLogErrors(const hipdnn_plugin::IGraph& o
     {
         return getBatchnormBackwardFusionNodeAttrs(opGraph);
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return {};
@@ -262,7 +262,7 @@ bool batchnormBwdFusionCheckTensorsLogErrors(
         batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, tensorMap);
         return true;
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -279,7 +279,7 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
         batchnormFwdFusionCheckTensors(bnInfAttr, actAttr, tensorMap);
         return true;
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -292,10 +292,24 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin::IGraph& opGraph) const
 {
+    auto areAllNodesF32Compute = [&]() {
+        return !std::all_of(
+            opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
+                return node->computeDataType() == hipdnn_sdk::data_objects::DataType::FLOAT;
+            });
+    };
+
     switch(opGraph.nodeCount())
     {
     case 1:
     {
+        if(areAllNodesF32Compute())
+        {
+            HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
+                             "compute_data_type");
+            return false;
+        }
+
         if(!opGraph.hasOnlySupportedAttributes(std::set<hipdnn_sdk::data_objects::NodeAttributes>{
                hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
                hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
@@ -338,6 +352,13 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     }
     case 2:
     {
+        if(areAllNodesF32Compute())
+        {
+            HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
+                             "compute_data_type");
+            return false;
+        }
+
         const auto& node0 = opGraph.getNodeWrapper(0);
         const auto& node1 = opGraph.getNodeWrapper(1);
 
@@ -369,6 +390,12 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     case 3:
     {
         // batchnorm inference -> activation -> batchnorm backward
+        if(areAllNodesF32Compute())
+        {
+            HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
+                             "compute_data_type");
+            return false;
+        }
         const auto nodeAttrs = getBatchnormBackwardFusionNodeAttrsLogErrors(opGraph);
         if(!nodeAttrs.has_value())
         {

@@ -33,6 +33,7 @@ set(REGRESSION_TESTS
     test_convnd_fwd
     test_convnd_bwd_data
     test_grouped_convnd_fwd
+    test_grouped_convnd_fwd_scaleadd_ab
     test_grouped_convnd_bwd_weight
     test_softmax_rank3
     test_softmax_rank4
@@ -63,6 +64,9 @@ function(add_test_executable TEST_NAME)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp32|_f32") AND NOT "fp32" IN_LIST DTYPES)
+                set(test 1)
+            endif()
+            if((source_name MATCHES "_tf32|_tf32") AND NOT "tf32" IN_LIST DTYPES)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp64|_f64") AND NOT "fp64" IN_LIST DTYPES)
@@ -154,6 +158,9 @@ function(add_gtest_executable TEST_NAME)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp32|_f32") AND NOT "fp32" IN_LIST DTYPES)
+                set(test 1)
+            endif()
+            if((source_name MATCHES "_tf32|_tf32") AND NOT "tf32" IN_LIST DTYPES)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp64|_f64") AND NOT "fp64" IN_LIST DTYPES)
@@ -255,6 +262,7 @@ add_subdirectory(gemm_multiply_multiply_wp)
 add_subdirectory(gemm_split_k)
 add_subdirectory(gemm_universal)
 add_subdirectory(gemm_universal_preshuffle)
+add_subdirectory(gemm_ab_scale)
 add_subdirectory(gemm_b_scale)
 add_subdirectory(gemm_universal_streamk)
 add_subdirectory(gemm_reduce)
@@ -304,3 +312,5 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx12")
 endif()
 add_subdirectory(position_embedding)
 add_subdirectory(scatter_gather)
+add_subdirectory(gpu_reference)
+add_subdirectory(util)

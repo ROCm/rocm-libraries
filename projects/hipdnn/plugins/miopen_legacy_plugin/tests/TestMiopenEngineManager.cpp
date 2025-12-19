@@ -7,8 +7,8 @@
 #include <set>
 
 #include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/test_utils/MockEngineConfig.hpp>
-#include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "EngineManager.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
@@ -17,6 +17,7 @@
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
 using namespace miopen_legacy_plugin;
+using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin;
 using ::testing::Return;
 

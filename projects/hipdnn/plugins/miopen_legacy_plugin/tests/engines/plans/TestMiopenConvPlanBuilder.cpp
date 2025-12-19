@@ -2,9 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -12,6 +12,7 @@
 
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_plugin;
+using namespace hipdnn_test_sdk::utilities;
 
 class TestMiopenConvPlanBuilder : public ::testing::Test
 {
@@ -51,7 +52,7 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph)
 
 TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
@@ -61,7 +62,7 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
 {
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvFwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_handle, graph);
@@ -69,7 +70,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
     }
 
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_handle, graph);
@@ -77,7 +78,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
     }
 
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvWrwGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_handle, graph);
@@ -96,7 +97,7 @@ TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForMultiNodeGraph)
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, graph),
@@ -106,21 +107,21 @@ TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeReturnsValueForSupportedGraph)
 {
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvFwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
     }
 
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
     }
 
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvWrwGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
@@ -140,7 +141,7 @@ TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForMultiNodeGraph)
 
 TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
@@ -149,10 +150,23 @@ TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
+TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
+{
+    flatbuffers::FlatBufferBuilder builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+
+    auto mutableGraph = hipdnn_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+    mutableGraph->mutable_nodes()->GetMutableObject(0)->mutate_compute_data_type(
+        hipdnn_sdk::data_objects::DataType::HALF);
+
+    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
 {
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvFwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
@@ -161,7 +175,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
     }
 
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
@@ -170,7 +184,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
     }
 
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvWrwGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 

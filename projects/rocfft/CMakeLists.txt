@@ -85,7 +85,7 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.36" )
+set ( VERSION_STRING "1.0.37" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
@@ -167,6 +167,9 @@ else()
   # Don't force, users should be able to override GPU_TARGETS at the command line if desired
   set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "GPU architectures to build for")
 endif()
+# tolerate comma as a value separator since the compiler does the
+# same
+string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
 rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   
 # HIP is required - library and clients use HIP to access the device

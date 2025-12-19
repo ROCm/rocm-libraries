@@ -77,7 +77,7 @@ void testing_axpy_strided_batched_ex_bad_arg(const Arguments& arg)
         device_strided_batch_vector<Tx> dx(N, incx, stridex, batch_count);
         device_strided_batch_vector<Ty> dy(N, incy, stridey, batch_count);
 
-        const Ts  h_alpha{1}, h_zero{0};
+        const Ts  h_alpha{1.0f}, h_zero{0.0f};
         const Ts* alpha = &h_alpha;
         const Ts* zero  = &h_zero;
 
@@ -297,7 +297,7 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dy.memcheck());
     CHECK_DEVICE_ALLOCATION(d_alpha.memcheck());
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);
