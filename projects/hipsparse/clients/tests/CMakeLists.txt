@@ -143,27 +143,17 @@ if(HIPSPARSE_ENABLE_HIP)
     )
 endif()
 
-# NOTE: Commented out - unnecessary manual include directory specification
-# Include directories are already provided through target linkage:
-# hipsparse-test -> hipsparse::clients-common -> roc::hipsparse
-# Modern CMake targets should propagate usage requirements automatically
-#if(NOT HIPSPARSE_ENABLE_HOST)
-#    target_include_directories(hipsparse-test PRIVATE "${hipsparse_INCLUDE_DIRS}/hipsparse")
-#endif()
-
 # Include sources
 if(HIPSPARSE_ENABLE_HIP)
-  include(rocm/CMakeLists.txt)
+  add_subdirectory(rocm)
 elseif(HIPSPARSE_ENABLE_CUDA)
   if(CUDAToolkit_VERSION MATCHES "12.8")
-    include(cuda/12.8/CMakeLists.txt)
+    add_subdirectory(cuda/12.8)
     message("Building hipsparse-test executable using CUDA_VERSION ${CUDAToolkit_VERSION}")
   else()
     message("ERROR: Testing on CUDA_VERSION ${CUDAToolkit_VERSION} not supported.")
   endif()
 endif()
-
-# add_executable(hipsparse-test hipsparse_gtest_main.cpp ${HIPSPARSE_TEST_SOURCES} ${HIPSPARSE_CLIENTS_COMMON})
 
 target_compile_definitions(hipsparse-test PRIVATE GOOGLE_TEST)
 
@@ -175,9 +165,6 @@ target_link_libraries(hipsparse-test PRIVATE
 if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX)
 endif()
-# # Internal common header
-# target_include_directories(hipsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-# target_include_directories(hipsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-test PRIVATE __HIP_PLATFORM_NVIDIA__)
@@ -202,16 +189,16 @@ if(WIN32)
             "${PROJECT_BINARY_DIR}/clients/matrices"
         COMMENT "Copying matrices for Windows test environment"
     )
-else()
-    # On Linux: Create symlink after test target is built
-    # POST_BUILD ensures matrices are downloaded first (via hipsparse-common dependency)
-    add_custom_command(
-        TARGET hipsparse-test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E create_symlink # replace with copy
-            "${PROJECT_BINARY_DIR}/matrices"
-            "${PROJECT_BINARY_DIR}/clients/matrices"
-        COMMENT "Creating symlink for test matrices"
-    )
+# else()
+#     # On Linux: Create symlink after test target is built
+#     # POST_BUILD ensures matrices are downloaded first (via hipsparse-common dependency)
+#     add_custom_command(
+#         TARGET hipsparse-test POST_BUILD
+#         COMMAND ${CMAKE_COMMAND} -E create_symlink # replace with copy
+#             "${PROJECT_BINARY_DIR}/matrices"
+#             "${PROJECT_BINARY_DIR}/clients/matrices"
+#         COMMENT "Creating symlink for test matrices"
+#     )
 endif()
 
 # Build mtx2csr converter

@@ -54,7 +54,8 @@
       "installDir": "${sourceDir}/build/asan/install",
       "cacheVariables": {
         "HIPSPARSE_BUILD_TESTING": "ON",
-        "HIPSPARSE_ENABLE_ASAN": "ON"
+        "HIPSPARSE_ENABLE_ASAN": "ON",
+        "HIPSPARSE_ENABLE_FORTRAN": "OFF"
       }
     }
   ],
