@@ -14,7 +14,9 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <hip/hip_runtime.h>
 #include <mutex>
+#include <sys/utsname.h>
 
 namespace hipdnn_backend
 {
@@ -29,6 +31,59 @@ std::mutex s_loggingInitMutex; // NOLINT(readability-identifier-naming)
 bool s_loggingInitialized = false; // NOLINT(readability-identifier-naming)
 const std::string S_BACKEND_LOGGER_NAME = "hipdnn_backend";
 const std::string S_CALLBACK_RECEIVER_LOGGER_NAME = "hipdnn_callback_receiver";
+
+void logSystemInfo(const std::shared_ptr<spdlog::logger>& logger)
+{
+    if(!logger)
+    {
+        return;
+    }
+
+    struct utsname buffer;
+    if(uname(&buffer) != 0)
+    {
+        logger->warn("Failed to retrieve system information using uname");
+    }
+    else
+    {
+        logger->info("System Information: [System Name: {}, Node Name: {}, Release: {}, Version: "
+                     "{}, Machine: {}]",
+                     buffer.sysname,
+                     buffer.nodename,
+                     buffer.release,
+                     buffer.version,
+                     buffer.machine);
+    }
+
+    int deviceId = 0;
+    // Get device ID from the current stream
+    hipError_t err = hipStreamGetDevice(nullptr, &deviceId);
+    if(err != hipSuccess)
+    {
+        logger->warn("Failed to get device from current stream: {}", hipGetErrorString(err));
+        return;
+    }
+
+    hipDeviceProp_t props;
+    err = hipGetDeviceProperties(&props, deviceId);
+    if(err != hipSuccess)
+    {
+        logger->warn(
+            "Failed to get properties for device {}: {}", deviceId, hipGetErrorString(err));
+        return;
+    }
+
+    logger->info(
+        "HIP Device Information: [Device: {}, Name: {}, Global Mem: {} bytes, Compute: {}.{}, "
+        "MPs: {}, Clock: {} kHz]",
+        deviceId,
+        props.name,
+        props.totalGlobalMem,
+        props.major,
+        props.minor,
+        props.multiProcessorCount,
+        props.clockRate);
+}
 
 } // namespace
 
@@ -84,6 +139,8 @@ void initialize()
         setLogLevel(logLevel);
 
         s_loggingInitialized = true;
+
+        logSystemInfo(backendLogger);
 
         return;
     }
