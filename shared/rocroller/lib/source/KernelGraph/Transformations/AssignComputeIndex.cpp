@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/CodeGen/Utils.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
@@ -128,7 +129,8 @@ namespace rocRoller
                 for(OpsAndTilesType& elem : opsAndTiles)
                 {
                     auto memType = std::get<1>(elem).second.memoryType;
-                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE)
+                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE
+                       || memType == MemoryType::WAVE_FROM_GLOBAL)
                     {
                         return elem;
                     }
@@ -161,7 +163,8 @@ namespace rocRoller
                 elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
             }
             else if(macTile.memoryType == MemoryType::WAVE
-                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE)
+                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE
+                    || macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
             {
                 auto [vgprBlockNumberTag, vgprBlockNumber]
                     = graph.getDimension<VGPRBlockNumber>(opTag, 0);
@@ -226,9 +229,11 @@ namespace rocRoller
                            ComputeIndex const& ci,
                            const int           target,
                            const int           offset,
+                           const int           baseAddress,
                            const bool          maybeLDS,
                            const bool          isTransposed,
                            const ContextPtr    context,
+                           const CommandPtr    command,
                            Transformer&        coords)
         {
             auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
@@ -271,6 +276,24 @@ namespace rocRoller
             if(ci.isStorePartOfGlobalToLDS)
             {
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
+            }
+
+            if(baseAddress > 0)
+            {
+                namespace CG = KernelGraph::CoordinateGraph;
+                auto userTag = only(graph.coordinates.getNeighbours<Graph::Direction::Downstream>(
+                                        baseAddress))
+                                   .value();
+                AssertFatal(
+                    userTag > 0,
+                    fmt::format("Could not find User connected to BaseAddress({})", baseAddress));
+                auto user = graph.coordinates.getNode<CG::User>(userTag);
+
+                AssertFatal(
+                    command, "Expected command pointer but got nullptr", ShowValue(command));
+
+                auto userAsCmdArg = findArgumentByName(command, user.argumentName);
+                expr              = expr + convert(ci.offsetType, userAsCmdArg->expression());
             }
 
             auto assignNode         = Assign{offsetRegisterType, convert(ci.offsetType, expr)};
@@ -435,6 +458,8 @@ namespace rocRoller
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
                 auto buffer = kgraph.mapper.get(
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
+                auto baseAddress = kgraph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASEADDRESS});
 
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::commit: computeindex {} base {} offset {} stride {}, target {} "
@@ -529,8 +554,16 @@ namespace rocRoller
 
                 if(base < 0 && offset > 0)
                 {
-                    assignBaseTag = makeAssignBase(
-                        kgraph, ci, target, offset, maybeLDS, isTransposed, m_context, xform);
+                    assignBaseTag = makeAssignBase(kgraph,
+                                                   ci,
+                                                   target,
+                                                   offset,
+                                                   baseAddress,
+                                                   maybeLDS,
+                                                   isTransposed,
+                                                   m_context,
+                                                   m_command,
+                                                   xform);
                 }
 
                 if(stride > 0)
