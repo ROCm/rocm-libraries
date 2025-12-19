@@ -97,6 +97,12 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     label_skipWGMXCC = Label(label="skip_WGMXCC", comment="skip WGMXCC if no enough WGs to remap")
 
     if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
+        # We need to get WGMXCC from WGM
+        # This value will be used as number of XCCs for both chunked and non-chunked remapping
+        module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
+        module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
+        module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1, comment="No mapping if WGMXCC <= 1"))
+        module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
         label_skipWGMCHUNK = Label(label="skip_WGMCHUNK", comment="skip WGMCHUNK if no enough WGs to remap")
         """
         Use chiplet_transform_chunk, skip classic wgmxcc remapping
@@ -108,7 +114,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         module.addComment0("remap WGs if WGMCHUNK > 1")
         module.add(SCmpGtU32(src0=sgpr(SgprChunkSize), src1=1))
         module.add(SCBranchSCC0(label_skipWGMCHUNK.getLabelName()))
-        module.add(chiplet_transform_chunked(writer, kernel, SgprIndex, tmpSgprNumWorkGroups, SgprChunkSize))
+        module.add(chiplet_transform_chunked(writer, kernel, SgprWGMXCC, SgprIndex, tmpSgprNumWorkGroups, SgprChunkSize))
         writer.sgprPool.checkIn(SgprChunkSize)
         module.add(SBranch(label_skipWGMXCC.getLabelName()))
         module.add(label_skipWGMCHUNK)
@@ -136,8 +142,6 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
-            module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
-            module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
             module.addComment0("remap WGs if WGMXCC > 1")
             module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1))
             module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
@@ -303,12 +307,9 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     return module
 
-def chiplet_transform_chunked(writer, kernel, sgprIndex, sgprNumWG, sgprChunkSize):
-
-    numXCC = 8
+def chiplet_transform_chunked(writer, kernel, sgprNumXCC, sgprIndex, sgprNumWG, sgprChunkSize):
     module = Module()
 
-    sgprNumXCC = writer.sgprPool.checkOut(1, preventOverflow=False)
     sgprTmp  = writer.sgprPool.checkOut(1, preventOverflow=False)
     sgprTmp2 = writer.sgprPool.checkOut(1, preventOverflow=False)
 
@@ -322,9 +323,6 @@ def chiplet_transform_chunked(writer, kernel, sgprIndex, sgprNumWG, sgprChunkSiz
 
     labelEnd = Label(writer.labels.getUniqueNamePrefix("ChipletTransformChunkEnd"), comment="")
     module.addComment0("Chiplet Transform Chunked")
-
-    # Hard-coded for now, needs to be a run-time param
-    module.add(SMovB32(dst=sgpr(sgprNumXCC), src=numXCC, comment=""))
 
     # Compute sgprTmp = numWG, sgprTmp2 = numXCC * chunk_size
     module.add(SMulI32(dst=sgpr(sgprTmp2), src0=sgpr(sgprNumXCC), src1=sgpr(sgprChunkSize), comment="Compute total number of tiles"))
