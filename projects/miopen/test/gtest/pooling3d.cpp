@@ -359,14 +359,16 @@ void CheckPooling3dTestCase(const Pooling3dTestCase& test_case)
     // Estimate memory requirements and skip if too large
     // Conservative threshold: 1.5 GB to prevent out-of-memory errors on GPUs with limited memory
     const size_t memory_threshold_bytes = 1500ULL * 1024 * 1024; // 1.5 GB
-    size_t estimated_memory_fp32 = EstimateMemoryRequirements(test_case, sizeof(float));
+    size_t estimated_memory_fp32        = EstimateMemoryRequirements(test_case, sizeof(float));
     size_t estimated_memory_fp16 = EstimateMemoryRequirements(test_case, 2); // half is 2 bytes
 
-    if(estimated_memory_fp32 > memory_threshold_bytes || estimated_memory_fp16 > memory_threshold_bytes)
+    if(estimated_memory_fp32 > memory_threshold_bytes ||
+       estimated_memory_fp16 > memory_threshold_bytes)
     {
         GTEST_SKIP() << "Test case requires too much memory (estimated: "
                      << (estimated_memory_fp32 / (1024 * 1024)) << " MB for FP32, "
-                     << (estimated_memory_fp16 / (1024 * 1024)) << " MB for FP16). Skipping to avoid OOM.";
+                     << (estimated_memory_fp16 / (1024 * 1024))
+                     << " MB for FP16). Skipping to avoid OOM.";
     }
 
     // Check kernel size vs input dimensions
