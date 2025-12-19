@@ -10,7 +10,7 @@ name = "origami"
 version = "0.1.0"
 description = "Analytical GEMM Solution Selection"
 readme = "../README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "Advanced Micro Devices, Inc."}
