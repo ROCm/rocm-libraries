@@ -215,6 +215,10 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
 
     SECTION("valid hoist")
     {
+        // Add assign node to kloop body that writes a constant to a new coordinate
+        // in the body of the kloop
+        // Verify that this node is hoisted to above the kloop
+
         int coord = graph.coordinates.addElement(Linear{});
 
         auto constantExpr = Expression::literal(42.0f);
@@ -262,6 +266,9 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
 
     SECTION("invalid hoist")
     {
+        // Add assign node to kloop body that writes to incremented for loop variable
+        // Verify that this node is *not* hoisted
+
         int forLoopCoordinate = -1;
         for(const auto& c : graph.mapper.getConnections(kLoop))
         {
