@@ -122,21 +122,57 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
         return;
     }
 
-    const auto& referenceStrideOrder = tensors[0].strideOrder;
-    const size_t numDims = tensors[0].numDims();
+    // Helper lambda to check if a tensor has degenerate dimensions (all dims are 1).
+    // Degenerate tensors like [1,1,1,1] with strides [1,1,1,1] are layout-agnostic
+    // because memory layout is irrelevant when there's only one element.
+    auto isDegenerate = [](const BatchnormTensorDescriptor& tensor) {
+        return std::all_of(tensor.dims.begin(), tensor.dims.end(), [](int64_t d) { return d == 1; });
+    };
 
-    // Validate first tensor's layout is supported
+    // Find the first non-degenerate tensor to use as the layout reference.
+    // We cannot use degenerate tensors as reference because their stride order
+    // (e.g., [3,2,1,0] from strides [1,1,1,1]) is ambiguous and defaults to NCHW
+    // regardless of the actual intended layout.
+    // Note: Tensor order is unpredictable (from unordered_map iteration), so we
+    // search for ANY non-degenerate tensor - they all must have the same layout anyway.
+    size_t referenceIndex = 0;
+    for(size_t i = 0; i < tensors.size(); ++i)
+    {
+        if(!isDegenerate(tensors[i]))
+        {
+            referenceIndex = i;
+            break;
+        }
+    }
+
+    // If all tensors are degenerate, no layout validation is needed
+    if(isDegenerate(tensors[referenceIndex]))
+    {
+        return;
+    }
+
+    const auto& referenceStrideOrder = tensors[referenceIndex].strideOrder;
+    const size_t numDims = tensors[referenceIndex].numDims();
+
+    // Validate reference tensor's layout is supported
     validateSupportedLayout(referenceStrideOrder, numDims);
 
-    // Validate all other tensors match
-    for(size_t i = 1; i < tensors.size(); ++i)
+    // Validate all other non-degenerate tensors match the reference layout
+    for(size_t i = 0; i < tensors.size(); ++i)
     {
-        // Check if tensor has degenerate dimensions (all dims are 1)
-        // Degenerate tensors with strides [1,1,1,1] are layout-agnostic
-        bool isDegenerate = std::all_of(tensors[i].dims.begin(), tensors[i].dims.end(),
-                                       [](int64_t d) { return d == 1; });
-        
-        if(!isDegenerate && tensors[i].strideOrder != referenceStrideOrder)
+        if(i == referenceIndex)
+        {
+            continue; // Skip the reference tensor itself
+        }
+
+        // Degenerate tensors are layout-agnostic, skip validation
+        if(isDegenerate(tensors[i]))
+        {
+            continue;
+        }
+
+        // Non-degenerate tensors must have the same layout as reference
+        if(tensors[i].strideOrder != referenceStrideOrder)
         {
             throw hipdnn_plugin::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
