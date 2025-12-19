@@ -355,7 +355,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  means that if the matrix \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column
 *  order as this is equivalent to being in row order), then internally memory copies and/or transposing of data might be performed
 *  to get them into the correct order (possibly using extra buffer size). Once computation is completed, additional memory copies
-*  and/or transposing of data may be performed to get them back into the user arrays. For best performance and smallest required
+*  and/or transposing of data might be performed to get them back into the user arrays. For the best performance and smallest required
 *  temporary storage buffers on an AMD system, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column
 *  order if \f$B\f$ is being transposed).
 *
