@@ -447,8 +447,6 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::SetWorkitemCount>(m_context));
-        // transform returns original graph; if applied, move higher up
-        transforms.push_back(std::make_shared<KernelGraph::HoistLoopInvariant>());
 
         for(auto const& t : transforms)
         {

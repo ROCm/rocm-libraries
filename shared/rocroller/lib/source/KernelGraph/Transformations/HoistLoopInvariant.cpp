@@ -226,17 +226,17 @@ namespace rocRoller::KernelGraph
 
                 if(allTagsLoopInvariant)
                 {
-                    Log::debug("HoistLoopInvariant, hoisting {}, {}, to, {}, {}",
-                               controlNode,
-                               Graph::variantToString(graph.control.getElement(controlNode)),
-                               loopNode,
-                               Graph::variantToString(graph.control.getElement(loopNode)));
+                    Log::info("HoistLoopInvariant, hoisting {}, {}, to, {}, {}",
+                              controlNode,
+                              Graph::variantToString(graph.control.getElement(controlNode)),
+                              loopNode,
+                              Graph::variantToString(graph.control.getElement(loopNode)));
 
                     hoistNodeBeforeLoop(graph, controlNode, loopNode);
                 }
             }
         }
-        return original; // Note: logging only
+        return graph;
     }
 
     std::string HoistLoopInvariant::name() const
