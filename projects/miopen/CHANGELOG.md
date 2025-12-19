@@ -4,6 +4,9 @@
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 ## (Unreleased) MIOpen 3.5.1 for ROCm 8.0.0
 
+### Resolved issues
+* Fixed calculation of workspace size for fusions when tuning is done
+
 ## MIOpen 3.5.1 for ROCm 7.2.0
 ### Changed
 * Ported several OCL kernels to HIP
