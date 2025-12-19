@@ -123,26 +123,14 @@ TEST_CASE("ControlFlowRWTracer - LoadTiled and StoreTiled", "[kernel-graph][util
 
     // LoadTiled should write to tileA
     auto tileARecords = tracer.coordinatesReadWrite(tileA);
-    bool foundWrite   = false;
-    for(auto const& record : tileARecords)
-    {
-        if(record.control == load && record.rw == RW::WRITE)
-        {
-            foundWrite = true;
-        }
-    }
+    bool foundWrite   = std::ranges::any_of(
+        tileARecords, [load](auto const& x) { return x.control == load && x.rw == RW::WRITE; });
     CHECK(foundWrite);
 
     // StoreTiled should read from tileB
     auto tileBRecords = tracer.coordinatesReadWrite(tileB);
-    bool foundRead    = false;
-    for(auto const& record : tileBRecords)
-    {
-        if(record.control == store && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead    = std::ranges::any_of(
+        tileBRecords, [store](auto const& x) { return x.control == store && x.rw == RW::READ; });
     CHECK(foundRead);
 }
 
@@ -210,15 +198,9 @@ TEST_CASE("ControlFlowRWTracer - ForLoopOp", "[kernel-graph][utils]")
 
     // ForLoop should read the loop coordinate (in condition)
     auto unrollRecords    = tracer.coordinatesReadWrite(forLoop);
-    bool foundForLoopRead = false;
-
-    for(auto const& record : unrollRecords)
-    {
-        if(record.control == forLoop && record.rw == RW::READ)
-        {
-            foundForLoopRead = true;
-        }
-    }
+    bool foundForLoopRead = std::ranges::any_of(unrollRecords, [forLoopOp](auto const& x) {
+        return x.control == forLoopOp && x.rw == RW::READ;
+    });
 
     CHECK(foundForLoopRead);
 }
@@ -249,14 +231,9 @@ TEST_CASE("ControlFlowRWTracer - DoWhileOp", "[kernel-graph][utils]")
     auto tileARecords = tracer.coordinatesReadWrite(tileA);
     REQUIRE(tileARecords.size() >= 1);
 
-    bool foundRead = false;
-    for(auto const& record : tileARecords)
-    {
-        if(record.control == doWhile && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead = std::ranges::any_of(tileARecords, [doWhile](auto const& x) {
+        return x.control == doWhile && x.rw == RW::READ;
+    });
     CHECK(foundRead);
 
     // The body should be traced
@@ -283,27 +260,17 @@ TEST_CASE("ControlFlowRWTracer - Exchange", "[kernel-graph][utils]")
     // Exchange should READ from source (tileA)
     auto tileARecords = tracer.coordinatesReadWrite(tileA);
     REQUIRE(tileARecords.size() >= 1);
-    bool foundRead = false;
-    for(auto const& record : tileARecords)
-    {
-        if(record.control == exchange && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead = std::ranges::any_of(tileARecords, [exchange](auto const& x) {
+        return x.control == exchange && x.rw == RW::READ;
+    });
     CHECK(foundRead);
 
     // Exchange should READWRITE to destination (tileB)
     auto tileBRecords = tracer.coordinatesReadWrite(tileB);
     REQUIRE(tileBRecords.size() >= 1);
-    bool foundReadWrite = false;
-    for(auto const& record : tileBRecords)
-    {
-        if(record.control == exchange && record.rw == RW::READWRITE)
-        {
-            foundReadWrite = true;
-        }
-    }
+    bool foundReadWrite = std::ranges::any_of(tileBRecords, [exchange](auto const& x) {
+        return x.control == exchange && x.rw == RW::READWRITE;
+    });
     CHECK(foundReadWrite);
 }
 
@@ -564,14 +531,8 @@ TEST_CASE("ControlFlowRWTracer - Barrier operation", "[kernel-graph][utils]")
     auto tileRecords = tracer.coordinatesReadWrite(tile);
     REQUIRE(tileRecords.size() >= 1);
 
-    bool foundRead = false;
-    for(auto const& record : tileRecords)
-    {
-        if(record.control == barrier && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead = std::ranges::any_of(
+        tileRecords, [barrier](auto const& x) { return x.control == barrier && x.rw == RW::READ; });
     CHECK(foundRead);
 }
 
@@ -639,25 +600,14 @@ TEST_CASE("ControlFlowRWTracer - LoadLDSTile and StoreLDSTile", "[kernel-graph][
 
     // LoadLDSTile should write to MacroTile and read from LDSTile
     auto tileARecords = tracer.coordinatesReadWrite(tileA);
-    bool foundWrite   = false;
-    for(auto const& record : tileARecords)
-    {
-        if(record.control == loadLDS && record.rw == RW::WRITE)
-        {
-            foundWrite = true;
-        }
-    }
+    bool foundWrite   = std::ranges::any_of(tileARecords, [loadLDS](auto const& x) {
+        return x.control == loadLDS && x.rw == RW::WRITE;
+    });
     CHECK(foundWrite);
 
     auto ldsARecords = tracer.coordinatesReadWrite(ldsA);
-    bool foundRead   = false;
-    for(auto const& record : ldsARecords)
-    {
-        if(record.control == loadLDS && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead   = std::ranges::any_of(
+        ldsARecords, [loadLDS](auto const& x) { return x.control == loadLDS && x.rw == RW::READ; });
     CHECK(foundRead);
 }
 
@@ -679,14 +629,9 @@ TEST_CASE("ControlFlowRWTracer - SeedPRNG", "[kernel-graph][utils]")
 
     // SeedPRNG should write to VGPR coordinate (the seed destination)
     CHECK(vgprRecords.size() >= 1);
-    bool foundWrite = false;
-    for(auto const& record : vgprRecords)
-    {
-        if(record.control == seedPRNG && record.rw == RW::WRITE)
-        {
-            foundWrite = true;
-        }
-    }
+    bool foundWrite = std::ranges::any_of(vgprRecords, [seedPRNG](auto const& x) {
+        return x.control == seedPRNG && x.rw == RW::WRITE;
+    });
     CHECK(foundWrite);
 
     // SeedPRNG should also read from RHS
@@ -796,26 +741,16 @@ TEST_CASE("ControlFlowRWTracer - LoadVGPR and StoreVGPR", "[kernel-graph][utils]
 
     // LoadVGPR should write to vgpr1
     auto vgpr1Records = tracer.coordinatesReadWrite(vgpr1);
-    bool foundWrite   = false;
-    for(auto const& record : vgpr1Records)
-    {
-        if(record.control == loadVGPR && record.rw == RW::WRITE)
-        {
-            foundWrite = true;
-        }
-    }
+    bool foundWrite   = std::ranges::any_of(vgpr1Records, [loadVGPR](auto const& x) {
+        return x.control == loadVGPR && x.rw == RW::WRITE;
+    });
     CHECK(foundWrite);
 
     // StoreVGPR should read from vgpr2
     auto vgpr2Records = tracer.coordinatesReadWrite(vgpr2);
-    bool foundRead    = false;
-    for(auto const& record : vgpr2Records)
-    {
-        if(record.control == storeVGPR && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead    = std::ranges::any_of(vgpr2Records, [storeVGPR](auto const& x) {
+        return x.control == storeVGPR && x.rw == RW::READ;
+    });
     CHECK(foundRead);
 }
 
@@ -840,26 +775,16 @@ TEST_CASE("ControlFlowRWTracer - LoadSGPR and StoreSGPR", "[kernel-graph][utils]
 
     // LoadSGPR should write to vgpr1
     auto vgpr1Records = tracer.coordinatesReadWrite(vgpr1);
-    bool foundWrite   = false;
-    for(auto const& record : vgpr1Records)
-    {
-        if(record.control == loadSGPR && record.rw == RW::WRITE)
-        {
-            foundWrite = true;
-        }
-    }
+    bool foundWrite   = std::ranges::any_of(vgpr1Records, [loadSGPR](auto const& x) {
+        return x.control == loadSGPR && x.rw == RW::WRITE;
+    });
     CHECK(foundWrite);
 
     // StoreSGPR should read from vgpr2
     auto vgpr2Records = tracer.coordinatesReadWrite(vgpr2);
-    bool foundRead    = false;
-    for(auto const& record : vgpr2Records)
-    {
-        if(record.control == storeSGPR && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead    = std::ranges::any_of(vgpr2Records, [storeSGPR](auto const& x) {
+        return x.control == storeSGPR && x.rw == RW::READ;
+    });
     CHECK(foundRead);
 }
 
@@ -884,26 +809,16 @@ TEST_CASE("ControlFlowRWTracer - LoadLinear and StoreLinear", "[kernel-graph][ut
 
     // LoadLinear should write to linear1
     auto linear1Records = tracer.coordinatesReadWrite(linear1);
-    bool foundWrite     = false;
-    for(auto const& record : linear1Records)
-    {
-        if(record.control == loadLinear && record.rw == RW::WRITE)
-        {
-            foundWrite = true;
-        }
-    }
+    bool foundWrite     = std::ranges::any_of(linear1Records, [loadLinear](auto const& x) {
+        return x.control == loadLinear && x.rw == RW::WRITE;
+    });
     CHECK(foundWrite);
 
     // StoreLinear should read from linear2
     auto linear2Records = tracer.coordinatesReadWrite(linear2);
-    bool foundRead      = false;
-    for(auto const& record : linear2Records)
-    {
-        if(record.control == storeLinear && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead      = std::ranges::any_of(linear2Records, [storeLinear](auto const& x) {
+        return x.control == storeLinear && x.rw == RW::READ;
+    });
     CHECK(foundRead);
 }
 
@@ -925,26 +840,16 @@ TEST_CASE("ControlFlowRWTracer - LoadTileDirect2LDS", "[kernel-graph][utils]")
 
     // LoadTileDirect2LDS should read from MacroTile
     auto tileRecords = tracer.coordinatesReadWrite(tile);
-    bool foundRead   = false;
-    for(auto const& record : tileRecords)
-    {
-        if(record.control == loadDirect && record.rw == RW::READ)
-        {
-            foundRead = true;
-        }
-    }
+    bool foundRead   = std::ranges::any_of(tileRecords, [loadDirect](auto const& x) {
+        return x.control == loadDirect && x.rw == RW::READ;
+    });
     CHECK(foundRead);
 
     // LoadTileDirect2LDS should write to LDS
     auto ldsRecords = tracer.coordinatesReadWrite(lds);
-    bool foundWrite = false;
-    for(auto const& record : ldsRecords)
-    {
-        if(record.control == loadDirect && record.rw == RW::WRITE)
-        {
-            foundWrite = true;
-        }
-    }
+    bool foundWrite = std::ranges::any_of(ldsRecords, [loadDirect](auto const& x) {
+        return x.control == loadDirect && x.rw == RW::WRITE;
+    });
     CHECK(foundWrite);
 }
 
