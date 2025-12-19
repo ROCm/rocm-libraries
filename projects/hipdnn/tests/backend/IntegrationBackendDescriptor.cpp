@@ -3,8 +3,8 @@
 
 #include "hipdnn_backend.h"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <vector>
 
@@ -104,14 +104,14 @@ TEST(IntegrationBackendDescriptor, SetOperationGraph)
 {
     SKIP_IF_NO_DEVICES();
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     auto graph
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                       "Test GRAPH!",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
+                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
                                                       &tensorAttributes,
                                                       &nodes);
     builder.Finish(graph);

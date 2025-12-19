@@ -3,10 +3,10 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::data_objects;
 
 TEST(TestPointwiseValidation, UnaryModesClassifiedCorrectly)
 {

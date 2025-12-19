@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 namespace
 {

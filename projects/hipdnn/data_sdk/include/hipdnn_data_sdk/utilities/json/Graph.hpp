@@ -2,18 +2,18 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/json/BatchnormAttributes.hpp>
-#include <hipdnn_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
-#include <hipdnn_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
-#include <hipdnn_sdk/utilities/json/Common.hpp>
-#include <hipdnn_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
-#include <hipdnn_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
-#include <hipdnn_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
-#include <hipdnn_sdk/utilities/json/PointwiseAttributes.hpp>
-#include <hipdnn_sdk/utilities/json/TensorAttributes.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
+#include <hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
 
-namespace hipdnn_sdk::data_objects
+namespace hipdnn_data_sdk::data_objects
 {
 NLOHMANN_JSON_SERIALIZE_ENUM(
     NodeAttributes,
@@ -61,7 +61,7 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     default:
         throw std::runtime_error(
-            "hipdnn_sdk::data_objects::to_json(Node): Unsupported NodeAttributes type: "
+            "hipdnn_data_sdk::data_objects::to_json(Node): Unsupported NodeAttributes type: "
             + std::to_string(static_cast<int8_t>(node.attributes_type())));
     }
     nodeJson["name"] = node.name()->c_str();
@@ -81,7 +81,7 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
 }
 
 }
-namespace hipdnn_sdk::json
+namespace hipdnn_data_sdk::json
 {
 template <>
 inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
@@ -110,7 +110,7 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error(
-                "hipdnn_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "
+                "hipdnn_data_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "
                 + std::string{EnumNameNodeAttributes(type)});
         }
     }();

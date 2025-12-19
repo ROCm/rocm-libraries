@@ -15,7 +15,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 
 #include "convolution_common_generated.h"
 
-namespace hipdnn_sdk {
+namespace hipdnn_data_sdk {
 namespace data_objects {
 
 struct ConvolutionFwdAttributes;
@@ -34,7 +34,7 @@ struct ConvolutionFwdAttributesT : public ::flatbuffers::NativeTable {
   std::vector<int64_t> post_padding{};
   std::vector<int64_t> stride{};
   std::vector<int64_t> dilation{};
-  hipdnn_sdk::data_objects::ConvMode conv_mode = hipdnn_sdk::data_objects::ConvMode::UNSET;
+  hipdnn_data_sdk::data_objects::ConvMode conv_mode = hipdnn_data_sdk::data_objects::ConvMode::UNSET;
 };
 
 struct ConvolutionFwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -92,10 +92,10 @@ struct ConvolutionFwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   ::flatbuffers::Vector<int64_t> *mutable_dilation() {
     return GetPointer<::flatbuffers::Vector<int64_t> *>(VT_DILATION);
   }
-  hipdnn_sdk::data_objects::ConvMode conv_mode() const {
-    return static_cast<hipdnn_sdk::data_objects::ConvMode>(GetField<int8_t>(VT_CONV_MODE, 0));
+  hipdnn_data_sdk::data_objects::ConvMode conv_mode() const {
+    return static_cast<hipdnn_data_sdk::data_objects::ConvMode>(GetField<int8_t>(VT_CONV_MODE, 0));
   }
-  bool mutate_conv_mode(hipdnn_sdk::data_objects::ConvMode _conv_mode = static_cast<hipdnn_sdk::data_objects::ConvMode>(0)) {
+  bool mutate_conv_mode(hipdnn_data_sdk::data_objects::ConvMode _conv_mode = static_cast<hipdnn_data_sdk::data_objects::ConvMode>(0)) {
     return SetField<int8_t>(VT_CONV_MODE, static_cast<int8_t>(_conv_mode), 0);
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
@@ -144,7 +144,7 @@ struct ConvolutionFwdAttributesBuilder {
   void add_dilation(::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> dilation) {
     fbb_.AddOffset(ConvolutionFwdAttributes::VT_DILATION, dilation);
   }
-  void add_conv_mode(hipdnn_sdk::data_objects::ConvMode conv_mode) {
+  void add_conv_mode(hipdnn_data_sdk::data_objects::ConvMode conv_mode) {
     fbb_.AddElement<int8_t>(ConvolutionFwdAttributes::VT_CONV_MODE, static_cast<int8_t>(conv_mode), 0);
   }
   explicit ConvolutionFwdAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
@@ -167,7 +167,7 @@ inline ::flatbuffers::Offset<ConvolutionFwdAttributes> CreateConvolutionFwdAttri
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> post_padding = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> stride = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> dilation = 0,
-    hipdnn_sdk::data_objects::ConvMode conv_mode = hipdnn_sdk::data_objects::ConvMode::UNSET) {
+    hipdnn_data_sdk::data_objects::ConvMode conv_mode = hipdnn_data_sdk::data_objects::ConvMode::UNSET) {
   ConvolutionFwdAttributesBuilder builder_(_fbb);
   builder_.add_y_tensor_uid(y_tensor_uid);
   builder_.add_w_tensor_uid(w_tensor_uid);
@@ -189,12 +189,12 @@ inline ::flatbuffers::Offset<ConvolutionFwdAttributes> CreateConvolutionFwdAttri
     const std::vector<int64_t> *post_padding = nullptr,
     const std::vector<int64_t> *stride = nullptr,
     const std::vector<int64_t> *dilation = nullptr,
-    hipdnn_sdk::data_objects::ConvMode conv_mode = hipdnn_sdk::data_objects::ConvMode::UNSET) {
+    hipdnn_data_sdk::data_objects::ConvMode conv_mode = hipdnn_data_sdk::data_objects::ConvMode::UNSET) {
   auto pre_padding__ = pre_padding ? _fbb.CreateVector<int64_t>(*pre_padding) : 0;
   auto post_padding__ = post_padding ? _fbb.CreateVector<int64_t>(*post_padding) : 0;
   auto stride__ = stride ? _fbb.CreateVector<int64_t>(*stride) : 0;
   auto dilation__ = dilation ? _fbb.CreateVector<int64_t>(*dilation) : 0;
-  return hipdnn_sdk::data_objects::CreateConvolutionFwdAttributes(
+  return hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributes(
       _fbb,
       x_tensor_uid,
       w_tensor_uid,
@@ -261,7 +261,7 @@ inline ::flatbuffers::Offset<ConvolutionFwdAttributes> CreateConvolutionFwdAttri
   auto _stride = _o->stride.size() ? _fbb.CreateVector(_o->stride) : 0;
   auto _dilation = _o->dilation.size() ? _fbb.CreateVector(_o->dilation) : 0;
   auto _conv_mode = _o->conv_mode;
-  return hipdnn_sdk::data_objects::CreateConvolutionFwdAttributes(
+  return hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributes(
       _fbb,
       _x_tensor_uid,
       _w_tensor_uid,
@@ -274,6 +274,6 @@ inline ::flatbuffers::Offset<ConvolutionFwdAttributes> CreateConvolutionFwdAttri
 }
 
 }  // namespace data_objects
-}  // namespace hipdnn_sdk
+}  // namespace hipdnn_data_sdk
 
 #endif  // FLATBUFFERS_GENERATED_CONVOLUTIONFWDATTRIBUTES_HIPDNN_SDK_DATA_OBJECTS_H_

@@ -3,7 +3,7 @@
 
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <iostream>
 
 #if defined(__linux__)
@@ -19,7 +19,7 @@ TEST(TestPlatformUtils, PathCompEqIdenticalPaths)
     std::filesystem::path path1 = "/home/user/project";
     std::filesystem::path path2 = "/home/user/project";
 
-    EXPECT_TRUE(hipdnn_sdk::utilities::pathCompEq(path1, path2));
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(path1, path2));
 }
 
 TEST(TestPlatformUtils, PathCompEqDifferentPaths)
@@ -27,7 +27,7 @@ TEST(TestPlatformUtils, PathCompEqDifferentPaths)
     std::filesystem::path path1 = "/home/user/project1";
     std::filesystem::path path2 = "/home/user/project2";
 
-    EXPECT_FALSE(hipdnn_sdk::utilities::pathCompEq(path1, path2));
+    EXPECT_FALSE(hipdnn_data_sdk::utilities::pathCompEq(path1, path2));
 }
 
 TEST(TestPlatformUtils, PathCompEqEmptyPaths)
@@ -35,33 +35,33 @@ TEST(TestPlatformUtils, PathCompEqEmptyPaths)
     std::filesystem::path path1;
     std::filesystem::path path2;
 
-    EXPECT_TRUE(hipdnn_sdk::utilities::pathCompEq(path1, path2));
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(path1, path2));
 }
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryReturnsValidPath)
 {
-    auto execDir = hipdnn_sdk::utilities::getCurrentExecutableDirectory();
+    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_FALSE(execDir.empty());
 }
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryExists)
 {
-    auto execDir = hipdnn_sdk::utilities::getCurrentExecutableDirectory();
+    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_TRUE(std::filesystem::exists(execDir));
 }
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryIsAbsolute)
 {
-    auto execDir = hipdnn_sdk::utilities::getCurrentExecutableDirectory();
+    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_TRUE(execDir.is_absolute());
 }
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryIsDirectory)
 {
-    auto execDir = hipdnn_sdk::utilities::getCurrentExecutableDirectory();
+    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_TRUE(std::filesystem::is_directory(execDir));
 }
@@ -69,7 +69,7 @@ TEST(TestPlatformUtils, GetCurrentExecutableDirectoryIsDirectory)
 #if defined(__linux__)
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryContainsExecutable)
 {
-    auto execDir = hipdnn_sdk::utilities::getCurrentExecutableDirectory();
+    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     std::array<char, PATH_MAX> execPath{};
     ssize_t len = readlink("/proc/self/exe", execPath.data(), PATH_MAX);

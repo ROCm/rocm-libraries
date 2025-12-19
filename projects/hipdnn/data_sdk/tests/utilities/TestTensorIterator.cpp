@@ -4,10 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <numeric>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 // Helper to process ITensor polymorphically
 template <typename T>

@@ -13,7 +13,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
               FLATBUFFERS_VERSION_REVISION == 23,
              "Non-compatible flatbuffers version included");
 
-namespace hipdnn_sdk {
+namespace hipdnn_data_sdk {
 namespace data_objects {
 
 struct BatchnormInferenceAttributes;
@@ -195,7 +195,7 @@ inline ::flatbuffers::Offset<BatchnormInferenceAttributes> CreateBatchnormInfere
   auto _scale_tensor_uid = _o->scale_tensor_uid;
   auto _bias_tensor_uid = _o->bias_tensor_uid;
   auto _y_tensor_uid = _o->y_tensor_uid;
-  return hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+  return hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
       _fbb,
       _x_tensor_uid,
       _mean_tensor_uid,
@@ -206,6 +206,6 @@ inline ::flatbuffers::Offset<BatchnormInferenceAttributes> CreateBatchnormInfere
 }
 
 }  // namespace data_objects
-}  // namespace hipdnn_sdk
+}  // namespace hipdnn_data_sdk
 
 #endif  // FLATBUFFERS_GENERATED_BATCHNORMINFERENCEATTRIBUTES_HIPDNN_SDK_DATA_OBJECTS_H_

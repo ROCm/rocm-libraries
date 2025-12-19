@@ -13,7 +13,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
               FLATBUFFERS_VERSION_REVISION == 23,
              "Non-compatible flatbuffers version included");
 
-namespace hipdnn_sdk {
+namespace hipdnn_data_sdk {
 namespace data_objects {
 
 struct BatchnormAttributes;
@@ -261,7 +261,7 @@ inline ::flatbuffers::Offset<BatchnormAttributes> CreateBatchnormAttributesDirec
     ::flatbuffers::Optional<int64_t> next_running_mean_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> next_running_variance_tensor_uid = ::flatbuffers::nullopt) {
   auto peer_stats_tensor_uid__ = peer_stats_tensor_uid ? _fbb.CreateVector<int64_t>(*peer_stats_tensor_uid) : 0;
-  return hipdnn_sdk::data_objects::CreateBatchnormAttributes(
+  return hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(
       _fbb,
       x_tensor_uid,
       scale_tensor_uid,
@@ -348,7 +348,7 @@ inline ::flatbuffers::Offset<BatchnormAttributes> CreateBatchnormAttributes(::fl
   auto _inv_variance_tensor_uid = _o->inv_variance_tensor_uid;
   auto _next_running_mean_tensor_uid = _o->next_running_mean_tensor_uid;
   auto _next_running_variance_tensor_uid = _o->next_running_variance_tensor_uid;
-  return hipdnn_sdk::data_objects::CreateBatchnormAttributes(
+  return hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(
       _fbb,
       _x_tensor_uid,
       _scale_tensor_uid,
@@ -366,6 +366,6 @@ inline ::flatbuffers::Offset<BatchnormAttributes> CreateBatchnormAttributes(::fl
 }
 
 }  // namespace data_objects
-}  // namespace hipdnn_sdk
+}  // namespace hipdnn_data_sdk
 
 #endif  // FLATBUFFERS_GENERATED_BATCHNORMATTRIBUTES_HIPDNN_SDK_DATA_OBJECTS_H_

@@ -7,8 +7,8 @@
 #include <memory>
 #include <stdexcept>
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 
 namespace hipdnn_plugin_sdk
 {
@@ -23,16 +23,16 @@ class IGraph
 public:
     virtual ~IGraph() = default;
 
-    virtual const hipdnn_sdk::data_objects::Graph& getGraph() const = 0;
+    virtual const hipdnn_data_sdk::data_objects::Graph& getGraph() const = 0;
     virtual bool isValid() const = 0;
     virtual uint32_t nodeCount() const = 0;
     virtual bool hasOnlySupportedAttributes(
-        std::set<hipdnn_sdk::data_objects::NodeAttributes> supportedAttributes) const
+        std::set<hipdnn_data_sdk::data_objects::NodeAttributes> supportedAttributes) const
         = 0;
-    virtual const hipdnn_sdk::data_objects::Node& getNode(uint32_t index) const = 0;
+    virtual const hipdnn_data_sdk::data_objects::Node& getNode(uint32_t index) const = 0;
     virtual const INodeWrapper& getNodeWrapper(uint32_t index) const = 0;
     virtual const std::vector<std::unique_ptr<INodeWrapper>>& nodeWrappers() const = 0;
-    virtual const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    virtual const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const
         = 0;
 };
@@ -45,14 +45,14 @@ public:
         if(buffer != nullptr)
         {
             flatbuffers::Verifier verifier(static_cast<const uint8_t*>(buffer), size);
-            if(verifier.VerifyBuffer<hipdnn_sdk::data_objects::Graph>())
+            if(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>())
             {
-                _shallowGraph = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Graph>(buffer);
+                _shallowGraph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(buffer);
             }
         }
     }
 
-    const hipdnn_sdk::data_objects::Graph& getGraph() const override
+    const hipdnn_data_sdk::data_objects::Graph& getGraph() const override
     {
         throwIfNotValid();
         return *_shallowGraph;
@@ -75,7 +75,7 @@ public:
     }
 
     bool hasOnlySupportedAttributes(
-        std::set<hipdnn_sdk::data_objects::NodeAttributes> supportedAttributes) const override
+        std::set<hipdnn_data_sdk::data_objects::NodeAttributes> supportedAttributes) const override
     {
         throwIfNotValid();
 
@@ -90,7 +90,7 @@ public:
         });
     }
 
-    const hipdnn_sdk::data_objects::Node& getNode(uint32_t index) const override
+    const hipdnn_data_sdk::data_objects::Node& getNode(uint32_t index) const override
     {
         throwIfNotValid();
 
@@ -128,7 +128,7 @@ public:
         return _nodeWrappers;
     }
 
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const override
     {
         throwIfNotValid();
@@ -179,10 +179,10 @@ private:
 
     // Pointer to the flatbuffer representation of the graph. We do not own this memory
     // as were just reading from the buffer passed during construction.
-    const hipdnn_sdk::data_objects::Graph* _shallowGraph = nullptr;
+    const hipdnn_data_sdk::data_objects::Graph* _shallowGraph = nullptr;
 
     //lazy init state;
-    mutable std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>
+    mutable std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>
         _tensorMap;
 
     mutable std::vector<std::unique_ptr<INodeWrapper>> _nodeWrappers;

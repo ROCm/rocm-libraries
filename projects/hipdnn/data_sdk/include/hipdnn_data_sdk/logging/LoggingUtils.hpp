@@ -5,10 +5,10 @@
 
 #include <algorithm>
 #include <array>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <string>
 
-namespace hipdnn_sdk::logging
+namespace hipdnn_data_sdk::logging
 {
 
 inline constexpr std::array<const char*, 5> VALID_LOG_LEVELS
@@ -22,7 +22,7 @@ inline bool isValidLogLevel(const std::string& level)
 
 inline bool isLoggingEnabled()
 {
-    auto logLevel = hipdnn_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+    auto logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
     return isValidLogLevel(logLevel) && logLevel != "off";
 }
 
@@ -31,4 +31,4 @@ inline std::string generatePatternString(const std::string& componentName)
     return "[%Y-%m-%d %H:%M:%S.%e] [tid %t] [%l] [" + componentName + "] %v";
 }
 
-} // namespace hipdnn_sdk::logging
+} // namespace hipdnn_data_sdk::logging

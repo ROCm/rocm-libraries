@@ -10,8 +10,8 @@
 #include <thread>
 #include <vector>
 
-#include <hipdnn_sdk/logging/CallbackTypes.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 
 static std::vector<std::string> s_capturedLogs; //NOLINT
 static std::mutex s_logMutex; //NOLINT

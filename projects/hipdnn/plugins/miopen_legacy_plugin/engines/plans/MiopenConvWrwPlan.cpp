@@ -4,9 +4,9 @@
 #include <array>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_sdk/utilities/ScopedResource.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvWrwPlan.hpp"
@@ -16,8 +16,8 @@ namespace miopen_legacy_plugin
 {
 
 ConvWrwParams::ConvWrwParams(
-    const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
@@ -28,10 +28,10 @@ ConvWrwParams::ConvWrwParams(
     const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());
     const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
 
-    const auto inputDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+    const auto inputDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
     const auto weightDims
-        = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
-    const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(inputDims, weightDims);
+        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
+    const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
     _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
 
@@ -70,7 +70,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&&
     miopenProblem_t problem;
     THROW_ON_MIOPEN_FAILURE(miopenCreateConvProblem(
         &problem, _params.conv().convDescriptor(), miopenProblemDirectionBackwardWeights));
-    hipdnn_sdk::utilities::ScopedResource problemRes(
+    hipdnn_data_sdk::utilities::ScopedResource problemRes(
         problem, [](miopenProblem_t p) { std::ignore = miopenDestroyProblem(p); });
 
     THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
@@ -93,7 +93,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&&
     }
 
     _solution
-        = hipdnn_sdk::utilities::ScopedResource<miopenSolution_t>(solution, [](miopenSolution_t s) {
+        = hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t>(solution, [](miopenSolution_t s) {
               auto status = miopenDestroySolution(s);
               if(status != miopenStatusSuccess)
               {

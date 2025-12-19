@@ -6,7 +6,7 @@
 #include <ostream>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 
 inline const char* toString(hipdnnPluginStatus_t status)
 {

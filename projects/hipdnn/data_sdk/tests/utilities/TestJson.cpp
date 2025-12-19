@@ -4,24 +4,24 @@
 #include <flatbuffers/flatbuffer_builder.h>
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::data_objects;
 
-void toJsonAndBackTestSuite(const hipdnn_sdk::data_objects::Graph* graph,
+void toJsonAndBackTestSuite(const hipdnn_data_sdk::data_objects::Graph* graph,
                             const std::string& context)
 {
     nlohmann::json graphJson = *graph;
 
     flatbuffers::FlatBufferBuilder builder;
-    auto newGraphBuilder = hipdnn_sdk::json::to<Graph>(builder, graphJson);
+    auto newGraphBuilder = hipdnn_data_sdk::json::to<Graph>(builder, graphJson);
     builder.Finish(newGraphBuilder);
-    auto newGraph = hipdnn_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    auto newGraph = hipdnn_data_sdk::data_objects::GetGraph(builder.GetBufferPointer());
 
     EXPECT_EQ(graph->compute_data_type(), newGraph->compute_data_type()) << context;
     EXPECT_EQ(graph->intermediate_data_type(), newGraph->intermediate_data_type()) << context;
@@ -52,54 +52,54 @@ void toJsonAndBackTestSuite(const hipdnn_sdk::data_objects::Graph* graph,
 TEST(TestJson, GraphToJsonAndBack)
 {
     auto nodeAttributeValues = EnumValuesNodeAttributes();
-    auto maxEnumValue = static_cast<size_t>(hipdnn_sdk::data_objects::NodeAttributes::MAX);
+    auto maxEnumValue = static_cast<size_t>(hipdnn_data_sdk::data_objects::NodeAttributes::MAX);
     for(size_t i = 0; i <= maxEnumValue; i++)
     {
         auto enumValue = nodeAttributeValues[i];
         flatbuffers::FlatBufferBuilder graphBuilder;
-        const hipdnn_sdk::data_objects::Graph* graph = nullptr;
+        const hipdnn_data_sdk::data_objects::Graph* graph = nullptr;
         std::string context;
 
         switch(enumValue)
         {
-        case hipdnn_sdk::data_objects::NodeAttributes::NONE:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::NONE:
             graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(empty valid graph)";
             break;
-        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid batchnorm inference graph)";
             break;
-        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid batchnorm backward graph)";
             break;
-        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid batchnorm forward training graph)";
             break;
-        case hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createPointwiseGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid pointwise graph)";
             break;
-        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid convolution forward graph)";
             break;
-        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid convolution backward graph)";
             break;
-        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid convolution weight gradient graph)";
             break;
         default:
@@ -140,10 +140,10 @@ void enumTestSuite(T value, const std::string& stringRep, const std::string& con
 
 TEST(TestJson, Enum)
 {
-    using namespace hipdnn_sdk::data_objects;
+    using namespace hipdnn_data_sdk::data_objects;
 
-    enumTestSuite(DataType::FLOAT, "float", "(hipdnn_sdk::data_objects::DataType)");
+    enumTestSuite(DataType::FLOAT, "float", "(hipdnn_data_sdk::data_objects::DataType)");
     enumTestSuite(NodeAttributes::BatchnormInferenceAttributes,
                   "BatchnormInferenceAttributes",
-                  "(for hipdnn_sdk::data_objects::NodeAttributes)");
+                  "(for hipdnn_data_sdk::data_objects::NodeAttributes)");
 }

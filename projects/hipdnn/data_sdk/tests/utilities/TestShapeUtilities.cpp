@@ -3,9 +3,9 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 struct ExtractStrideOrderTestCase
 {

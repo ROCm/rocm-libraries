@@ -6,7 +6,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
 
-#include <hipdnn_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 
 namespace hipdnn_plugin_sdk
 {
@@ -16,7 +16,7 @@ class IEngineDetails
 public:
     virtual ~IEngineDetails() = default;
 
-    virtual const hipdnn_sdk::data_objects::EngineDetails& getEngineDetails() const = 0;
+    virtual const hipdnn_data_sdk::data_objects::EngineDetails& getEngineDetails() const = 0;
     virtual bool isValid() const = 0;
     virtual int64_t engineId() const = 0;
 };
@@ -29,15 +29,15 @@ public:
         if(buffer != nullptr)
         {
             flatbuffers::Verifier verifier(static_cast<const uint8_t*>(buffer), size);
-            if(verifier.VerifyBuffer<hipdnn_sdk::data_objects::EngineDetails>())
+            if(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::EngineDetails>())
             {
                 _shallowEngineDetails
-                    = flatbuffers::GetRoot<hipdnn_sdk::data_objects::EngineDetails>(buffer);
+                    = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::EngineDetails>(buffer);
             }
         }
     }
 
-    const hipdnn_sdk::data_objects::EngineDetails& getEngineDetails() const override
+    const hipdnn_data_sdk::data_objects::EngineDetails& getEngineDetails() const override
     {
         throwIfNotValid();
         return *_shallowEngineDetails;
@@ -66,7 +66,7 @@ private:
 
     // Pointer to the flatbuffer representation of the engine details. We do not own this memory
     // as were just reading from the buffer passed during construction.
-    const hipdnn_sdk::data_objects::EngineDetails* _shallowEngineDetails = nullptr;
+    const hipdnn_data_sdk::data_objects::EngineDetails* _shallowEngineDetails = nullptr;
 };
 
 }

@@ -6,7 +6,7 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 namespace detail
@@ -94,4 +94,4 @@ S staticCast(T value)
     return detail::CastTo<S>::from(value);
 }
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

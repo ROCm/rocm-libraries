@@ -205,7 +205,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)"
+        "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_data_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_data_sdk/plugin/test_utils.*\)"
     )
     set(CODE_COVERAGE_OBJECTS
         -object

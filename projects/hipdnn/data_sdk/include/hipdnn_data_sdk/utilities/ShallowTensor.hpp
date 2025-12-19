@@ -8,11 +8,11 @@
 #include <random>
 #include <vector>
 
-#include <hipdnn_sdk/utilities/ShallowHostOnlyMigratableMemory.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowHostOnlyMigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 template <class T>
@@ -105,4 +105,4 @@ private:
     bool _packed;
 };
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

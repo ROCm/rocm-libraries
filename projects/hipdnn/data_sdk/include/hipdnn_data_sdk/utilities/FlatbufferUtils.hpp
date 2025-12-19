@@ -4,12 +4,12 @@
 #pragma once
 
 #include <flatbuffers/flatbuffers.h>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 template <typename T>

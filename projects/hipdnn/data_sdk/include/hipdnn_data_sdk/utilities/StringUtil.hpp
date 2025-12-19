@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 inline void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
@@ -85,4 +85,4 @@ std::enable_if_t<!std::is_arithmetic_v<T>, std::string> vecToString(const std::v
     return stream.str();
 }
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

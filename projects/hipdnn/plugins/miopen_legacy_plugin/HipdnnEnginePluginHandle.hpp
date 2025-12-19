@@ -9,7 +9,7 @@
 #include <unordered_map>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 
 #include "MiopenContainer.hpp"
 #include "MiopenUtils.hpp"

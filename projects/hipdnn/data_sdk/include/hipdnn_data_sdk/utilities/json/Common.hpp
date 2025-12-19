@@ -3,7 +3,7 @@
 #pragma once
 
 #include <flatbuffers/flatbuffer_builder.h>
-#include <hipdnn_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
@@ -68,7 +68,7 @@ void to_json(nlohmann::json& vectorList, const Vector<Offset<T>>* vec)
 
 // NOLINTEND(readability-identifier-naming)
 
-namespace hipdnn_sdk::data_objects
+namespace hipdnn_data_sdk::data_objects
 {
 NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                              {
@@ -97,7 +97,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
 )
 }
 
-namespace hipdnn_sdk::json
+namespace hipdnn_data_sdk::json
 {
 
 template <class T>
@@ -108,7 +108,7 @@ inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::js
 {
     if(!entry.is_array())
     {
-        throw std::runtime_error("hipdnn_sdk::json::to<vector<T>>(): field is not an array");
+        throw std::runtime_error("hipdnn_data_sdk::json::to<vector<T>>(): field is not an array");
     }
     std::vector<flatbuffers::Offset<T>> ret;
     for(const auto& v : entry)

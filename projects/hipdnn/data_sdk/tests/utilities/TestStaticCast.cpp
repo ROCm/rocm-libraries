@@ -3,9 +3,9 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_fp16.h>
-#include <hipdnn_sdk/utilities/StaticCast.hpp>
+#include <hipdnn_data_sdk/utilities/StaticCast.hpp>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {

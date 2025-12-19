@@ -5,7 +5,7 @@ SPDX-License-Identifier: MIT
 
 #include "logging/Logging.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 
 int main(int argc, char** argv)

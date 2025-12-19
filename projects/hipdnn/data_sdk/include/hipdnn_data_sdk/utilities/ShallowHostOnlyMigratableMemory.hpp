@@ -8,9 +8,9 @@
 #include <random>
 #include <vector>
 
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 template <class T>
@@ -117,4 +117,4 @@ private:
     size_t _count;
 };
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

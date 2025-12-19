@@ -2,10 +2,10 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_sdk/utilities/json/Common.hpp>
+#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
-namespace hipdnn_sdk::data_objects
+namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& convJson, const ConvolutionFwdAttributes& conv)
@@ -26,7 +26,7 @@ inline void to_json(nlohmann::json& convJson, const ConvolutionFwdAttributes& co
 }
 
 }
-namespace hipdnn_sdk::json
+namespace hipdnn_data_sdk::json
 {
 template <>
 inline auto to<data_objects::ConvolutionFwdAttributes>(flatbuffers::FlatBufferBuilder& builder,

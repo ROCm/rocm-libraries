@@ -8,7 +8,7 @@
 #include <functional>
 #include <utility>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 template <typename T>
@@ -82,4 +82,4 @@ private:
     bool _empty = true;
 };
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

@@ -13,7 +13,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
               FLATBUFFERS_VERSION_REVISION == 23,
              "Non-compatible flatbuffers version included");
 
-namespace hipdnn_sdk {
+namespace hipdnn_data_sdk {
 namespace data_objects {
 
 struct BatchnormBackwardAttributes;
@@ -201,7 +201,7 @@ inline ::flatbuffers::Offset<BatchnormBackwardAttributes> CreateBatchnormBackwar
     int64_t dscale_tensor_uid = 0,
     int64_t dbias_tensor_uid = 0) {
   auto peer_stats_tensor_uid__ = peer_stats_tensor_uid ? _fbb.CreateVector<int64_t>(*peer_stats_tensor_uid) : 0;
-  return hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+  return hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
       _fbb,
       dy_tensor_uid,
       x_tensor_uid,
@@ -272,7 +272,7 @@ inline ::flatbuffers::Offset<BatchnormBackwardAttributes> CreateBatchnormBackwar
   auto _dx_tensor_uid = _o->dx_tensor_uid;
   auto _dscale_tensor_uid = _o->dscale_tensor_uid;
   auto _dbias_tensor_uid = _o->dbias_tensor_uid;
-  return hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+  return hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
       _fbb,
       _dy_tensor_uid,
       _x_tensor_uid,
@@ -286,6 +286,6 @@ inline ::flatbuffers::Offset<BatchnormBackwardAttributes> CreateBatchnormBackwar
 }
 
 }  // namespace data_objects
-}  // namespace hipdnn_sdk
+}  // namespace hipdnn_data_sdk
 
 #endif  // FLATBUFFERS_GENERATED_BATCHNORMBACKWARDATTRIBUTES_HIPDNN_SDK_DATA_OBJECTS_H_

@@ -5,12 +5,12 @@
 #include <gtest/gtest.h>
 #include <set>
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_plugin_sdk;
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::data_objects;
 
 TEST(TestNodeWrapper, NullBufferIsInvalid)
 {
@@ -23,16 +23,16 @@ TEST(TestNodeWrapper, EnsureTheNodeIsWrappedCorrectly)
         = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     auto serializedGraph = builder.Release();
     auto shallowGraph
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Graph>(serializedGraph.data());
+        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(serializedGraph.data());
 
     NodeWrapper wrapper(shallowGraph->nodes()->Get(0));
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.attributesType(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
     EXPECT_EQ(wrapper.attributesClassType(),
-              typeid(hipdnn_sdk::data_objects::BatchnormInferenceAttributes));
-    EXPECT_NO_THROW(wrapper.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>());
-    EXPECT_THROW(wrapper.attributesAs<hipdnn_sdk::data_objects::BatchnormBackwardAttributes>(),
+              typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes));
+    EXPECT_NO_THROW(wrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>());
+    EXPECT_THROW(wrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>(),
                  std::invalid_argument);
 }

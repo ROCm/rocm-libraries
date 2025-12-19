@@ -4,12 +4,12 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/utilities/Allocators.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/Allocators.hpp>
 #include <memory>
 #include <stdexcept>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 enum class MemoryLocation
@@ -367,4 +367,4 @@ private:
     DeviceAlloc _deviceAllocator;
 };
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

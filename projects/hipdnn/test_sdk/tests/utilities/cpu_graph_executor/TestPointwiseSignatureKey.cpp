@@ -7,15 +7,15 @@
 
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwiseSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk_test_utils;
+using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk_test_utils;
 
 TEST(TestPointwiseSignatureKey, EqualityOperator)
 {
@@ -227,8 +227,8 @@ TEST(TestPointwiseSignatureKey, UnorderedSetUsage)
 
 TEST(TestPointwiseSignatureKey, DifferentOperationsAreDifferent)
 {
-    auto unaryModesBitset = hipdnn_sdk::utilities::getUnaryModesBitset();
-    auto binaryModesBitset = hipdnn_sdk::utilities::getBinaryModesBitset();
+    auto unaryModesBitset = hipdnn_data_sdk::utilities::getUnaryModesBitset();
+    auto binaryModesBitset = hipdnn_data_sdk::utilities::getBinaryModesBitset();
 
     // Test that all supported operations create different keys
     std::unordered_set<PointwiseSignatureKey, PointwiseSignatureKey> uniqueKeys;

@@ -10,7 +10,7 @@
 #include <new>
 #include <type_traits>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
@@ -293,4 +293,4 @@ bool operator!=([[maybe_unused]] const DeviceAllocator<T>& lhs,
     return false;
 }
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

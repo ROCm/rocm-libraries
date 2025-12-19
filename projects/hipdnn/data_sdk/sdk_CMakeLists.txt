@@ -64,7 +64,7 @@ if(TARGET FlatBuffers)
     # uses the following: $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include> This end ups
     # resolving to /opt/rocm/include/include which isnt correct.  I cant find a way to set this
     # value when adding the dependency so after we init the dependency, I then force the
-    # INTERFACE_INCLUDE_DIRECTORIES to be the correct value required for the hipdnn_sdk
+    # INTERFACE_INCLUDE_DIRECTORIES to be the correct value required for the hipdnn_data_sdk
     get_target_property(_is_imported FlatBuffers IMPORTED)
     if(NOT _is_imported)
         get_target_property(current_includes FlatBuffers INTERFACE_INCLUDE_DIRECTORIES)
@@ -93,7 +93,7 @@ _hipdnn_sdk_process_dependency(
 
 if(WIN32)
     # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
-    # when consuming the hipdnn_sdk.  We need to clear these options Refer to issue:
+    # when consuming the hipdnn_data_sdk.  We need to clear these options Refer to issue:
     # https://github.com/ROCm/TheRock/issues/2003
 
     # Can't do this to an alias
@@ -105,14 +105,14 @@ if(WIN32)
     endif()
 endif()
 
-add_library(hipdnn_sdk INTERFACE)
+add_library(hipdnn_data_sdk INTERFACE)
 target_link_libraries(
-    hipdnn_sdk INTERFACE flatbuffers::flatbuffers spdlog::spdlog_header_only
+    hipdnn_data_sdk INTERFACE flatbuffers::flatbuffers spdlog::spdlog_header_only
                          nlohmann_json::nlohmann_json
 )
 
 target_include_directories(
-    hipdnn_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_SDK_INCLUDE_DIR}>
+    hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_SDK_INCLUDE_DIR}>
                          $<INSTALL_INTERFACE:${HIP_DNN_SDK_INSTALL_INCLUDE_DIR}>
 )
 
@@ -144,7 +144,7 @@ if(HIP_DNN_GENERATE_SDK_HEADERS)
         "" # schema_include_dirs
         generate_hipdnn_sdk_headers # custom_target_name
         "" # additional_dependencies
-        ${HIP_DNN_SDK_INCLUDE_DIR}/hipdnn_sdk/data_objects # generated_includes_dir
+        ${HIP_DNN_SDK_INCLUDE_DIR}/hipdnn_data_sdk/data_objects # generated_includes_dir
         "" # binary_schemas_dir
         "" # copy_text_schemas_dir
     )
@@ -157,18 +157,18 @@ if(HIP_DNN_GENERATE_SDK_HEADERS)
     endif()
     _restore_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
 
-    add_dependencies(hipdnn_sdk generate_hipdnn_sdk_headers)
+    add_dependencies(hipdnn_data_sdk generate_hipdnn_sdk_headers)
 endif()
 
 # This is required to use hip/hip_fp16.h and hip/hip_bfloat16.h in any code that includes the sdk By
 # doing this, we don't need to link to hip::device
-target_compile_definitions(hipdnn_sdk INTERFACE __HIPCC__)
+target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
 
-export(TARGETS hipdnn_sdk ${_hipdnn_sdk_local_export_targets}
-       FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkTargets.cmake"
+export(TARGETS hipdnn_data_sdk ${_hipdnn_sdk_local_export_targets}
+       FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_sdkTargets.cmake"
 )
 
-install(TARGETS hipdnn_sdk ${_hipdnn_sdk_local_export_targets} EXPORT hipdnn_sdk_targets
+install(TARGETS hipdnn_data_sdk ${_hipdnn_sdk_local_export_targets} EXPORT hipdnn_sdk_targets
         COMPONENT Development
 )
 
@@ -182,7 +182,7 @@ install(
     PATTERN "*.hpp"
 )
 
-install(EXPORT hipdnn_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
+install(EXPORT hipdnn_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
         FILE hipdnn_sdkTargets.cmake COMPONENT Development
 )
 
@@ -202,23 +202,23 @@ if(_hipdnn_sdk_local_export_includes)
     )
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig_local.cmake.in"
-        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_sdkConfig.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
         PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR
                   HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
     )
 else()
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig_imported.cmake.in"
-        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_sdkConfig.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
         PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR
                   HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
     )
 endif()
 
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk COMPONENT Development
+install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_sdkConfig.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk COMPONENT Development
 )
 
 add_subdirectory(tests)

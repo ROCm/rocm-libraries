@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 
 TEST(TestUtilsFp16, BasicUsage)
 {

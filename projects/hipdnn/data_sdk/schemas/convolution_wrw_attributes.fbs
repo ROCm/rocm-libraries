@@ -3,7 +3,7 @@
 
 include "convolution_common.fbs";
 
-namespace hipdnn_sdk.data_objects;
+namespace hipdnn_data_sdk.data_objects;
 
 table ConvolutionWrwAttributes {
     // Input/Output tensor UIDs

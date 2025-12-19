@@ -3,14 +3,14 @@
 #pragma once
 
 #include <algorithm>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <numeric>
 #include <ranges>
 #include <stdexcept>
 #include <vector>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 // Check broadcastability: input can be broadcast to output
@@ -310,4 +310,4 @@ inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
     return inChannels / wChannels;
 }
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

@@ -3,7 +3,7 @@
 
 #pragma once
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 // Struct is initialized with a list of functors

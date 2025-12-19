@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 template <typename T, bool IsConst = false>

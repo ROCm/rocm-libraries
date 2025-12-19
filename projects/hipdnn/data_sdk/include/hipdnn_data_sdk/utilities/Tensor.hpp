@@ -3,18 +3,18 @@
 
 #pragma once
 
-#include <hipdnn_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
 #include <typeindex>
 #include <vector>
 
-namespace hipdnn_sdk::utilities
+namespace hipdnn_data_sdk::utilities
 {
 
 struct TensorLayout
@@ -546,4 +546,4 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
     }
 }
 
-} // namespace hipdnn_sdk::utilities
+} // namespace hipdnn_data_sdk::utilities

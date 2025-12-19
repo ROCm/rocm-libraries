@@ -5,12 +5,12 @@
 #include <gtest/gtest.h>
 #include <set>
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_plugin_sdk;
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::data_objects;
 
 TEST(TestGraphWrapper, NullBufferIsInvalid)
 {
@@ -60,11 +60,11 @@ TEST(TestGraphWrapper, HasSupportedTypesReturnsTrueIfAllSupported)
 
     GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
 
-    std::set<hipdnn_sdk::data_objects::NodeAttributes> supported
-        = {hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes};
+    std::set<hipdnn_data_sdk::data_objects::NodeAttributes> supported
+        = {hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes};
     EXPECT_TRUE(wrapper.hasOnlySupportedAttributes(supported));
 
-    supported.insert(hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes);
+    supported.insert(hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes);
     EXPECT_TRUE(wrapper.hasOnlySupportedAttributes(supported));
 }
 
@@ -76,11 +76,11 @@ TEST(TestGraphWrapper, HasSupportedTypesReturnsFalseIfAnyUnsupported)
 
     GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
 
-    std::set<hipdnn_sdk::data_objects::NodeAttributes> supported
-        = {hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes};
+    std::set<hipdnn_data_sdk::data_objects::NodeAttributes> supported
+        = {hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes};
     EXPECT_FALSE(wrapper.hasOnlySupportedAttributes(supported));
 
-    supported.insert(hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes);
+    supported.insert(hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes);
     EXPECT_FALSE(wrapper.hasOnlySupportedAttributes(supported));
 }
 
@@ -99,17 +99,17 @@ TEST(TestGraphWrapper, GetTensorMapEmptyGraph)
 TEST(TestGraphWrapper, GetTensorMapReturnsCorrectTensors)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     std::vector<int64_t> strides = {1, 1, 1, 1};
     std::vector<int64_t> dims = {1, 1, 1, 1};
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    auto graph = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                              "test",
                                                              DataType::FLOAT,
                                                              DataType::HALF,
@@ -143,6 +143,6 @@ TEST(TestGraphWrapper, GetNodeWrapper)
     const auto& nodeWrapper = wrapper.getNodeWrapper(0);
 
     EXPECT_EQ(nodeWrapper.attributesType(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
     EXPECT_THROW(wrapper.getNodeWrapper(1), std::out_of_range);
 }

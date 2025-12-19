@@ -44,10 +44,10 @@ The hipDNN backend is a shared library that provides the core C API for graph ex
 The hipDNN SDK is a header-only C++ library that provides utilities and interfaces for plugin development. For complete SDK functionality and future roadmap, see the [SDK section in the Design Guide](./Design.md#sdk).
 
 #### Key Components
-- Plugin interface definitions: [`sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h)
+- Plugin interface definitions: [`sdk/include/hipdnn_data_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_data_sdk/plugin/EnginePluginApi.h)
 - Schema files: [`sdk/schemas/`](../sdk/schemas/)
 - Test utilities (incl. reference implementations): [`sdk/tests/test_utilities/`](../sdk/tests/test_utilities/)
-- Logging [`sdk/include/hipdnn_sdk/logging/Logger.hpp`](../sdk/include/hipdnn_sdk/logging/Logger.hpp)
+- Logging [`sdk/include/hipdnn_data_sdk/logging/Logger.hpp`](../sdk/include/hipdnn_data_sdk/logging/Logger.hpp)
 
 ### CMake Integration
 
@@ -73,7 +73,7 @@ target_link_libraries(your_target PRIVATE hipdnn::backend)
 
 #### SDK Integration
 ```cmake
-find_package(hipdnn_sdk REQUIRED)
+find_package(hipdnn_data_sdk REQUIRED)
 target_link_libraries(your_plugin PRIVATE hipdnn::sdk)
 ```
 

@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/Allocators.hpp>
+#include <hipdnn_data_sdk/utilities/Allocators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <list>
 #include <memory>
 #include <vector>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 // Test that allocators work with STL containers
 TEST(TestAllocators, HostAllocatorWithVector)

@@ -3,10 +3,10 @@
 
 #include <array>
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/ShallowHostOnlyMigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowHostOnlyMigratableMemory.hpp>
 #include <stdexcept>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 TEST(TestShallowHostOnlyMigratableMemory, HostAccess)
 {

@@ -15,7 +15,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 
 #include "data_types_generated.h"
 
-namespace hipdnn_sdk {
+namespace hipdnn_data_sdk {
 namespace data_objects {
 
 struct PointwiseAttributes;
@@ -195,7 +195,7 @@ inline const char *EnumNamePointwiseMode(PointwiseMode e) {
 
 struct PointwiseAttributesT : public ::flatbuffers::NativeTable {
   typedef PointwiseAttributes TableType;
-  hipdnn_sdk::data_objects::PointwiseMode operation = hipdnn_sdk::data_objects::PointwiseMode::UNSET;
+  hipdnn_data_sdk::data_objects::PointwiseMode operation = hipdnn_data_sdk::data_objects::PointwiseMode::UNSET;
   ::flatbuffers::Optional<float> relu_lower_clip = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<float> relu_upper_clip = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<float> relu_lower_clip_slope = ::flatbuffers::nullopt;
@@ -226,10 +226,10 @@ struct PointwiseAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
     VT_ELU_ALPHA = 24,
     VT_SOFTPLUS_BETA = 26
   };
-  hipdnn_sdk::data_objects::PointwiseMode operation() const {
-    return static_cast<hipdnn_sdk::data_objects::PointwiseMode>(GetField<int8_t>(VT_OPERATION, 0));
+  hipdnn_data_sdk::data_objects::PointwiseMode operation() const {
+    return static_cast<hipdnn_data_sdk::data_objects::PointwiseMode>(GetField<int8_t>(VT_OPERATION, 0));
   }
-  bool mutate_operation(hipdnn_sdk::data_objects::PointwiseMode _operation = static_cast<hipdnn_sdk::data_objects::PointwiseMode>(0)) {
+  bool mutate_operation(hipdnn_data_sdk::data_objects::PointwiseMode _operation = static_cast<hipdnn_data_sdk::data_objects::PointwiseMode>(0)) {
     return SetField<int8_t>(VT_OPERATION, static_cast<int8_t>(_operation), 0);
   }
   ::flatbuffers::Optional<float> relu_lower_clip() const {
@@ -323,7 +323,7 @@ struct PointwiseAttributesBuilder {
   typedef PointwiseAttributes Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
-  void add_operation(hipdnn_sdk::data_objects::PointwiseMode operation) {
+  void add_operation(hipdnn_data_sdk::data_objects::PointwiseMode operation) {
     fbb_.AddElement<int8_t>(PointwiseAttributes::VT_OPERATION, static_cast<int8_t>(operation), 0);
   }
   void add_relu_lower_clip(float relu_lower_clip) {
@@ -372,7 +372,7 @@ struct PointwiseAttributesBuilder {
 
 inline ::flatbuffers::Offset<PointwiseAttributes> CreatePointwiseAttributes(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    hipdnn_sdk::data_objects::PointwiseMode operation = hipdnn_sdk::data_objects::PointwiseMode::UNSET,
+    hipdnn_data_sdk::data_objects::PointwiseMode operation = hipdnn_data_sdk::data_objects::PointwiseMode::UNSET,
     ::flatbuffers::Optional<float> relu_lower_clip = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<float> relu_upper_clip = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<float> relu_lower_clip_slope = ::flatbuffers::nullopt,
@@ -467,7 +467,7 @@ inline ::flatbuffers::Offset<PointwiseAttributes> CreatePointwiseAttributes(::fl
   auto _swish_beta = _o->swish_beta;
   auto _elu_alpha = _o->elu_alpha;
   auto _softplus_beta = _o->softplus_beta;
-  return hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+  return hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
       _fbb,
       _operation,
       _relu_lower_clip,
@@ -484,6 +484,6 @@ inline ::flatbuffers::Offset<PointwiseAttributes> CreatePointwiseAttributes(::fl
 }
 
 }  // namespace data_objects
-}  // namespace hipdnn_sdk
+}  // namespace hipdnn_data_sdk
 
 #endif  // FLATBUFFERS_GENERATED_POINTWISEATTRIBUTES_HIPDNN_SDK_DATA_OBJECTS_H_

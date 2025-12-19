@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <hipdnn_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_sdk/utilities/json/Common.hpp>
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
-namespace hipdnn_sdk::data_objects
+namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& batchnormJson, const BatchnormAttributes& bn)
@@ -31,7 +31,7 @@ inline void to_json(nlohmann::json& batchnormJson, const BatchnormAttributes& bn
 }
 
 }
-namespace hipdnn_sdk::json
+namespace hipdnn_data_sdk::json
 {
 template <>
 inline auto to<data_objects::BatchnormAttributes>(flatbuffers::FlatBufferBuilder& builder,

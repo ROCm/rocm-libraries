@@ -3,12 +3,12 @@
 
 #include <array>
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/ShallowTensor.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <stdexcept>
 #include <vector>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestShallowTensor, ConstructionAndShape)

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {

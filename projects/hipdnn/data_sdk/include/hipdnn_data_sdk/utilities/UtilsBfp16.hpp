@@ -7,7 +7,7 @@
 #include <ostream>
 
 #include <hip/hip_bfloat16.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <string>
 
 #define HIPDNN_NAN_BF16 ushort_as_bfloat16(static_cast<unsigned short>(0x7FFFU))
@@ -17,7 +17,7 @@ inline __HOST_DEVICE__ hip_bfloat16 operator""_bf(long double value)
     return hip_bfloat16(static_cast<float>(value));
 }
 
-namespace hipdnn_sdk::utilities::bfp16
+namespace hipdnn_data_sdk::utilities::bfp16
 {
 
 inline __HOST_DEVICE__ hip_bfloat16 ushort_as_bfloat16(const unsigned short int a)
@@ -58,24 +58,24 @@ inline __HOST_DEVICE__ hip_bfloat16 hmax(const hip_bfloat16 a, const hip_bfloat1
     return a.data > b.data ? a : b;
 }
 
-} // namespace hipdnn_sdk::utilities::bfp16
+} // namespace hipdnn_data_sdk::utilities::bfp16
 
 namespace std
 {
 
 inline __HOST_DEVICE__ hip_bfloat16 fabs(hip_bfloat16 num)
 {
-    return hipdnn_sdk::utilities::bfp16::habs(num);
+    return hipdnn_data_sdk::utilities::bfp16::habs(num);
 }
 
 inline __HOST_DEVICE__ hip_bfloat16 abs(hip_bfloat16 num)
 {
-    return hipdnn_sdk::utilities::bfp16::habs(num);
+    return hipdnn_data_sdk::utilities::bfp16::habs(num);
 }
 
 inline __HOST_DEVICE__ hip_bfloat16 max(hip_bfloat16 a, hip_bfloat16 b)
 {
-    return hipdnn_sdk::utilities::bfp16::hmax(a, b);
+    return hipdnn_data_sdk::utilities::bfp16::hmax(a, b);
 }
 
 } // namespace std

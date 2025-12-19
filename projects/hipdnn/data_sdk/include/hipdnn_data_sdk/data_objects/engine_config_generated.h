@@ -13,7 +13,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
               FLATBUFFERS_VERSION_REVISION == 23,
              "Non-compatible flatbuffers version included");
 
-namespace hipdnn_sdk {
+namespace hipdnn_data_sdk {
 namespace data_objects {
 
 struct EngineConfig;
@@ -110,62 +110,62 @@ inline ::flatbuffers::Offset<EngineConfig> CreateEngineConfig(::flatbuffers::Fla
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const EngineConfigT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _engine_id = _o->engine_id;
-  return hipdnn_sdk::data_objects::CreateEngineConfig(
+  return hipdnn_data_sdk::data_objects::CreateEngineConfig(
       _fbb,
       _engine_id);
 }
 
-inline const hipdnn_sdk::data_objects::EngineConfig *GetEngineConfig(const void *buf) {
-  return ::flatbuffers::GetRoot<hipdnn_sdk::data_objects::EngineConfig>(buf);
+inline const hipdnn_data_sdk::data_objects::EngineConfig *GetEngineConfig(const void *buf) {
+  return ::flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::EngineConfig>(buf);
 }
 
-inline const hipdnn_sdk::data_objects::EngineConfig *GetSizePrefixedEngineConfig(const void *buf) {
-  return ::flatbuffers::GetSizePrefixedRoot<hipdnn_sdk::data_objects::EngineConfig>(buf);
+inline const hipdnn_data_sdk::data_objects::EngineConfig *GetSizePrefixedEngineConfig(const void *buf) {
+  return ::flatbuffers::GetSizePrefixedRoot<hipdnn_data_sdk::data_objects::EngineConfig>(buf);
 }
 
 inline EngineConfig *GetMutableEngineConfig(void *buf) {
   return ::flatbuffers::GetMutableRoot<EngineConfig>(buf);
 }
 
-inline hipdnn_sdk::data_objects::EngineConfig *GetMutableSizePrefixedEngineConfig(void *buf) {
-  return ::flatbuffers::GetMutableSizePrefixedRoot<hipdnn_sdk::data_objects::EngineConfig>(buf);
+inline hipdnn_data_sdk::data_objects::EngineConfig *GetMutableSizePrefixedEngineConfig(void *buf) {
+  return ::flatbuffers::GetMutableSizePrefixedRoot<hipdnn_data_sdk::data_objects::EngineConfig>(buf);
 }
 
 inline bool VerifyEngineConfigBuffer(
     ::flatbuffers::Verifier &verifier) {
-  return verifier.VerifyBuffer<hipdnn_sdk::data_objects::EngineConfig>(nullptr);
+  return verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::EngineConfig>(nullptr);
 }
 
 inline bool VerifySizePrefixedEngineConfigBuffer(
     ::flatbuffers::Verifier &verifier) {
-  return verifier.VerifySizePrefixedBuffer<hipdnn_sdk::data_objects::EngineConfig>(nullptr);
+  return verifier.VerifySizePrefixedBuffer<hipdnn_data_sdk::data_objects::EngineConfig>(nullptr);
 }
 
 inline void FinishEngineConfigBuffer(
     ::flatbuffers::FlatBufferBuilder &fbb,
-    ::flatbuffers::Offset<hipdnn_sdk::data_objects::EngineConfig> root) {
+    ::flatbuffers::Offset<hipdnn_data_sdk::data_objects::EngineConfig> root) {
   fbb.Finish(root);
 }
 
 inline void FinishSizePrefixedEngineConfigBuffer(
     ::flatbuffers::FlatBufferBuilder &fbb,
-    ::flatbuffers::Offset<hipdnn_sdk::data_objects::EngineConfig> root) {
+    ::flatbuffers::Offset<hipdnn_data_sdk::data_objects::EngineConfig> root) {
   fbb.FinishSizePrefixed(root);
 }
 
-inline std::unique_ptr<hipdnn_sdk::data_objects::EngineConfigT> UnPackEngineConfig(
+inline std::unique_ptr<hipdnn_data_sdk::data_objects::EngineConfigT> UnPackEngineConfig(
     const void *buf,
     const ::flatbuffers::resolver_function_t *res = nullptr) {
-  return std::unique_ptr<hipdnn_sdk::data_objects::EngineConfigT>(GetEngineConfig(buf)->UnPack(res));
+  return std::unique_ptr<hipdnn_data_sdk::data_objects::EngineConfigT>(GetEngineConfig(buf)->UnPack(res));
 }
 
-inline std::unique_ptr<hipdnn_sdk::data_objects::EngineConfigT> UnPackSizePrefixedEngineConfig(
+inline std::unique_ptr<hipdnn_data_sdk::data_objects::EngineConfigT> UnPackSizePrefixedEngineConfig(
     const void *buf,
     const ::flatbuffers::resolver_function_t *res = nullptr) {
-  return std::unique_ptr<hipdnn_sdk::data_objects::EngineConfigT>(GetSizePrefixedEngineConfig(buf)->UnPack(res));
+  return std::unique_ptr<hipdnn_data_sdk::data_objects::EngineConfigT>(GetSizePrefixedEngineConfig(buf)->UnPack(res));
 }
 
 }  // namespace data_objects
-}  // namespace hipdnn_sdk
+}  // namespace hipdnn_data_sdk
 
 #endif  // FLATBUFFERS_GENERATED_ENGINECONFIG_HIPDNN_SDK_DATA_OBJECTS_H_

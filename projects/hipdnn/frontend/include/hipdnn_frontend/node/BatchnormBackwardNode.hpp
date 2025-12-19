@@ -7,8 +7,8 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -216,9 +216,9 @@ public:
             if(tensorToInfer->get_stride().empty())
             {
                 auto strideOrder
-                    = hipdnn_sdk::utilities::strideOrderNhwc(tensorToInfer->get_dim().size());
+                    = hipdnn_data_sdk::utilities::strideOrderNhwc(tensorToInfer->get_dim().size());
                 tensorToInfer->set_stride(
-                    hipdnn_sdk::utilities::generateStrides(tensorToInfer->get_dim(), strideOrder));
+                    hipdnn_data_sdk::utilities::generateStrides(tensorToInfer->get_dim(), strideOrder));
             }
         };
 
@@ -242,14 +242,14 @@ public:
         }
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hip/hip_fp16.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <string>
 
 #define HIPDNN_NAN_FP16 ushort_as_half(static_cast<unsigned short>(0x7FFFU))
@@ -14,7 +14,7 @@ inline __HOST_DEVICE__ half operator""_h(long double value)
     return {static_cast<float>(value)};
 }
 
-namespace hipdnn_sdk::utilities::fp16
+namespace hipdnn_data_sdk::utilities::fp16
 {
 
 inline __HOST_DEVICE__ half ushort_as_half(unsigned short x)
@@ -58,24 +58,24 @@ inline __HOST_DEVICE__ half hmax(const half a, const half b)
     return __half_raw{static_cast<__half_raw>(b).x};
 }
 
-} // namespace hipdnn_sdk::utilities::fp16
+} // namespace hipdnn_data_sdk::utilities::fp16
 
 namespace std
 {
 
 inline __HOST_DEVICE__ half fabs(half num)
 {
-    return hipdnn_sdk::utilities::fp16::habs(num);
+    return hipdnn_data_sdk::utilities::fp16::habs(num);
 }
 
 inline __HOST_DEVICE__ half abs(half num)
 {
-    return hipdnn_sdk::utilities::fp16::habs(num);
+    return hipdnn_data_sdk::utilities::fp16::habs(num);
 }
 
 inline __HOST_DEVICE__ half max(half a, half b)
 {
-    return hipdnn_sdk::utilities::fp16::hmax(a, b);
+    return hipdnn_data_sdk::utilities::fp16::hmax(a, b);
 }
 
 } // namespace std
