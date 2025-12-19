@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <vector>
 #include <gtest/gtest.h>
 #include <half/half.hpp>
@@ -358,9 +359,29 @@ TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { RunPooling2dTest<half_float::ha
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling2d_FP32,
                          testing::ValuesIn(GetPooling2dTestCases()),
-                         testing::PrintToStringParamName());
+                         [](const testing::TestParamInfo<Pooling2dTestCase>& info) {
+                             const auto& tc = info.param;
+                             std::ostringstream os;
+                             os << "N" << tc.input_dims[0] << "_C" << tc.input_dims[1] << "_H"
+                                << tc.input_dims[2] << "_W" << tc.input_dims[3] << "_lens"
+                                << tc.lens[0] << "x" << tc.lens[1] << "_pads" << tc.pads[0] << "x"
+                                << tc.pads[1] << "_str" << tc.strides[0] << "x" << tc.strides[1]
+                                << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                                << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
+                             return os.str();
+                         });
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling2d_FP16,
                          testing::ValuesIn(GetPooling2dTestCases()),
-                         testing::PrintToStringParamName());
+                         [](const testing::TestParamInfo<Pooling2dTestCase>& info) {
+                             const auto& tc = info.param;
+                             std::ostringstream os;
+                             os << "N" << tc.input_dims[0] << "_C" << tc.input_dims[1] << "_H"
+                                << tc.input_dims[2] << "_W" << tc.input_dims[3] << "_lens"
+                                << tc.lens[0] << "x" << tc.lens[1] << "_pads" << tc.pads[0] << "x"
+                                << tc.pads[1] << "_str" << tc.strides[0] << "x" << tc.strides[1]
+                                << "_idx" << static_cast<int>(tc.index_type) << "_mode"
+                                << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
+                             return os.str();
+                         });
