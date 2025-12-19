@@ -127,6 +127,23 @@ TEST(TestTensorAttributes, PackAttributes)
     EXPECT_TRUE(unpacked->virtual_);
 }
 
+TEST(TestTensorAttributes, ValidateSucceedsOnValueTensor)
+{
+    TensorAttributes tensor(1.f);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnVirtualTensor)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({1});
+    tensor.set_stride({1});
+    tensor.set_is_virtual(true);
+    tensor.set_data_type(DataType::FLOAT);
+
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
 TEST(TestTensorAttributes, ValidateFailsOnVirtualValueTensor)
 {
     TensorAttributes tensor(1.f);

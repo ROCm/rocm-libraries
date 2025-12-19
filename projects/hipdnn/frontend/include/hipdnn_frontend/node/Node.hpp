@@ -117,37 +117,6 @@ protected:
             node->gatherHipdnnTensorsSubtree(allTensors);
         }
     }
-
-    void gatherOutputTensors(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& outputTensors) const
-    {
-        auto outputs = getNodeOutputTensorAttributes();
-        outputTensors.insert(outputs.begin(), outputs.end());
-
-        for(const auto& node : _sub_nodes)
-        {
-            node->gatherOutputTensors(outputTensors);
-        }
-    }
-
-    void gatherInputTensors(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& inputTensors,
-        const std::unordered_set<std::shared_ptr<TensorAttributes>>& outputTensors) const
-    {
-        auto inputs = getNodeInputTensorAttributes();
-        for(const auto& input : inputs)
-        {
-            if(outputTensors.count(input) == 0)
-            {
-                inputTensors.insert(input);
-            }
-        }
-
-        for(const auto& node : _sub_nodes)
-        {
-            node->gatherInputTensors(inputTensors, outputTensors);
-        }
-    }
 };
 
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
