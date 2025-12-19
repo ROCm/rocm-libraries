@@ -768,30 +768,10 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     numMfma = 144
     optSchedule = dict()
     syncCode = []
-    snopCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and useLDSTr and TLDS == 1:
         kernel["UsePLRPack"] = True
 
-        snopTable = [
-            -1, SNop(0),
-            0, SNop(0),
-            1, SNop(0),
-            2, SNop(0),
-            3, SNop(0),
-            4, SNop(0),
-            5, SNop(0),
-            35, SNop(0),
-            36, SNop(0),
-            37, SNop(0),
-            38, SNop(0),
-            39, SNop(0),
-            40, SNop(0),
-            41, SNop(0),
-            71, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-            107, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0")
-        ]
-        
         syncTable = [
             
             9, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for first 2 LRA0"),
@@ -811,7 +791,6 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
 
             116, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 1st 2 LRA3 to complete"),
             127, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA3 to complete")
-
         ]
         
         optSchedule = {
@@ -849,12 +828,10 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
 
             'LCC'    : [[143, 143]],
 
-            'SNOP'   : [snopTable[::2]]
         }
         syncCode = syncTable[1::2]
-        snopCode = snopTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=[], snopCode=snopCode)
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
