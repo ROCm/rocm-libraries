@@ -88,13 +88,19 @@ protected:
         xAttr.set_uid(BatchnormFwdTrainingActivTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto scaleAttr = graph::makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims, layout.strideOrder));
+        auto scaleAttr
+            = graph::makeTensorAttributes("scale",
+                                          intermediateDataType,
+                                          derivedDims,
+                                          generateStrides(derivedDims, layout.strideOrder));
         scaleAttr.set_uid(BatchnormFwdTrainingActivTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = graph::makeTensorAttributes(
-            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims, layout.strideOrder));
+        auto biasAttr
+            = graph::makeTensorAttributes("bias",
+                                          intermediateDataType,
+                                          derivedDims,
+                                          generateStrides(derivedDims, layout.strideOrder));
         biasAttr.set_uid(BatchnormFwdTrainingActivTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -111,10 +117,11 @@ protected:
 
         if(scenario == BatchnormTrainingScenario::FULL_TRAINING)
         {
-            auto prevRunningMeanAttr = graph::makeTensorAttributes("prev_running_mean",
-                                                                   intermediateDataType,
-                                                                   derivedDims,
-                                                                   generateStrides(derivedDims, layout.strideOrder));
+            auto prevRunningMeanAttr
+                = graph::makeTensorAttributes("prev_running_mean",
+                                              intermediateDataType,
+                                              derivedDims,
+                                              generateStrides(derivedDims, layout.strideOrder));
             prevRunningMeanAttr.set_uid(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID);
             prevRunningMeanTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningMeanAttr));

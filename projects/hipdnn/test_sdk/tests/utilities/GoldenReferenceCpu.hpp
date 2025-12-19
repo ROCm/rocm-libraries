@@ -10,7 +10,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
-#include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -18,7 +18,7 @@ namespace hipdnn_test_sdk::utilities
 class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
 {
 protected:
-    hipdnn_sdk::utilities::GraphAndTensorMap _graphAndTensors;
+    hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>>
         _referenceOutputTensors;
 
@@ -34,7 +34,7 @@ protected:
             GTEST_SKIP();
         }
 
-        _graphAndTensors = hipdnn_sdk::utilities::loadGraphAndTensors(path);
+        _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(path);
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 

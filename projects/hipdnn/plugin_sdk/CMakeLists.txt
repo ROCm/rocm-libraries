@@ -30,12 +30,14 @@ export(
 
 install(TARGETS hipdnn_plugin_sdk EXPORT hipdnn_plugin_sdk_targets COMPONENT Development)
 
+# cmake-lint: disable=E1122
 install(
     DIRECTORY ${HIP_DNN_PLUGIN_SDK_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}
     COMPONENT Development
     FILES_MATCHING
     PATTERN "*.hpp"
+    PATTERN "*.h"
 )
 
 install(EXPORT hipdnn_plugin_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk

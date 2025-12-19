@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -151,12 +152,14 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, ValidateDimensionCountAccepts5DTe
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, ValidateDimensionCountThrowsFor3DTensor)
 {
-    EXPECT_THROW({ validators::validateDimensionCount(3); }, hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(
+        { validators::validateDimensionCount(3); }, hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, ValidateDimensionCountThrowsFor6DTensor)
 {
-    EXPECT_THROW({ validators::validateDimensionCount(6); }, hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(
+        { validators::validateDimensionCount(6); }, hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -202,7 +205,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, ValidateConsistentDimensionsThrow
 
     EXPECT_THROW(
         { validators::validateConsistentDimensions(tensors); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, ValidateConsistentDimensionsAcceptsEmptyVector)
@@ -247,7 +250,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, ValidatePackedTensorsThrowsForNon
     }
 
     EXPECT_THROW(
-        { validators::validatePackedTensors(tensors); }, hipdnn_plugin::HipdnnPluginException);
+        { validators::validatePackedTensors(tensors); }, hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -271,7 +274,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, ValidateSupportedLayoutThrowsForU
     std::vector<int64_t> invalidOrder = {0, 1, 2, 3}; // Invalid stride order
     EXPECT_THROW(
         { validators::validateSupportedLayout(invalidOrder, 4); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -318,7 +321,8 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorLayoutsAndDimsRejectsMixedD
                                     .build();
 
     EXPECT_THROW(
-        { checkTensorLayoutsAndDimsSupported(tensorMap); }, hipdnn_plugin::HipdnnPluginException);
+        { checkTensorLayoutsAndDimsSupported(tensorMap); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorLayoutsAndDimsRejectsNonPackedTensors)
@@ -331,7 +335,8 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorLayoutsAndDimsRejectsNonPac
               .build();
 
     EXPECT_THROW(
-        { checkTensorLayoutsAndDimsSupported(tensorMap); }, hipdnn_plugin::HipdnnPluginException);
+        { checkTensorLayoutsAndDimsSupported(tensorMap); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorLayoutsAndDimsRejectsMixedLayouts)
@@ -346,7 +351,8 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorLayoutsAndDimsRejectsMixedL
                                     .build();
 
     EXPECT_THROW(
-        { checkTensorLayoutsAndDimsSupported(tensorMap); }, hipdnn_plugin::HipdnnPluginException);
+        { checkTensorLayoutsAndDimsSupported(tensorMap); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -445,7 +451,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorDataTypesRejectsInvalidIoTy
 
     EXPECT_THROW(
         { checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorDataTypesRejectsInvalidAffineType)
@@ -468,7 +474,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorDataTypesRejectsInvalidAffi
 
     EXPECT_THROW(
         { checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorDataTypesRejectsInconsistentIoTypes)
@@ -495,7 +501,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorDataTypesRejectsInconsisten
 
     EXPECT_THROW(
         { checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -573,7 +579,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorShapesRejectsInconsistentIo
             checkTensorShapesSupported(
                 ioTensorIds, affineTensorIds, statTensorIds, tensorMap, false);
         },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorShapesRejectsInvalidDerivedShape)
@@ -596,7 +602,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorShapesRejectsInvalidDerived
             checkTensorShapesSupported(
                 ioTensorIds, affineTensorIds, statTensorIds, tensorMap, false);
         },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorShapesRejectsInsufficientSpatialForTraining)
@@ -618,7 +624,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorShapesRejectsInsufficientSp
             checkTensorShapesSupported(
                 ioTensorIds, affineTensorIds, statTensorIds, tensorMap, true);
         },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -755,7 +761,8 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FwdActivationThrowsForLeakyRelu)
         builder.GetBufferPointer());
 
     EXPECT_THROW(
-        { checkBatchnormFwdActivationModeSupported(*attr); }, hipdnn_plugin::HipdnnPluginException);
+        { checkBatchnormFwdActivationModeSupported(*attr); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, BwdActivationThrowsForLeakyRelu)
@@ -778,7 +785,8 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BwdActivationThrowsForLeakyRelu)
         builder.GetBufferPointer());
 
     EXPECT_THROW(
-        { checkBatchnormBwdActivationModeSupported(*attr); }, hipdnn_plugin::HipdnnPluginException);
+        { checkBatchnormBwdActivationModeSupported(*attr); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, FwdActivationThrowsForSigmoid)
@@ -801,7 +809,8 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FwdActivationThrowsForSigmoid)
         builder.GetBufferPointer());
 
     EXPECT_THROW(
-        { checkBatchnormFwdActivationModeSupported(*attr); }, hipdnn_plugin::HipdnnPluginException);
+        { checkBatchnormFwdActivationModeSupported(*attr); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, FwdActivationThrowsForTanh)
@@ -824,7 +833,8 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FwdActivationThrowsForTanh)
         builder.GetBufferPointer());
 
     EXPECT_THROW(
-        { checkBatchnormFwdActivationModeSupported(*attr); }, hipdnn_plugin::HipdnnPluginException);
+        { checkBatchnormFwdActivationModeSupported(*attr); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -834,7 +844,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FwdActivationThrowsForTanh)
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorConfigAcceptsValidInference)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormInferenceAttributes();
@@ -846,7 +856,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorConfigAcceptsValidInference
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorConfigAcceptsValidTraining)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormAttributes();
@@ -858,7 +868,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorConfigAcceptsValidTraining)
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorConfigAcceptsValidBackward)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
@@ -870,7 +880,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorConfigAcceptsValidBackward)
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TensorConfigAcceptsValidFusedBackwardActivation)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnInfNode = graph.getNode(0);
     const auto& actNode = graph.getNode(1);
@@ -900,7 +910,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsInvalidIoDataType
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_sdk::data_objects::DataType::UINT8); // Invalid IO data type
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormInferenceAttributes();
@@ -908,7 +918,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsInvalidIoDataType
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsNonPackedTensor)
@@ -948,7 +958,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsNonPackedTensor)
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsInvalidLayout)
@@ -989,7 +999,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsInvalidLayout)
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsMixedDimensions)
@@ -1029,7 +1039,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, InferenceRejectsMixedDimensions)
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -1081,7 +1091,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TrainingRejectsInvalidIoDataType)
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TrainingRejectsInvalidAffineDataType)
@@ -1131,7 +1141,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TrainingRejectsInvalidAffineDataT
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, TrainingRejectsInsufficientSpatialDimensions)
@@ -1177,7 +1187,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, TrainingRejectsInsufficientSpatia
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -1191,7 +1201,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidIoDataType)
         {1, 3, 224, 224},
         true,
         hipdnn_sdk::data_objects::DataType::UINT8); // Invalid IO data type
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
@@ -1199,7 +1209,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidIoDataType)
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidScaleBiasDataType)
@@ -1210,7 +1220,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidScaleBiasDa
         true,
         hipdnn_sdk::data_objects::DataType::FLOAT, // Valid IO
         hipdnn_sdk::data_objects::DataType::HALF); // Invalid scale/bias - must be FLOAT
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
@@ -1218,7 +1228,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidScaleBiasDa
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidStatDataType)
@@ -1230,7 +1240,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidStatDataTyp
         hipdnn_sdk::data_objects::DataType::FLOAT, // Valid IO
         hipdnn_sdk::data_objects::DataType::FLOAT, // Valid scale/bias
         hipdnn_sdk::data_objects::DataType::HALF); // Invalid mean/variance - must be FLOAT
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
@@ -1238,7 +1248,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInvalidStatDataTyp
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInsufficientSpatialDimensions)
@@ -1283,7 +1293,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, BackwardRejectsInsufficientSpatia
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*attrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -1297,7 +1307,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FusedBackwardRejectsInvalidIoData
         {1, 3, 224, 224},
         true,
         hipdnn_sdk::data_objects::DataType::UINT8); // Invalid IO data type
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnInfNode = graph.getNode(0);
     const auto& actNode = graph.getNode(1);
@@ -1316,7 +1326,7 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FusedBackwardRejectsInvalidIoData
             checkBatchnormTensorConfigSupported(
                 *bnInfAttrs, *actAttrs, *bnBwdAttrs, graph.getTensorMap());
         },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, FusedBackwardRejectsNonPackedTensor)
@@ -1399,14 +1409,14 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FusedBackwardRejectsNonPackedTens
 
     EXPECT_THROW(
         { checkBatchnormTensorConfigSupported(*bnInfAttrs, *actAttrs, *bnBwdAttrs, tensorMap); },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenBatchnormApplicabilityChecks, FusedBackwardRejectsInsufficientSpatialDimensions)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(
         {3, 1, 1, 1}, {1, 3, 1, 1}); // Batch * spatial = 1 * 1 = 1 (invalid)
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnInfNode = graph.getNode(0);
     const auto& actNode = graph.getNode(1);
@@ -1425,5 +1435,5 @@ TEST_F(TestMiopenBatchnormApplicabilityChecks, FusedBackwardRejectsInsufficientS
             checkBatchnormTensorConfigSupported(
                 *bnInfAttrs, *actAttrs, *bnBwdAttrs, graph.getTensorMap());
         },
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }

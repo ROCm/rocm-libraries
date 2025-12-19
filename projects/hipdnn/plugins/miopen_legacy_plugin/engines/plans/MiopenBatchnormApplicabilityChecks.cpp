@@ -4,7 +4,7 @@
 #include <numeric>
 #include <vector>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
@@ -47,7 +47,7 @@ void validateDimensionCount(size_t numDims)
 
     if(numDims < MIN_SUPPORTED_DIMS || numDims > MAX_SUPPORTED_DIMS)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm implementation supports only 4D or 5D tensors.");
     }
@@ -67,7 +67,7 @@ void validateConsistentDimensions(const std::vector<BatchnormTensorDescriptor>& 
     {
         if(tensors[i].numDims() != expectedDims)
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "All tensors for batchnorm must have the same number of dimensions.");
         }
@@ -80,7 +80,7 @@ void validatePackedTensors(const std::vector<BatchnormTensorDescriptor>& tensors
     {
         if(!tensor.isPacked())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm implementation supports only packed tensors.");
         }
@@ -96,7 +96,7 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
 
         if(strideOrder != layoutNchw.strideOrder && strideOrder != layoutNhwc.strideOrder)
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm implementation supports only NCHW and NHWC layouts for 4D tensors.");
         }
@@ -108,7 +108,7 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
 
         if(strideOrder != layoutNcdhw.strideOrder && strideOrder != layoutNdhwc.strideOrder)
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm implementation supports only NCDHW and NDHWC layouts for 5D tensors.");
         }
@@ -126,7 +126,8 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
     // Degenerate tensors like [1,1,1,1] with strides [1,1,1,1] are layout-agnostic
     // because memory layout is irrelevant when there's only one element.
     auto isDegenerate = [](const BatchnormTensorDescriptor& tensor) {
-        return std::all_of(tensor.dims.begin(), tensor.dims.end(), [](int64_t d) { return d == 1; });
+        return std::all_of(
+            tensor.dims.begin(), tensor.dims.end(), [](int64_t d) { return d == 1; });
     };
 
     // Find the first non-degenerate tensor to use as the layout reference.
@@ -174,7 +175,7 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
         // Non-degenerate tensors must have the same layout as reference
         if(tensors[i].strideOrder != referenceStrideOrder)
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "All tensors for batchnorm must have the same layout.");
         }
@@ -195,7 +196,7 @@ void validateDataTypeIsSupported(
             return;
         }
     }
-    throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, errorMessage);
+    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, errorMessage);
 }
 
 void validateConsistentDataTypes(
@@ -220,8 +221,8 @@ void validateConsistentDataTypes(
         const auto& tensor = miopen_utils::findTensorAttributes(tensorMap, tensorIds[i]);
         if(tensor.data_type() != referenceType)
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       consistencyErrorMessage);
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           consistencyErrorMessage);
         }
     }
 }
@@ -237,8 +238,8 @@ void validateFixedDataType(
         const auto& tensor = miopen_utils::findTensorAttributes(tensorMap, tensorId);
         if(tensor.data_type() != expectedType)
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       errorMessage);
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           errorMessage);
         }
     }
 }
@@ -257,8 +258,8 @@ void validateConsistentShapes(
         const std::vector<int64_t> dims(tensorAttr.dims()->begin(), tensorAttr.dims()->end());
         if(dims != referenceShape)
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       errorMessage);
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           errorMessage);
         }
     }
 }
@@ -267,7 +268,7 @@ void validateSpatialDimensions(const std::vector<int64_t>& ioDims)
 {
     if(ioDims.size() < 3)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "IO tensor must have at least 3 dimensions for batchnorm.");
     }
@@ -277,7 +278,7 @@ void validateSpatialDimensions(const std::vector<int64_t>& ioDims)
 
     if(ioDims[0] * spatialSize <= 1)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "The product of the batch size and spatial dimensions must be greater than 1 for "
             "batchnorm.");
@@ -358,7 +359,7 @@ void checkTensorShapesSupported(
 {
     if(ioTensorIds.empty())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "At least one IO tensor must be provided for batchnorm.");
     }
@@ -526,13 +527,13 @@ void checkBatchnormActivationModeSupported(
         {
             return;
         }
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm fused activation does not support Leaky ReLU.");
     }
 
-    throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                               "Unsupported activation mode for batchnorm fusion.");
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion.");
 }
 
 } // namespace

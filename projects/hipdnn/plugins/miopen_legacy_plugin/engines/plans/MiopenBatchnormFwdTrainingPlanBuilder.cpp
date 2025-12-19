@@ -3,8 +3,8 @@
 
 #include <string>
 
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -18,13 +18,34 @@ namespace miopen_legacy_plugin
 namespace
 {
 
+bool isNodeActivFwd(const hipdnn_sdk::data_objects::PointwiseAttributes& attr)
+{
+    using PointwiseMode = hipdnn_sdk::data_objects::PointwiseMode;
+
+    // Check if operation is supported for batchnorm fusion
+    switch(attr.operation())
+    {
+    case PointwiseMode::RELU_FWD:
+        break; // Continue to parameter validation
+    default:
+        return false;
+    }
+
+    // MIOpen batchnorm fusion supports:
+    // - Standard ReLU (no parameters)
+    // - Clipped ReLU (relu_upper_clip only)
+    // - CLAMP (relu_lower_clip + relu_upper_clip)
+    // But does NOT support Leaky ReLU (relu_lower_clip_slope)
+    return !attr.relu_lower_clip_slope();
+}
+
 const hipdnn_sdk::data_objects::BatchnormAttributes&
-    checkBatchnormNode(const hipdnn_plugin::INodeWrapper& node)
+    checkBatchnormNode(const hipdnn_plugin_sdk::INodeWrapper& node)
 {
     if(node.attributesType() != hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes)
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "First node must be batchnorm");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "First node must be batchnorm");
     }
 
     const auto& bnAttr = node.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
@@ -36,7 +57,7 @@ const hipdnn_sdk::data_objects::BatchnormAttributes&
        || bnAttr.next_running_mean_tensor_uid().has_value()
        || bnAttr.next_running_variance_tensor_uid().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm fwd training plan builder does not support running statistics - MIOpen API "
             "update required");
@@ -46,21 +67,27 @@ const hipdnn_sdk::data_objects::BatchnormAttributes&
 }
 
 const hipdnn_sdk::data_objects::PointwiseAttributes&
-    checkActivationNode(const hipdnn_plugin::INodeWrapper& node,
+    checkActivationNode(const hipdnn_plugin_sdk::INodeWrapper& node,
                         const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr)
 {
     if(node.attributesType() != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "Second node must be pointwise");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Second node must be pointwise");
     }
 
     const auto& activAttr = node.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 
+    if(!isNodeActivFwd(activAttr))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion");
+    }
+
     if(activAttr.in_0_tensor_uid() != bnAttr.y_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "Activation input must match batchnorm output");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation input must match batchnorm output");
     }
 
     return activAttr;
@@ -80,7 +107,7 @@ void checkRunningStatisticsTensorVirtuality(
             tensorMap, bnAttr.prev_running_mean_tensor_uid().value());
         if(bnTensorAttrPrevRunningMean.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm prev_running_mean tensor must be non-virtual");
         }
@@ -92,7 +119,7 @@ void checkRunningStatisticsTensorVirtuality(
             tensorMap, bnAttr.prev_running_variance_tensor_uid().value());
         if(bnTensorAttrPrevRunningVar.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm prev_running_variance tensor must be non-virtual");
         }
@@ -104,7 +131,7 @@ void checkRunningStatisticsTensorVirtuality(
             tensorMap, bnAttr.next_running_mean_tensor_uid().value());
         if(bnTensorAttrNextRunningMean.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm next_running_mean tensor must be non-virtual");
         }
@@ -116,7 +143,7 @@ void checkRunningStatisticsTensorVirtuality(
             tensorMap, bnAttr.next_running_variance_tensor_uid().value());
         if(bnTensorAttrNextRunningVar.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm next_running_variance tensor must be non-virtual");
         }
@@ -139,7 +166,7 @@ void checkTensorVirtuality1Node(
     if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
        || bnTensorY.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm training tensors must be non-virtual for 1-node graph");
     }
@@ -151,8 +178,8 @@ void checkTensorVirtuality1Node(
             = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
         if(bnTensorMean.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Batchnorm mean tensor must be non-virtual");
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
         }
     }
 
@@ -162,7 +189,7 @@ void checkTensorVirtuality1Node(
             tensorMap, bnAttr.inv_variance_tensor_uid().value());
         if(bnTensorInvVar.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm inv_variance tensor must be non-virtual");
         }
@@ -189,7 +216,7 @@ void checkTensorVirtuality2Node(
     if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
        || !bnTensorY.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm training input tensors must be non-virtual, output tensor must be virtual");
     }
@@ -201,8 +228,8 @@ void checkTensorVirtuality2Node(
             = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
         if(bnTensorMean.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Batchnorm mean tensor must be non-virtual");
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
         }
     }
 
@@ -212,7 +239,7 @@ void checkTensorVirtuality2Node(
             tensorMap, bnAttr.inv_variance_tensor_uid().value());
         if(bnTensorInvVar.virtual_())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Batchnorm inv_variance tensor must be non-virtual");
         }
@@ -229,7 +256,7 @@ void checkTensorVirtuality2Node(
 
     if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation input from batchnorm must be virtual, output must be non virtual");
     }
@@ -239,7 +266,7 @@ void checkTensorVirtuality2Node(
 
 bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin::IGraph& opGraph) const
+    const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
     {
@@ -291,7 +318,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");
         return true;
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -300,7 +327,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
 
 size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
@@ -308,7 +335,7 @@ size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
 
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin::IGraph& opGraph,
+    const hipdnn_plugin_sdk::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
@@ -335,7 +362,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     }
     else
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm fwd training plan builder supports only 1 or 2 node graphs");
     }

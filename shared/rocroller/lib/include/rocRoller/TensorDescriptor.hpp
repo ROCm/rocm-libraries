@@ -89,11 +89,6 @@ namespace rocRoller
         /**
          *  Allow directly specifying total number of elements instead of sizes
          */
-        TensorDescriptor(DataType                      t,
-                         size_t                        totalLogicalElements,
-                         std::initializer_list<size_t> strides,
-                         size_t                        offset = 0);
-
         TensorDescriptor(DataType t, std::initializer_list<size_t> sizes, size_t offset = 0);
 
         TensorDescriptor(DataType t, std::vector<size_t> sizes, size_t offset = 0);
