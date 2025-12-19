@@ -239,11 +239,11 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
             Log::info("test setup placing before {}", firstDownstreamNode, assign);
             insertBefore(graph, firstDownstreamNode, assign, assign);
         }
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
+
         graph = transform<HoistLoopInvariant>(graph);
 
-        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, tracer) == 1);
-        const auto newTracer = ControlFlowRWTracer(graph);
-        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, newTracer) == 0);
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 0);
 
         int newAssign;
         {
@@ -305,10 +305,13 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
             insertBefore(graph, firstDownstreamNode, assign, assign);
         }
 
-        CHECK(countCoordinateWritesInLoop(graph, kLoop, forLoopCoordinate, tracer) >= 1);
-        graph                = transform<HoistLoopInvariant>(graph);
-        const auto newTracer = ControlFlowRWTracer(graph);
-        CHECK(countCoordinateWritesInLoop(graph, kLoop, forLoopCoordinate, newTracer) >= 1);
+        CHECK(
+            countCoordinateWritesInLoop(graph, kLoop, forLoopCoordinate, ControlFlowRWTracer(graph))
+            >= 1);
+        graph = transform<HoistLoopInvariant>(graph);
+        CHECK(
+            countCoordinateWritesInLoop(graph, kLoop, forLoopCoordinate, ControlFlowRWTracer(graph))
+            >= 1);
 
         {
             const auto loopStack   = controlStack(kLoop, graph);
