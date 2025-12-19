@@ -4775,11 +4775,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.startVgprIdentityMatrix = vgprIdx
       vgprIdx+=2
       
-    # TODO: Serial is always the first/last register in the pool so the store
-    # code doesn't have to deal with fragmentation
-    self.states.startVgprSerial = vgprIdx
-    vgprIdx += 1 # for vgpr serial id
-
     if kernel["UseDirect32XEmulation"]:
       numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
       if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
@@ -4791,7 +4786,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.startVgprCvt = vgprIdx
         vgprIdx += numVgprsEmu # for vgpr 32XEmulation
 
-
+    # TODO: Serial is always the first/last register in the pool so the store
+    # code doesn't have to deal with fragmentation
+    self.states.startVgprSerial = vgprIdx
+    vgprIdx += 1 # for vgpr serial id
 
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
