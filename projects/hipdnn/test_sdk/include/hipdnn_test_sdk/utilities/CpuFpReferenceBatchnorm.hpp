@@ -22,13 +22,13 @@ public:
               class MeanVarianceDataType,
               class YDataType,
               class ComputeDataType = MeanVarianceDataType>
-    static void
-        fwdInference(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
-                     const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
-                     const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
-                     const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
-                     const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
-                     hipdnn_data_sdk::utilities::TensorBase<YDataType>& y)
+    static void fwdInference(
+        const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
+        hipdnn_data_sdk::utilities::TensorBase<YDataType>& y)
     {
         if(x.dims().size() < 2)
         {
@@ -49,13 +49,13 @@ public:
             ComputeDataType elemStd = inVal - mean;
             ComputeDataType inhat = elemStd * invVarianceValue;
 
-            y.setHostValue(
-                hipdnn_data_sdk::utilities::staticCast<YDataType>(
-                    (hipdnn_data_sdk::utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx))
-                     * inhat)
-                    + hipdnn_data_sdk::utilities::staticCast<ComputeDataType>(
-                        bias.getHostValue(0, cidx))),
-                indices);
+            y.setHostValue(hipdnn_data_sdk::utilities::staticCast<YDataType>(
+                               (hipdnn_data_sdk::utilities::staticCast<ComputeDataType>(
+                                    scale.getHostValue(0, cidx))
+                                * inhat)
+                               + hipdnn_data_sdk::utilities::staticCast<ComputeDataType>(
+                                   bias.getHostValue(0, cidx))),
+                           indices);
         };
 
         // Iterate all indices in parallel
@@ -79,7 +79,8 @@ public:
         double momentum,
         hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance = nullptr,
-        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningMean = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningMean
+        = nullptr,
         const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningVariance
         = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningMean = nullptr,
@@ -147,7 +148,9 @@ public:
             if(mean != nullptr)
             {
                 mean->setHostValue(
-                    hipdnn_data_sdk::utilities::staticCast<MeanVarianceDataType>(channelMean), 0, cidx);
+                    hipdnn_data_sdk::utilities::staticCast<MeanVarianceDataType>(channelMean),
+                    0,
+                    cidx);
             }
 
             if(invVariance != nullptr)
@@ -217,17 +220,17 @@ public:
               class MeanVarianceDataType = ScaleBiasDataType,
               class DxDataType = XDataType,
               class ComputeDataType = MeanVarianceDataType>
-    static void backward(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
-                         const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
-                         const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
-                         hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
-                         hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
-                         hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
-                         const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean
-                         = nullptr,
-                         const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance
-                         = nullptr,
-                         double epsilon = 1e-5)
+    static void
+        backward(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
+                 const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                 const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+                 hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
+                 hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
+                 hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
+                 const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean = nullptr,
+                 const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance
+                 = nullptr,
+                 double epsilon = 1e-5)
     {
         if(x.dims().size() < 2)
         {
@@ -289,8 +292,8 @@ public:
                     invVariance->getHostValue(0, cidx));
             }
 
-            auto channelScale
-                = hipdnn_data_sdk::utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx));
+            auto channelScale = hipdnn_data_sdk::utilities::staticCast<ComputeDataType>(
+                scale.getHostValue(0, cidx));
 
             // Calculate dot product for (x - mean) * channelInvVariance * dy and ∑ dy for this channel
             auto dotProduct = hipdnn_data_sdk::utilities::staticCast<ComputeDataType>(0.0);
@@ -362,14 +365,15 @@ public:
               class MeanVarianceDataType = ScaleBiasDataType,
               class DxDataType = XDataType,
               class ComputeDataType = MeanVarianceDataType>
-    static void backward(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
-                         const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
-                         const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& mean,
-                         const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
-                         const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
-                         hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
-                         hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
-                         hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias)
+    static void
+        backward(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
+                 const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                 const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& mean,
+                 const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
+                 const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+                 hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
+                 hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
+                 hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias)
     {
         backward<DyDataType,
                  XDataType,

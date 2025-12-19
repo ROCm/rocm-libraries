@@ -4,12 +4,12 @@
 
 #include "GraphAttributes.hpp"
 #include <flatbuffers/flatbuffers.h>
-#include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -213,8 +213,8 @@ public:
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto result = std::visit(
-            [&](auto&& arg)
-                -> std::pair<hipdnn_data_sdk::data_objects::TensorValue, flatbuffers::Offset<void>> {
+            [&](auto&& arg) -> std::pair<hipdnn_data_sdk::data_objects::TensorValue,
+                                         flatbuffers::Offset<void>> {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr(std::is_same_v<T, float>)
                 {
@@ -261,14 +261,14 @@ public:
             _value);
 
         return hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                      _uid,
-                                                                      _name.c_str(),
-                                                                      toSdkType(_dataType),
-                                                                      &_stride,
-                                                                      &_dim,
-                                                                      _isVirtual,
-                                                                      result.first,
-                                                                      result.second);
+                                                                           _uid,
+                                                                           _name.c_str(),
+                                                                           toSdkType(_dataType),
+                                                                           &_stride,
+                                                                           &_dim,
+                                                                           _isVirtual,
+                                                                           result.first,
+                                                                           result.second);
     }
 
 private:

@@ -92,7 +92,8 @@ template <typename Factory = spdlog::synchronous_factory>
 inline std::shared_ptr<spdlog::logger> createCallbackLoggerMt(hipdnnCallback_t callback,
                                                               const std::string& source)
 {
-    auto logger = Factory::template create<hipdnn_data_sdk::logging::CallbackSinkMt>(source, callback);
+    auto logger
+        = Factory::template create<hipdnn_data_sdk::logging::CallbackSinkMt>(source, callback);
     logger->set_pattern(generatePatternString(source));
     return logger;
 }

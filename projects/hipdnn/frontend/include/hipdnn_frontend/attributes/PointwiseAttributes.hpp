@@ -4,8 +4,8 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
 #include <unordered_map>

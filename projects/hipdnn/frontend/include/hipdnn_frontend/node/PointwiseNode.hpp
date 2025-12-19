@@ -3,12 +3,12 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -172,7 +172,7 @@ private:
                     const auto& inputDims = inputTensor->get_dim();
 
                     if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(inputDims,
-                                                                                outputDims))
+                                                                                     outputDims))
                     {
                         return {ErrorCode::INVALID_VALUE,
                                 "PointwiseNode input '" + inputTensor->get_name()

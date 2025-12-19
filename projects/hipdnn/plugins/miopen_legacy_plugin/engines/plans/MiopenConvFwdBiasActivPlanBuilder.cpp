@@ -4,8 +4,8 @@
 #include <string>
 #include <tuple>
 
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
@@ -85,7 +85,8 @@ std::tuple<const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes&,
                     hipdnn_data_sdk::data_objects::toString(secondNodeWrapper.attributesType())));
     }
     const auto& secondNodeAttr
-        = opGraph.getNodeWrapper(1).attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+        = opGraph.getNodeWrapper(1)
+              .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
     if(isNodeActivFwd(secondNodeAttr))
     {
@@ -137,7 +138,8 @@ std::tuple<const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes&,
                     hipdnn_data_sdk::data_objects::toString(thirdNodeWrapper.attributesType())));
     }
     const auto& thirdNodeAttr
-        = opGraph.getNodeWrapper(2).attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+        = opGraph.getNodeWrapper(2)
+              .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
     if(!isNodeActivFwd(thirdNodeAttr))
     {
@@ -170,7 +172,8 @@ void nodeAttrsCheckTensors(
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     using DataType = hipdnn_data_sdk::data_objects::DataType;
 
@@ -310,7 +313,8 @@ bool nodeAttrsCheckTensorsLogErrors(
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     try
     {
@@ -328,13 +332,15 @@ void checkComputeTypes(
     const hipdnn_plugin_sdk::IGraph& graph,
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     uint32_t convAttrIdx = 0;
     uint32_t biasAttrIdx = 1;
     uint32_t activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
 
-    if(graph.getNode(convAttrIdx).compute_data_type() != hipdnn_data_sdk::data_objects::DataType::FLOAT)
+    if(graph.getNode(convAttrIdx).compute_data_type()
+       != hipdnn_data_sdk::data_objects::DataType::FLOAT)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Convolution node compute data type must be float");
@@ -354,7 +360,8 @@ void checkComputeTypes(
         }
     }
 
-    if(graph.getNode(activAttrIdx).compute_data_type() != hipdnn_data_sdk::data_objects::DataType::FLOAT)
+    if(graph.getNode(activAttrIdx).compute_data_type()
+       != hipdnn_data_sdk::data_objects::DataType::FLOAT)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation node compute data type must be float");
@@ -365,7 +372,8 @@ bool checkComputeTypesLogErrors(
     const hipdnn_plugin_sdk::IGraph& graph,
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     try
     {

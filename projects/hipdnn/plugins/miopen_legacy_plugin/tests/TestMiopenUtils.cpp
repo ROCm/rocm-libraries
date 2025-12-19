@@ -3,9 +3,9 @@
 
 #include "MiopenUtils.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 using namespace miopen_legacy_plugin;
 using namespace miopen_utils;
@@ -61,8 +61,9 @@ TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
     auto attrPtr2 = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
         builder2.GetBufferPointer());
 
-    auto attrMap = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{
-        {1, attrPtr1}, {2, attrPtr2}};
+    auto attrMap
+        = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{
+            {1, attrPtr1}, {2, attrPtr2}};
 
     EXPECT_EQ(miopen_utils::findTensorAttributes(attrMap, 1).uid(), 1);
     EXPECT_EQ(miopen_utils::findTensorAttributes(attrMap, 2).uid(), 2);
@@ -70,7 +71,8 @@ TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
 
 TEST(TestMiopenUtils, FindTensorAttributesThrowsIfNotFound)
 {
-    auto attrMap = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{};
+    auto attrMap
+        = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{};
 
     EXPECT_THROW(miopen_utils::findTensorAttributes(attrMap, 1),
                  hipdnn_plugin_sdk::HipdnnPluginException);

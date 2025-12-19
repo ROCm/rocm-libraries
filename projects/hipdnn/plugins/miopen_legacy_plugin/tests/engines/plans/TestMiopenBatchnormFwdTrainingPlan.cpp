@@ -77,7 +77,8 @@ TEST(TestBatchnormFwdTrainingParams, ThrowsWhenRunningStatsProvided)
 {
     // Create graph with running stats (should be rejected by defensive check)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
@@ -165,14 +166,14 @@ TEST(TestBatchnormFwdTrainingParams, ThrowsWhenRunningStatsProvided)
         bnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());

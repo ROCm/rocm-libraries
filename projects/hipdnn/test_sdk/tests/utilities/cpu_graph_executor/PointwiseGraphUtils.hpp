@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
@@ -138,7 +138,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     int64_t uid = 1;
 
     // Create input tensor attributes
-    auto input1Strides = hipdnn_data_sdk::utilities::generateStrides(input1Dims, layout.strideOrder);
+    auto input1Strides
+        = hipdnn_data_sdk::utilities::generateStrides(input1Dims, layout.strideOrder);
     const auto& input1DimsCopy = input1Dims;
     auto input1Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input1", hipdnn_frontend::fromSdkType(input0DataType), input1DimsCopy, input1Strides);
@@ -146,7 +147,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto input1TensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input1Attr));
 
-    auto input2Strides = hipdnn_data_sdk::utilities::generateStrides(input2Dims, layout.strideOrder);
+    auto input2Strides
+        = hipdnn_data_sdk::utilities::generateStrides(input2Dims, layout.strideOrder);
     const auto& input2DimsCopy = input2Dims;
     auto input2Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input2", hipdnn_frontend::fromSdkType(input1DataType), input2DimsCopy, input2Strides);

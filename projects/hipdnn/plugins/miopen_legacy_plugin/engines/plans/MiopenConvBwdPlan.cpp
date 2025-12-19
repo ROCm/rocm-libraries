@@ -3,10 +3,10 @@
 
 #include <array>
 
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvBwdPlan.hpp"
@@ -17,7 +17,8 @@ namespace miopen_legacy_plugin
 
 ConvBwdParams::ConvBwdParams(
     const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.dx_tensor_uid())))
     , _dx(miopen_utils::createTensor(tensorMap, attributes.dx_tensor_uid()))
@@ -28,8 +29,10 @@ ConvBwdParams::ConvBwdParams(
     const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
     const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
 
-    const auto inputDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrDX.dims());
-    const auto weightDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+    const auto inputDims
+        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrDX.dims());
+    const auto weightDims
+        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
     _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));

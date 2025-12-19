@@ -5,8 +5,8 @@
 #include <numeric>
 #include <unordered_set>
 
-#include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
@@ -119,7 +119,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectTwoNo
 {
     // Create a graph with 2 nodes but in wrong order
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Wrong order: activation -> batchnorm inference
@@ -139,14 +140,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectTwoNo
         0);
     nodes.push_back(node1);
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -160,7 +161,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectThree
 {
     // Create a graph with 3 nodes but in wrong order
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Wrong order: activation -> batchnorm inference -> batchnorm backward
@@ -188,14 +190,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectThree
         0);
     nodes.push_back(node2);
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -209,15 +211,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForTwoNodeFusionU
 {
     // Fusion graph with unsupported activation (e.g., MUL instead of RELU_FWD)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {6});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 6);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 6);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -244,14 +247,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForTwoNodeFusionU
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -263,15 +266,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeUnsup
 {
     // Fusion graph with unsupported activation (e.g., SIGMOID_BWD instead of RELU_BWD)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -317,14 +321,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeUnsup
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -336,15 +340,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
 {
     // Fusion graph where activation doesn't have in_1 tensor (required for backward)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -390,14 +395,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -496,26 +501,27 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForUnsupportedNodeType)
 {
     // Create a graph with a node of unsupported type
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Node with NONE attributes type
-    auto node
-        = hipdnn_data_sdk::data_objects::CreateNodeDirect(builder,
-                                                     "unsupported",
-                                                     hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                     hipdnn_data_sdk::data_objects::NodeAttributes::NONE,
-                                                     0);
+    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "unsupported",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::NONE,
+        0);
     nodes.push_back(node);
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -531,7 +537,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedInferenceAttri
 {
     // Create a graph with batchnorm inference node but malformed attributes
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Node with BatchnormInferenceAttributes type but null attributes pointer
@@ -543,14 +550,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedInferenceAttri
         0);
     nodes.push_back(node);
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -564,7 +571,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttrib
 {
     // Create a graph with batchnorm backward node but malformed attributes
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Node with BatchnormBackwardAttributes type but null attributes pointer
@@ -576,14 +584,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttrib
         0);
     nodes.push_back(node);
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -596,7 +604,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttrib
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGraphFirstNode)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {6});
 
@@ -627,14 +636,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -648,15 +657,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGraphSecondNode)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {6});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 6);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 6);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -671,14 +681,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         0)); //malformed!
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -693,7 +703,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
 {
     // Create a 3-node graph with malformed first node (batchnorm inference)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10, 11});
 
@@ -746,14 +757,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -767,15 +778,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphSeco
 {
     // Create a 3-node graph with malformed second node (pointwise)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Valid batchnorm inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inference",
@@ -811,14 +823,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphSeco
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -832,15 +844,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
 {
     // Create a 3-node graph with malformed third node (batchnorm backward)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Valid batchnorm inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inference",
@@ -876,14 +889,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
         0);
     nodes.push_back(node2);
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -898,15 +911,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
 {
     // Fusion graph where BN inference output doesn't connect to activation
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference with output uid=10
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -952,14 +966,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -972,15 +986,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
 {
     // Fusion graph where activation output doesn't connect to BN backward dy
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -1026,14 +1041,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -1045,15 +1060,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDi
 {
     // Fusion graph where BN backward uses different X than BN inference
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 13, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference with x=1
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -1099,14 +1115,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDi
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -1119,15 +1135,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
 {
     // Fusion graph where BN backward uses different scale than BN inference
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 13, {10, 11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference with scale=2
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -1173,14 +1190,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -1192,15 +1209,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOu
 {
     // Fusion graph where BN inference output tensor is non-virtual (should be virtual)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {11});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference with output uid=10 (which is non-virtual - wrong!)
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -1246,14 +1264,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOu
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -1265,15 +1283,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
 {
     // Fusion graph where activation output tensor is non-virtual (should be virtual)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 12, {10});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 10);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 10);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -1319,14 +1338,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -1338,15 +1357,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
        IsApplicableReturnsFalseForTwoNodeFusionWhenInfOutputNotMatchingActInput)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {6});
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 6);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 6);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -1372,14 +1392,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -1391,15 +1411,16 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
        IsApplicableReturnsFalseForTwoNodeFusionWhenInfOutputIsNonVirtual)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {}); //node 6 not virtual
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN inference
-    auto bnInfAttr
-        = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 6);
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 4, 5, 2, 3, 6);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -1425,14 +1446,14 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());

@@ -4,8 +4,8 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -188,15 +188,16 @@ public:
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        return hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributesDirect(builder,
-                                                                              get_x()->get_uid(),
-                                                                              get_w()->get_uid(),
-                                                                              get_y()->get_uid(),
-                                                                              &pre_padding,
-                                                                              &post_padding,
-                                                                              &stride,
-                                                                              &dilation,
-                                                                              toSdkType(math_mode));
+        return hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+            builder,
+            get_x()->get_uid(),
+            get_w()->get_uid(),
+            get_y()->get_uid(),
+            &pre_padding,
+            &post_padding,
+            &stride,
+            &dilation,
+            toSdkType(math_mode));
     }
 
 private:

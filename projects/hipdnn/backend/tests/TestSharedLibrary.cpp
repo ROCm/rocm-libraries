@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"

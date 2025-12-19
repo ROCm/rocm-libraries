@@ -3,12 +3,12 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -217,8 +217,8 @@ public:
             {
                 auto strideOrder
                     = hipdnn_data_sdk::utilities::strideOrderNhwc(tensorToInfer->get_dim().size());
-                tensorToInfer->set_stride(
-                    hipdnn_data_sdk::utilities::generateStrides(tensorToInfer->get_dim(), strideOrder));
+                tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                    tensorToInfer->get_dim(), strideOrder));
             }
         };
 

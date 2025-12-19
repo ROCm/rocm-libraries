@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <hipdnn_frontend.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 

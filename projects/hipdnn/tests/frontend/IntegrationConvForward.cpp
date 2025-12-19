@@ -9,10 +9,10 @@
 #include <random>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"

@@ -23,7 +23,8 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))

@@ -717,7 +717,8 @@ TEST(TestConvolutionNode, PackNode)
     EXPECT_EQ(packedAttributes->dilation()->Get(0), 1);
     EXPECT_EQ(packedAttributes->dilation()->Get(1), 1);
 
-    EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(packedAttributes->conv_mode(),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestConvolutionNode, GatherHipdnnTensor)

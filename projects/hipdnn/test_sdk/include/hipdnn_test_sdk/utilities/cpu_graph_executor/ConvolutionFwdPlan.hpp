@@ -128,17 +128,18 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        ConvolutionFwdParams params(
-            *tensorMap.at(nodeAttributes->x_tensor_uid()),
-            *tensorMap.at(nodeAttributes->w_tensor_uid()),
-            *tensorMap.at(nodeAttributes->y_tensor_uid()),
-            hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
-                nodeAttributes->pre_padding()),
-            hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
-                nodeAttributes->post_padding()),
-            hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(nodeAttributes->stride()),
-            hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
-            nodeAttributes->conv_mode());
+        ConvolutionFwdParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->w_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->pre_padding()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->post_padding()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->stride()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->dilation()),
+                                    nodeAttributes->conv_mode());
 
         return std::make_unique<
             ConvolutionFwdPlan<XDataType, WDataType, OutputDataType, ComputeDataType>>(

@@ -17,7 +17,10 @@ public:
     MOCK_METHOD(const hipdnn_data_sdk::data_objects::Node&, node, (), (const, override));
 
     MOCK_METHOD(const void*, attributes, (), (const, override));
-    MOCK_METHOD(hipdnn_data_sdk::data_objects::NodeAttributes, attributesType, (), (const, override));
+    MOCK_METHOD(hipdnn_data_sdk::data_objects::NodeAttributes,
+                attributesType,
+                (),
+                (const, override));
     MOCK_METHOD(const std::type_info&, attributesClassType, (), (const, override));
     MOCK_METHOD(std::string, name, (), (const, override));
     MOCK_METHOD(hipdnn_data_sdk::data_objects::DataType, computeDataType, (), (const, override));

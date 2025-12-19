@@ -4,9 +4,9 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
-#include <hipdnn_frontend.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_frontend.hpp>
 
 #include <algorithm>
 #include <iostream>

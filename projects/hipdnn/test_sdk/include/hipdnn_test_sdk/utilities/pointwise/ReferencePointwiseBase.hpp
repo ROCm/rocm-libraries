@@ -96,9 +96,10 @@ public:
 
 private:
     template <typename InputType, typename ComputeType>
-    static void executeUnaryOperation(hipdnn_data_sdk::data_objects::PointwiseMode operation,
-                                      hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
-                                      const hipdnn_data_sdk::utilities::TensorBase<InputType>& input)
+    static void
+        executeUnaryOperation(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                              hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                              const hipdnn_data_sdk::utilities::TensorBase<InputType>& input)
     {
         DeviceExecutor policy;
 
@@ -160,10 +161,11 @@ private:
     }
 
     template <typename Input1Type, typename Input2Type, typename ComputeType>
-    static void executeBinaryOperation(hipdnn_data_sdk::data_objects::PointwiseMode operation,
-                                       hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
-                                       const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
-                                       const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
+    static void
+        executeBinaryOperation(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                               hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                               const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                               const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
     {
         DeviceExecutor policy;
 
@@ -229,7 +231,8 @@ private:
         policy.markOutputModified(output);
     }
 
-    static bool canExecuteUnaryOperation(const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs)
+    static bool
+        canExecuteUnaryOperation(const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs)
     {
         return attrs->in_0_tensor_uid() != 0 && // Required: first input
                !attrs->in_1_tensor_uid() && // Must NOT be set

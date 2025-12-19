@@ -126,7 +126,8 @@ TEST(TestConvolutionDgradAttributes, PackAttributes)
     EXPECT_EQ(convAttributesFb->dilation()->Get(0), 1);
     EXPECT_EQ(convAttributesFb->dilation()->Get(1), 1);
 
-    EXPECT_EQ(convAttributesFb->conv_mode(), hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(convAttributesFb->conv_mode(),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestConvolutionDgradAttributes, DefaultValues)

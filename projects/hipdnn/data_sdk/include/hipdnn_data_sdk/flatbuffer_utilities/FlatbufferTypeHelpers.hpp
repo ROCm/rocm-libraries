@@ -71,7 +71,8 @@ template <>
 struct fmt::formatter<hipdnn_data_sdk::data_objects::PointwiseMode> : fmt::formatter<const char*>
 {
     template <typename FormatContext>
-    auto format(hipdnn_data_sdk::data_objects::PointwiseMode pointwiseMode, FormatContext& ctx) const
+    auto format(hipdnn_data_sdk::data_objects::PointwiseMode pointwiseMode,
+                FormatContext& ctx) const
     {
         return fmt::formatter<const char*>::format(
             hipdnn_data_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode), ctx);

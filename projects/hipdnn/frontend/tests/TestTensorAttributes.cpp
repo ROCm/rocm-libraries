@@ -3,8 +3,8 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;

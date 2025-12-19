@@ -148,7 +148,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_data_sdk::data_objects::PointwiseMode::ADD, biasRefTensor, convRefTensor, biasTensor);
+            hipdnn_data_sdk::data_objects::PointwiseMode::ADD,
+            biasRefTensor,
+            convRefTensor,
+            biasTensor);
 
         // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);

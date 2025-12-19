@@ -35,9 +35,11 @@ struct BatchnormTrainParams
         // Optional running mean/variance tensors
         const hipdnn_data_sdk::data_objects::TensorAttributes* momentumAttributes = nullptr,
         const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningMeanAttributes = nullptr,
-        const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningVarianceAttributes = nullptr,
+        const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningVarianceAttributes
+        = nullptr,
         const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningMeanAttributes = nullptr,
-        const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningVarianceAttributes = nullptr)
+        const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningVarianceAttributes
+        = nullptr)
         : xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , biasTensor(unpackTensorAttributes(biasAttributes))
@@ -110,8 +112,8 @@ public:
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
-        double epsilon
-            = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(_params.epsilonTensor, "Epsilon");
+        double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+            _params.epsilonTensor, "Epsilon");
 
         // Optional batch statistics tensors
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>> mean;
@@ -135,16 +137,20 @@ public:
         }
 
         // Optional momentum and running statistics tensors
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>> prevRunningMean;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
+            prevRunningMean;
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
             prevRunningVariance;
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>> nextRunningMean;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
+            nextRunningMean;
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
             nextRunningVariance;
         hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningMeanPtr = nullptr;
-        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningVariancePtr = nullptr;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningVariancePtr
+            = nullptr;
         hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningMeanPtr = nullptr;
-        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningVariancePtr = nullptr;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningVariancePtr
+            = nullptr;
 
         // Extract momentum from pass-by-value tensor if present (cast to double)
         double momentumValue = 0.1;

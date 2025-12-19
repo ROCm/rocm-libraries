@@ -24,7 +24,8 @@ hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
             + " not found in the provided device buffers.");
 }
 
-miopenDataType_t tensorDataTypeToMiopenDataType(const hipdnn_data_sdk::data_objects::DataType& dataType)
+miopenDataType_t
+    tensorDataTypeToMiopenDataType(const hipdnn_data_sdk::data_objects::DataType& dataType)
 {
     switch(dataType)
     {
@@ -43,7 +44,8 @@ miopenDataType_t tensorDataTypeToMiopenDataType(const hipdnn_data_sdk::data_obje
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     int64_t uid)
 {
     if(auto tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
@@ -57,7 +59,8 @@ const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
 }
 
 MiopenTensor createTensor(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     int64_t uid)
 {
     const auto& tensorAttr = findTensorAttributes(tensorMap, uid);
@@ -77,8 +80,8 @@ size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes&
     return attr.dims()->size() - 2;
 }
 
-ActivationParams
-    mapPointwiseModeToMiopenActivation(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs)
+ActivationParams mapPointwiseModeToMiopenActivation(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs)
 {
     using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
 

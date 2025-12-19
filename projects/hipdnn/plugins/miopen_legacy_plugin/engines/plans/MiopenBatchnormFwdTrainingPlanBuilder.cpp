@@ -3,8 +3,8 @@
 
 #include <string>
 
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -152,7 +152,8 @@ void checkRunningStatisticsTensorVirtuality(
 
 void checkTensorVirtuality1Node(
     const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     // Check for virtual tensors - 1-node case (solo batchnorm training)
     const auto& bnTensorX = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
@@ -202,7 +203,8 @@ void checkTensorVirtuality1Node(
 void checkTensorVirtuality2Node(
     const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     // Check for virtual tensors - 2-node case (batchnorm training + activation)
     const auto& bnTensorX = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
@@ -331,8 +333,9 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     if(opGraph.nodeCount() == 1)
     {
         // Solo batchnorm training
-        const auto& bnAttr = opGraph.getNodeWrapper(0)
-                                 .attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
+        const auto& bnAttr
+            = opGraph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
@@ -341,10 +344,12 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     else if(opGraph.nodeCount() == 2)
     {
         // Batchnorm training + activation fusion
-        const auto& bnAttr = opGraph.getNodeWrapper(0)
-                                 .attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
-        const auto& activAttr = opGraph.getNodeWrapper(1)
-                                    .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+        const auto& bnAttr
+            = opGraph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
+        const auto& activAttr
+            = opGraph.getNodeWrapper(1)
+                  .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));

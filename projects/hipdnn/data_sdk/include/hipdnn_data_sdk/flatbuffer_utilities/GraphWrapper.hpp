@@ -32,7 +32,8 @@ public:
     virtual const hipdnn_data_sdk::data_objects::Node& getNode(uint32_t index) const = 0;
     virtual const INodeWrapper& getNodeWrapper(uint32_t index) const = 0;
     virtual const std::vector<std::unique_ptr<INodeWrapper>>& nodeWrappers() const = 0;
-    virtual const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    virtual const std::unordered_map<int64_t,
+                                     const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const
         = 0;
 };

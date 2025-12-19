@@ -63,10 +63,10 @@ inline Error findCommonShape(const std::vector<std::vector<int64_t>>& inputShape
 template <class T,
           class HostAlloc = hipdnn_data_sdk::utilities::HostAllocator<T>,
           class DeviceAlloc = hipdnn_data_sdk::utilities::DeviceAllocator<T>>
-inline TensorAttributes
-    makeTensorAttributes(const std::string& name,
-                         DataType dataType,
-                         const hipdnn_data_sdk::utilities::Tensor<T, HostAlloc, DeviceAlloc>& tensor)
+inline TensorAttributes makeTensorAttributes(
+    const std::string& name,
+    DataType dataType,
+    const hipdnn_data_sdk::utilities::Tensor<T, HostAlloc, DeviceAlloc>& tensor)
 {
     return TensorAttributes()
         .set_name(name)

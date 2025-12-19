@@ -6,11 +6,11 @@
 #include <optional>
 #include <unordered_map>
 
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenTensor.hpp"
@@ -60,21 +60,24 @@ struct ActivationParams
     double gamma;
 };
 
-ActivationParams
-    mapPointwiseModeToMiopenActivation(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs);
+ActivationParams mapPointwiseModeToMiopenActivation(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs);
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                             uint32_t numDeviceBuffers);
 
-miopenDataType_t tensorDataTypeToMiopenDataType(const hipdnn_data_sdk::data_objects::DataType& dataType);
+miopenDataType_t
+    tensorDataTypeToMiopenDataType(const hipdnn_data_sdk::data_objects::DataType& dataType);
 
 const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     int64_t uid);
 
 MiopenTensor createTensor(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     int64_t uid);
 
 size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes& attr);

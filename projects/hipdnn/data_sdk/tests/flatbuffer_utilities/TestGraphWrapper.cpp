@@ -103,19 +103,20 @@ TEST(TestGraphWrapper, GetTensorMapReturnsCorrectTensors)
 
     std::vector<int64_t> strides = {1, 1, 1, 1};
     std::vector<int64_t> dims = {1, 1, 1, 1};
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                             "test",
-                                                             DataType::FLOAT,
-                                                             DataType::HALF,
-                                                             DataType::BFLOAT16,
-                                                             &tensorAttributes,
-                                                             &nodes);
+                                                                  "test",
+                                                                  DataType::FLOAT,
+                                                                  DataType::HALF,
+                                                                  DataType::BFLOAT16,
+                                                                  &tensorAttributes,
+                                                                  &nodes);
     builder.Finish(graph);
 
     auto serializedGraph = builder.Release();

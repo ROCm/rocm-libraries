@@ -23,11 +23,12 @@ struct BatchnormFwdInferenceSignatureKey
     hipdnn_data_sdk::data_objects::DataType computeDataType;
 
     BatchnormFwdInferenceSignatureKey() = default;
-    constexpr BatchnormFwdInferenceSignatureKey(hipdnn_data_sdk::data_objects::DataType x,
-                                                hipdnn_data_sdk::data_objects::DataType scaleBias,
-                                                hipdnn_data_sdk::data_objects::DataType meanVariance,
-                                                hipdnn_data_sdk::data_objects::DataType output,
-                                                hipdnn_data_sdk::data_objects::DataType compute)
+    constexpr BatchnormFwdInferenceSignatureKey(
+        hipdnn_data_sdk::data_objects::DataType x,
+        hipdnn_data_sdk::data_objects::DataType scaleBias,
+        hipdnn_data_sdk::data_objects::DataType meanVariance,
+        hipdnn_data_sdk::data_objects::DataType output,
+        hipdnn_data_sdk::data_objects::DataType compute)
         : xDataType(x)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)

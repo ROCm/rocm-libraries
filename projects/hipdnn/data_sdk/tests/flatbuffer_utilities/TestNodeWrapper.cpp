@@ -32,7 +32,8 @@ TEST(TestNodeWrapper, EnsureTheNodeIsWrappedCorrectly)
               hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
     EXPECT_EQ(wrapper.attributesClassType(),
               typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes));
-    EXPECT_NO_THROW(wrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>());
+    EXPECT_NO_THROW(
+        wrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>());
     EXPECT_THROW(wrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>(),
                  std::invalid_argument);
 }

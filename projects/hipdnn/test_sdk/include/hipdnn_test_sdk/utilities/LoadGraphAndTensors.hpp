@@ -5,12 +5,12 @@
 
 #include <filesystem>
 #include <fstream>
-#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
@@ -109,8 +109,8 @@ struct GraphAndTensorMap
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
                     auto tensorPtr = std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>(
-                        new hipdnn_data_sdk::utilities::Tensor<DataType>(outputTensorPtr->dims(),
-                                                                    outputTensorPtr->strides()));
+                        new hipdnn_data_sdk::utilities::Tensor<DataType>(
+                            outputTensorPtr->dims(), outputTensorPtr->strides()));
                     tensorPtr->fillTensorWithValue(0.f);
                     return tensorPtr;
                 },

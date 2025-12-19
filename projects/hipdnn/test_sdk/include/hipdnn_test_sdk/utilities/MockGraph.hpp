@@ -28,11 +28,11 @@ public:
                 getNodeWrapper,
                 (uint32_t index),
                 (const, override));
-    MOCK_METHOD(
-        (const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&),
-        getTensorMap,
-        (),
-        (const, override));
+    MOCK_METHOD((const std::unordered_map<int64_t,
+                                          const hipdnn_data_sdk::data_objects::TensorAttributes*>&),
+                getTensorMap,
+                (),
+                (const, override));
     MOCK_METHOD(const std::vector<std::unique_ptr<hipdnn_plugin_sdk::INodeWrapper>>&,
                 nodeWrappers,
                 (),

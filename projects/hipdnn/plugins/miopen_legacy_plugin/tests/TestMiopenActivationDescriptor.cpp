@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenActivationDescriptor.hpp"
@@ -154,8 +154,8 @@ TEST(TestMiopenActivationDescriptor, CreatesClamp)
 
 TEST(TestMiopenActivationDescriptor, CreatesSigmoidFwd)
 {
-    auto builder
-        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
+    auto builder = createPointwiseAttributesBuilder(
+        hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
@@ -173,8 +173,8 @@ TEST(TestMiopenActivationDescriptor, CreatesSigmoidFwd)
 
 TEST(TestMiopenActivationDescriptor, CreatesSigmoidBwd)
 {
-    auto builder
-        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_BWD);
+    auto builder = createPointwiseAttributesBuilder(
+        hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_BWD);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
@@ -277,8 +277,8 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithDefaultAlpha)
 
 TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwdWithoutBeta)
 {
-    auto builder
-        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD);
+    auto builder = createPointwiseAttributesBuilder(
+        hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
@@ -296,8 +296,8 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwdWithoutBeta)
 
 TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwdWithoutBeta)
 {
-    auto builder
-        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD);
+    auto builder = createPointwiseAttributesBuilder(
+        hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
@@ -316,13 +316,13 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwdWithoutBeta)
 TEST(TestMiopenActivationDescriptor, CreatesSoftplusWithBetaOne)
 {
     const float softplusBeta = 1.0f;
-    auto builder
-        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           softplusBeta);
+    auto builder = createPointwiseAttributesBuilder(
+        hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        softplusBeta);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
@@ -341,13 +341,13 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusWithBetaOne)
 TEST(TestMiopenActivationDescriptor, ThrowsOnSoftplusWithInvalidBeta)
 {
     const float softplusBeta = 2.0f;
-    auto builder
-        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           softplusBeta);
+    auto builder = createPointwiseAttributesBuilder(
+        hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        softplusBeta);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
@@ -357,7 +357,8 @@ TEST(TestMiopenActivationDescriptor, ThrowsOnSoftplusWithInvalidBeta)
 
 TEST(TestMiopenActivationDescriptor, CreatesAbs)
 {
-    auto builder = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::ABS);
+    auto builder
+        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::ABS);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
@@ -394,7 +395,8 @@ TEST(TestMiopenActivationDescriptor, CreatesIdentity)
 
 TEST(TestMiopenActivationDescriptor, ThrowsOnUnsupportedMode)
 {
-    auto builder = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::ADD);
+    auto builder
+        = createPointwiseAttributesBuilder(hipdnn_data_sdk::data_objects::PointwiseMode::ADD);
     const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 

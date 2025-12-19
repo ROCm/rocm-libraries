@@ -73,7 +73,8 @@ void initialize()
         // In spdlog, the formatting is a property of the underlying sink, not the logger.
         // However, we need one destination sink for thread safety because the mutex is attached to the sink.
         // Therefore, we implement a custom formatter to have distinct formatting for the backend, which does not use a callback sink.
-        backendLogger->set_formatter(std::make_unique<hipdnn_data_sdk::logging::ComponentFormatter>());
+        backendLogger->set_formatter(
+            std::make_unique<hipdnn_data_sdk::logging::ComponentFormatter>());
         spdlog::register_logger(backendLogger);
 
         auto callbackReceiverLogger = std::make_shared<spdlog::async_logger>(

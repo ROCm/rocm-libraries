@@ -5,8 +5,8 @@
 #include <limits>
 #include <string>
 
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
@@ -326,7 +326,8 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for convolution plan builder: "
-                + std::string(hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
+                + std::string(
+                    hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
 }
 

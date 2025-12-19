@@ -2,10 +2,10 @@
 /* SPDX-License-Identifier:  MIT */
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -529,17 +529,19 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               true,
               "CLAMP is supported"},
-        Param{
-            FusedOp::CBA,
-            validConvTestCase4d(),
-            TensorLayout::NCHW,
-            test_activation_common::ActivTestCase{
-                hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, std::nullopt, 1.0},
-            hipdnn_frontend::DataType::FLOAT,
-            {},
-            {TypeKey::Y_CONV, TypeKey::Y_BIAS},
-            false,
-            "Leaky RELU is NOT supported"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  std::nullopt,
+                  1.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Leaky RELU is NOT supported"},
         Param{FusedOp::CA,
               validConvTestCase4d(),
               TensorLayout::NCHW,
@@ -560,17 +562,19 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               true,
               "CLAMP is supported"},
-        Param{
-            FusedOp::CA,
-            validConvTestCase4d(),
-            TensorLayout::NCHW,
-            test_activation_common::ActivTestCase{
-                hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, std::nullopt, 1.0},
-            hipdnn_frontend::DataType::FLOAT,
-            {},
-            {TypeKey::Y_CONV, TypeKey::Y_BIAS},
-            false,
-            "Leaky RELU is NOT supported"},
+        Param{FusedOp::CA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  std::nullopt,
+                  1.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Leaky RELU is NOT supported"},
     };
 
     return params;

@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -116,7 +116,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 {
     // Create graph with batchnorm training node but null attributes
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Node with BatchnormAttributes type but null attributes pointer
@@ -146,14 +147,14 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -168,7 +169,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 {
     // Create graph with valid batchnorm but malformed activation
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
@@ -178,7 +180,13 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y_virtual", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
+        builder,
+        2,
+        "y_virtual",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        true));
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
@@ -211,19 +219,19 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     // Valid batchnorm training node
     auto bnormAttributes
         = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(builder,
-                                                              1,
-                                                              3,
-                                                              4,
-                                                              5,
-                                                              0,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              2,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt);
+                                                                   1,
+                                                                   3,
+                                                                   4,
+                                                                   5,
+                                                                   0,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_training",
@@ -239,14 +247,14 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         0));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -260,7 +268,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
 {
     // Create graph with nodes in wrong order (activation → batchnorm instead of batchnorm → activation)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Wrong order: activation first
@@ -297,19 +306,19 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
 
     auto bnormAttributes
         = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(builder,
-                                                              1,
-                                                              3,
-                                                              4,
-                                                              5,
-                                                              0,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              2,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt);
+                                                                   1,
+                                                                   3,
+                                                                   4,
+                                                                   5,
+                                                                   0,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn",
@@ -317,14 +326,14 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -339,7 +348,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 {
     // Create fusion graph where BN output tensor is non-virtual (should be virtual)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
@@ -350,7 +360,13 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
     // BN output NOT virtual (should be virtual for fusion)
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y_bn", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, false));
+        builder,
+        2,
+        "y_bn",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        false));
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
@@ -385,19 +401,19 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 
     auto bnormAttributes
         = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(builder,
-                                                              1,
-                                                              3,
-                                                              4,
-                                                              5,
-                                                              0,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              2,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt);
+                                                                   1,
+                                                                   3,
+                                                                   4,
+                                                                   5,
+                                                                   0,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn",
@@ -423,14 +439,14 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_data_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());

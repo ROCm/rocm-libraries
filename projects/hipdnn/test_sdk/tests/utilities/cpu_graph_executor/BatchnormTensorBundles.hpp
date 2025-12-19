@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
@@ -164,9 +164,11 @@ struct BatchnormTrainTensorBundle
 
     std::optional<hipdnn_data_sdk::utilities::Tensor<MeanVarianceDataType>> momentumTensor;
     std::optional<hipdnn_data_sdk::utilities::Tensor<MeanVarianceDataType>> prevRunningMeanTensor;
-    std::optional<hipdnn_data_sdk::utilities::Tensor<MeanVarianceDataType>> prevRunningVarianceTensor;
+    std::optional<hipdnn_data_sdk::utilities::Tensor<MeanVarianceDataType>>
+        prevRunningVarianceTensor;
     std::optional<hipdnn_data_sdk::utilities::Tensor<MeanVarianceDataType>> nextRunningMeanTensor;
-    std::optional<hipdnn_data_sdk::utilities::Tensor<MeanVarianceDataType>> nextRunningVarianceTensor;
+    std::optional<hipdnn_data_sdk::utilities::Tensor<MeanVarianceDataType>>
+        nextRunningVarianceTensor;
 };
 
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>

@@ -265,8 +265,9 @@ public:
                         {
                             auto yChannelIdx = (gIdx * yChannelsPerGroup) + k;
 
-                            auto gradOutputFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
-                                nIdx, yChannelIdx, ySpatialIndices);
+                            auto gradOutputFullIndices
+                                = hipdnn_data_sdk::utilities::buildTensorIndices(
+                                    nIdx, yChannelIdx, ySpatialIndices);
 
                             auto wBatchIdx = yChannelIdx;
                             auto wChannelIdx = cIdx;
@@ -284,8 +285,8 @@ public:
                 });
 
             int64_t xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
-            auto gradInputFullIndices
-                = hipdnn_data_sdk::utilities::buildTensorIndices(nIdx, xChannelIdx, xSpatialIndices);
+            auto gradInputFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
+                nIdx, xChannelIdx, xSpatialIndices);
 
             gradX.setHostValue(static_cast<DxDataType>(vAcc), gradInputFullIndices);
         };
@@ -385,8 +386,9 @@ public:
                         {
                             auto yChannelIdx = (gIdx * yChannelsPerGroup) + kIdx;
 
-                            auto gradOutputFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
-                                n, yChannelIdx, ySpatialIndices);
+                            auto gradOutputFullIndices
+                                = hipdnn_data_sdk::utilities::buildTensorIndices(
+                                    n, yChannelIdx, ySpatialIndices);
 
                             auto xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
 

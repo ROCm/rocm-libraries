@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 

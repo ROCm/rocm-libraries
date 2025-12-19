@@ -48,7 +48,8 @@ TEST(TestTypes, PointwiseModeConversion)
 
     EXPECT_EQ(toSdkType(PointwiseMode::RELU_FWD),
               hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
-    EXPECT_EQ(toSdkType(PointwiseMode::NOT_SET), hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
+    EXPECT_EQ(toSdkType(PointwiseMode::NOT_SET),
+              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
 }
 
 TEST(TestTypes, HeuristicModeConversion)

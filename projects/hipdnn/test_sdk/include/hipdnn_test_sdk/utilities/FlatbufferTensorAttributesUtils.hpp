@@ -21,7 +21,8 @@ inline hipdnn_data_sdk::data_objects::TensorAttributesT
 
 template <typename T>
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>>
-    createShallowTensor(const hipdnn_data_sdk::data_objects::TensorAttributesT& tensorDetails, void* ptr)
+    createShallowTensor(const hipdnn_data_sdk::data_objects::TensorAttributesT& tensorDetails,
+                        void* ptr)
 {
     return std::make_unique<hipdnn_data_sdk::utilities::ShallowTensor<T>>(
         ptr, tensorDetails.dims, tensorDetails.strides);
@@ -31,7 +32,8 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensorFromAttribute(const hipdnn_data_sdk::data_objects::TensorAttributes& attribute)
 {
     auto dims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
-    auto strides = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.strides());
+    auto strides
+        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.strides());
 
     return hipdnn_data_sdk::utilities::createTensor(attribute.data_type(), dims, strides);
 }

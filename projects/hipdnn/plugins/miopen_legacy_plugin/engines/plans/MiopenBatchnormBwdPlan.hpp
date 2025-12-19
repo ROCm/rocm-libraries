@@ -26,9 +26,11 @@ public:
             tensorMap);
 
     BatchnormBwdParams(
-        const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& batchnormBackwardAttributes,
+        const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes&
+            batchnormBackwardAttributes,
         const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes&
+            batchnormInferenceAttributes,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 

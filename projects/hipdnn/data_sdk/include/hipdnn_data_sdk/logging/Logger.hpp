@@ -61,8 +61,8 @@ inline void initializeCallbackLogging(const std::string& componentName,
             spdlog::init_thread_pool(8192, 1);
         }
 
-        auto callbackLogger
-            = hipdnn_data_sdk::logging::createAsyncCallbackLoggerMt(callbackFunction, componentName);
+        auto callbackLogger = hipdnn_data_sdk::logging::createAsyncCallbackLoggerMt(
+            callbackFunction, componentName);
         spdlog::register_logger(callbackLogger);
     }
     catch(const spdlog::spdlog_ex& ex)
