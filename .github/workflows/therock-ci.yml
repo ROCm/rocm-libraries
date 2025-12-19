@@ -86,7 +86,10 @@ jobs:
           AMDGPU_FAMILIES: "gfx94X, gfx950"
           # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
           ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+          # TODO(#2656): Migrate the organization variable to S3 file. Below code is a temporary resolution
+          # If it is a forked repo, we cannot access organization variables (so load in the file)
+          # Otherwise, we use the organization variable directly
+          LOAD_TEST_RUNNERS_FROM_VAR: ${{ github.event.pull_request.head.repo.full_name == 'ROCm/rocm-libraries' }}
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
@@ -97,7 +100,10 @@ jobs:
           AMDGPU_FAMILIES: "gfx1151"
           # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
           ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+          # TODO(#2656): Migrate the organization variable to S3 file. Below code is a temporary resolution
+          # If it is a forked repo, we cannot access organization variables (so load in the file)
+          # Otherwise, we use the organization variable directly
+          LOAD_TEST_RUNNERS_FROM_VAR: ${{ github.event.pull_request.head.repo.full_name == 'ROCm/rocm-libraries' }}
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
