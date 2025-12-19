@@ -347,7 +347,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  \ref hipsparseSpSM_analysis which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes
 *  the computation by calling \p hipsparseSpSM_solve_ex. The buffer size and analysis routines only need to be called once
 *  for a given sparse matrix \f$op(A)\f$ while the computation can be called repeatedly with different \f$B\f$ and \f$C\f$
-*  matrices. Once all calls to \p hipsparseSpSM_solve_ex are complete, the temporary buffer can be deallocated.
+*  matrices. After all calls to \p hipsparseSpSM_solve_ex are complete, the temporary buffer can be deallocated.
 *
 *  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
 *  row order and \f$C\f$ is column order and vice versa). When running on an AMD system with the rocSPARSE backend, the kernels
