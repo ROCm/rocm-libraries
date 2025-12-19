@@ -372,12 +372,6 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
-        // Collect input and output tensors
-        // std::unordered_set<std::shared_ptr<TensorAttributes>> inputTensors;
-        // std::unordered_set<std::shared_ptr<TensorAttributes>> outputTensors;
-        // gatherOutputTensors(outputTensors);
-        // gatherInputTensors(inputTensors, outputTensors);
-
         auto [inputTensors, remainingTensors] = getGraphInputTensorAttributesAndRemainder();
 
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors = inputTensors;
