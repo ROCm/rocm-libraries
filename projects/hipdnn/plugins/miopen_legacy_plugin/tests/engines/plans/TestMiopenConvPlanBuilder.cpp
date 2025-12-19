@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
@@ -12,6 +12,7 @@
 
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_plugin;
+using namespace hipdnn_test_sdk::utilities;
 
 class TestMiopenConvPlanBuilder : public ::testing::Test
 {
