@@ -98,8 +98,8 @@ int main(int argc, char* argv[])
   out_file.open(argv[1]);
 
   // Figure out how many devices are in the system.
-  int dev_count;
-  HIP_CHECK(hipGetDeviceCount(&dev_count));
+  int dev_count = 0;
+  hipGetDeviceCount(&dev_count);
 
   // There could be more than one device of each type.
   // Build a mapping of gfxID (string) to a vector of device IDs (unsigned ints).
