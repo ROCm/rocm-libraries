@@ -197,11 +197,13 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
     {
       result = __adjacent_difference::adjacent_difference(policy, first, last, result, binary_op);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static void
     seq(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt& result, BinaryOp binary_op)
     {
       result = thrust::adjacent_difference(cvt_to_seq(derived_cast(policy)), first, last, result, binary_op);
     }
+# endif
   };
 #  if __THRUST_HAS_HIPRT__
   workaround::par(policy, first, last, result, binary_op);

@@ -27,8 +27,6 @@ subtrees:
     title: Program with rocBLAS
   - file: how-to/logging-in-rocblas.rst
     title: Use logging with rocBLAS
-  - file: how-to/Contributors_Guide.rst
-    title: Contribute to rocBLAS
 
 - caption: Examples
   entries:
@@ -62,3 +60,5 @@ subtrees:
     title: References
   - file: reference/acknowledge.rst
     title: Acknowledgements
+  - file: contribute.rst
+    title: Contribute to rocBLAS

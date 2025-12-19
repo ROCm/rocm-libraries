@@ -6,7 +6,7 @@
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineConfigWrapper.hpp>
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 flatbuffers::FlatBufferBuilder buildValidEngineConfigBuffer(int64_t engineId)
 {
@@ -20,8 +20,8 @@ TEST(TestEngineConfigWrapper, InvalidBufferIsNotValid)
 {
     EngineConfigWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
-    EXPECT_THROW(wrapper.engineId(), HipdnnPluginException);
-    EXPECT_THROW(wrapper.getEngineConfig(), HipdnnPluginException);
+    EXPECT_THROW(wrapper.engineId(), std::invalid_argument);
+    EXPECT_THROW(wrapper.getEngineConfig(), std::invalid_argument);
 }
 
 TEST(TestEngineConfigWrapper, ValidBufferIsValid)
@@ -39,5 +39,5 @@ TEST(TestEngineConfigWrapper, CorruptedBufferIsNotValid)
     std::vector<uint8_t> buffer(16, 0xFF); // Not a valid flatbuffer
     EngineConfigWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_FALSE(wrapper.isValid());
-    EXPECT_THROW(wrapper.engineId(), HipdnnPluginException);
+    EXPECT_THROW(wrapper.engineId(), std::invalid_argument);
 }

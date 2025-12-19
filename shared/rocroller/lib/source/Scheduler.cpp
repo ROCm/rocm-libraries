@@ -249,6 +249,20 @@ namespace rocRoller
             if(m_locks.contains(dep))
                 return m_depToStream.at(dep) == streamId;
 
+            // If another stream holds a higher-ranked lock, the scheduler
+            // cannot schedule this lower-ranked lock from streamId until the
+            // higher-ranked lock is released by another stream.
+            auto depVal  = static_cast<int>(dep);
+            auto tempDep = static_cast<Dependency>(++depVal);
+            while(tempDep != Dependency::Count)
+            {
+                if(m_locks.contains(tempDep))
+                    return false;
+
+                depVal  = static_cast<int>(tempDep);
+                tempDep = static_cast<Dependency>(++depVal);
+            }
+
             // If the given stream tries to acquire a non-preemptible lock
             // and another stream currently holds a higher-ranked preemptible lock,
             // the scheduler cannot schedule this lower-ranked non-preemptible

@@ -157,8 +157,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //     return rocblaslt_status_invalid_size;
     // }
 
-    if(algo)
-        workspaceSizeInBytes = min(workspaceSizeInBytes, algo->max_workspace_bytes);
+    if(algo) {
+        workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
+    }
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,

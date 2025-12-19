@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spsm_coo_bad_arg(void)
+template <typename I, typename T>
+void testing_spsm_coo_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int64_t              m         = 100;
@@ -178,7 +179,7 @@ void testing_spsm_coo_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spsm_coo(Arguments argus)
+void testing_spsm_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     I                    m        = argus.M;
@@ -192,13 +193,13 @@ hipsparseStatus_t testing_spsm_coo(Arguments argus)
     hipsparseIndexBase_t idx_base = argus.baseA;
     hipsparseDiagType_t  diag     = argus.diag_type;
     hipsparseFillMode_t  uplo     = argus.fill_mode;
-    hipsparseSpSMAlg_t   alg      = static_cast<hipsparseSpSMAlg_t>(argus.spsm_alg);
+    hipsparseSpSMAlg_t   alg      = argus.spsm_alg;
     std::string          filename = argus.filename;
 
 #if(defined(CUDART_VERSION))
     if(orderB != orderC)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 #endif
 
@@ -222,13 +223,13 @@ hipsparseStatus_t testing_spsm_coo(Arguments argus)
     if(!generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     if(m != n)
     {
         // Skip non-square matrices
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     std::vector<I> hrow_ind(nnz);
@@ -451,8 +452,6 @@ hipsparseStatus_t testing_spsm_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPSM_COO_HPP

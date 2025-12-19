@@ -7,9 +7,8 @@
 #include <memory>
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 
-namespace hipdnn_plugin
+namespace hipdnn_plugin_sdk
 {
 
 class INodeWrapper
@@ -30,16 +29,13 @@ public:
     {
         if(attributesClassType() != typeid(T))
         {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "Node attributes are not of the expected type");
+            throw std::invalid_argument("Node attributes are not of the expected type");
         }
 
         auto* attr = attributes();
         if(attr == nullptr)
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Node attributes are null");
+            throw std::invalid_argument("Node attributes are null");
         }
 
         return *static_cast<const T*>(attr);
@@ -94,8 +90,7 @@ public:
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return typeid(hipdnn_sdk::data_objects::ConvolutionWrwAttributes);
         default:
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Node attributes type is not recognized");
+            throw std::invalid_argument("Node attributes type is not recognized");
         }
     }
 
@@ -115,8 +110,7 @@ private:
     {
         if(!isValid())
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Node is null");
+            throw std::invalid_argument("Node is null");
         }
     }
 

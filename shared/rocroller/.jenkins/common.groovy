@@ -36,7 +36,7 @@ def withSSH(platform, pipeline) {
 def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true, boolean staticAnalysis=false)
 {
     project.paths.construct_build_prefix()
-    String codeCovFlag = codeCoverage ? '-DROCROLLER_ENABLE_COVERAGE=ON -DROCROLLER_BUILD_SHARED_LIBS=OFF -DROCROLLER_ENABLE_LLD=ON' : ''
+    String codeCovFlag = codeCoverage ? '-DROCROLLER_ENABLE_COVERAGE=ON -DROCROLLER_BUILD_SHARED_LIBS=OFF' : ''
     String timerFlag = enableTimers ? '-DROCROLLER_ENABLE_TIMERS=ON' : ''
     String yamlBackendFlag = useYamlCpp ? '' : '-DROCROLLER_ENABLE_YAML_CPP=OFF'
     String useCppCheck = staticAnalysis ? '-DROCROLLER_ENABLE_CPPCHECK=ON' : ''
@@ -215,17 +215,17 @@ def runPerformanceCommand (platform, project)
         sshBlock ->
         def rrperfSuite = platform.jenkinsLabel.contains('gfx12') ? "all_gfx120X" : "all"
 
-        // either a label or a parameter can block comparison to master branch
-        def masterCompare = !(
-            pullRequest.labels.any { it == "ci:no-build-master" || it == "ci:no-build-target" }
-        )
-        if (masterCompare && (params?."Build target branch for comparison" != null))
-        {
-            masterCompare = params."Build target branch for comparison"
-        }
-
         if (env.CHANGE_ID)
         {
+            // either a label or a parameter can block comparison to master branch
+            def masterCompare = !(
+                pullRequest.labels.any { it == "ci:no-build-master" || it == "ci:no-build-target" }
+            )
+            if (masterCompare && (params?."Build target branch for comparison" != null))
+            {
+                masterCompare = params."Build target branch for comparison"
+            }
+
             String masterCompareCommand
             if (masterCompare)
             {
@@ -393,6 +393,13 @@ def runPerformanceCommand (platform, project)
         else
         {
             def ARCHIVE_LIMIT = "101"
+
+            // a parameter can block comparison to target branch
+            def masterCompare = false
+            if (params?."Build target branch for comparison" != null)
+            {
+                masterCompare = params."Build target branch for comparison"
+            }
 
             String masterCompareString = masterCompare ? "1" : "0"
 

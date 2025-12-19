@@ -100,13 +100,14 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
     {
       return result = __copy::device_to_device(system, first, last, result);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, InputIterator last, OutputIterator result)
     {
       return result = thrust::copy(cvt_to_seq(derived_cast(system)), first, last, result);
     }
+#  endif
   };
-
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(system, first, last, result);
 #  else
@@ -127,11 +128,13 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     {
       return result = __copy::device_to_device(system, first, thrust::next(first, n), result);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
     {
       return result = thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);
     }
+#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(system, first, n, result);

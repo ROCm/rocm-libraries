@@ -44,6 +44,11 @@ function(add_hipsparse_example EXAMPLE_SOURCE)
   # Linker dependencies
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::hipsparse)
 
+  # Link against stdc++fs for std::experimental::filesystem support
+  if(NOT WIN32)
+    target_link_libraries(${EXAMPLE_TARGET} PRIVATE stdc++fs)
+  endif()
+
   if(NOT USE_CUDA)
     target_link_libraries(${EXAMPLE_TARGET} PRIVATE hip::host)
   else()
@@ -98,9 +103,17 @@ if(NOT USE_CUDA)
   FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_C documentation_examples/*.c)
   FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_F90 documentation_examples/*.f90)
   
-  set(DOCUMENTATION_EXAMPLES ${DOCUMENTATION_EXAMPLES_CPP} ${DOCUMENTATION_EXAMPLES_C} ${DOCUMENTATION_EXAMPLES_F90})
-
-  foreach(file ${DOCUMENTATION_EXAMPLES})
+  foreach(file ${DOCUMENTATION_EXAMPLES_CPP})
       add_hipsparse_example(${file})
   endforeach()
+
+  foreach(file ${DOCUMENTATION_EXAMPLES_C})
+      add_hipsparse_example(${file})
+  endforeach()
+
+  if (NOT WIN32)
+    foreach(file ${DOCUMENTATION_EXAMPLES_F90})
+        add_hipsparse_example(${file})
+    endforeach()
+  endif()
 endif()

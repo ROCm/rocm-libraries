@@ -254,9 +254,8 @@ bsr_col_ind Array of ``nnzb`` elements containing the block column indices (inte
 bsr_dim     Dimension of each block (integer).
 =========== ==============================================================================================================================================
 
-The BSR matrix is expected to be sorted by column indices within each row.
-If :math:`m` or :math:`n` are not evenly divisible by the block dimension, then zeros are padded to the matrix,
-such that :math:`mb = (m + \text{bsr_dim} - 1) / \text{bsr_dim}` and :math:`nb = (n + \text{bsr_dim} - 1) / \text{bsr_dim}`.
+The BSR matrix is sorted by column indices within each row.
+This matrix is defined as having a number of rows equivalent to :math:`\text{block_dim} \times \text{number_of_row_blocks}`.
 Consider the following :math:`4 \times 3` matrix and the corresponding BSR structures,
 with :math:`\text{bsr_dim} = 2, mb = 2, nb = 2` and :math:`\text{nnzb} = 4` using zero-based indexing and column-major storage:
 
@@ -430,18 +429,20 @@ m           Number of rows (integer).
 n           Number of columns (integer).
 nnz         Number of non-zero elements of the COO part (integer).
 ell_width   Maximum number of non-zero elements per row of the ELL part (integer).
-ell_val     Array of ``m * ell_width`` elements containing the ELL-part data (floating point).
-ell_col_ind Array of ``m * ell_width`` elements containing the ELL-part column indices (integer).
-coo_val     Array of ``nnz`` elements containing the COO-part data (floating point).
-coo_row_ind Array of ``nnz`` elements containing the COO-part row indices (integer).
-coo_col_ind Array of ``nnz`` elements containing the COO-part column indices (integer).
+ell_val     Array of ``m * ell_width`` elements containing the data for the ELL part (floating point).
+ell_col_ind Array of ``m * ell_width`` elements containing the column indices for the ELL part (integer).
+coo_val     Array of ``nnz`` elements containing the data for the COO part (floating point).
+coo_row_ind Array of ``nnz`` elements containing the row indices for the COO part (integer).
+coo_col_ind Array of ``nnz`` elements containing the column indices for the COO part (integer).
 =========== =========================================================================================
 
 The HYB format is a combination of the ELL and COO sparse matrix formats.
-Typically, the regular part of the matrix is stored in ELL storage format and the irregular part
-of the matrix is stored in COO storage format. Three different partitioning schemes can be applied when
-converting a CSR matrix to a matrix in HYB storage format. For further details on the partitioning schemes,
-see :ref:`hipsparse_hyb_partition_`.
+Typically, the regular part of the matrix is stored in
+ELL storage format, and the irregular part of the matrix is stored
+in COO storage format. Three different partitioning schemes can
+be applied when converting a CSR matrix to a matrix in
+HYB storage format. For further details on the partitioning schemes,
+see :ref:`rocsparse_hyb_partition_`.
 
 .. _index_base:
 

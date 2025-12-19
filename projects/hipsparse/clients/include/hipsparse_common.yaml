@@ -129,6 +129,7 @@ Datatypes:
         HIPSPARSE_SPMV_CSR_ALG1: 2
         HIPSPARSE_SPMV_CSR_ALG2: 3
         HIPSPARSE_SPMV_COO_ALG2: 4
+        HIPSPARSE_SPMV_SELL_ALG1: 5
   - hipsparseSpSVAlg_t:
       bases: [c_int ]
       attr:
@@ -320,6 +321,7 @@ Arguments:
   - boosttol: c_double
   - boostval: c_double
   - boostvali: c_double
+  - slice_size: c_int
   - ell_width: c_int
   - permute: c_int
   - gtsv_alg: c_int
@@ -425,6 +427,7 @@ Defaults:
   boosttol: 0.0
   boostval: 1.0
   boostvali: 0.0
+  slice_size: 2
   ell_width: 0
   permute: 0
   gtsv_alg: 0

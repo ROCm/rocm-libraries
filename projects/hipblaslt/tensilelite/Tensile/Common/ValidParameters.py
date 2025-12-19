@@ -459,7 +459,8 @@ validParameters = { # we need to make sure this matches develop
     # StaggerUStride will be internally increased so it is an integer multiple of DepthU*BpeAB.
     # (the implementation requires this - the unroll iteration accesses data in steps of
     # DepthU*BPE
-    "StaggerUStride": [-1, 16, 32, 64, 128, 256, 512, 1024, 2048],
+    # StaggerUStride = 0 is valid only when StaggerU = 0
+    "StaggerUStride": [-1, 0, 16, 32, 64, 128, 256, 512, 1024, 2048],
     # How the tile assignment (wg0, wg1, wg2) controls the initial StaggerU offset:
     # 0: Use wg0
     # 1: Use wg1
@@ -857,7 +858,8 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1]
+    "UseCustomMainLoopSchedule" : [0, 1],
+    "AdaptiveGemm": [0, 1]
 }
 
 newMIValidParameters = {

@@ -42,19 +42,47 @@ inline std::string removeNewlines(const std::string& str)
     return result;
 }
 
+// Converts a vector of numbers to a string "[1, 2, 3...]".
+template <typename T>
+std::enable_if_t<std::is_arithmetic_v<T>, std::string> // Restrict template to numeric types
+    vecToString(const std::vector<T>& vec)
+{
+    std::string result = "[";
+    if(!vec.empty())
+    {
+        result += std::to_string(vec[0]);
+        for(size_t i = 1; i < vec.size(); ++i)
+        {
+            result += ", " + std::to_string(vec[i]);
+        }
+    }
+    return result + "]";
+}
+
+// Converts a vector of objects to an ostream "[A, B, C...]".
 template <typename T>
 inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
 {
-    if(vec.empty())
+    os << "[";
+    if(!vec.empty())
     {
-        os << "[]";
-        return;
+        os << vec[0];
+        for(size_t i = 1; i < vec.size(); ++i)
+        {
+            os << ", " << vec[i];
+        }
     }
 
-    os << "[";
-    std::copy(vec.begin(), vec.end() - 1, std::ostream_iterator<T>(os, ", "));
-    os << vec.back();
     os << "]";
 }
 
+// Converts a vector of objects to a string "[A, B, C...]".
+template <typename T>
+std::enable_if_t<!std::is_arithmetic_v<T>, std::string> vecToString(const std::vector<T>& vec)
+{
+    std::stringstream stream;
+    vecToStream(stream, vec);
+    return stream.str();
 }
+
+} // namespace hipdnn_sdk::utilities

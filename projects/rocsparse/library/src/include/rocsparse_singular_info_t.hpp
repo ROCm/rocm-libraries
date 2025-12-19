@@ -29,7 +29,6 @@
 
 namespace rocsparse
 {
-
     struct singular_info_t : rocsparse::position_t
     {
     protected:
@@ -44,15 +43,22 @@ namespace rocsparse
                                                    void*                  position,
                                                    hipStream_t            stream) const;
 
-        void create_singular_pivot_async(rocsparse_indextype indextype, hipStream_t stream);
+        rocsparse_status create_singular_pivot_async(int64_t             batch_count,
+                                                     rocsparse_indextype indextype,
+                                                     hipStream_t         stream);
 
-        const void* get_singular_pivot() const;
-        void*       get_singular_pivot();
-
+        const void*         get_singular_pivot() const;
+        void*               get_singular_pivot();
+        int64_t             get_singular_pivot_stride() const;
         rocsparse_indextype get_singular_pivot_indextype() const;
-        double              get_singular_tol() const;
-        void                set_singular_tol(double);
 
-        void copy_singular_info_async(const singular_info_t* that, hipStream_t stream);
+        rocsparse_status set_singular_pivot_batch_count(int64_t, hipStream_t stream);
+
+        int64_t get_singular_pivot_batch_count() const;
+
+        double get_singular_tol() const;
+        void   set_singular_tol(double);
+
+        rocsparse_status copy_singular_info_async(const singular_info_t* that, hipStream_t stream);
     };
 }

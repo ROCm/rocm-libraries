@@ -280,11 +280,13 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
     {
       return __copy_if::copy_if(policy, first, last, result, pred);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIterator seq(
       execution_policy<Derived>& policy, InputIterator first, InputIterator last, OutputIterator result, Predicate pred)
     {
       return thrust::copy_if(cvt_to_seq(derived_cast(policy)), first, last, result, pred);
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__
@@ -317,6 +319,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
     {
       return __copy_if::copy_if(policy, first, last, stencil, result, pred);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<Derived>& policy,
         InputIterator first,
@@ -327,6 +330,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
     {
       return thrust::copy_if(cvt_to_seq(derived_cast(policy)), first, last, stencil, result, pred);
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__

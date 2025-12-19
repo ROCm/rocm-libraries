@@ -119,10 +119,6 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
 
         for(auto& p : params)
         {
-            // callbacks are not currently supported for multi-proc transforms
-            if(p.run_callbacks && mp_lib == fft_params::fft_mp_lib_mpi)
-                continue;
-
             // start with all-ones in grids
             std::vector<unsigned int> input_grid(p.length.size() + 1, 1);
             std::vector<unsigned int> output_grid(p.length.size() + 1, 1);

@@ -3,6 +3,9 @@
 
 @PACKAGE_INIT@
 
+# Find required dependencies
+find_package(Threads REQUIRED)
+
 include(CMakeFindDependencyMacro)
 
 find_dependency(flatbuffers REQUIRED)

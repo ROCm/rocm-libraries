@@ -3,11 +3,12 @@
 
 #include "MiopenUtils.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 
 using namespace miopen_legacy_plugin;
+using namespace miopen_utils;
 
 TEST(TestMiopenUtils, FindDeviceBufferReturnsCorrectBuffer)
 {
@@ -25,7 +26,7 @@ TEST(TestMiopenUtils, FindDeviceBufferThrowsIfNotFound)
 
     EXPECT_THROW(
         miopen_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),
-        hipdnn_plugin::HipdnnPluginException);
+        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, TensorDataTypeToMiopenDataType)
@@ -42,7 +43,7 @@ TEST(TestMiopenUtils, TensorDataTypeToMiopenDataTypeThrowsOnUnsupported)
     // Use a value not in the enum
     EXPECT_THROW(miopen_utils::tensorDataTypeToMiopenDataType(
                      static_cast<hipdnn_sdk::data_objects::DataType>(-1)),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
@@ -72,7 +73,7 @@ TEST(TestMiopenUtils, FindTensorAttributesThrowsIfNotFound)
     auto attrMap = std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>{};
 
     EXPECT_THROW(miopen_utils::findTensorAttributes(attrMap, 1),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, GetSpatialDimCountReturnsCorrectValue)
@@ -102,7 +103,8 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
     auto attrPtr1 = flatbuffers::GetRoot<hipdnn_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(miopen_utils::getSpatialDimCount(*attrPtr1), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(miopen_utils::getSpatialDimCount(*attrPtr1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeStandardRelu)
@@ -114,10 +116,40 @@ TEST(TestMiopenUtils, MapPointwiseModeStandardRelu)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationRELU);
-    EXPECT_DOUBLE_EQ(result->alpha, 0.0);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationRELU);
+    EXPECT_DOUBLE_EQ(result.alpha, 0.0);
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipOnly)
+{
+    const float lowerClip = 0.1f;
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+        builder, hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip);
+    builder.Finish(attrOffset);
+    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+        builder.GetBufferPointer());
+
+    ASSERT_THROW(mapPointwiseModeToMiopenActivation(*attr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeReluZeroLowerClipOnly)
+{
+    const float lowerClip = 0.0f;
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+        builder, hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip);
+    builder.Finish(attrOffset);
+    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+        builder.GetBufferPointer());
+
+    ActivationParams result;
+    ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*attr));
+
+    EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(lowerClip));
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeClippedRelu)
@@ -133,10 +165,10 @@ TEST(TestMiopenUtils, MapPointwiseModeClippedRelu)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationCLIPPEDRELU);
-    EXPECT_DOUBLE_EQ(result->alpha, static_cast<double>(upperClip));
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationCLIPPEDRELU);
+    EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(upperClip));
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeLeakyRelu)
@@ -153,10 +185,10 @@ TEST(TestMiopenUtils, MapPointwiseModeLeakyRelu)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationLEAKYRELU);
-    EXPECT_DOUBLE_EQ(result->alpha, static_cast<double>(slope));
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationLEAKYRELU);
+    EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(slope));
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeClamp)
@@ -170,11 +202,11 @@ TEST(TestMiopenUtils, MapPointwiseModeClamp)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationCLAMP);
-    EXPECT_DOUBLE_EQ(result->alpha, static_cast<double>(lowerClip));
-    EXPECT_DOUBLE_EQ(result->beta, static_cast<double>(upperClip));
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationCLAMP);
+    EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(lowerClip));
+    EXPECT_DOUBLE_EQ(result.beta, static_cast<double>(upperClip));
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeSigmoid)
@@ -186,9 +218,9 @@ TEST(TestMiopenUtils, MapPointwiseModeSigmoid)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationLOGISTIC);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationLOGISTIC);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeTanh)
@@ -200,11 +232,11 @@ TEST(TestMiopenUtils, MapPointwiseModeTanh)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationTANH);
-    EXPECT_DOUBLE_EQ(result->alpha, 1.0);
-    EXPECT_DOUBLE_EQ(result->beta, 1.0);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationTANH);
+    EXPECT_DOUBLE_EQ(result.alpha, 1.0);
+    EXPECT_DOUBLE_EQ(result.beta, 1.0);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeEluWithCustomAlpha)
@@ -228,10 +260,10 @@ TEST(TestMiopenUtils, MapPointwiseModeEluWithCustomAlpha)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationELU);
-    EXPECT_DOUBLE_EQ(result->alpha, static_cast<double>(eluAlpha));
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationELU);
+    EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(eluAlpha));
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeEluWithDefaultAlpha)
@@ -243,10 +275,10 @@ TEST(TestMiopenUtils, MapPointwiseModeEluWithDefaultAlpha)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationELU);
-    EXPECT_DOUBLE_EQ(result->alpha, 1.0);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationELU);
+    EXPECT_DOUBLE_EQ(result.alpha, 1.0);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithoutBeta)
@@ -258,9 +290,9 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithoutBeta)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationSOFTRELU);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationSOFTRELU);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithBetaOne)
@@ -285,9 +317,9 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithBetaOne)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationSOFTRELU);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationSOFTRELU);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithInvalidBeta)
@@ -312,8 +344,8 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithInvalidBeta)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_THROW(miopen_utils::mapPointwiseModeToMiopenActivation(*attr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeAbs)
@@ -325,9 +357,9 @@ TEST(TestMiopenUtils, MapPointwiseModeAbs)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationABS);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationABS);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeIdentity)
@@ -339,9 +371,9 @@ TEST(TestMiopenUtils, MapPointwiseModeIdentity)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->mode, miopenActivationPASTHRU);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationPASTHRU);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
@@ -353,6 +385,6 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
     const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
-    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_THROW(miopen_utils::mapPointwiseModeToMiopenActivation(*attr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }

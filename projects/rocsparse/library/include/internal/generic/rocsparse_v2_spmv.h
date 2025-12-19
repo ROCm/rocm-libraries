@@ -246,11 +246,11 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  \details
  *  \p rocsparse_spmv_set_extra sets a gamma dnvec vector and z vectors
  *  appended to the spmv computation. The computation will be:
- *  $y = alpha * op(A) * x + beta * y + \sum_{i=1}^{n} \gamma_i z_i$
- *  where $n$ is the number of extra terms set by \p num_extras.
+ *  \f$y = \alpha * op(A) * x + \beta * y + \sum_{i=1}^{n} \gamma_i z_i\f$
+ *  where \f$n\f$ is the number of extra terms set by \p num_extras.
  * 
  *  This feature can be used to implement residual calculations of the form
- *  $r = b - A * x$ within the SpMV call by setting $\gamma = 1$ and $z = b$.
+ *  \f$r = b - A * x\f$ within the SpMV call by setting \f$\gamma = 1\f$ and \f$z = b\f$.
  *
  *  \par Datatype Requirements
  *  The following datatype requirements must be satisfied:
@@ -318,18 +318,6 @@ rocsparse_status rocsparse_spmv_clear_extra(rocsparse_handle     handle,
 
 #ifdef __cplusplus
 }
-#endif
-
-// Helper functions for accessing pre-extracted arrays (C++ functions)
-#ifdef __cplusplus
-bool rocsparse_spmv_has_device_arrays(void* spmv_descr_ptr);
-
-// Template functions for accessing pre-extracted arrays
-template <typename T>
-T* rocsparse_spmv_get_gamma_device_array(void* spmv_descr_ptr);
-
-template <typename Z>
-const Z** rocsparse_spmv_get_z_array(void* spmv_descr_ptr);
 #endif
 
 #endif

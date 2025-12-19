@@ -102,7 +102,7 @@ void testing_gemm_ex_bad_arg(const Arguments& arg)
         HOST_MEMCHECK(host_matrix<To>, hC, (M, N, ldc));
         rocblas_seedrand();
         rocblas_init_matrix(hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
-        dC.transfer_from(hC);
+        CHECK_HIP_ERROR(dC.transfer_from(hC));
 
         // clang-format off
 
