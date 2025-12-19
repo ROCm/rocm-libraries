@@ -49,14 +49,13 @@ std::vector<Pooling3dTestCase> GetPooling3dTestCases()
 
     // Dataset 0: Default dataset (various tensor sizes)
     // Based on original pooling3d.hpp input shapes
-    std::vector<std::vector<int>> dataset0_inputs = {
-        {16, 64, 3, 4, 4},
-        {16, 32, 4, 9, 9},
-        {8, 512, 3, 14, 14},
-        {8, 512, 4, 28, 28},
-        {16, 64, 56, 56, 56},
-        {4, 3, 4, 227, 227},
-        {4, 4, 4, 161, 700}};
+    std::vector<std::vector<int>> dataset0_inputs       = {{16, 64, 3, 4, 4},
+                                                     {16, 32, 4, 9, 9},
+                                                     {8, 512, 3, 14, 14},
+                                                     {8, 512, 4, 28, 28},
+                                                     {16, 64, 56, 56, 56},
+                                                     {4, 3, 4, 227, 227},
+                                                     {4, 4, 4, 161, 700}};
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2, 2}, {3, 3, 3}};
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2, 2}, {1, 1, 1}};
     std::vector<std::vector<int>> dataset0_pads         = {{0, 0, 0}, {1, 1, 1}};
@@ -92,10 +91,11 @@ std::vector<Pooling3dTestCase> GetPooling3dTestCases()
     }
 
     // Dataset 1: Minimal dataset (asymmetric configs, small tensors)
-    std::vector<std::vector<int>> dataset1_inputs       = {{1, 4, 4, 4, 4}};
-    std::vector<std::vector<int>> dataset1_lens         = {{2, 2, 2}, {1, 2, 2}, {2, 1, 2}, {2, 2, 1}};
-    std::vector<std::vector<int>> dataset1_strides       = {{1, 1, 1}, {2, 1, 1}, {1, 2, 1}, {1, 1, 2}, {2, 2, 2}};
-    std::vector<std::vector<int>> dataset1_pads          = {{0, 0, 0}};
+    std::vector<std::vector<int>> dataset1_inputs  = {{1, 4, 4, 4, 4}};
+    std::vector<std::vector<int>> dataset1_lens    = {{2, 2, 2}, {1, 2, 2}, {2, 1, 2}, {2, 2, 1}};
+    std::vector<std::vector<int>> dataset1_strides = {
+        {1, 1, 1}, {2, 1, 1}, {1, 2, 1}, {1, 1, 2}, {2, 2, 2}};
+    std::vector<std::vector<int>> dataset1_pads         = {{0, 0, 0}};
     std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint8, miopenIndexUint32};
 
     // Generate cartesian product for dataset 1
@@ -143,8 +143,8 @@ void RunPooling3dTestWithIndexType(const Pooling3dTestCase& test_case)
     filter.SetIndexType(test_case.index_type);
     filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(test_case.wsidx));
 
-    // Additional check: Skip if index_max is insufficient for output spatial dimensions (wsidx == 1)
-    // This check requires creating the filter and calculating output tensor, so it's done here
+    // Additional check: Skip if index_max is insufficient for output spatial dimensions (wsidx ==
+    // 1) This check requires creating the filter and calculating output tensor, so it's done here
     if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1)
     {
         // Calculate index_max based on index type from test_case
@@ -179,12 +179,10 @@ void RunPooling3dTestWithIndexType(const Pooling3dTestCase& test_case)
             default: index_bits = 0; break;
             }
             GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
-                         << index_max << ") <= output spatial product ("
-                         << output_spatial_product
+                         << index_max << ") <= output spatial product (" << output_spatial_product
                          << ") for max pooling backward with workspace index image mode";
         }
     }
-
 
     // Run forward pooling
     std::vector<Index> indices;
@@ -285,9 +283,8 @@ void CheckPooling3dTestCase(const Pooling3dTestCase& test_case)
     // Check kernel size vs input dimensions
     for(int i = 0; i < spt_dim; i++)
     {
-        if(test_case.lens[i] >
-           (static_cast<uint64_t>(test_case.input_dims[i + 2]) +
-            static_cast<uint64_t>(2) * test_case.pads[i]))
+        if(test_case.lens[i] > (static_cast<uint64_t>(test_case.input_dims[i + 2]) +
+                                static_cast<uint64_t>(2) * test_case.pads[i]))
         {
             GTEST_SKIP() << "Invalid config: lens[" << i << "] > (input_dims[" << i + 2
                          << "] + 2 * pads[" << i << "])";
@@ -300,7 +297,8 @@ void CheckPooling3dTestCase(const Pooling3dTestCase& test_case)
     if(test_case.mode == miopenPoolingMax &&
        (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
     {
-        GTEST_SKIP() << "Config skipped: uint" << (test_case.index_type == miopenIndexUint8 ? 8 : 16)
+        GTEST_SKIP() << "Config skipped: uint"
+                     << (test_case.index_type == miopenIndexUint8 ? 8 : 16)
                      << " index is too small (spt_dim == 3 && mode == Max)";
     }
 
