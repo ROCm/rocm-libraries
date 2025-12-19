@@ -241,6 +241,7 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
         }
         graph = transform<HoistLoopInvariant>(graph);
 
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, tracer) == 1);
         const auto newTracer = ControlFlowRWTracer(graph);
         CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, newTracer) == 0);
 
@@ -268,6 +269,62 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
             {
                 CHECK(loopStack[i] == assignStack[i]);
             }
+        }
+    }
+
+    SECTION("invalid hoist")
+    {
+        int forLoopCoordinate = -1;
+        for(const auto& c : graph.mapper.getConnections(kLoop))
+        {
+            CAPTURE(c.control);
+            if(std::holds_alternative<Connections::JustNaryArgument>(c.connection))
+            {
+                forLoopCoordinate = c.coordinate;
+                break;
+            }
+        }
+        AssertFatal(forLoopCoordinate != -1, "Could not find for loop coordinate");
+
+        auto constantExpr = Expression::literal(42.0f);
+
+        Assign assignOp;
+        assignOp.expression = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{forLoopCoordinate, Register::Type::Scalar, DataType::UInt32});
+
+        int assign = graph.control.addElement(assignOp);
+
+        graph.mapper.connect(assign, forLoopCoordinate, NaryArgument::DEST);
+
+        const auto firstDownstreamNode
+            = graph.control.getOutputNodeIndices<Body>(kLoop).take(1).only().value();
+
+        if(firstDownstreamNode != -1)
+        {
+            Log::info("test setup placing before {}", firstDownstreamNode, assign);
+            insertBefore(graph, firstDownstreamNode, assign, assign);
+        }
+
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, forLoopCoordinate, tracer) >= 1);
+        graph                = transform<HoistLoopInvariant>(graph);
+        const auto newTracer = ControlFlowRWTracer(graph);
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, forLoopCoordinate, newTracer) >= 1);
+
+        {
+            const auto loopStack   = controlStack(kLoop, graph);
+            const auto assignStack = controlStack(assign, graph);
+
+            Log::info("loopstack: {}", loopStack);
+            Log::info("assignstack: {}", assignStack);
+
+            REQUIRE(loopStack.size() + 1 == assignStack.size());
+
+            // Assign stack has one more element which is itself
+            for(size_t i = 0; i < loopStack.size(); ++i)
+            {
+                CHECK(loopStack[i] == assignStack[i]);
+            }
+            CHECK(assignStack.back() == assign);
         }
     }
 }
