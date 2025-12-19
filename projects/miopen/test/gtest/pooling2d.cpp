@@ -212,7 +212,16 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
     }
 
     // Skip configurations that would cause "Index range not enough" exception
-    // This happens when the index type doesn't have enough range for max pooling backward
+    // The original ctest skips ALL uint8/uint16 max pooling with wsidx=1 in 2D
+    // (matching the original ctest behavior: spt_dim == 2 && wsidx == 1 && mode == Max)
+    if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1 &&
+       (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
+    {
+        GTEST_SKIP() << "Config skipped: uint" << (test_case.index_type == miopenIndexUint8 ? 8 : 16)
+                     << " index is too small (spt_dim == 2 && wsidx == 1) && mode == Max";
+    }
+
+    // Additional check: Skip if index_max is insufficient for the pooling window or output
     if(test_case.mode == miopenPoolingMax)
     {
         // Calculate index_max based on index type from test_case
