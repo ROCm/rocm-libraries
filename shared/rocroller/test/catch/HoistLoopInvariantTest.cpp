@@ -274,8 +274,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
         }
         AssertFatal(forLoopCoordinate != -1, "Could not find for loop coordinate");
 
-        auto constantExpr = Expression::literal(42.0f);
-
         Assign assignOp;
         assignOp.expression = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{forLoopCoordinate, Register::Type::Scalar, DataType::UInt32});
