@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/utilities/json/BatchnormAttributes.hpp>
 #include <hipdnn_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_sdk/utilities/json/Common.hpp>
 #include <hipdnn_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
 #include <hipdnn_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
@@ -18,6 +19,8 @@ namespace hipdnn_sdk::data_objects
 NLOHMANN_JSON_SERIALIZE_ENUM(
     NodeAttributes,
     {{NodeAttributes::BatchnormInferenceAttributes, "BatchnormInferenceAttributes"},
+     {NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+      "BatchnormInferenceAttributesVarianceExt"},
      {NodeAttributes::PointwiseAttributes, "PointwiseAttributes"},
      {NodeAttributes::BatchnormBackwardAttributes, "BatchnormBackwardAttributes"},
      {NodeAttributes::BatchnormAttributes, "BatchnormAttributes"},
@@ -40,6 +43,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
     {
     case data_objects::NodeAttributes::BatchnormInferenceAttributes:
         nodeJson = *node.attributes_as_BatchnormInferenceAttributes();
+        break;
+    case data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+        nodeJson = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
         break;
     case data_objects::NodeAttributes::BatchnormBackwardAttributes:
         nodeJson = *node.attributes_as_BatchnormBackwardAttributes();
@@ -96,6 +102,9 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
         {
         case data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return to<data_objects::BatchnormInferenceAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            return to<data_objects::BatchnormInferenceAttributesVarianceExt>(builder, entry)
+                .Union();
         case data_objects::NodeAttributes::BatchnormBackwardAttributes:
             return to<data_objects::BatchnormBackwardAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::BatchnormAttributes:

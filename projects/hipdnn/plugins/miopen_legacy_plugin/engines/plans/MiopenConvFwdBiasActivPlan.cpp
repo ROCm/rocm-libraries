@@ -45,7 +45,7 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     {
         if(!biasAttr->in_1_tensor_uid().has_value())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "ConvFwdBiasActivParams: biasAttr missing in_1_tensor_uid");
         }
@@ -60,7 +60,7 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
         }
         else
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "ConvFwdBiasActivParams: biasAttr tensor UIDs do not match convAttr y_tensor_uid");
         }
@@ -69,7 +69,7 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     if(activAttr.elu_alpha().has_value() || activAttr.softplus_beta().has_value()
        || activAttr.swish_beta().has_value() || activAttr.relu_lower_clip_slope().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ConvFwdBiasActivParams: Fusion supports only relu, clipped relu "
             "(relu_upper_clip set), "
