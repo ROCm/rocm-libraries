@@ -623,7 +623,6 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(
         return false;
     if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
         return false;
-
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
