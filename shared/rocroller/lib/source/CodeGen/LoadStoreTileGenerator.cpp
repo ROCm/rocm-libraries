@@ -198,7 +198,18 @@ namespace rocRoller
             auto     l  = graph.control.get<LoadTiled>(op);
             auto     ll = graph.control.get<LoadLDSTile>(op);
             auto     sl = graph.control.get<StoreLDSTile>(op);
-            if(s || l || ll || sl || isStorePartOfGlobalToLDSOp)
+
+            auto isGlobalLoad = false;
+            if(l)
+            {
+                auto [_, macTile] = graph.getDimension<MacroTile>(op);
+                if(macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
+                {
+                    isGlobalLoad = true;
+                }
+            }
+
+            if(s || (l and not isGlobalLoad) || ll || sl || isStorePartOfGlobalToLDSOp)
             {
                 rv = DataType::UInt32;
             }
