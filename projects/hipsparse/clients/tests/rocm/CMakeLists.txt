@@ -207,8 +207,3 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spsv_coo.yaml
     rocm/test_spsv_csr.yaml
     rocm/test_spvv.yaml)
-
-# Propagate variables to parent scope for test data generation
-set(HIPSPARSE_TEST_SOURCES ${HIPSPARSE_TEST_SOURCES} PARENT_SCOPE)
-set(HIPSPARSE_TEST_YAML_INCLUDE ${HIPSPARSE_TEST_YAML_INCLUDE} PARENT_SCOPE)
-set(HIPSPARSE_TEST_YAMLS ${HIPSPARSE_TEST_YAMLS} PARENT_SCOPE)
