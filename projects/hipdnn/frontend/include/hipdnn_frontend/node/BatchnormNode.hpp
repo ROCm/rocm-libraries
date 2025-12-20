@@ -83,11 +83,6 @@ public:
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
         HIPDNN_CHECK_ERROR(validateScalarParameter(epsilon, "Epsilon"));
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "BatchnormNode: Input tensor (x) dimensions and strides must be set and positive");
-
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape - it only transforms values, not dimensions.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
