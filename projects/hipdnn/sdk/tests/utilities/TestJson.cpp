@@ -72,6 +72,12 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid batchnorm inference graph)";
             break;
+        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            graphBuilder
+                = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid batchnorm with variance inference graph)";
+            break;
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
             graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
