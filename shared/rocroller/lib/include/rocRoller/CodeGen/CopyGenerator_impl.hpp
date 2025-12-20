@@ -317,6 +317,26 @@ namespace rocRoller
 
             co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
         }
+        // TTMP -> Scalar
+        else if(dest->regType() == Register::Type::Scalar && src->isTTMP())
+        {
+            if(dest->variableType().getElementSize() == 8)
+            {
+                for(size_t i = 0; i < src->registerCount() / 2; ++i)
+                {
+                    co_yield_(Instruction(
+                        "s_mov_b64", {dest->element({i})}, {src->element({i})}, {}, comment));
+                }
+            }
+            else
+            {
+                for(size_t i = 0; i < src->registerCount(); ++i)
+                {
+                    co_yield_(Instruction(
+                        "s_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
+                }
+            }
+        }
         // Catch unhandled copy cases
         else
         {
