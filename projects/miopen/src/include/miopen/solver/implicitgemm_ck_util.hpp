@@ -54,6 +54,25 @@ namespace solver {
 
 static constexpr int CkSplitkAutoDeduce = -1;
 
+template <int L, int H>
+inline static bool NextCKSplitkValue(int& v)
+{
+    assert((IsTwoPower<L, H>(v) || v == CkSplitkAutoDeduce));
+    if(v == H)
+    {
+        v = CkSplitkAutoDeduce;
+        return false;
+    }
+    if(v == CkSplitkAutoDeduce)
+    {
+        v = L;
+        return true;
+    }
+
+    v *= 2;
+    return false;
+}
+
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace conv {
@@ -316,8 +335,10 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const auto ptrs = DeviceOpType::GetInstances();
     for(auto& ptr : ptrs)
     {
-        // first try powers of 2 split-k from 1..128
-        for(int split_k = 1; split_k <= 128; split_k *= 2)
+        // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
+        // The loop then restarts from 1 for the next conv instance.
+        auto split_k = 1;
+        do
         {
             if(args.IsSupportedBySplitK(ptr, split_k))
             {
@@ -325,15 +346,7 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
                 if(workspace_size > max_workspace_size)
                     max_workspace_size = workspace_size;
             }
-        }
-
-        // and now try the auto deduce split-k
-        if(args.IsSupportedBySplitK(ptr, CkSplitkAutoDeduce))
-        {
-            auto workspace_size = args.GetCKSplitkWorkspaceSize(ptr, CkSplitkAutoDeduce);
-            if(workspace_size > max_workspace_size)
-                    max_workspace_size = workspace_size;
-        }
+        } while(!NextCKSplitkValue<1, 128>(split_k));
     }
 
     MIOPEN_LOG_I("Max workspace size reported by CK: " << max_workspace_size);
