@@ -276,6 +276,15 @@ typedef enum {
   HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSB,
 } hipblasLtMatrixTransformDescAttributes_t;
 
+typedef enum {
+    HIPBLASLT_ALGO_ATTR_LDS_BYTES = 0,
+    HIPBLASLT_ALGO_ATTR_WAVE_COUNT,
+    HIPBLASLT_ALGO_ATTR_TILE_M,
+    HIPBLASLT_ALGO_ATTR_TILE_N,
+    HIPBLASLT_ALGO_ATTR_TILE_K,
+    HIPBLASLT_ALGO_ATTR_IS_TENSOR_CORE
+} hipblasLtMatmulAlgoAttribute_t;
+
 #if defined(__HIP_PLATFORM_AMD__)
 typedef struct {
   uint64_t data[4];
@@ -887,6 +896,37 @@ hipblasStatus_t hipblasLtMatmul(hipblasLtHandle_t            handle,
                                 void*                        workspace,
                                 size_t                       workspaceSizeInBytes,
                                 hipStream_t                  stream);
+
+                                /** Query an attribute of a matmul algorithm.
+ *
+ * This function retrieves a specified attribute from a
+ * hipblasLtMatmulAlgo_t object. The attribute value is written
+ * to the user-provided buffer.
+ *
+ * \param[in]  algo          Pointer to a valid matmul algorithm descriptor.
+ * \param[in]  attr          Algorithm attribute to query.
+ * \param[out] buf           Pointer to a buffer where the attribute value
+ *                           will be stored.
+ * \param[in]  sizeInBytes   Size of the buffer in bytes.
+ * \param[out] sizeWritten   Pointer to the number of bytes written to \p buf.
+ *                           May be nullptr if not required.
+ *
+ * \retval HIPBLAS_STATUS_SUCCESS
+ *         If the attribute was queried successfully.
+ * \retval HIPBLAS_STATUS_INVALID_VALUE
+ *         If \p algo or \p buf is nullptr, or if \p sizeInBytes is insufficient
+ *         for the requested attribute.
+ * \retval HIPBLAS_STATUS_NOT_SUPPORTED
+ *         If the requested attribute is not supported.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtMatmulAlgoGetAttribute(
+    const hipblasLtMatmulAlgo_t* algo,
+    hipblasLtMatmulAlgoAttribute_t attr,
+    void* buf,
+    size_t sizeInBytes,
+    size_t* sizeWritten
+);
 
 /** Create new matrix transform operation descriptor.
  *

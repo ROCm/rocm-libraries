@@ -501,6 +501,53 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtMatmulAlgoGetAttribute(
+    const hipblasLtMatmulAlgo_t*   algo,
+    hipblasLtMatmulAlgoAttribute_t attr,
+    void*                          buf,
+    size_t                         sizeInBytes,
+    size_t*                        sizeWritten)
+try
+{
+    if(!algo || !buf)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    const auto& internal = algo->algo;
+
+    rocblaslt_algo_attribute rocAttr;
+
+    switch(attr)
+    {
+        case HIPBLASLT_ALGO_ATTR_LDS_BYTES:
+            rocAttr = ROCBLASLT_ALGO_ATTR_LDS_BYTES;
+            break;
+
+        case HIPBLASLT_ALGO_ATTR_WAVE_COUNT:
+            rocAttr = ROCBLASLT_ALGO_ATTR_WAVE_COUNT;
+            break;
+
+        case HIPBLASLT_ALGO_ATTR_IS_TENSOR_CORE:
+            rocAttr = ROCBLASLT_ALGO_ATTR_IS_TENSOR_OP;
+            break;
+
+        default:
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+    }
+
+    return RocBlasLtStatusToHIPStatus(
+        rocblaslt_algo_get_attr(
+            internal,
+            rocAttr,
+            buf,
+            sizeInBytes,
+            sizeWritten));
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+
 hipblasStatus_t hipblasLtMatrixTransformDescCreate(hipblasLtMatrixTransformDesc_t* transformDesc,
                                                    hipDataType                     scaleType)
 {
