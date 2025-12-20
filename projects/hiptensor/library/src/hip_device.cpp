@@ -62,9 +62,18 @@ namespace hiptensor
         {
             mGcnArch = hipGcnArch_t::GFX950;
         }
+        else if(deviceName.find("gfx1200") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1200;
+        }
+        else if(deviceName.find("gfx1201") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1201;
+        }
 
         switch(mProps.warpSize)
         {
+        case hipWarpSize_t::Wave32:
         case hipWarpSize_t::Wave64:
             mWarpSize = mProps.warpSize;
         default:;
@@ -97,6 +106,34 @@ namespace hiptensor
                 || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
     }
 
+    bool HipDevice::matrixCoreSupport(hiptensorComputeDescriptor_t typeCompute) const
+    {
+        switch(typeCompute)
+        {
+        case HIPTENSOR_COMPUTE_DESC_64F:
+        case HIPTENSOR_COMPUTE_DESC_C64F:
+            return (mGcnArch == HipDevice::hipGcnArch_t::GFX90A
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX942
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
+        case HIPTENSOR_COMPUTE_DESC_32F:
+        case HIPTENSOR_COMPUTE_DESC_C32F:
+            return (mGcnArch == HipDevice::hipGcnArch_t::GFX908
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX90A
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX942
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
+        case HIPTENSOR_COMPUTE_DESC_16F:
+        case HIPTENSOR_COMPUTE_DESC_16BF:
+            return (mGcnArch == HipDevice::hipGcnArch_t::GFX908
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX90A
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX942
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1200
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1201);
+        default:
+            return false;
+        }
+    }
+
     // Need to check the host device target support statically before hip modules attempt
     // to load any kernels. Not safe to proceed if the host device is unsupported.
     struct HipStaticDeviceGuard
@@ -105,10 +142,15 @@ namespace hiptensor
         {
             auto device = HipDevice();
 
-            if((device.getGcnArch() == HipDevice::hipGcnArch_t::UNSUPPORTED_ARCH)
-               || (device.warpSize() == HipDevice::hipWarpSize_t::UNSUPPORTED_WARP_SIZE))
+            if(device.getGcnArch() == HipDevice::hipGcnArch_t::UNSUPPORTED_ARCH)
             {
                 std::cerr << "Cannot proceed: unsupported host device detected. Exiting."
+                          << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            else if(device.warpSize() == HipDevice::hipWarpSize_t::UNSUPPORTED_WARP_SIZE)
+            {
+                std::cerr << "Cannot proceed: unsupported warp size detected. Exiting."
                           << std::endl;
                 exit(EXIT_FAILURE);
             }

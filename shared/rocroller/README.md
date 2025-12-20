@@ -126,7 +126,6 @@ CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. [cmake options]
 | ROCROLLER_EMBED_ARCH_DEF                  | ON      | Embed msgpack architecture data in library                |
 | ROCROLLER_BUILD_SHARED_LIBS               | ON      | Build as shared library                                   |
 | ROCROLLER_ENABLE_FETCH                    | OFF     | Fetch dependencies if not found                           |
-| ROCROLLER_ENABLE_LLD                      | OFF     | Build LLD-dependent functionality                         |
 | ROCROLLER_ENABLE_TIMERS                   | OFF     | Enable timer code                                         |
 | ROCROLLER_ENABLE_CPPCHECK                 | OFF     | Enable cppcheck                                           |
 | ROCROLLER_MRISAS_DIR                      | `<build>/GPUArchitectureGenerator/amd-mrisa` | MRISA XML directory |

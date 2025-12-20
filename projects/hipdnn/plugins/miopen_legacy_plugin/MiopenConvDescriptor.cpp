@@ -5,7 +5,7 @@
 #include <limits>
 #include <vector>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenUtils.hpp"
@@ -24,18 +24,18 @@ void copyWithCheck(const flatbuffers::Vector<int64_t>* src,
 {
     if(src->size() != expectedSize)
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: " + std::string(name)
-                                                       + " size must be equal to "
-                                                       + std::string(expectedSizeName));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "MiopenConvDescriptor: " + std::string(name)
+                                                           + " size must be equal to "
+                                                           + std::string(expectedSizeName));
     }
     if(!std::all_of(src->begin(), src->end(), [](int64_t v) {
            return v <= std::numeric_limits<int>::max();
        }))
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: " + std::string(name)
-                                                       + " values must be less than INT_MAX");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "MiopenConvDescriptor: " + std::string(name)
+                                                           + " values must be less than INT_MAX");
     }
     std::copy(src->begin(), src->end(), dst.begin());
 }
@@ -129,59 +129,59 @@ void MiopenConvDescriptor::createDescriptorInternal(
 {
     if(spatialDimCount > std::numeric_limits<int>::max())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "MiopenConvDescriptor: spatialDimCount must be not greater than INT_MAX");
     }
 
     if(convMode != hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "MiopenConvDescriptor: only ConvMode::CROSS_CORRELATION is supported");
     }
 
     if(attrPrePadding == nullptr)
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: pre_padding must be set");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MiopenConvDescriptor: pre_padding must be set");
     }
 
     if(attrPostPadding == nullptr)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MiopenConvDescriptor: post_padding must be set");
     }
 
     if(attrStride == nullptr)
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: stride must be set");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "MiopenConvDescriptor: stride must be set");
     }
 
     if(attrDilation == nullptr)
     {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: dilation must be set");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MiopenConvDescriptor: dilation must be set");
     }
 
     if(attrPrePadding->size() != attrPostPadding->size())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "MiopenConvDescriptor: pre_padding and post_padding sizes must be equal");
     }
 
     if(!std::equal(attrPrePadding->begin(), attrPrePadding->end(), attrPostPadding->begin()))
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "MiopenConvDescriptor: asymmetric padding is not supported");
     }
 
     if(groupCount < 1)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "MiopenConvDescriptor: groupCount < 1 is not supported");
     }

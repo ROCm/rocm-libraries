@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineConfigWrapper.hpp>
 
 #include "engines/EngineInterface.hpp"
@@ -28,20 +28,20 @@ public:
     void addEngine(std::unique_ptr<IEngine> engine);
 
     std::vector<int64_t> getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
-                                                const hipdnn_plugin::IGraph& opGraph);
+                                                const hipdnn_plugin_sdk::IGraph& opGraph);
 
     void getEngineDetails(HipdnnEnginePluginHandle& handle,
-                          const hipdnn_plugin::IGraph& opGraph,
+                          const hipdnn_plugin_sdk::IGraph& opGraph,
                           int64_t engineId,
                           hipdnnPluginConstData_t& engineDetailsOut);
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                             int64_t engineId,
-                            const hipdnn_plugin::IGraph& opGraph) const;
+                            const hipdnn_plugin_sdk::IGraph& opGraph) const;
 
     void initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_plugin::IGraph& opGraph,
-                                    const hipdnn_plugin::IEngineConfig& engineConfig,
+                                    const hipdnn_plugin_sdk::IGraph& opGraph,
+                                    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
                                     HipdnnEnginePluginExecutionContext& executionContext) const;
 
 private:

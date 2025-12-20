@@ -14,11 +14,6 @@ runtime_options::runtime_options() { update_from_env(); }
 runtime_options::runtime_options(bool debug, bool heuristics, double variance)
     : debug_enabled(debug), heuristics_enabled(heuristics), heuristics_variance(variance) {}
 
-runtime_options& runtime_options::get() {
-  static runtime_options instance;
-  return instance;
-}
-
 bool runtime_options::read_debug_from_env() {
   const char* env = std::getenv("ANALYTICAL_GEMM_DEBUG");
   return env && std::string(env) == "1";

@@ -9,14 +9,14 @@
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_sdk::data_objects;
 
 TEST(TestGraphWrapper, NullBufferIsInvalid)
 {
     GraphWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
-    EXPECT_THROW(wrapper.getGraph(), HipdnnPluginException);
+    EXPECT_THROW(wrapper.getGraph(), std::invalid_argument);
 }
 
 TEST(TestGraphWrapper, NonGraphBufferIsInvalid)

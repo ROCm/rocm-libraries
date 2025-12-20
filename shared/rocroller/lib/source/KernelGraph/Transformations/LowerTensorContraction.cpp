@@ -419,8 +419,11 @@ namespace rocRoller
             auto macroTileNumbers = filterCoordinates<MacroTileNumber>(required, graph);
             for(auto mtnTag : macroTileNumbers)
             {
-                for(auto input : graph.coordinates.getInputNodeIndices(
-                        mtnTag, rocRoller::KernelGraph::CoordinateGraph::isEdge<Tile>))
+                auto edgePredicate = [&](auto edge) {
+                    return rocRoller::KernelGraph::CoordinateGraph::isEdge<Tile>(edge)
+                           || rocRoller::KernelGraph::CoordinateGraph::isEdge<PassThrough>(edge);
+                };
+                for(auto input : graph.coordinates.getInputNodeIndices(mtnTag, edgePredicate))
                 {
                     auto maybeSubDimension = graph.coordinates.get<SubDimension>(input);
                     if(!maybeSubDimension)
