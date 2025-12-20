@@ -46,6 +46,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomMatcherTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypesTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ErrorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionContainsSubExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionIdenticalTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionSerializationTest.cpp"
@@ -102,7 +103,6 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCCTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBufferTest.cpp"
-
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomMatchers.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomSections.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionMatchers.hpp"
@@ -111,6 +111,13 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SimpleFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SourceMatcher.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Utilities.hpp"
 )
 
 target_include_directories(rocroller-tests-catch PRIVATE
