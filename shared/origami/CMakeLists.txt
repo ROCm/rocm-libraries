@@ -294,6 +294,7 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
     rocm_create_package(
         NAME origami
         DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
+        MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
         LDCONFIG
         LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
     )
