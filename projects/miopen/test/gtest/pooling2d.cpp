@@ -217,7 +217,8 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
     if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1 &&
        (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
     {
-        GTEST_SKIP() << "Config skipped: uint" << (test_case.index_type == miopenIndexUint8 ? 8 : 16)
+        GTEST_SKIP() << "Config skipped: uint"
+                     << (test_case.index_type == miopenIndexUint8 ? 8 : 16)
                      << " index is too small (spt_dim == 2 && wsidx == 1) && mode == Max";
     }
 
