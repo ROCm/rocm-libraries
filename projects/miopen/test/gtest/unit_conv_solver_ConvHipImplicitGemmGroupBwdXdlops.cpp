@@ -56,7 +56,7 @@ auto GetDeterministicConvCase()
 }
 
 template <miopenDataType_t datatype>
-const auto &GetTestParams()
+const auto& GetTestParams()
 {
     static const auto params = [] {
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
