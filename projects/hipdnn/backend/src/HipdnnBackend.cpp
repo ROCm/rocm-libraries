@@ -272,6 +272,30 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
         hipdnn_sdk::utilities::copyMaxSizeWithNullTerminator(
             message, hipdnn_backend::LastErrorManager::getLastError(), maxSize);
 
+        // Clear the error after retrieval
+        hipdnn_backend::LastErrorManager::clearLastError();
+
+        LOG_API_SUCCESS(apiName, "set_error_message={:p}", static_cast<void*>(message));
+    });
+}
+
+HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t maxSize)
+{
+    LOG_API_ENTRY("message_ptr={:p}, maxSize={}", static_cast<void*>(message), maxSize);
+    // Ignore status since API doesn't return it.
+    // We still want to catch and log if the user provides incorrect parameters.
+    auto _ = hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(message);
+
+        if(maxSize == 0)
+        {
+            throw hipdnn_backend::HipdnnException(HIPDNN_STATUS_BAD_PARAM, "maxSize is 0");
+        }
+
+        // Get the error without clearing it (preserves pre-existing behavior)
+        hipdnn_sdk::utilities::copyMaxSizeWithNullTerminator(
+            message, hipdnn_backend::LastErrorManager::getLastError(), maxSize);
+
         LOG_API_SUCCESS(apiName, "set_error_message={:p}", static_cast<void*>(message));
     });
 }

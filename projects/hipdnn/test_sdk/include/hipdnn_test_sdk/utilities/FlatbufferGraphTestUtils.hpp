@@ -8,7 +8,6 @@
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -97,6 +96,87 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
         "batchnorm",
         computeDataType,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        bnormAttributes.Union());
+    nodes.push_back(node);
+
+    auto graphOffset
+        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+                                                      "test",
+                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
+                                                      hipdnn_sdk::data_objects::DataType::HALF,
+                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                                      &tensorAttributes,
+                                                      &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceGraph(
+    const std::vector<int64_t>& strides = {1, 3, 224, 224},
+    const std::vector<int64_t>& dims = {1, 3, 224, 224},
+    hipdnn_sdk::data_objects::DataType inputDataType = hipdnn_sdk::data_objects::DataType::FLOAT,
+    hipdnn_sdk::data_objects::DataType computeDataType = hipdnn_sdk::data_objects::DataType::FLOAT)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+
+    std::vector<int64_t> derivedStrides = hipdnn_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", inputDataType, &strides, &dims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", inputDataType, &strides, &dims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "scale",
+        hipdnn_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "bias",
+        hipdnn_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        5,
+        "est_mean",
+        hipdnn_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "variance",
+        hipdnn_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    auto bnormAttributes
+        = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(builder,
+                                                                                  1, // x uid
+                                                                                  5, // mean uid
+                                                                                  6, // variance uid
+                                                                                  3, // scale uid
+                                                                                  4, // bias uid
+                                                                                  2 // y uid
+        );
+
+    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "batchnormWithVariance",
+        computeDataType,
+        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
         bnormAttributes.Union());
     nodes.push_back(node);
 
@@ -1188,15 +1268,6 @@ inline flatbuffers::FlatBufferBuilder
                                             dataType);
 }
 
-inline hipdnnPluginConstData_t
-    createValidConstDataGraph(flatbuffers::DetachedBuffer& serializedGraph)
-{
-    hipdnnPluginConstData_t opGraph;
-    opGraph.ptr = serializedGraph.data();
-    opGraph.size = serializedGraph.size();
-    return opGraph;
-}
-
 inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -1205,30 +1276,12 @@ inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
     return builder;
 }
 
-inline hipdnnPluginConstData_t
-    createValidConstDataEngineDetails(flatbuffers::DetachedBuffer& serializedEngineDetails)
-{
-    hipdnnPluginConstData_t engineDetails;
-    engineDetails.ptr = serializedEngineDetails.data();
-    engineDetails.size = serializedEngineDetails.size();
-    return engineDetails;
-}
-
 inline flatbuffers::FlatBufferBuilder createValidEngineConfig(int64_t configId)
 {
     flatbuffers::FlatBufferBuilder builder;
     auto engineConfigOffset = hipdnn_sdk::data_objects::CreateEngineConfig(builder, configId);
     builder.Finish(engineConfigOffset);
     return builder;
-}
-
-inline hipdnnPluginConstData_t
-    createValidConstDataEngineConfig(flatbuffers::DetachedBuffer& serializedEngineConfig)
-{
-    hipdnnPluginConstData_t engineConfig;
-    engineConfig.ptr = serializedEngineConfig.data();
-    engineConfig.size = serializedEngineConfig.size();
-    return engineConfig;
 }
 
 }

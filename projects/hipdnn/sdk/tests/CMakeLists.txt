@@ -11,15 +11,10 @@ endif()
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
-enable_language(HIP)
 
 add_executable(
     hipdnn_sdk_tests
     main.cpp
-    plugin/TestPluginDataTypeHelpers.cpp
-    plugin/TestPluginException.cpp
-    plugin/TestPluginHelpers.cpp
-    plugin/TestPluginLastErrorManager.cpp
     plugin/flatbuffer_utilities/TestEngineConfigWrapper.cpp
     plugin/flatbuffer_utilities/TestEngineDetailsWrapper.cpp
     plugin/flatbuffer_utilities/TestGraphWrapper.cpp
@@ -28,7 +23,6 @@ add_executable(
     utilities/TestCallbackLogger.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
-    utilities/TestLoadGraphAndTensors.cpp
     utilities/TestMigratableMemory.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestPointwiseValidation.cpp

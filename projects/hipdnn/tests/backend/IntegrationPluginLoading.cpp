@@ -9,8 +9,8 @@
 #include <HipdnnBackendAttributeType.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <hipdnn_backend.h>
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginApi.h>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>

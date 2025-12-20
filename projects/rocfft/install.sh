@@ -32,7 +32,7 @@ function display_help()
     echo "./install [-h|--help] "
     echo "    [-h|--help] prints this help message"
     echo "    [--prefix] Specify an alternate CMAKE_INSTALL_PREFIX for cmake"
-    echo "    [-i|--install] install via package manger after build"
+    echo "    [-i|--install] install via package manager after build"
     echo "    [-d|--dependencies] install build dependencies"
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"

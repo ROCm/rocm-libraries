@@ -86,7 +86,7 @@ void printbuffer_cm(const std::vector<Tdata>& data,
 }
 
 // Check that an multi-dimensional array of complex values with dimensions length
-// and straide stride, with nbatch copies separated by dist is Hermitian-symmetric.
+// and stride stride, with nbatch copies separated by dist is Hermitian-symmetric.
 // Column-major version.
 template <class Tcomplex, class Tint1, class Tint2>
 bool check_symmetry_cm(const std::vector<Tcomplex>& data,

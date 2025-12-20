@@ -573,7 +573,7 @@ private:
 // @ elementary strides are ignored when implicit default inembed/onembed are used
 //   --> "true" template specialization value for second template arg of ionembed_t
 template <typename T>
-using hipfft_ionembed_t = ionembed_t<T, false>;
+using hipfft_ionembed_t = ionembed_t<T, true>;
 
 // in FFTW3/hipFFTW
 // @ T := int

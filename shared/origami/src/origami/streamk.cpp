@@ -267,12 +267,6 @@ size_t grid_reduction_cost_aware(const problem_t& problem,
     }
   }
 
-  if (get_runtime_options(config).debug_enabled) {
-    config.logger.log("grid_reduction_cost_aware_best_grid_size_original", min_grid_runtime.first);
-    config.logger.log("grid_reduction_cost_aware_best_runtime_original", min_grid_runtime.second);
-    config.logger.log("grid_reduction_cost_aware_best_grid_size_cache_offset", min_grid_runtime_v2.first);
-    config.logger.log("grid_reduction_cost_aware_best_runtime_cache_offset", min_grid_runtime_v2.second);
-  }
 
   return min_grid_runtime_v2.first;
 }

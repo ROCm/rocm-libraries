@@ -122,6 +122,7 @@ if(HIP_DNN_GENERATE_SDK_HEADERS)
         schemas/batchnorm_attributes.fbs
         schemas/batchnorm_backward_attributes.fbs
         schemas/batchnorm_inference_attributes.fbs
+        schemas/batchnorm_inference_attributes_variance_ext.fbs
         schemas/convolution_common.fbs
         schemas/convolution_fwd_attributes.fbs
         schemas/convolution_bwd_attributes.fbs
@@ -152,8 +153,9 @@ if(HIP_DNN_GENERATE_SDK_HEADERS)
     # Flatc build has some warnings that trigger and print to the console.  Since we dont want these
     # we can suppress all warnings by using the -w compile flag.  This command prepends -w to the
     # compile flats for the flatc target.
-    set_target_properties(flatc PROPERTIES COMPILE_FLAGS "-w")
-
+    if(TARGET flatc)
+        set_target_properties(flatc PROPERTIES COMPILE_FLAGS "-w")
+    endif()
     _restore_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
 
     add_dependencies(hipdnn_sdk generate_hipdnn_sdk_headers)
