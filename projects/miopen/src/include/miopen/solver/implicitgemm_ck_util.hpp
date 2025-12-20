@@ -332,7 +332,7 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
         {
             auto workspace_size = args.GetCKSplitkWorkspaceSize(ptr, CkSplitkAutoDeduce);
             if(workspace_size > max_workspace_size)
-                max_workspace_size = workspace_size;
+                    max_workspace_size = workspace_size;
         }
     }
 
