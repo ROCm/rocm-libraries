@@ -82,7 +82,7 @@ TEST(hiptensorGetAlignmentRequirementTest, UtilTest)
     void* ptr  = reinterpret_cast<void*>(5);
     output     = hiptensorGetAlignmentRequirement(handle, ptr, desc, &alignmentRequirement);
     EXPECT_EQ(output, HIPTENSOR_STATUS_INVALID_VALUE);
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
 }
 
 TEST(hiptensorReductionTest, UtilTest)
@@ -175,7 +175,7 @@ TEST(hiptensorReductionTest, UtilTest)
     EXPECT_EQ(
         output,
         HIPTENSOR_STATUS_NOT_SUPPORTED); // fail for descA.mLengths.size() < descC.mLengths.size()
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
 }
 
 TEST(hiptensorInitContractionDescriptorTest, UtilTest)
@@ -231,7 +231,7 @@ TEST(hiptensorInitContractionDescriptorTest, UtilTest)
                                                 alignmentRequirementD,
                                                 typeCompute);
     EXPECT_EQ(output, HIPTENSOR_STATUS_NOT_SUPPORTED); // fail for opA != HIPTENSOR_OP_IDENTITY
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
 }
 
 TEST(hiptensorInitContractionFindTest, UtilTest)
@@ -249,14 +249,14 @@ TEST(hiptensorInitContractionFindTest, UtilTest)
     EXPECT_EQ(
         output,
         HIPTENSOR_STATUS_ARCH_MISMATCH); // fail for currentDevice.getDeviceId() != handle->mDevice.getDeviceId()
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
 
     hiptensorHandle_t handlePtr;
     CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handlePtr));
     output = hiptensorInitContractionFind(handlePtr, &find, algo);
     EXPECT_EQ(output, HIPTENSOR_STATUS_INVALID_VALUE); // fail for invalid algo
 
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handlePtr));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handlePtr));
 }
 
 TEST(hiptensorContractionGetWorkspaceSizeTest, UtilTest)
@@ -284,7 +284,7 @@ TEST(hiptensorInitContractionPlanTest, UtilTest)
         = 0xFFFFFFFFFFFFFFFF; // A hack method that forcefully changes the data of the underlying handle. During subsequent comparisons, the underlying handle represented by the handle is invalid.
     output = hiptensorInitContractionPlan(handle, &plan, &desc, &find, workspaceSize);
     EXPECT_EQ(output, HIPTENSOR_STATUS_ARCH_MISMATCH); // fail for handle is null
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
 }
 
 TEST(hiptensorContractionTest, UtilTest)
@@ -313,5 +313,5 @@ TEST(hiptensorContractionTest, UtilTest)
     EXPECT_EQ(
         output,
         HIPTENSOR_STATUS_ARCH_MISMATCH); // fail for handle->mDevice.getDeviceId() == -1
-    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroy(&handle));
 }
