@@ -66,7 +66,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
        || attributes.next_running_mean_tensor_uid().has_value()
        || attributes.next_running_variance_tensor_uid().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "Running statistics should have been rejected by plan builder");
     }
@@ -92,7 +92,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     // Validate that activation input matches batchnorm output
     if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "BatchnormFwdTrainingParams: Activation input must match batchnorm output");
     }
@@ -121,7 +121,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
        || attributes.next_running_mean_tensor_uid().has_value()
        || attributes.next_running_variance_tensor_uid().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "Running statistics should have been rejected by plan builder");
     }
@@ -269,7 +269,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     // Running statistics should have been rejected by plan builder
     if(_trainingParams.hasRunningStats())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "Running statistics should have been rejected by plan builder");
     }

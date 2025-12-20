@@ -8,10 +8,9 @@
 #include <stdexcept>
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 
-namespace hipdnn_plugin
+namespace hipdnn_plugin_sdk
 {
 
 /*
@@ -156,8 +155,7 @@ private:
     {
         if(!isValid())
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Graph is not valid");
+            throw std::invalid_argument("Graph is not valid");
         }
     }
 
