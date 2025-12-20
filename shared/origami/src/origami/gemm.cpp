@@ -592,10 +592,22 @@ double compute_memory_latency(const problem_t& problem,
   double H_mem2 = estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor);
 
   // 3) Total loads are loads from A and loads from B
-  size_t Ld_A_value = a_trans ?
-      MT_M * round_elements_to_128B(MT_K, a_bits) : round_elements_to_128B(MT_M, a_bits) * MT_K;
-  size_t Ld_B_value = b_trans ?
-      round_elements_to_128B(MT_N, b_bits) * MT_K : MT_N * round_elements_to_128B(MT_K, b_bits);
+  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, a_bits);
+  size_t MT_N_rounded_128bytes = round_elements_to_128B(MT_N, a_bits);
+  size_t MT_K_rounded_128bytes = round_elements_to_128B(MT_K, a_bits);
+
+  if (!a_trans && !b_trans) {
+    MT_N_rounded_128bytes = MT_N;
+    MT_K_rounded_128bytes = MT_K;
+  } else if (a_trans && !b_trans) {
+    MT_M_rounded_128bytes = MT_M;
+    MT_N_rounded_128bytes = MT_N;
+  } else if (!a_trans && b_trans) {
+    MT_K_rounded_128bytes = MT_K;
+  }
+
+  size_t Ld_A_value  = MT_M_rounded_128bytes * MT_K_rounded_128bytes;
+  size_t Ld_B_value  = MT_N_rounded_128bytes * MT_K_rounded_128bytes;
   auto Ld_CU_bytes = (Ld_A_value * a_bytes)     // A Bytes
                        + (Ld_B_value * b_bytes);  // B Bytes
 
@@ -904,23 +916,6 @@ double compute_total_latency(const problem_t& problem,
   if (heuristics) {
     if (MT_M == 64 && MT_N == 32 && MT_K == 32 && !b_trans && a_bits == 16) {
       total_latency = total_latency * 10;
-    }
-
-    if(hardware.arch == hardware_t::architecture_t::gfx950) {
-      // TODO is Origami missing something for the "Large N, very small M and K" case?
-      // In BBS NN gfx950, MT192x336x32 performs poorly on "Large N, very small M and K".
-      if(MT_M == 192 && MT_N == 336 && MT_K == 32 && !a_trans && !b_trans && problem.a_dtype == data_type_t::BFloat16) {
-        total_latency = total_latency * 10;
-      }
-      // In HHS TN gfx950, MT128x512x32 performs poorly on "Large N, very small M and K".
-      if(MT_M == 128 && MT_N == 512 && MT_K == 32 && a_trans && !b_trans && problem.a_dtype == data_type_t::Half) {
-        total_latency = total_latency * 10;
-      }
-      // In HHS NT gfx950, DP kernel with MT16x16x64 was added as a fallback kernel (VWA1 and VWB1),
-      // but it performs very poorly, especially on "Large K, very small M and N".
-      if(MT_M == 16 && MT_N == 16 && MT_K == 64 && !a_trans && b_trans && problem.a_dtype == data_type_t::Half) {
-        total_latency = total_latency * 10;
-      }
     }
 
     bool tf32_emu = ((problem.mi_dtype == data_type_t::XFloat32) &&
