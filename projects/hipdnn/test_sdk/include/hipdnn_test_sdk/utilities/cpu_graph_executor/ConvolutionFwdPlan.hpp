@@ -118,7 +118,7 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_plugin::IGraph& graph,
+        buildNodePlan(const hipdnn_plugin_sdk::IGraph& graph,
                       const hipdnn_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_ConvolutionFwdAttributes();

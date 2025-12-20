@@ -10,7 +10,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class MockEngineConfig : public hipdnn_plugin::IEngineConfig
+class MockEngineConfig : public hipdnn_plugin_sdk::IEngineConfig
 {
 public:
     MOCK_METHOD(const hipdnn_sdk::data_objects::EngineConfig&,
