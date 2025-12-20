@@ -391,22 +391,18 @@ double estimate_l2_hit(const problem_t& problem,
   l2_tile_m = std::max(std::min(workgroups_m, l2_tile_m), static_cast<size_t>(1));
   l2_tile_n = std::max(std::min(workgroups_n, l2_tile_n), static_cast<size_t>(1));
 
-  double tiles_per_xcd = std::min(static_cast<double>(problem.batch * splitting_factor),
-      std::max(static_cast<double>(hardware.CU_per_L2) / cu_per_xcd, 1.));
-
   // Calculate memory footprint in bytes.
   const auto a_bytes     = data_type_to_bytes(problem.a_dtype);
   const auto b_bytes     = data_type_to_bytes(problem.b_dtype);
   auto calculate_footprint = [&](auto tile_m, auto tile_n) {
     auto a_footprint = tile_m * config.mt.mk() * a_bytes;
     auto b_footprint = tile_n * config.mt.nk() * b_bytes;
-    return (a_footprint + b_footprint) * tiles_per_xcd;
+    return a_footprint + b_footprint;
   };
 
   // Symmetrically shrink the L2 tile until it fits in the L2 cache capacity.
   // This is more robust than shrinking only one dimension.
-  while (calculate_footprint(l2_tile_m, l2_tile_n) > hardware.L2_capacity
-         || l2_tile_m * l2_tile_n > cu_per_xcd) {
+  while (calculate_footprint(l2_tile_m, l2_tile_n) > hardware.L2_capacity) {
     if (l2_tile_m > 1 && l2_tile_m >= l2_tile_n) {
       l2_tile_m--;
     } else if (l2_tile_n > 1) {
@@ -451,8 +447,9 @@ double estimate_mall_hit(const problem_t& problem,
 
   // --- Initial Tile Sizing based on Concurrency ---
   // Use ceiling division for a more accurate initial guess.
+  size_t mall_tile_m =
+      math::safe_ceil_div(num_active_cus, static_cast<size_t>(config.workgroup_mapping));
   size_t mall_tile_n = std::min(static_cast<size_t>(config.workgroup_mapping), workgroups_n);
-  size_t mall_tile_m = math::safe_ceil_div(std::min(num_active_cus, workgroups_m * workgroups_n), mall_tile_n);
 
   // Handle wrap-around case if the tile is taller than the grid.
   if (mall_tile_m > workgroups_m) {
@@ -474,17 +471,6 @@ double estimate_mall_hit(const problem_t& problem,
     auto b_footprint = tile_n * config.mt.nk() * b_bytes;
     return a_footprint + b_footprint;
   };
-
-  while (mall_tile_m * mall_tile_n > num_active_cus) {
-    if (mall_tile_m > 1 && mall_tile_m >= mall_tile_n) {
-      mall_tile_m--;
-    } else if (mall_tile_n > 1) {
-      mall_tile_n--;
-    } else {
-      // Cannot shrink further.
-      break;
-    }
-  }
 
   // --- Calculate Hit Rate based on the final, capacity-aware tile size ---
   const long long uncached_A_reads     = static_cast<long long>(mall_tile_m) * config.mt.mk();
@@ -511,9 +497,7 @@ double estimate_mall_hit(const problem_t& problem,
 double compute_l2_hit_rate_global(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config,
-                                  size_t l2_capacity_bytes,
-                                  size_t num_active_cus,
-                                  size_t splitting_factor) {
+                                  size_t l2_capacity_bytes) {
   // --- Hardware Parameters (as requested, defined locally) ---
   // You would normally get l2_capacity_bytes from your hardware_t struct.
   if (l2_capacity_bytes == 0) throw std::runtime_error("L2 Capacity is zero");
@@ -532,8 +516,7 @@ double compute_l2_hit_rate_global(const problem_t& problem,
 
   const double a_working_set           = static_cast<double>(grid_m * config.mt.mk()) * a_bytes;
   const double b_working_set           = static_cast<double>(grid_n * config.mt.nk()) * b_bytes;
-  const double concurrent_tiles = std::min(problem.batch * splitting_factor, std::max(num_active_cus / (grid_m * grid_n), static_cast<size_t>(1)));
-  const double total_working_set_bytes = (a_working_set + b_working_set) * concurrent_tiles;
+  const double total_working_set_bytes = a_working_set + b_working_set;
 
   // 3. CRUCIAL: Check if the working set fits in the L2 cache.
   // If it doesn't, the global reuse pattern is broken by capacity misses,
@@ -598,13 +581,12 @@ double compute_memory_latency(const problem_t& problem,
 
   // Global cap on L2 hit-rate (prevents impossible cache residency claims)
   // (Assumes capacity is given in KiB, convert to bytes)
-  // TODO hardware.L2_capacity is already in bytes?
   double H_mem1_global =
-      compute_l2_hit_rate_global(problem, hardware, config, hardware.L2_capacity * 1024, num_active_cus, splitting_factor);
+      compute_l2_hit_rate_global(problem, hardware, config, hardware.L2_capacity * 1024);
 
   H_mem1 = std::min(H_mem1, H_mem1_global);
 
-  if (H_mem1 == 0) { H_mem1 = 0.1; }
+  if (H_mem1 == 0) { H_mem1 = 0.5; }
 
   // 2) Estimate mall hit-rate
   double H_mem2 = estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor);
@@ -652,8 +634,9 @@ double compute_memory_latency(const problem_t& problem,
   // Calculate the tile of workgroups that can run concurrently (logic from estimate_mall_hit).
   size_t grid_m = math::safe_ceil_div(problem.size.m, MT_M);
   size_t grid_n = math::safe_ceil_div(problem.size.n, MT_N);
+  size_t mall_m =
+      math::safe_ceil_div(num_active_cus, static_cast<size_t>(config.workgroup_mapping));
   size_t mall_n = std::min(static_cast<size_t>(config.workgroup_mapping), grid_n);
-  size_t mall_m = math::safe_ceil_div(std::min(num_active_cus, grid_m * grid_n), mall_n);
   // Handle wrap-around case
   if (mall_m > grid_m) {
     size_t num_wraps = (mall_m / grid_m);
@@ -663,22 +646,12 @@ double compute_memory_latency(const problem_t& problem,
   // Clamp tile dimensions
   mall_m = std::max(std::min(grid_m, mall_m), static_cast<size_t>(1));
   mall_n = std::max(std::min(grid_n, mall_n), static_cast<size_t>(1));
-  while (mall_m * mall_n > num_active_cus) {
-    if (mall_m > 1 && mall_m >= mall_n) {
-      mall_m--;
-    } else if (mall_n > 1) {
-      mall_n--;
-    } else {
-      // Cannot shrink further.
-      break;
-    }
-  }
-  double concurrent_tiles = std::min(static_cast<double>(problem.batch * splitting_factor),
-      std::max(static_cast<double>(num_active_cus) / (grid_m * grid_n), 1.));
   // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
-  double min_load = static_cast<double>((mall_m * Ld_A_value * a_bytes) +
-                                        (mall_n * Ld_B_value * b_bytes)) *
-                    concurrent_tiles;  // Apply batching to the minimum load itself.
+  double concurrent_batches = std::min(static_cast<double>(problem.batch),
+      std::max(static_cast<double>(num_active_cus) / (grid_m * grid_n), 1.));
+  double min_load = static_cast<double>((mall_m * config.mt.mk() * a_bytes) +
+                                        (mall_n * config.mt.nk() * b_bytes)) *
+                    concurrent_batches;  // Apply batching to the minimum load itself.
   // The actual loads cannot be less than this physical minimum.
   Ld_MEM  = std::max(Ld_MEM, min_load);
   Ld_mem2 = std::max(Ld_mem2, min_load);
@@ -907,12 +880,7 @@ double compute_total_latency(const problem_t& problem,
   }
 
   // 1-1) To compute the latency, use default WGM. And WGM can't be greater than one
-  int defaultWGM = batch > 1 ? 1 : static_cast<int>(ceil(std::sqrt(max_cus / hardware.NUM_XCD)));
-  const size_t grid_m = math::safe_ceil_div(M, MT_N);
-  const size_t grid_n = math::safe_ceil_div(N, MT_N);
-  if(grid_m * grid_n > hardware.N_CU && M > 10 * N && grid_n <= 8) {
-    defaultWGM = grid_n;
-  }
+  int defaultWGM = batch > 1 ? 1 : static_cast<int>(ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
   auto config_with_default_wgm              = config;
   config_with_default_wgm.workgroup_mapping = std::max(defaultWGM, 1);
 
