@@ -27,7 +27,7 @@
 #include "../../shared/precision_type.h"
 #include "../../shared/rocfft_complex.h"
 #include "hip/hip_runtime_api.h"
-#include <boost/scope_exit.hpp>
+#include "../../shared/scope_exit.h"
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -216,12 +216,12 @@ TEST(rocfft_UnitTest, log_levels)
     }
 
     // clean up environment and temporary file when we exit
-    BOOST_SCOPE_EXIT_ALL(=)
+    ROCFFT_SCOPE_EXIT([=]()
     {
         rocfft_cleanup();
         // re-init logs with default logging
         rocfft_setup();
-    };
+    });
     rocfft_cleanup();
 
     // enumerate all known log levels and direct all of the logs to nowhere
@@ -297,13 +297,13 @@ TEST(rocfft_UnitTest, log_multithreading)
     static const char* TRACE_FILE           = "trace.log";
 
     // clean up environment and temporary file when we exit
-    BOOST_SCOPE_EXIT_ALL(=)
+    ROCFFT_SCOPE_EXIT([=]()
     {
         rocfft_cleanup();
         remove(TRACE_FILE);
         // re-init logs with default logging
         rocfft_setup();
-    };
+    });
 
     // ask for trace logging, since that's the easiest to trigger
     rocfft_cleanup();
@@ -491,7 +491,7 @@ void rtc_cache_main()
     size_t onekernel_cache_bytes = 0;
 
     // cleanup
-    BOOST_SCOPE_EXIT_ALL(=)
+    ROCFFT_SCOPE_EXIT([=]()
     {
         // close log file handles
         rocfft_cleanup();
@@ -503,7 +503,7 @@ void rtc_cache_main()
             rocfft_cache_buffer_free(empty_cache);
         if(onekernel_cache)
             rocfft_cache_buffer_free(onekernel_cache);
-    };
+    });
 
     rocfft_cleanup();
     EnvironmentSetTemp cache_env("ROCFFT_RTC_CACHE_PATH", rtc_cache_path.c_str());
@@ -746,12 +746,12 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 
     rocfft_cleanup();
 
-    BOOST_SCOPE_EXIT_ALL()
+    ROCFFT_SCOPE_EXIT([]()
     {
         // reinit rocFFT so caching goes back to normal
         rocfft_cleanup();
         rocfft_setup();
-    };
+    });
 
     // extra scope to control lifetime of env vars
     {

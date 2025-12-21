@@ -18,8 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/scope_exit.hpp>
-#include <boost/tokenizer.hpp>
+#include "../../shared/string_tokenizer.h"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <math.h>
@@ -140,14 +139,11 @@ TEST_P(accuracy_test, vs_fftw)
     {
         // split launcher into tokens since the first one is the exe
         // and the remainder is the start of its argv
-        boost::escaped_list_separator<char>                   sep('\\', ' ', '\"');
-        boost::tokenizer<boost::escaped_list_separator<char>> tokenizer(mp_launch, sep);
+        auto                     tokens = tokenize_escaped(mp_launch, '\\', ' ', '"');
         std::string                                           exe;
         std::vector<std::string>                              argv;
-        for(auto t : tokenizer)
+        for(const auto& t : tokens)
         {
-            if(t.empty())
-                continue;
 
             if(exe.empty())
                 exe = t;
