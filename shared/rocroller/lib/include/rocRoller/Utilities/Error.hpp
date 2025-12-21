@@ -73,9 +73,23 @@ namespace rocRoller
         std::string          message;
         std::source_location loc;
 
-        template <typename T>
-        MessageWithLocation(T&& msg, std::source_location l = std::source_location::current())
-            : message(std::forward<T>(msg))
+        MessageWithLocation(std::string          msg,
+                            std::source_location l = std::source_location::current())
+            : message(std::move(msg))
+            , loc(l)
+        {
+        }
+
+        MessageWithLocation(std::string_view     msg,
+                            std::source_location l = std::source_location::current())
+            : message(msg)
+            , loc(l)
+        {
+        }
+
+        MessageWithLocation(const char*          msg,
+                            std::source_location l = std::source_location::current())
+            : message(msg ? msg : "")
             , loc(l)
         {
         }
