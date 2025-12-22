@@ -33,7 +33,7 @@ struct Pooling2dTestCase
     std::array<int, 4> input_dims; // [N, C, H, W]
     std::array<int, 2> lens;       // [H, W]
     std::array<int, 2> pads;       // [H, W]
-    std::array<int, 2> strides;     // [H, W]
+    std::array<int, 2> strides;    // [H, W]
     miopenIndexType_t index_type;
     miopenPoolingMode_t mode;
     int wsidx;
@@ -55,9 +55,9 @@ struct Pooling2dTestCase
 
 // Helper function to calculate output spatial dimensions for 2D pooling
 std::array<int, 4> CalculateOutputDims(const std::array<int, 4>& input_dims,
-                                        const std::array<int, 2>& lens,
-                                        const std::array<int, 2>& strides,
-                                        const std::array<int, 2>& pads)
+                                       const std::array<int, 2>& lens,
+                                       const std::array<int, 2>& strides,
+                                       const std::array<int, 2>& pads)
 {
     // input_dims is [N, C, H, W]
     // Returns [N, C, H_out, W_out]
@@ -66,9 +66,8 @@ std::array<int, 4> CalculateOutputDims(const std::array<int, 4>& input_dims,
     output_dims[1] = input_dims[1];
     for(int i = 0; i < 2; i++)
     {
-        int input_size = input_dims[i + 2];
-        int output_size =
-            (input_size + 2 * pads[i] - lens[i]) / strides[i] + 1;
+        int input_size     = input_dims[i + 2];
+        int output_size    = (input_size + 2 * pads[i] - lens[i]) / strides[i] + 1;
         output_dims[i + 2] = output_size;
     }
     return output_dims;
@@ -131,10 +130,10 @@ bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
     }
 
     // Check 5: Skip average pooling with wsidx=0 (workspace index modes are irrelevant for Average)
-    // This matches original ctest behavior: skip to optimize performance, but ensure wsidx=1 is tested
+    // This matches original ctest behavior: skip to optimize performance, but ensure wsidx=1 is
+    // tested
     if(test_case.wsidx == 0 &&
-       (test_case.mode == miopenPoolingAverage ||
-        test_case.mode == miopenPoolingAverageInclusive))
+       (test_case.mode == miopenPoolingAverage || test_case.mode == miopenPoolingAverageInclusive))
     {
         return false;
     }
@@ -180,32 +179,31 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 
     // Counters to limit non-uint8 index types (matching original ctest behavior)
     // The original ctest limits these to speed up testing of the default dataset
-    int num_uint16_case           = 0;
-    int num_uint32_case          = 0;
-    int num_uint32_case_imgidx    = 0;
-    int num_uint64_case           = 0;
-    int num_uint64_case_imgidx    = 0;
+    int num_uint16_case        = 0;
+    int num_uint32_case        = 0;
+    int num_uint32_case_imgidx = 0;
+    int num_uint64_case        = 0;
+    int num_uint64_case_imgidx = 0;
 
     // Dataset 0: Default dataset (various tensor sizes)
     std::vector<std::vector<int>> dataset0_inputs;
 #if TEST_GET_INPUT_TENSOR
     // When TEST_GET_INPUT_TENSOR = 1, use get_inputs() function (matching original ctest behavior)
-    int batch_factor = 0; // Default batch factor matching original ctest
+    int batch_factor                      = 0; // Default batch factor matching original ctest
     std::set<std::vector<int>> in_dim_set = get_inputs<int>(batch_factor);
     dataset0_inputs.assign(in_dim_set.begin(), in_dim_set.end());
 #else
     // When TEST_GET_INPUT_TENSOR = 0, use predefined shapes
     // Limited to 9 input shapes (matching generate_multi_data_limited with limit_multiplier=9)
-    dataset0_inputs = {
-        {1, 19, 1024, 2048},
-        {10, 3, 32, 32},
-        {5, 32, 8, 8},
-        {2, 1024, 12, 12},
-        {4, 3, 231, 231},
-        {8, 3, 227, 227},
-        {1, 384, 13, 13},
-        {1, 96, 27, 27},
-        {2, 160, 7, 7}}; // First 9 from the original 18
+    dataset0_inputs = {{1, 19, 1024, 2048},
+                       {10, 3, 32, 32},
+                       {5, 32, 8, 8},
+                       {2, 1024, 12, 12},
+                       {4, 3, 231, 231},
+                       {8, 3, 227, 227},
+                       {1, 384, 13, 13},
+                       {1, 96, 27, 27},
+                       {2, 160, 7, 7}}; // First 9 from the original 18
 #endif
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
@@ -499,6 +497,12 @@ TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { RunPooling2dTest<float>(GetPar
 
 TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { RunPooling2dTest<half_float::half>(GetParam()); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP32, testing::ValuesIn(GetPooling2dTestCases()), GetPooling2dTestCaseName);
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Pooling2d_FP32,
+                         testing::ValuesIn(GetPooling2dTestCases()),
+                         GetPooling2dTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP16, testing::ValuesIn(GetPooling2dTestCases()), GetPooling2dTestCaseName);
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Pooling2d_FP16,
+                         testing::ValuesIn(GetPooling2dTestCases()),
+                         GetPooling2dTestCaseName);
