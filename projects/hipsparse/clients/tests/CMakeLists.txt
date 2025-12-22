@@ -177,11 +177,8 @@ set_target_properties(hipsparse-test PROPERTIES
 )
 
 # Create symlink/copy for matrices after build completes
-# This ensures matrices are accessible at ../matrices/ from build tree executable
-# and at clients/matrices/ for TheRock CI (via HIPSPARSE_CLIENTS_MATRICES_DIR env var)
 if(WIN32)
     # On Windows: Copy matrices directory after build to avoid symlink issues
-    # Symlinks cause OSError in TheRock's fileset_tool.py during staging
     add_custom_command(
         TARGET hipsparse-test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -189,16 +186,15 @@ if(WIN32)
             "${PROJECT_BINARY_DIR}/clients/matrices"
         COMMENT "Copying matrices for Windows test environment"
     )
-# else()
-#     # On Linux: Create symlink after test target is built
-#     # POST_BUILD ensures matrices are downloaded first (via hipsparse-common dependency)
-#     add_custom_command(
-#         TARGET hipsparse-test POST_BUILD
-#         COMMAND ${CMAKE_COMMAND} -E create_symlink # replace with copy
-#             "${PROJECT_BINARY_DIR}/matrices"
-#             "${PROJECT_BINARY_DIR}/clients/matrices"
-#         COMMENT "Creating symlink for test matrices"
-#     )
+else()
+    # On Linux: Copy matrices directory after build
+    add_custom_command(
+        TARGET hipsparse-test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_BINARY_DIR}/matrices"
+            "${PROJECT_BINARY_DIR}/clients/matrices"
+        COMMENT "Copying matrices for Linux test environment"
+    )
 endif()
 
 # Build mtx2csr converter

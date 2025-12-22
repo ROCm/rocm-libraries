@@ -105,7 +105,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_gtsv.yaml
     cuda/12.8/test_gtsv2_nopivot.yaml
     cuda/12.8/test_gtsv2_strided_batch.yaml
-    cuda/12.8/test_gtsv_interleaved_batch.yamlcd
+    cuda/12.8/test_gtsv_interleaved_batch.yaml
     # Extra
     cuda/12.8/test_csrgeam2.yaml
     # Reorder
