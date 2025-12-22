@@ -4,7 +4,6 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
@@ -189,7 +188,7 @@ TEST(TestTensorAttributes, ValidateFailsOnNonPositiveDimension)
 
         EXPECT_EQ(tensor.validate(),
                   Error(ErrorCode::INVALID_VALUE, "Tensor  must have only positive dimensions"))
-            << "Dims: " << hipdnn_sdk::utilities::vecToString(dim);
+            << "Dims: " << hipdnn_data_sdk::utilities::vecToString(dim);
     }
 }
 

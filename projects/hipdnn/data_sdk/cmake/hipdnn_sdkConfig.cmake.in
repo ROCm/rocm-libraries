@@ -1,6 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-#
+
+
 # Backwards compatibility config for hipdnn_sdk
 # hipdnn_sdk is a thin wrapper that links to hipdnn_data_sdk
 

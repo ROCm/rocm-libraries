@@ -14,6 +14,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 && FLATBUFFERS_VERSION_MINOR == 9
 #include "batchnorm_attributes_generated.h"
 #include "batchnorm_backward_attributes_generated.h"
 #include "batchnorm_inference_attributes_generated.h"
+#include "batchnorm_inference_attributes_variance_ext_generated.h"
 #include "convolution_bwd_attributes_generated.h"
 #include "convolution_fwd_attributes_generated.h"
 #include "convolution_wrw_attributes_generated.h"
@@ -49,40 +50,45 @@ enum class NodeAttributes : uint8_t
     ConvolutionFwdAttributes = 5,
     ConvolutionBwdAttributes = 6,
     ConvolutionWrwAttributes = 7,
+    BatchnormInferenceAttributesVarianceExt = 8,
     MIN = NONE,
-    MAX = ConvolutionWrwAttributes
+    MAX = BatchnormInferenceAttributesVarianceExt
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[8]
+inline const NodeAttributes (&EnumValuesNodeAttributes())[9]
 {
-    static const NodeAttributes values[] = {NodeAttributes::NONE,
-                                            NodeAttributes::BatchnormInferenceAttributes,
-                                            NodeAttributes::PointwiseAttributes,
-                                            NodeAttributes::BatchnormBackwardAttributes,
-                                            NodeAttributes::BatchnormAttributes,
-                                            NodeAttributes::ConvolutionFwdAttributes,
-                                            NodeAttributes::ConvolutionBwdAttributes,
-                                            NodeAttributes::ConvolutionWrwAttributes};
+    static const NodeAttributes values[]
+        = {NodeAttributes::NONE,
+           NodeAttributes::BatchnormInferenceAttributes,
+           NodeAttributes::PointwiseAttributes,
+           NodeAttributes::BatchnormBackwardAttributes,
+           NodeAttributes::BatchnormAttributes,
+           NodeAttributes::ConvolutionFwdAttributes,
+           NodeAttributes::ConvolutionBwdAttributes,
+           NodeAttributes::ConvolutionWrwAttributes,
+           NodeAttributes::BatchnormInferenceAttributesVarianceExt};
     return values;
 }
 
 inline const char* const* EnumNamesNodeAttributes()
 {
-    static const char* const names[9] = {"NONE",
-                                         "BatchnormInferenceAttributes",
-                                         "PointwiseAttributes",
-                                         "BatchnormBackwardAttributes",
-                                         "BatchnormAttributes",
-                                         "ConvolutionFwdAttributes",
-                                         "ConvolutionBwdAttributes",
-                                         "ConvolutionWrwAttributes",
-                                         nullptr};
+    static const char* const names[10] = {"NONE",
+                                          "BatchnormInferenceAttributes",
+                                          "PointwiseAttributes",
+                                          "BatchnormBackwardAttributes",
+                                          "BatchnormAttributes",
+                                          "ConvolutionFwdAttributes",
+                                          "ConvolutionBwdAttributes",
+                                          "ConvolutionWrwAttributes",
+                                          "BatchnormInferenceAttributesVarianceExt",
+                                          nullptr};
     return names;
 }
 
 inline const char* EnumNameNodeAttributes(NodeAttributes e)
 {
-    if(::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::ConvolutionWrwAttributes))
+    if(::flatbuffers::IsOutRange(
+           e, NodeAttributes::NONE, NodeAttributes::BatchnormInferenceAttributesVarianceExt))
         return "";
     const size_t index = static_cast<size_t>(e);
     return EnumNamesNodeAttributes()[index];
@@ -136,6 +142,13 @@ struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::ConvolutionWrwAttribu
     static const NodeAttributes enum_value = NodeAttributes::ConvolutionWrwAttributes;
 };
 
+template <>
+struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>
+{
+    static const NodeAttributes enum_value
+        = NodeAttributes::BatchnormInferenceAttributesVarianceExt;
+};
+
 template <typename T>
 struct NodeAttributesUnionTraits
 {
@@ -182,6 +195,14 @@ template <>
 struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT>
 {
     static const NodeAttributes enum_value = NodeAttributes::ConvolutionWrwAttributes;
+};
+
+template <>
+struct NodeAttributesUnionTraits<
+    hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT>
+{
+    static const NodeAttributes enum_value
+        = NodeAttributes::BatchnormInferenceAttributesVarianceExt;
 };
 
 struct NodeAttributesUnion
@@ -341,6 +362,23 @@ struct NodeAttributesUnion
                          const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT*>(value)
                    : nullptr;
     }
+    hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*
+        AsBatchnormInferenceAttributesVarianceExt()
+    {
+        return type == NodeAttributes::BatchnormInferenceAttributesVarianceExt
+                   ? reinterpret_cast<
+                         hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*>(
+                         value)
+                   : nullptr;
+    }
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*
+        AsBatchnormInferenceAttributesVarianceExt() const
+    {
+        return type == NodeAttributes::BatchnormInferenceAttributesVarianceExt
+                   ? reinterpret_cast<const hipdnn_data_sdk::data_objects::
+                                          BatchnormInferenceAttributesVarianceExtT*>(value)
+                   : nullptr;
+    }
 };
 
 inline bool operator==(const NodeAttributesUnion& lhs, const NodeAttributesUnion& rhs)
@@ -402,6 +440,15 @@ inline bool operator==(const NodeAttributesUnion& lhs, const NodeAttributesUnion
                    lhs.value))
                == *(reinterpret_cast<
                     const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT*>(rhs.value));
+    }
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    {
+        return *(reinterpret_cast<
+                   const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*>(
+                   lhs.value))
+               == *(reinterpret_cast<
+                    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*>(
+                   rhs.value));
     }
     default:
     {
@@ -534,6 +581,16 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
                          attributes())
                    : nullptr;
     }
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt*
+        attributes_as_BatchnormInferenceAttributesVarianceExt() const
+    {
+        return attributes_type()
+                       == hipdnn_data_sdk::data_objects::NodeAttributes::
+                           BatchnormInferenceAttributesVarianceExt
+                   ? static_cast<const hipdnn_data_sdk::data_objects::
+                                     BatchnormInferenceAttributesVarianceExt*>(attributes())
+                   : nullptr;
+    }
     void* mutable_attributes()
     {
         return GetPointer<void*>(VT_ATTRIBUTES);
@@ -603,6 +660,14 @@ inline const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes*
     Node::attributes_as<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>() const
 {
     return attributes_as_ConvolutionWrwAttributes();
+}
+
+template <>
+inline const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt*
+    Node::attributes_as<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>()
+        const
+{
+    return attributes_as_BatchnormInferenceAttributesVarianceExt();
 }
 
 struct NodeBuilder
@@ -1207,6 +1272,12 @@ inline bool
             = reinterpret_cast<const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes*>(obj);
         return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    {
+        auto ptr = reinterpret_cast<
+            const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt*>(obj);
+        return verifier.VerifyTable(ptr);
+    }
     default:
         return true;
     }
@@ -1280,6 +1351,12 @@ inline void* NodeAttributesUnion::UnPack(const void* obj,
             = reinterpret_cast<const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes*>(obj);
         return ptr->UnPack(resolver);
     }
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    {
+        auto ptr = reinterpret_cast<
+            const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt*>(obj);
+        return ptr->UnPack(resolver);
+    }
     default:
         return nullptr;
     }
@@ -1339,6 +1416,12 @@ inline ::flatbuffers::Offset<void>
                 value);
         return CreateConvolutionWrwAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    {
+        auto ptr = reinterpret_cast<
+            const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*>(value);
+        return CreateBatchnormInferenceAttributesVarianceExt(_fbb, ptr, _rehasher).Union();
+    }
     default:
         return 0;
     }
@@ -1394,6 +1477,13 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion& u)
             *reinterpret_cast<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT*>(u.value));
         break;
     }
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    {
+        value = new hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT(
+            *reinterpret_cast<
+                hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*>(u.value));
+        break;
+    }
     default:
         break;
     }
@@ -1447,6 +1537,13 @@ inline void NodeAttributesUnion::Reset()
     {
         auto ptr
             = reinterpret_cast<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT*>(value);
+        delete ptr;
+        break;
+    }
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    {
+        auto ptr = reinterpret_cast<
+            hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT*>(value);
         delete ptr;
         break;
     }
