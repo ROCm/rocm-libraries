@@ -45,18 +45,18 @@
 template <typename T, typename Tb = T, typename To = T, hipsparseOrder_t order>
 void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
 {
-    auto saturate_i8 = [](Tb val) {
+    using TAccum = float;
+
+    auto saturate_i8 = [](TAccum val) {
         auto _val = std::nearbyint(static_cast<double>(val));
         _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
         return static_cast<To>(_val);
     };
 
-    auto saturate_o = [](Tb val) { return static_cast<To>(val); };
+    auto saturate_o = [](TAccum val) { return static_cast<To>(val); };
 
-    To (*saturate)(Tb val);
+    To (*saturate)(TAccum val);
     saturate = std::is_same<int8_t, To>() ? saturate_i8 : saturate_o;
-
-    using TAccum = std::conditional_t<std::is_same<__half, Tb>::value, float, Tb>;
 
     for(int64_t i = 0; i < m; i++)
     {
