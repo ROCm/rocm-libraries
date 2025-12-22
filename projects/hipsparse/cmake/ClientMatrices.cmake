@@ -60,6 +60,7 @@ get_filename_component(CMAKE_MATRICES_DIR "${CMAKE_MATRICES_DIR}"
                        ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
 
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}")
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/clients")
 
 if(HIPSPARSE_ENABLE_ASAN)
   execute_process(COMMAND "${CMAKE_CXX_COMPILER}" "${CONVERT_SOURCE}" -O3 -fsanitize=address -static-libsan -o "${PROJECT_BINARY_DIR}/clients/mtx2csr.exe"
