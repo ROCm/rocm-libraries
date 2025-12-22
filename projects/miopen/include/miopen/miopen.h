@@ -591,8 +591,8 @@ typedef enum
  */
 typedef enum
 {
-    MIOPEN_NOT_PROPAGATE_NAN = 0, /*!< does not propagate Nan number */
-    MIOPEN_PROPAGATE_NAN     = 1, /*!< propagate the Nan number by the Reduction operation */
+    MIOPEN_NOT_PROPAGATE_NAN = 0, /*!< does not propagate NaN number */
+    MIOPEN_PROPAGATE_NAN     = 1, /*!< propagate the NaN number by the Reduction operation */
 } miopenNanPropagation_t;
 
 /*! @ingroup TensorReduce
@@ -3000,7 +3000,7 @@ miopenBatchNormForwardTrainingActivation(miopenHandle_t handle,
  * If either estimatedMean, or estimatedVariance are null pointers then the values for the mean and
  * variance will be calculated from input data and this calculated mean and variance will be used
  * to update input values.
- * If variance is zero and epsilon is also zero, this function outputs NAN values.  Input epsilon
+ * If variance is zero and epsilon is also zero, this function outputs NaN values.  Input epsilon
  * value should always be non zero positive value.
  *
  * @param handle                    MIOpen handle (input)
@@ -3045,7 +3045,7 @@ miopenBatchNormalizationForwardInference(miopenHandle_t handle,
  * If either estimatedMean, or estimatedVariance are null pointers then the values for the mean and
  * variance will be calculated from input data and this calculated mean and variance will be used
  * to update input values.
- * If variance is zero and epsilon is also zero, this function outputs NAN values.  Input epsilon
+ * If variance is zero and epsilon is also zero, this function outputs NaN values.  Input epsilon
  * value should always be non zero positive value.
  *
  * @param handle                    MIOpen handle (input)
@@ -3095,7 +3095,7 @@ miopenBatchNormalizationForwardInference_V2(miopenHandle_t handle,
  * If either estimatedMean, or estimatedVariance are null pointers then the values for the mean and
  * variance will be calculated from input data and this calculated mean and variance will be used
  * to update input values.
- * If variance is zero and epsilon is also zero, this function outputs NAN values.  Input epsilon
+ * If variance is zero and epsilon is also zero, this function outputs NaN values.  Input epsilon
  * value should always be non zero positive value.
  *
  * @param handle                    MIOpen handle (input)
@@ -5790,7 +5790,7 @@ miopenDestroyReduceTensorDescriptor(miopenReduceTensorDescriptor_t reduceTensorD
  * @param reduceTensorOp           Enumerant specifying the operation used by ReduceTensor (input)
  * @param reduceTensorCompType     Enumerant specifying the data type used with ReduceTensor
  * operation (input)
- * @param reduceTensorNanOpt       Enumerant specifying the Nan number propagation mode (input)
+ * @param reduceTensorNanOpt       Enumerant specifying the NaN number propagation mode (input)
  * @param reduceTensorIndices      Enumerant specifying the indices modes used by ReduceTensor
  * (input)
  * @param reduceTensorIndicesType  Enumerant specifying the data type of the indices (input)
@@ -5811,7 +5811,7 @@ miopenSetReduceTensorDescriptor(miopenReduceTensorDescriptor_t reduceTensorDesc,
  * ReduceTensor (output)
  * @param reduceTensorCompType     Pointer to enumerant specifying the data type used with
  * ReduceTensor operation (output)
- * @param reduceTensorNanOpt       Pointer to enumerant specifying the Nan number propagation mode
+ * @param reduceTensorNanOpt       Pointer to enumerant specifying the NaN number propagation mode
  * (output)
  * @param reduceTensorIndices      Pointer to enumerant specifying the indices modes used by
  * ReduceTensor (output)
@@ -6428,9 +6428,9 @@ MIOPEN_EXPORT miopenStatus_t miopenCreateSoftmaxProblem(miopenProblem_t* problem
  */
 typedef enum
 {
-    MIOPEN_REDUCE_CALCULATION_NOT_PROPAGATE_NAN = 0, /*!< does not propagate Nan number */
+    MIOPEN_REDUCE_CALCULATION_NOT_PROPAGATE_NAN = 0, /*!< does not propagate NaN number */
     MIOPEN_REDUCE_CALCULATION_PROPAGATE_NAN =
-        1, /*!< propagate the Nan number by the Reduction operation */
+        1, /*!< propagate the NaN number by the Reduction operation */
 } miopenReduceCalculationNanPropagation_t;
 
 // ReduceCalculation APIs
@@ -6470,7 +6470,7 @@ miopenGetReduceCalculationWorkspaceSize(miopenHandle_t handle,
 /*! @brief Execute a reducecalculation forward layer
  *
  * @param [in]   handle                   MIOpen handle
- * @param [in]   nanPropagation           Nan number propagation mode
+ * @param [in]   nanPropagation           NaN number propagation mode
  * @param [in]   workspace                Address of the allocated workspace data
  * @param [in]   workspaceSizeInBytes     Size in bytes of the allocated workspace data
  * @param [in]   xDesc                    Tensor descriptor for data input tensor x
@@ -7800,7 +7800,7 @@ MIOPEN_EXPORT miopenStatus_t miopenFusedAdam(miopenHandle_t handle,
  * @param gradScaleDesc       Tensor descriptor for the input grad scale tensor (input, optional)
  * @param gradScale           Input grad scale tensor (input, optional)
  * @param foundInfDesc        Tensor descriptor for the input found inf tensor (input, optional)
- * @param foundInf            Tensor indicating presence of inf or nan in gradients. If true, skips
+ * @param foundInf            Tensor indicating presence of inf or NaN in gradients. If true, skips
  *                            operation and step update. (input, optional)
  * @return                    miopenStatus_t
  */
@@ -8085,7 +8085,7 @@ MIOPEN_EXPORT miopenStatus_t miopenTransformersAdamW(miopenHandle_t handle,
  * @param gradScaleDesc       Tensor descriptor for the input grad scale tensor (input, optional)
  * @param gradScale           Input grad scale tensor (input, optional)
  * @param foundInfDesc        Tensor descriptor for the input found inf tensor (input, optional)
- * @param foundInf            Tensor indicating presence of inf or nan in gradients. If true, skips
+ * @param foundInf            Tensor indicating presence of inf or NaN in gradients. If true, skips
  *                            operation and step update. (input, optional)
  * @return                    miopenStatus_t
  */
