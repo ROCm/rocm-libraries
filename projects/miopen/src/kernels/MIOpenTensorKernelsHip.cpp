@@ -775,7 +775,7 @@ extern "C" __global__ void Op5dTensorGeneric(const MIOPEN_TYPE* __restrict__ a, 
         // the same element reused for all W positions for A only case with stride == 0
         // for B: stride == 0 or size == 1
         const bool aw0 = (a_wstride == 0);
-        const bool bw0 = (b_w == 1) || (b_wstride == 0);
+        const idx_t bw0 = (b_w == 1) ? 0 : ((b_w == c_w) ? w0 : (w0 % static_cast<idx_t>(b_w)));
 
         // Base offsets for A, B, C tensors
         wide_t a_off = static_cast<wide_t>(n0) * a_nstride + static_cast<wide_t>(c0) * a_cstride +
@@ -784,7 +784,7 @@ extern "C" __global__ void Op5dTensorGeneric(const MIOPEN_TYPE* __restrict__ a, 
 
         wide_t b_off = static_cast<wide_t>(bn0) * b_nstride + static_cast<wide_t>(bc0) * b_cstride +
                        static_cast<wide_t>(bd0) * b_dstride + static_cast<wide_t>(bh0) * b_hstride +
-                       (bw0 ? static_cast<wide_t>(0) : static_cast<wide_t>(w0) * b_wstride);
+                       static_cast<wide_t>(bw0) * b_wstride;
 
         wide_t c_off = static_cast<wide_t>(n0) * c_nstride + static_cast<wide_t>(c0) * c_cstride +
                        static_cast<wide_t>(d0) * c_dstride + static_cast<wide_t>(h0) * c_hstride +
@@ -792,7 +792,7 @@ extern "C" __global__ void Op5dTensorGeneric(const MIOPEN_TYPE* __restrict__ a, 
 
         // Increments for A, B, C ptrs
         const wide_t a_inc_w = aw0 ? static_cast<wide_t>(0) : static_cast<wide_t>(a_wstride);
-        const wide_t b_inc_w = bw0 ? static_cast<wide_t>(0) : static_cast<wide_t>(b_wstride);
+        const wide_t b_inc_w = static_cast<wide_t>(b_wstride);
         const wide_t c_inc_w = static_cast<wide_t>(c_wstride);
 
         // Remaining elements in current C-row by W. Compute via wide_t then narrow.
