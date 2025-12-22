@@ -158,6 +158,7 @@ namespace rocRoller::KernelGraph
         std::string   toString(ConnectionSpec const& cs);
         std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs);
 
+        NaryArgument getNaryArgument(Connections::ConnectionSpec const& conn);
     }
 
     struct DeferredConnection
@@ -330,6 +331,8 @@ namespace rocRoller::KernelGraph
     };
 
     std::string toString(ControlToCoordinateMapper::Connection const& conn);
+
+    NaryArgument getNaryArgument(ControlToCoordinateMapper::Connection const& conn);
 
 }
 
