@@ -6,7 +6,7 @@
 namespace {
 
 // numeric part of test case
-using TestCase = miopen::unit_tests::GroupXdlopsNumericData;
+using TestCase     = miopen::unit_tests::GroupXdlopsNumericData;
 using TestDataType = miopen::unit_tests::TestDataType;
 
 template <TestDataType type>
