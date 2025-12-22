@@ -30,6 +30,7 @@
 
 // Workaround to overcome redefinition errors while including rocrand header files directly
 #include "miopen_rocrand.hpp"
+#include "miopen_cstdint.hpp"
 
 #ifndef MIOPEN_USE_FP32
 #define MIOPEN_USE_FP32 0
@@ -63,7 +64,7 @@
  * @param states_num The number of elements in the state array.
  */
 extern "C" __global__ void
-InitKernelStateHIP(rocrand_state_xorwow* state, ulong prng_seed, ulong states_num)
+InitKernelStateHIP(rocrand_state_xorwow* state, uint64_t prng_seed, uint64_t states_num)
 {
     // Get the index of the current element
     size_t index  = blockIdx.x * blockDim.x + threadIdx.x;

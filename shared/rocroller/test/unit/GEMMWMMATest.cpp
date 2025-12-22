@@ -38,15 +38,19 @@ namespace GEMMTests
 
     // Params are: A & B type, K tile size, (transA, transB)
     class GEMMTestWMMAGPU
-        : public BaseGEMMContextFixture<
-              std::tuple<std::pair<rocRoller::DataType, int>, std::pair<std::string, std::string>>>
+        : public BaseGEMMContextFixture<std::tuple<std::pair<rocRoller::DataType, int>,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
     {
     };
 
     // Params are: A & B type, K tile size, (transA, transB)
     class GEMMTestWMMAF16AccumGPU
-        : public BaseGEMMContextFixture<
-              std::tuple<std::pair<rocRoller::DataType, int>, std::pair<std::string, std::string>>>
+        : public BaseGEMMContextFixture<std::tuple<std::pair<rocRoller::DataType, int>,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
     {
     };
 
@@ -55,15 +59,17 @@ namespace GEMMTests
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    rocRoller::DataType,
                                                    int,
-                                                   std::pair<std::string, std::string>>>
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
     {
     };
 
     TEST_P(GEMMTestWMMAGPU, GPU_BasicGEMM)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
-        auto [typeABAndWaveK, transOp] = std::get<1>(GetParam());
-        auto [typeAB, waveK]           = typeABAndWaveK;
+        auto [typeABAndWaveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
+        auto [typeAB, waveK]                                 = typeABAndWaveK;
 
         switch(waveK)
         {
@@ -81,6 +87,8 @@ namespace GEMMTests
         gemm.wavefrontSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultWavefrontSize);
         std::tie(gemm.transA, gemm.transB) = transOp;
+        gemm.loadPathA                     = loadPathA;
+        gemm.loadPathB                     = loadPathB;
 
         if(typeAB == DataType::Half)
         {
@@ -99,8 +107,8 @@ namespace GEMMTests
     TEST_P(GEMMTestWMMAF16AccumGPU, GPU_BasicGEMM)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
-        auto [dataTypeAndWaveK, transOp] = std::get<1>(GetParam());
-        auto [dataType, waveK]           = dataTypeAndWaveK;
+        auto [dataTypeAndWaveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
+        auto [dataType, waveK]                                 = dataTypeAndWaveK;
 
         switch(waveK)
         {
@@ -118,6 +126,8 @@ namespace GEMMTests
         gemm.wavefrontSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultWavefrontSize);
         std::tie(gemm.transA, gemm.transB) = transOp;
+        gemm.loadPathA                     = loadPathA;
+        gemm.loadPathB                     = loadPathB;
 
         if(dataType == DataType::Half)
         {
@@ -136,7 +146,7 @@ namespace GEMMTests
     TEST_P(MixedGEMMTestWMMAGPU, GPU_BasicGEMM)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
-        auto [typeA, typeB, waveK, transOp] = std::get<1>(GetParam());
+        auto [typeA, typeB, waveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
 
         switch(waveK)
         {
@@ -154,6 +164,8 @@ namespace GEMMTests
         gemm.wavefrontSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultWavefrontSize);
         std::tie(gemm.transA, gemm.transB) = transOp;
+        gemm.loadPathA                     = loadPathA;
+        gemm.loadPathB                     = loadPathB;
 
         basicGEMMMixed(typeA, typeB, gemm);
     }
@@ -169,7 +181,11 @@ namespace GEMMTests
                 ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
-                                  std::pair<std::string, std::string>("T", "T")))));
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMTestWMMA,
@@ -182,7 +198,11 @@ namespace GEMMTests
                 ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
-                                  std::pair<std::string, std::string>("T", "T")))));
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         MixedGEMMTestWMMA,
@@ -196,5 +216,9 @@ namespace GEMMTests
                 ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
-                                  std::pair<std::string, std::string>("T", "T")))));
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 } // namespace GEMMTests
