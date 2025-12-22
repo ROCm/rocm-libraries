@@ -90,18 +90,6 @@ public:
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(dy, 2, "Gradient input tensor (dy)"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "BatchnormBackwardNode: Input tensor (x) dimensions and strides must be set and "
-            "positive");
-
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "BatchnormBackwardNode: Gradient input tensor (dy) dimensions and strides must be "
-            "set and positive");
-
         // SECTION 3: Validate Tensor Shape Consistency
         // Why: Gradients flow through the same computational graph as forward pass.
         // - dy has same shape as y (and therefore x) from forward pass

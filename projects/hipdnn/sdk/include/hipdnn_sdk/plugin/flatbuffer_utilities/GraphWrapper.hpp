@@ -10,7 +10,7 @@
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 
-namespace hipdnn_plugin
+namespace hipdnn_plugin_sdk
 {
 
 /*

@@ -246,17 +246,21 @@ TEST_F(TestGraph, BatchnormNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+    x->set_name("BatchnormNode::X");
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 2, 1, 1});
-
+    scale->set_name("BatchnormNode::SCALE").set_dim(derivedDims).set_stride(derivedStrides);
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_dim({1, 2, 1, 1});
-
+    bias->set_name("BatchnormNode::BIAS").set_dim(derivedDims).set_stride(derivedStrides);
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_dim({1});
+    epsilon->set_name("BatchnormNode::EPSILON").set_value(0.001f);
 
     BatchnormAttributes attributes;
     attributes.set_name("BatchnormNode");
@@ -288,13 +292,18 @@ TEST_F(TestGraph, BatchnormBackwardNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto dy = std::make_shared<TensorAttributes>();
     auto x = std::make_shared<TensorAttributes>();
     auto scale = std::make_shared<TensorAttributes>();
 
-    dy->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
-    scale->set_dim({1, 2, 1, 1});
+    dy->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+    x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+    scale->set_dim(derivedDims).set_stride(derivedStrides).set_data_type(DataType::FLOAT);
 
     BatchnormBackwardAttributes attributes;
     attributes.set_name("BatchnormBackwardNode");
@@ -321,8 +330,13 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({1, 2, 1, 1});
@@ -335,6 +349,11 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
 
     auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({1, 2, 1, 1});
+
+    mean->set_dim(derivedDims).set_stride(derivedStrides);
+    invVariance->set_dim(derivedDims).set_stride(derivedStrides);
+    scale->set_dim(derivedDims).set_stride(derivedStrides);
+    bias->set_dim(derivedDims).set_stride(derivedStrides);
 
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
@@ -506,27 +525,41 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    mean->set_uid(2)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    scale->set_uid(4)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(5).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    bias->set_uid(5)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     BatchnormInferenceAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNode");
@@ -585,36 +618,51 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(2).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    scale->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(3).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    bias->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto prevRunningMean = std::make_shared<TensorAttributes>();
     prevRunningMean->set_uid(4)
         .set_name("PrevRunningMean")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto prevRunningVariance = std::make_shared<TensorAttributes>();
     prevRunningVariance->set_uid(5)
         .set_name("PrevRunningVariance")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto momentum = std::make_shared<TensorAttributes>();
-    momentum->set_uid(6).set_name("Momentum").set_data_type(DataType::FLOAT).set_dim({1});
+    momentum->set_uid(6)
+        .set_name("Momentum")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(7).set_name("Epsilon").set_data_type(DataType::FLOAT).set_dim({1});
+    epsilon->set_uid(7).set_name("Epsilon").set_value(1.f);
 
     BatchnormAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNode");
@@ -692,36 +740,51 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormAndPointwiseGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(2).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    scale->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(3).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    bias->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto prevRunningMean = std::make_shared<TensorAttributes>();
     prevRunningMean->set_uid(4)
         .set_name("PrevRunningMean")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto prevRunningVariance = std::make_shared<TensorAttributes>();
     prevRunningVariance->set_uid(5)
         .set_name("PrevRunningVariance")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto momentum = std::make_shared<TensorAttributes>();
-    momentum->set_uid(6).set_name("Momentum").set_data_type(DataType::FLOAT).set_dim({1});
+    momentum->set_uid(6)
+        .set_name("Momentum")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(7).set_name("Epsilon").set_data_type(DataType::FLOAT).set_dim({1});
+    epsilon->set_uid(7).set_name("Epsilon").set_value(1.f);
 
     BatchnormAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNode");
@@ -875,27 +938,41 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormInferenceGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    mean->set_uid(2)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    scale->set_uid(4)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(5).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    bias->set_uid(5)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     BatchnormInferenceAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNode");
@@ -971,31 +1048,37 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormBackwardGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto dy = std::make_shared<TensorAttributes>();
-    dy->set_uid(1)
-        .set_name("Dy")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    dy->set_uid(1).set_name("Dy").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(2)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(2).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(3).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    scale->set_uid(3)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(4).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    mean->set_uid(4)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(5)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     BatchnormBackwardAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormBackwardNode");
@@ -1203,11 +1286,16 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormBackwardGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
     auto xPointwise = std::make_shared<TensorAttributes>();
     xPointwise->set_uid(6)
         .set_name("X_Pointwise")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
+        .set_dim(dims)
+        .set_stride(strides)
         .set_data_type(DataType::FLOAT);
 
     PointwiseAttributes pointwiseAttributes;
@@ -1217,23 +1305,28 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormBackwardGraph)
     auto dy = graph.pointwise(xPointwise, pointwiseAttributes);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(2).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    scale->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(3).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+    mean->set_uid(3)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(4)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1});
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
 
     BatchnormBackwardAttributes batchnormAttributes;
     batchnormAttributes.set_name("BatchnormBackwardNode");
@@ -2684,18 +2777,21 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_dim({1, 2, 1, 1});
+    mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_dim({1, 2, 1, 1});
+    invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 2, 1, 1});
+    scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_dim({1, 2, 1, 1});
+    bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
 
     // Node 0: batchnorm1
     BatchnormInferenceAttributes bnAttrs1;
     bnAttrs1.set_name("batchnorm1");
     auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs1);
+
+    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(x->get_dim());
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     // Node 1: pointwise1 (depends on batchnorm1)
     PointwiseAttributes pwAttrs1;
@@ -2782,13 +2878,13 @@ TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_dim({1, 2, 1, 1});
+    mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_dim({1, 2, 1, 1});
+    invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 2, 1, 1});
+    scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_dim({1, 2, 1, 1});
+    bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
 
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
@@ -2797,6 +2893,9 @@ TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
     BatchnormInferenceAttributes attributes2;
     attributes2.set_name("BatchnormNode2");
     auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+
+    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(x->get_dim());
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     //validate graph is good.
     auto result = graph.validate();

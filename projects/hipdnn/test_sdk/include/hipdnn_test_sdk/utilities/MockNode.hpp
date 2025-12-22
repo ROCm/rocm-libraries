@@ -10,7 +10,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class MockNode : public hipdnn_plugin::INodeWrapper
+class MockNode : public hipdnn_plugin_sdk::INodeWrapper
 {
 public:
     MOCK_METHOD(bool, isValid, (), (const, override));

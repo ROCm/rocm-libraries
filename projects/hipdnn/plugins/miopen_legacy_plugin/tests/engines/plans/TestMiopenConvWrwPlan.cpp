@@ -36,7 +36,7 @@ TEST(TestConvWrwParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -75,7 +75,7 @@ TEST(TestConvWrwParams, ThrowsOnAssymetricPadding)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -83,7 +83,8 @@ TEST(TestConvWrwParams, ThrowsOnAssymetricPadding)
     ASSERT_NE(attrs, nullptr);
 
     // Construct params and expect exception
-    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestConvWrwParams, ThrowsOnInvalidPostPaddingVectorSize)
@@ -108,7 +109,7 @@ TEST(TestConvWrwParams, ThrowsOnInvalidPostPaddingVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -116,7 +117,8 @@ TEST(TestConvWrwParams, ThrowsOnInvalidPostPaddingVectorSize)
     ASSERT_NE(attrs, nullptr);
 
     // Construct params and expect exception
-    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestConvWrwParams, ThrowsOnInvalidPaddingVectorsSize)
@@ -142,7 +144,7 @@ TEST(TestConvWrwParams, ThrowsOnInvalidPaddingVectorsSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -150,7 +152,8 @@ TEST(TestConvWrwParams, ThrowsOnInvalidPaddingVectorsSize)
     ASSERT_NE(attrs, nullptr);
 
     // Construct params and expect exception
-    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestConvWrwParams, ThrowsOnInvalidStrideVectorSize)
@@ -175,7 +178,7 @@ TEST(TestConvWrwParams, ThrowsOnInvalidStrideVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -183,7 +186,8 @@ TEST(TestConvWrwParams, ThrowsOnInvalidStrideVectorSize)
     ASSERT_NE(attrs, nullptr);
 
     // Construct params and expect exception
-    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestConvWrwParams, ThrowsOnInvalidDilationVectorSize)
@@ -208,7 +212,7 @@ TEST(TestConvWrwParams, ThrowsOnInvalidDilationVectorSize)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -216,14 +220,15 @@ TEST(TestConvWrwParams, ThrowsOnInvalidDilationVectorSize)
     ASSERT_NE(attrs, nullptr);
 
     // Construct params and expect exception
-    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ConvWrwParams(*attrs, graph.getTensorMap()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestGpuConvWrwPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -260,7 +265,7 @@ TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
                                                                        convPostPadding,
                                                                        convStrides,
                                                                        convDilation);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
     const auto& node = graph.getNode(0);
@@ -271,5 +276,5 @@ TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
     ConvWrwParams params(*attrs, graph.getTensorMap());
 
     // Create plan and expect exception
-    EXPECT_THROW(ConvWrwPlan(_handle, std::move(params)), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ConvWrwPlan(_handle, std::move(params)), hipdnn_plugin_sdk::HipdnnPluginException);
 }
