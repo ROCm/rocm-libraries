@@ -1994,63 +1994,6 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm():
     yield from add_wgm((1, 1), mxfp8_target_d2lds_mi16x16x128_pf4x1())
 
 
-def mxfp8_target_d2lds_mi16x16x128_st32x8_pf2x1_skipPermlane():
-    """Test for 16x16x128 instruction with scaleSkipPermlane and 32x8 swizzle tile."""
-    yield GEMMRun(
-        M=4096,
-        N=4096,
-        K=16384,
-        beta=0.0,
-        mac_m=128,
-        mac_n=128,
-        mac_k=128,
-        wave_m=16,
-        wave_n=16,
-        wave_k=128,
-        wave_b=1,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        load_A="BufferToLDS",
-        load_B="BufferToLDS",
-        loadScale_A="BufferToVGPR",
-        loadScale_B="BufferToVGPR",
-        storeLDS_D=False,
-        prefetch=True,
-        prefetchInFlight=2,
-        prefetchLDSFactor=1,
-        prefetchScale=True,
-        swizzleScale=True,
-        prefetchMixMemOps=False,
-        betaInFma=True,
-        scheduler="Priority",
-        matchMemoryAccess=True,
-        workgroupMappingDim=0,
-        workgroupRemapXCC=True,
-        workgroupMappingValue=1,
-        types=TypeParameters(
-            trans_A="T",
-            trans_B="N",
-            type_A="fp4",
-            type_B="fp4",
-            type_C="float",
-            type_D="float",
-            type_acc="float",
-            scale_A="Separate",
-            scaleType_A="E8M0",
-            scale_B="Separate",
-            scaleType_B="E8M0",
-            scaleBlockSize=32,
-            scaleSkipPermlane=True,
-        ),
-        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
-        numOuter=1,
-        numWarmUp=1000,
-        numInner=1000,
-    )
-
-
 def fp8_target_d2lds_mi16x16x128_pf4x1():
     yield GEMMRun(
         M=4096,
@@ -2117,7 +2060,6 @@ def mxfp8_kernels_wgm():
 
 def mxfp8_16x16x128_scale_options():
     yield from addSkipPermlane(mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm())
-    yield from mxfp8_target_d2lds_mi16x16x128_st32x8_pf2x1_skipPermlane()
 
 
 def mxfp8_32x32x64_scale_options():
