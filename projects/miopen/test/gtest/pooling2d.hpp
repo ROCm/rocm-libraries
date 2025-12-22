@@ -11,6 +11,7 @@ struct pooling2d_driver : pooling_driver<T>
 {
 private:
     using U = typename std::vector<int>;
+    // Dataset 0 is intended for testing standard pooling configurations with various tensor sizes.
     std::vector<U> get_2d_pooling_input_shapes()
     {
         return {{1, 19, 1024, 2048},
