@@ -825,7 +825,7 @@ namespace rocRoller
                                       barrier);
                     }
 
-                    auto successor = (u == numUnroll - 1) ? barrier : segmentBoundaries[u + 1];
+                    auto successor = segmentBoundaries[u + 1];
 
                     Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
                                "ordering {} to {}",
