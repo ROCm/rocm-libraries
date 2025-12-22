@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -15,6 +16,11 @@
 #include "gtest_common.hpp"
 #include "../network_data.hpp"
 #include "../pooling_common.hpp"
+
+// Temporary: Enable configuration logging for comparison with ctest
+// Set to 1 to generate a file with all test configurations
+// This should be reverted after reviewer verification
+#define ENABLE_CONFIG_LOGGING 1
 
 // Configuration define matching the original ctest behavior
 // These can be overridden at compile time via -D flags
@@ -173,17 +179,117 @@ bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
     return true;
 }
 
-std::vector<Pooling2dTestCase> GetPooling2dTestCases()
+// Helper struct to track index type limits (matching original ctest behavior)
+struct IndexTypeCounters
 {
-    std::vector<Pooling2dTestCase> test_cases;
-
-    // Counters to limit non-uint8 index types (matching original ctest behavior)
-    // The original ctest limits these to speed up testing of the default dataset
     int num_uint16_case        = 0;
     int num_uint32_case        = 0;
     int num_uint32_case_imgidx = 0;
     int num_uint64_case        = 0;
     int num_uint64_case_imgidx = 0;
+
+    // Check if we should add a test case based on index type limits
+    bool ShouldAddBasedOnIndexType(miopenIndexType_t index_type, int wsidx)
+    {
+        switch(index_type)
+        {
+        case miopenIndexUint16:
+            // Only test 5 uint16 cases total
+            if(num_uint16_case >= 5)
+                return false;
+            ++num_uint16_case;
+            return true;
+        case miopenIndexUint32:
+            // Only test 5 uint32 cases for each wsidx mode
+            if(wsidx == 0)
+            {
+                if(num_uint32_case >= 5)
+                    return false;
+                ++num_uint32_case;
+            }
+            else
+            {
+                if(num_uint32_case_imgidx >= 5)
+                    return false;
+                ++num_uint32_case_imgidx;
+            }
+            return true;
+        case miopenIndexUint64:
+            // Only test 5 uint64 cases for wsidx=0
+            // For wsidx=1, limit to 5 cases for 2D (spt_dim == 2)
+            if(wsidx == 0)
+            {
+                if(num_uint64_case >= 5)
+                    return false;
+                ++num_uint64_case;
+            }
+            else
+            {
+                // For 2D pooling (spt_dim == 2), limit to 5 cases
+                if(num_uint64_case_imgidx >= 5)
+                    return false;
+                ++num_uint64_case_imgidx;
+            }
+            return true;
+        case miopenIndexUint8:
+        default:
+            // No limit for uint8
+            return true;
+        }
+    }
+};
+
+// Helper function to generate test cases for a single input configuration
+void AddTestCasesForInput(const std::vector<int>& input_dims,
+                          const std::vector<std::vector<int>>& lens_list,
+                          const std::vector<std::vector<int>>& strides_list,
+                          const std::vector<std::vector<int>>& pads_list,
+                          const std::vector<miopenIndexType_t>& index_types,
+                          const std::vector<miopenPoolingMode_t>& modes,
+                          const std::vector<int>& wsidx_values,
+                          IndexTypeCounters& counters,
+                          std::vector<Pooling2dTestCase>& test_cases)
+{
+    for(const auto& lens : lens_list)
+    {
+        for(const auto& strides : strides_list)
+        {
+            for(const auto& pads : pads_list)
+            {
+                for(const auto& index_type : index_types)
+                {
+                    for(const auto& mode : modes)
+                    {
+                        for(int wsidx : wsidx_values)
+                        {
+                            Pooling2dTestCase test_case = {
+                                {input_dims[0], input_dims[1], input_dims[2], input_dims[3]},
+                                {lens[0], lens[1]},
+                                {pads[0], pads[1]},
+                                {strides[0], strides[1]},
+                                index_type,
+                                mode,
+                                wsidx};
+                            if(ShouldIncludeTestCase(test_case))
+                            {
+                                // Apply original ctest limits for non-uint8 index types
+                                if(counters.ShouldAddBasedOnIndexType(index_type, wsidx))
+                                {
+                                    test_cases.push_back(test_case);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+std::vector<Pooling2dTestCase> GetPooling2dTestCases()
+{
+    std::vector<Pooling2dTestCase> test_cases;
+    IndexTypeCounters counters;
 
     // Dataset 0: Default dataset (various tensor sizes)
     std::vector<std::vector<int>> dataset0_inputs;
@@ -219,118 +325,42 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     // Filter invalid combinations at generation time instead of skipping at runtime
     for(const auto& input_dims : dataset0_inputs)
     {
-        for(const auto& lens : dataset0_lens)
-        {
-            for(const auto& strides : dataset0_strides)
-            {
-                for(const auto& pads : dataset0_pads)
-                {
-                    for(const auto& index_type : dataset0_index_types)
-                    {
-                        for(const auto& mode : modes)
-                        {
-                            for(int wsidx : wsidx_values)
-                            {
-                                Pooling2dTestCase test_case = {
-                                    {input_dims[0], input_dims[1], input_dims[2], input_dims[3]},
-                                    {lens[0], lens[1]},
-                                    {pads[0], pads[1]},
-                                    {strides[0], strides[1]},
-                                    index_type,
-                                    mode,
-                                    wsidx};
-                                if(ShouldIncludeTestCase(test_case))
-                                {
-                                    // Apply original ctest limits for non-uint8 index types
-                                    // (matching skip_many_configs_with_non_int8_index logic)
-                                    bool should_add = true;
-                                    switch(index_type)
-                                    {
-                                    case miopenIndexUint16:
-                                        // Only test 5 uint16 cases total
-                                        if(num_uint16_case >= 5)
-                                        {
-                                            should_add = false;
-                                        }
-                                        else
-                                        {
-                                            ++num_uint16_case;
-                                        }
-                                        break;
-                                    case miopenIndexUint32:
-                                        // Only test 5 uint32 cases for each wsidx mode
-                                        if(wsidx == 0)
-                                        {
-                                            if(num_uint32_case >= 5)
-                                            {
-                                                should_add = false;
-                                            }
-                                            else
-                                            {
-                                                ++num_uint32_case;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            if(num_uint32_case_imgidx >= 5)
-                                            {
-                                                should_add = false;
-                                            }
-                                            else
-                                            {
-                                                ++num_uint32_case_imgidx;
-                                            }
-                                        }
-                                        break;
-                                    case miopenIndexUint64:
-                                        // Only test 5 uint64 cases for wsidx=0
-                                        // For wsidx=1, limit to 5 cases for 2D (spt_dim == 2)
-                                        if(wsidx == 0)
-                                        {
-                                            if(num_uint64_case >= 5)
-                                            {
-                                                should_add = false;
-                                            }
-                                            else
-                                            {
-                                                ++num_uint64_case;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            // For 2D pooling (spt_dim == 2), limit to 5 cases
-                                            if(num_uint64_case_imgidx >= 5)
-                                            {
-                                                should_add = false;
-                                            }
-                                            else
-                                            {
-                                                ++num_uint64_case_imgidx;
-                                            }
-                                        }
-                                        break;
-                                    case miopenIndexUint8:
-                                    default:
-                                        // No limit for uint8
-                                        break;
-                                    }
-
-                                    if(should_add)
-                                    {
-                                        test_cases.push_back(test_case);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        AddTestCasesForInput(input_dims,
+                             dataset0_lens,
+                             dataset0_strides,
+                             dataset0_pads,
+                             dataset0_index_types,
+                             modes,
+                             wsidx_values,
+                             counters,
+                             test_cases);
     }
 
     // Note: Dataset 1 (asymmetric) and Dataset 2 (wide window) are tested separately
     // via pooling2d_asymmetric.cpp and pooling2d_wide.cpp to maintain the same
     // structure as the original ctest implementation.
+
+#if ENABLE_CONFIG_LOGGING
+    // Temporary: Log all test configurations to a file for comparison with ctest
+    // Format: input_dims[4] lens[2] pads[2] strides[2] index_type mode wsidx
+    std::ofstream log_file("pooling2d_gtest_configs.txt");
+    if(log_file.is_open())
+    {
+        log_file << "# Total test cases: " << test_cases.size() << "\n";
+        log_file << "# Format: input_dims[4] lens[2] pads[2] strides[2] index_type mode wsidx\n";
+        for(const auto& tc : test_cases)
+        {
+            log_file << tc.input_dims[0] << " " << tc.input_dims[1] << " " << tc.input_dims[2]
+                     << " " << tc.input_dims[3] << " ";
+            log_file << tc.lens[0] << " " << tc.lens[1] << " ";
+            log_file << tc.pads[0] << " " << tc.pads[1] << " ";
+            log_file << tc.strides[0] << " " << tc.strides[1] << " ";
+            log_file << static_cast<int>(tc.index_type) << " " << static_cast<int>(tc.mode) << " "
+                     << tc.wsidx << "\n";
+        }
+        log_file.close();
+    }
+#endif
 
     return test_cases;
 }
@@ -346,8 +376,12 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
     input.generate(tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
 
     // Setup pooling descriptor
+    // Convert std::array to std::vector for PoolingDescriptor constructor
+    std::vector<int> lens_vec(test_case.lens.begin(), test_case.lens.end());
+    std::vector<int> strides_vec(test_case.strides.begin(), test_case.strides.end());
+    std::vector<int> pads_vec(test_case.pads.begin(), test_case.pads.end());
     miopen::PoolingDescriptor filter{
-        test_case.mode, miopenPaddingDefault, test_case.lens, test_case.strides, test_case.pads};
+        test_case.mode, miopenPaddingDefault, lens_vec, strides_vec, pads_vec};
     filter.SetIndexType(test_case.index_type);
     filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(test_case.wsidx));
 
