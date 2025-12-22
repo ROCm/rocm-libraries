@@ -350,6 +350,17 @@ endif()
 # install location and renamed "CTestTestfile.cmake" (below).
 set(CTEST_RESOURCE_SPEC_FILE "${CMAKE_BINARY_DIR}/resources.json")
 
+rocm_install(
+    FILES "${INSTALL_TEST_FILE}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
+    RENAME "CTestTestfile.cmake"
+)
+
+# Generate the resource spec file while building the tests
+if(USE_HIPCXX)
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/test/enum_devices.cpp PROPERTIES LANGUAGE HIP)
+endif()
 add_executable(enum_devices ${CMAKE_SOURCE_DIR}/test/enum_devices.cpp)
 target_link_libraries(enum_devices PRIVATE hip::host)
 add_custom_command(
@@ -358,13 +369,6 @@ add_custom_command(
     COMMAND enum_devices resources.json
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Generating resources.json file"
-)
-
-rocm_install(
-    FILES "${INSTALL_TEST_FILE}"
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
-    COMPONENT tests
-    RENAME "CTestTestfile.cmake"
 )
 
 # Generate the resource spec file at install time
