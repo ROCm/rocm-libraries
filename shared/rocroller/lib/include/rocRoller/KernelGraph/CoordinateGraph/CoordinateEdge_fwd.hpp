@@ -69,6 +69,7 @@ namespace rocRoller
 
         struct Alias;
         struct Buffer;
+        struct BaseAddress;
         struct Duplicate;
         struct Identify;
         struct Index;
@@ -80,6 +81,7 @@ namespace rocRoller
         using DataFlowEdge = std::variant<DataFlow,
                                           Alias,
                                           Buffer,
+                                          BaseAddress,
                                           Duplicate,
                                           Identify,
                                           Index,

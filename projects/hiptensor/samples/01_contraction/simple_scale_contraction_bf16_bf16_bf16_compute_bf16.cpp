@@ -28,8 +28,14 @@
 int main(int argc, char* argv[])
 {
     /***************************************
-   * Check device support                 *
-   **************************************/
+    * Check device support                 *
+    **************************************/
+    if(!isF16Supported() || !isF32MatrixCoreSupported())
+    {
+        std::cout << "unsupported host device" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
     typedef hip_bfloat16 ADataType;
     typedef hip_bfloat16 BDataType;
     typedef hip_bfloat16 DDataType;

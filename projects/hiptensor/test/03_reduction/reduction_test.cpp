@@ -86,9 +86,13 @@ namespace hiptensor
     bool ReductionTest::checkDevice(hiptensorDataType_t          datatype,
                                     hiptensorComputeDescriptor_t computeDataType) const
     {
-        return !(((datatype == HIPTENSOR_R_32F || computeDataType == HIPTENSOR_R_32F)
-                  && !isF32Supported())
-                 || ((datatype == HIPTENSOR_R_64F || computeDataType == HIPTENSOR_R_64F)
+        return !(((datatype == HIPTENSOR_R_16F || datatype == HIPTENSOR_R_16BF
+                   || computeDataType == HIPTENSOR_COMPUTE_DESC_16F
+                   || computeDataType == HIPTENSOR_COMPUTE_DESC_16BF)
+                  && !isF16Supported())
+                 || ((datatype == HIPTENSOR_R_32F || computeDataType == HIPTENSOR_COMPUTE_DESC_32F)
+                     && !isF32Supported())
+                 || ((datatype == HIPTENSOR_R_64F || computeDataType == HIPTENSOR_COMPUTE_DESC_64F)
                      && !isF64Supported()));
     }
 
