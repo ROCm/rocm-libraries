@@ -1005,7 +1005,9 @@ public:
             = placement == fft_placement_inplace ? xt_output.get() : xt_input.get();
         xt_inBricks.resize(compare_desc->descriptor->nGPUs);
         xt_outBricks.resize(compare_desc->descriptor->nGPUs);
-        set_io_bricks(ilength_cm(), olength_cm(), nbatch, xt_inBricks, xt_outBricks);
+
+        // FIXME: xt????
+        set_io_bricks(ilength_cm(), olength_cm(), nbatch, xt_inBricks, xt_outBricks, false);
 
         // check cufftXtMemcpy versus hipfft's implementation
         if(!xt_desc_matches_brick(input_host,

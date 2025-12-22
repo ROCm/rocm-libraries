@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <iostream> // FIXME: temp
 
 #ifdef HIPFFT_MPI_ENABLE
 #include "hipfft/hipfftMp.h"
@@ -436,11 +438,32 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     std::copy_n(lengths, dim, std::back_inserter(plan->inLength));
     std::copy_n(lengths, dim, std::back_inserter(plan->outLength));
 
+    // FIXME: combine with inpadding/outpadding?
     if(iotxtype.is_real_to_complex())
         plan->outLength.front() = plan->outLength.front() / 2 + 1;
     else if(iotxtype.is_complex_to_real())
         plan->inLength.front() = plan->inLength.front() / 2 + 1;
     plan->batch = number_of_transforms;
+
+    // In-place real/complex padding
+    const size_t inpadding = iotxtype.is_real_to_complex() ? 2 : 0;
+    const size_t outpadding = iotxtype.is_complex_to_real() ? 2 : 0;
+
+    // OK, so why isn't the type real to complex if the input type is HIP_R_64F?  FIXME
+    std::cout << "iotxtype.inputType=" << iotxtype.inputType
+              << " : " <<  "HIP_R_64F=" << HIP_R_64F << std::endl;
+    std::cout << "inpadding: " << inpadding << std::endl;
+    std::cout << "outpadding: " << outpadding << std::endl;
+    std::cout << "is_real_to_complex: " << iotxtype.is_real_to_complex() << std::endl;
+    std::cout << "is_complex_to_real: " << iotxtype.is_complex_to_real() << std::endl;
+    
+    // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
+    if(plan->singleProcMultiDevice)
+    {
+        set_io_bricks(
+            plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks,
+            !iotxtype.is_complex_to_complex());
+    }
 
     if(desc != nullptr)
     {
@@ -451,8 +474,8 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         {
             if(desc->inArrayType == rocfft_array_type_real) // real-to-complex
             {
-                size_t idist = 2 * (1 + lengths[0] / 2);
-                size_t odist = 1 + lengths[0] / 2;
+                size_t idist = 2 * (lengths[0] / 2 + 1);
+                size_t odist = lengths[0] / 2 + 1;
                 for(size_t i = 1; i < dim; i++)
                 {
                     i_strides[i] = idist;
@@ -676,48 +699,27 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     else
     {
         // No caller-specified strides - compute default strides
-        size_t iDist = 1;
-        size_t oDist = 1;
-        for(size_t i = 0; i < plan->inLength.size(); ++i)
+        plan->inStrides.push_back(1);
+        for(size_t idx = 0; idx < plan->inLength.size() - 1; ++idx)
         {
-            plan->inStrides.push_back(iDist);
-            plan->outStrides.push_back(oDist);
-            iDist *= plan->inLength[i];
-            oDist *= plan->outLength[i];
+            plan->inStrides.push_back(plan->inLength[idx] *
+                                      (plan->inStrides.back()) + (idx == 0 ? inpadding : 0));
         }
-        plan->iDist = iDist;
-        plan->oDist = oDist;
-    }
-
-    // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
-    if(plan->singleProcMultiDevice)
-    {
-        if(plan->batch > 1)
-        {
-            // Multi-batch configration
-
-            // Currently not implemented.
-        }
-        else
-        {
-            if(plan->iotxtype.is_complex_to_complex())
-            {
-                // FIXME
-            }
-            else if (plan->iotxtype.is_real_to_complex())
-            {
-                // FIXME
-            }
-            else if (plan->iotxtype.is_complex_to_real())
-            {
-                // FIXME
-            }
-                
-        }
+        plan->iDist = std::accumulate(begin(plan->inStrides), end(plan->inStrides),
+                                      static_cast<decltype(plan->iDist)>(plan->inLength.back()),
+                                      std::multiplies<decltype(plan->iDist)>());
         
-        set_io_bricks(
-            plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks);
+        plan->outStrides.push_back(1);
+        for(size_t idx = 0; idx < plan->outLength.size() - 1; ++idx)
+        {
+            plan->outStrides.push_back(plan->outLength[idx] *
+                                       (plan->outStrides.back()) + (idx == 0 ? outpadding : 0));
+        }
+        plan->oDist = std::accumulate(begin(plan->outStrides), end(plan->outStrides),
+                                      static_cast<decltype(plan->oDist)>(plan->outLength.back()),
+                                      std::multiplies<decltype(plan->oDist)>());
     }
+
 
     // Create fields for the bricks
     if(!plan->inBricks.empty())
@@ -2003,28 +2005,43 @@ catch(...)
     return handle_exception();
 }
 
-// collapse contiguous dimensions in the specified length + stride -
+// Collapse contiguous dimensions in the specified length + stride -
 // user data might be split on any dimension so if we can simplify to
 // just one split dimension and one contiguous dimension we can more
 // easily map a XtMemcpy to a 2DMemcpy.
 static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
                                      std::vector<size_t>& brick_stride,
-
                                      std::vector<size_t>& field_stride)
 {
-    // go backwards from slowest to fastest dims
-    for(size_t i = brick_length.size() - 1; i != 0; --i)
+    
+    // FIXME: temp
+    std::cout << "brick_length";
+    for(auto val : brick_length)
+        std::cout << " " << val;
+    std::cout << std::endl;
+    std::cout << "brick_stride";
+    for(auto val : brick_stride)
+        std::cout << " " << val;
+    std::cout << std::endl;
+    std::cout << "field_stride";
+    for(auto val : field_stride)
+        std::cout << " " << val;
+    std::cout << std::endl;
+
+    
+    // Go backwards from slowest to fastest dims
+    for(size_t idx = brick_length.size(); idx-- > 0;)
     {
-        if(brick_length[i - 1] * brick_stride[i - 1] == brick_stride[i]
-           && brick_length[i - 1] * field_stride[i - 1] == field_stride[i])
+        if(brick_length[idx - 1] * brick_stride[idx - 1] == brick_stride[idx]
+           && brick_length[idx - 1] * field_stride[idx - 1] == field_stride[idx])
         {
-            brick_length[i - 1] *= brick_length[i];
-            brick_length.erase(brick_length.begin() + i);
-            brick_stride.erase(brick_stride.begin() + i);
-            field_stride.erase(field_stride.begin() + i);
+            brick_length[idx - 1] *= brick_length[idx];
+            brick_length.erase(brick_length.begin() + idx);
+            brick_stride.erase(brick_stride.begin() + idx);
+            field_stride.erase(field_stride.begin() + idx);
         }
     }
-    // we should be splitting on exactly one dimension, so we
+    // We should be splitting on exactly one dimension, so we
     // should end up with at most two dimensions after
     // collapsing
     if(brick_length.size() > 2 || brick_stride.size() > 2 || field_stride.size() > 2)
@@ -2034,7 +2051,8 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
         throw std::runtime_error("fastest dim not contiguous after collapsing");
 }
 
-hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
+hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src,
+                            hipfftXtCopyType cptype)
 try
 {
     if(!plan || !dest || !src)
@@ -2054,15 +2072,105 @@ try
         switch(subFormat)
         {
         case HIPFFT_XT_FORMAT_INPUT:
+        case HIPFFT_XT_FORMAT_INPLACE:
             return plan->inBricks;
         case HIPFFT_XT_FORMAT_OUTPUT:
-        case HIPFFT_XT_FORMAT_INPLACE:
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
             return plan->outBricks;
         default:
             throw HIPFFT_INVALID_VALUE;
         }
     };
 
+    std::cout << "cptype: " << cptype << std::endl; // FIXME: temp
+
+    // For real/complex transforms, we CUFFT_XT_FORMAT_INPLACE means real, and
+    // CUFFT_XT_FORMAT_INPLACE_SHUFFLED means complex.
+
+    // For complex/complex out-of-place transforms, 
+    // CUFFT_XT_FORMAT_INPUT input goes to CUFFT_XT_FORMAT_OUTPUT.
+
+    // For complex/complex in-place transforms, CUFFT_XT_FORMAT_INPLACE goes to
+    // CUFFT_XT_FORMAT_INPLACE_SHUFFLED, but either one could be the input (maybe?)
+    
+    // FIXME: modify this for real-data stuff.
+    // NB: depending on the cbtype, we need different lengths and strides.  w00t.
+
+    
+
+    // Strides for the host buffer.
+    std::vector<size_t> hostStride;
+    std::vector<size_t> hostLength;
+    // FIXME: gotta set these up.  They need to match the format, and real-data cases need the +2
+    // padding.
+
+    
+    switch(cptype)
+    {
+    case HIPFFT_COPY_HOST_TO_DEVICE:
+    case HIPFFT_COPY_DEVICE_TO_HOST:
+    {
+        // Destination is device, and what do we do now?
+        const auto devDesc = static_cast<hipLibXtDesc*>(cptype == HIPFFT_COPY_HOST_TO_DEVICE ?
+                                                        dest : src);
+        switch(devDesc->subFormat)
+        {
+        case HIPFFT_XT_FORMAT_INPUT:
+        case HIPFFT_XT_FORMAT_INPLACE:
+            // We are working with the input data.
+            std::cout << "input data\n";
+
+            if(plan->iotxtype.is_complex_to_complex())
+            {
+                // complex data
+                hostStride = plan->inStrides;
+                hostStride.push_back(plan->iDist);
+            }
+            else
+            {
+                // real data
+                if(devDesc->subFormat != HIPFFT_XT_FORMAT_INPLACE)
+                {
+                    // FIXME: throw.
+                }
+                hostStride.push_back(1);
+                for(size_t idx = 1; idx <= plan->inLength.size(); ++idx)
+                {
+                    hostStride.push_back(hostStride[idx - 1] * plan->inLength[idx-1]
+                                         + (idx == 1 ? 2 : 0));
+                }
+            }
+            break;
+        case HIPFFT_XT_FORMAT_OUTPUT:
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+            // We are working with the output data.
+            std::cout << "output data\n";
+            // complex data
+            hostStride = plan->outStrides;
+            hostStride.push_back(plan->oDist);
+            break;
+        case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+            // We now know that it's 1D
+            // TODO: do something
+            break;
+        default:
+            // Throw an execption because this isn't ok any more.
+            break;
+        }
+    }
+    break;
+    default:
+        // Not currently handling this case, so  throw an exception.
+        // FIXME: throw
+        break;
+    }
+
+    std::cout << "hostStride:";
+    for(const auto & val: hostStride)
+        std::cout << " " << val; // FIXME: temp
+    std::cout << std::endl;
+    
+    
     switch(cptype)
     {
     case HIPFFT_COPY_HOST_TO_DEVICE:
@@ -2071,9 +2179,7 @@ try
         auto destDesc = static_cast<hipLibXtDesc*>(dest);
         if(!destDesc->descriptor)
             return HIPFFT_INVALID_VALUE;
-
-        std::vector<size_t> srcStride = plan->inStrides;
-        srcStride.push_back(plan->iDist);
+            
         for(size_t i = 0; i < static_cast<size_t>(destDesc->descriptor->nGPUs); ++i)
         {
             rocfft_scoped_device dev(destDesc->descriptor->GPUs[i]);
@@ -2082,14 +2188,36 @@ try
 
             auto brick_length = brick.length();
             auto brick_stride = brick.brick_stride;
-            auto field_stride = srcStride;
-            collapse_contiguous_dims(brick_length, brick_stride, field_stride);
+            // If the data is real-valued, then we need to do a contiguous copy, including the extra
+            // 2 values in the real domain to accomadate (n/2 +1) complex values taking up 2(n/2+1)
+            // real values.  Column-major.
+            if(!plan->iotxtype.is_complex_to_complex() &&
+               destDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE)
+            {
+                brick_length[0] += 2;
+                for(size_t idx = 1; idx <= brick_length.size(); ++idx)
+                {
+                    brick_stride[idx]
+                        = brick_stride[idx - 1] * brick_length[idx-1];
+                }
 
+                //for(size_t idx = 1; idx < 
+                
+                // FIXME: need to do the other strides.
+                // FIXME: make sure that we don't go out-of-bounds.
+            }
+
+            auto field_stride = hostStride;
+
+            
+            collapse_contiguous_dims(brick_length, brick_stride, field_stride);
+            
             // if we can do a 1D memcpy, just do that
             if(brick_length.size() == 1)
             {
                 if(hipMemcpy(destDesc->descriptor->data[i],
-                             offset_buffer(src, plan->iotxtype.inputType, brick.field_lower, srcStride),
+                             offset_buffer(src, plan->iotxtype.inputType, brick.field_lower,
+                                           hostStride),
                              destDesc->descriptor->size[i],
                              hipMemcpyHostToDevice)
                    != hipSuccess)
@@ -2100,7 +2228,7 @@ try
                 if(hipMemcpy2D(
                        destDesc->descriptor->data[i],
                        hipDataType_bytes(plan->iotxtype.inputType, brick_stride[1]),
-                       offset_buffer(src, plan->iotxtype.inputType, brick.field_lower, srcStride),
+                       offset_buffer(src, plan->iotxtype.inputType, brick.field_lower, hostStride),
                        hipDataType_bytes(plan->iotxtype.inputType, field_stride[1]),
                        hipDataType_bytes(plan->iotxtype.inputType, brick_length[0]),
                        brick_length[1],
@@ -2184,6 +2312,13 @@ try
     default:
         throw HIPFFT_INVALID_VALUE;
     }
+}
+catch (const std::exception &exc)
+{
+    // FIXME: temp
+    // catch anything thrown within try block that derives from std::exception
+    std::cerr << exc.what();
+    throw;
 }
 catch(...)
 {

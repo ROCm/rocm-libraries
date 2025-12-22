@@ -70,20 +70,22 @@ struct hipfft_brick
         return std::inner_product(brick_idx.begin(), brick_idx.end(), brick_stride.begin(), 0);
     }
 
-    // set contiguous strides on this brick
-    void set_contiguous_stride()
+    // Set contiguous strides on this brick
+    void set_contiguous_stride(const bool r2c)
     {
         brick_stride = {1};
-        auto len     = length();
-        for(size_t i = 0; i < len.size() - 1; ++i)
-            brick_stride.push_back(brick_stride[i] * len[i]);
+        const auto len     = length();
+        for(size_t idx = 0; idx < len.size() - 1; ++idx) {
+            brick_stride.push_back(brick_stride[idx] * len[idx] + (idx == 0 ? 2 : 0));
+        }
     }
 };
 
 // lengths include batch dimension (col-major), split_dim is counted with 0 = fastest dim.
 static void set_bricks(const std::vector<size_t>& length,
                        std::vector<hipfft_brick>& bricks,
-                       const size_t               split_dim)
+                       const size_t               split_dim,
+                       const bool r2c)
 {
     const size_t dim = length.size();
 
@@ -94,27 +96,25 @@ static void set_bricks(const std::vector<size_t>& length,
         // lower idx starts at origin, upper is one-past-the-end
         brick.field_lower.resize(dim);
         brick.field_upper.resize(dim);
-
         std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
 
         // All of the remainders get put on the low-index bricks.
         brick.field_lower[split_dim] = length[split_dim] / bricks.size() * idx
                                        + std::min(idx, length[split_dim] % bricks.size());
-
-        // length of the brick along the split dimension
         size_t split_len
             = length[split_dim] / bricks.size() + (idx < length[split_dim] % bricks.size() ? 1 : 0);
 
         brick.field_upper = length;
         if(idx != bricks.size() - 1)
             brick.field_upper[split_dim] = brick.field_lower[split_dim] + split_len;
-
-        brick.set_contiguous_stride();
+        
+        brick.set_contiguous_stride(r2c);
 
         // work out how big a buffer we need to allocate
         std::vector<size_t> brick_len(dim);
         for(size_t d = 0; d < dim; ++d)
             brick_len[d] = brick.field_upper[d] - brick.field_lower[d];
+        // FIXME: r2c
         brick.min_size
             = std::max(brick.min_size, compute_ptrdiff(brick_len, brick.brick_stride, 0, 0));
     }
@@ -125,22 +125,30 @@ static void set_bricks(const std::vector<size_t>& length,
 // filled in by this function
 static void set_io_bricks(const std::vector<size_t>& inLength,
                           const std::vector<size_t>& outLength,
-                          size_t                     batch,
+                          const size_t               batch,
                           std::vector<hipfft_brick>& inBricks,
-                          std::vector<hipfft_brick>& outBricks)
+                          std::vector<hipfft_brick>& outBricks,
+                          bool r2c)
 {
+    // Batched transforms are split between batches.
+    
+    // Single-batch multi-dimensional transforms are split along the slower dimension for input, and
+    // the second-slower dimension for output.
+
+    // Single-batch 1D transforms are split in the single dimension.
+
+    const size_t rank = inLength.size();
+    const size_t in_split_dim  = batch == 1 ? rank - 1 : rank;
+    const size_t out_split_dim = batch == 1 ? (rank == 1 ? 0 : rank - 2) : rank;
+
     std::vector<size_t> inLengthWithBatch = inLength;
     inLengthWithBatch.push_back(batch);
     std::vector<size_t> outLengthWithBatch = outLength;
     outLengthWithBatch.push_back(batch);
 
-    // For batched FFT, split input on batch, otherwise split input
-    // on fastest FFT dim and output on slowest FFT dim
-    const size_t in_split_dim  = inLengthWithBatch.size() - (batch > 1 ? 1 : 2);
-    const size_t out_split_dim = outLengthWithBatch.size() - (batch > 1 ? 1 : 2);
-
-    set_bricks(inLengthWithBatch, inBricks, in_split_dim);
-    set_bricks(outLengthWithBatch, outBricks, out_split_dim);
+    // FIXME: strides?
+    set_bricks(inLengthWithBatch, inBricks, in_split_dim, r2c);
+    set_bricks(outLengthWithBatch, outBricks, out_split_dim, r2c);
 }
 
 #endif

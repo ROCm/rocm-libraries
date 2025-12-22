@@ -139,14 +139,19 @@ int main()
                                reinterpret_cast<void*>(rinput.data()),
                                HIPFFT_COPY_HOST_TO_DEVICE);
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtMemcpy failed withd code " + std::to_string(hipfft_rt));
+    {
+        std::stringstream ss;
+        ss << "hipfftXtMemcpy host-to-device failed with code ";
+        ss << std::to_string(hipfft_rt) << " : " << hipfftResult_to_name(hipfft_rt);
+        throw std::runtime_error(ss.str());
+    }
    
     std::cout << "Distributed input data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
-        const int Nxmax = Nx / ngpus  + (idx < Nx % ngpus) ? 1 : 0;
+        const int Nxmax = (Nx / ngpus)  + ((idx < Nx % ngpus) ? 1 : 0);
         const int Nymax = Ny;
-        const int Nzmax = Nz;
+        const int Nzmax = Nz + 2;
         const size_t vsize
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(rinput)::value_type);
         std::vector<decltype(rinput)::value_type> hbuf(vsize);
