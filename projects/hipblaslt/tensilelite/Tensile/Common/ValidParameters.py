@@ -860,6 +860,9 @@ validParameters = { # we need to make sure this matches develop
     "MbskPrefetchMethod": [-1, 0, 1],
     "UseCustomMainLoopSchedule" : [0, 1],
     "AdaptiveGemm": [0, 1],
+    # Add extra latency to calculate number of MFMA to insert between local read and wait
+    # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
+    "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),
     # Add extra miLatencyLeft to improve local read scheduling
     # Adding more room for scheduling local read instructions
     # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
