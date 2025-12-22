@@ -24,9 +24,11 @@
  *
  *******************************************************************************/
 
-#include <gtest/gtest.h>
-
+#include <cstdlib>
+#include <ctime>
 #include <functional>
+#include <gtest/gtest.h>
+#include <half/half.hpp>
 #include <numeric>
 #include <miopen/handle.hpp>
 #include <miopen/miopen.h>
@@ -34,22 +36,37 @@
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 #include <miopen/bfloat16.hpp>
-#include <vector>
-#include <cstdlib>
-#include <ctime>
 #include <sstream>
 #include <type_traits>
 #include <utility>
-#include <half/half.hpp>
-#include "../driver.hpp"
-#include "../tensor_holder.hpp"
-#include "../cpu_conv.hpp"
-#include "../random.hpp"
+#include <vector>
 
-namespace
-{
+#include "../cpu_conv.hpp"
+#include "../driver.hpp"
+#include "../random.hpp"
+#include "../tensor_holder.hpp"
+
+namespace {
 using TestCase2D = std::tuple<int, int, int, int, int, int, int, int, int, int, int, int, int, int>;
-using TestCase3D = std::tuple<int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int>;
+using TestCase3D = std::tuple<int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int,
+                              int>;
 
 static constexpr int RAND_INTEGER_MAX       = 5;
 static constexpr int RAND_INTEGER_MIN       = -4;
@@ -58,80 +75,53 @@ static constexpr float MAX_INTEGER_INTERVAL = 4.f;
 auto NameGenerator(const ::testing::TestParamInfo<TestCase2D>& info)
 {
     std::stringstream ss{};
-    int n = 0;
-    int wi = 0;
-    int hi = 0;
-    int c = 0;
-    int k = 0;
-    int fx = 0;
-    int fy = 0;
-    int px = 0;
-    int py = 0;
-    int sx = 0;
-    int sy = 0;
-    int dx = 0;
-    int dy = 0;
-    int g = 0;
+    int n                                                        = 0;
+    int wi                                                       = 0;
+    int hi                                                       = 0;
+    int c                                                        = 0;
+    int k                                                        = 0;
+    int fx                                                       = 0;
+    int fy                                                       = 0;
+    int px                                                       = 0;
+    int py                                                       = 0;
+    int sx                                                       = 0;
+    int sy                                                       = 0;
+    int dx                                                       = 0;
+    int dy                                                       = 0;
+    int g                                                        = 0;
     std::tie(n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g) = info.param;
-    ss << "n" << n <<
-          "wi" << wi <<
-          "hi" << hi <<
-          "c" << c <<
-          "k" << k <<
-          "fx" << fx <<
-          "fy" << fy <<
-          "px" << px <<
-          "py" << py <<
-          "sx" << sx <<
-          "sy" << sy <<
-          "dx" << dx <<
-          "dy" << dy <<
-          "g" << g;
+    ss << "n" << n << "wi" << wi << "hi" << hi << "c" << c << "k" << k << "fx" << fx << "fy" << fy
+       << "px" << px << "py" << py << "sx" << sx << "sy" << sy << "dx" << dx << "dy" << dy << "g"
+       << g;
     return ss.str();
 }
 
 auto NameGenerator(const ::testing::TestParamInfo<TestCase3D>& info)
 {
     std::stringstream ss{};
-    int n = 0;
-    int di = 0;
-    int wi = 0;
-    int hi = 0;
-    int c = 0;
-    int k = 0;
-    int fz = 0;
-    int fx = 0;
-    int fy = 0;
-    int pz = 0;
-    int px = 0;
-    int py = 0;
-    int sz = 0;
-    int sx = 0;
-    int sy = 0;
-    int dz = 0;
-    int dx = 0;
-    int dy = 0;
-    int g = 0;
+    int n                                                                            = 0;
+    int di                                                                           = 0;
+    int wi                                                                           = 0;
+    int hi                                                                           = 0;
+    int c                                                                            = 0;
+    int k                                                                            = 0;
+    int fz                                                                           = 0;
+    int fx                                                                           = 0;
+    int fy                                                                           = 0;
+    int pz                                                                           = 0;
+    int px                                                                           = 0;
+    int py                                                                           = 0;
+    int sz                                                                           = 0;
+    int sx                                                                           = 0;
+    int sy                                                                           = 0;
+    int dz                                                                           = 0;
+    int dx                                                                           = 0;
+    int dy                                                                           = 0;
+    int g                                                                            = 0;
     std::tie(n, di, wi, hi, c, k, fz, fx, fy, pz, px, py, sz, sx, sy, dz, dx, dy, g) = info.param;
-    ss << "n" << n <<
-          "di" << di <<
-          "wi" << wi <<
-          "hi" << hi <<
-          "c" << c <<
-          "k" << k <<
-          "fz" << fz <<
-          "fx" << fx <<
-          "fy" << fy <<
-          "pz" << pz <<
-          "px" << px <<
-          "py" << py <<
-          "sz" << sz <<
-          "sx" << sx <<
-          "sy" << sy <<
-          "dz" << dz <<
-          "dx" << dx <<
-          "dy" << dy <<
-          "g" << g;
+    ss << "n" << n << "di" << di << "wi" << wi << "hi" << hi << "c" << c << "k" << k << "fz" << fz
+       << "fx" << fx << "fy" << fy << "pz" << pz << "px" << px << "py" << py << "sz" << sz << "sx"
+       << sx << "sy" << sy << "dz" << dz << "dx" << dx << "dy" << dy << "g" << g;
 
     return ss.str();
 }
@@ -199,26 +189,23 @@ std::vector<TestCase2D> generate_conv_2d()
                         {
                             for(int px : get_pad_size())
                             {
-                                int n = get_batch_size()[prng::gen_canonical<size_t>()];
-                                int g = get_group_size()[prng::gen_canonical<size_t>()];
-                                int k = get_channel_size()[prng::gen_canonical<size_t>()];
-                                int sy =
-                                    get_stride_dilation_size()[prng::gen_canonical<size_t>()];
-                                int sx =
-                                    get_stride_dilation_size()[prng::gen_canonical<size_t>()];
-                                int dy =
-                                    get_stride_dilation_size()[prng::gen_canonical<size_t>()];
-                                int dx =
-                                    get_stride_dilation_size()[prng::gen_canonical<size_t>()];
+                                int n  = get_batch_size()[prng::gen_canonical<size_t>()];
+                                int g  = get_group_size()[prng::gen_canonical<size_t>()];
+                                int k  = get_channel_size()[prng::gen_canonical<size_t>()];
+                                int sy = get_stride_dilation_size()[prng::gen_canonical<size_t>()];
+                                int sx = get_stride_dilation_size()[prng::gen_canonical<size_t>()];
+                                int dy = get_stride_dilation_size()[prng::gen_canonical<size_t>()];
+                                int dx = get_stride_dilation_size()[prng::gen_canonical<size_t>()];
                                 int ho = conv_out_size(hi, py, dy, fy, sy);
                                 int wo = conv_out_size(wi, px, dx, fx, sx);
 
                                 if(fy > hi || fx > wi || (fy - 1) < py || (fx - 1) < px ||
-                                    ho <= 0 || wo <= 0 || c % g != 0 || k % g != 0)
+                                   ho <= 0 || wo <= 0 || c % g != 0 || k % g != 0)
                                     continue;
                                 if((fx == 3 && fy == 5) || (fx == 5 && fy == 3))
                                     continue;
-                                result.push_back(std::make_tuple(n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g));
+                                result.push_back(std::make_tuple(
+                                    n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g));
                             }
                         }
                     }
@@ -229,7 +216,6 @@ std::vector<TestCase2D> generate_conv_2d()
 
     return result;
 }
-
 
 auto GenCases2D()
 {
@@ -268,30 +254,30 @@ std::vector<TestCase3D> generate_conv_3d()
                         int wo  = conv_out_size(wi, px, dx, fx, sx);
                         int do_ = conv_out_size(di, pz, dz, fz, sz);
                         if(fy > hi || fx > wi || fz > di || (fy - 1) < py || (fx - 1) < px ||
-                            (fz - 1) < pz || ho <= 0 || wo <= 0 || do_ <= 0 || c % g != 0 ||
-                            k % g != 0)
+                           (fz - 1) < pz || ho <= 0 || wo <= 0 || do_ <= 0 || c % g != 0 ||
+                           k % g != 0)
                             continue;
                         if((fx == 3 && fy == 5) || (fx == 5 && fy == 3))
                             continue;
                         result.push_back(std::make_tuple(n,
-                            di,
-                            wi,
-                            hi,
-                            c,
-                            k,
-                            fz,
-                            fx,
-                            fy,
-                            pz,
-                            px,
-                            py,
-                            sz,
-                            sx,
-                            sy,
-                            dz,
-                            dx,
-                            dy,
-                            g));
+                                                         di,
+                                                         wi,
+                                                         hi,
+                                                         c,
+                                                         k,
+                                                         fz,
+                                                         fx,
+                                                         fy,
+                                                         pz,
+                                                         px,
+                                                         py,
+                                                         sz,
+                                                         sx,
+                                                         sy,
+                                                         dz,
+                                                         dx,
+                                                         dy,
+                                                         g));
                     }
                 }
             }
@@ -332,8 +318,8 @@ bool verify_tensor(tensor<T>& t_gpu,
             valid_result = false;
     }
 
-    EXPECT_TRUE(valid_result) << "diff at:" << idx << ", gpu:" << t_gpu[idx] << ", cpu:" << t_cpu[idx]
-                  << std::endl;
+    EXPECT_TRUE(valid_result) << "diff at:" << idx << ", gpu:" << t_gpu[idx]
+                              << ", cpu:" << t_cpu[idx] << std::endl;
     return valid_result;
 }
 
@@ -378,7 +364,7 @@ std::string miopen_type_to_string(miopenDataType_t type)
     return "n/a";
 }
 
-template<miopen::conv::Direction direction,
+template <miopen::conv::Direction direction,
           typename TRef,
           typename Tout,
           miopenTensorLayout_t tensor_layout>
@@ -392,28 +378,11 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
         miopenCreate(&handle);
     }
 
-    void TearDown() override
-    {
-        miopenDestroy(handle);
-    }
+    void TearDown() override { miopenDestroy(handle); }
 
     void Run()
     {
-        int n = 0;
-        int wi = 0;
-        int hi = 0;
-        int c = 0;
-        int k = 0;
-        int fx = 0;
-        int fy = 0;
-        int px = 0;
-        int py = 0;
-        int sx = 0;
-        int sy = 0;
-        int dx = 0;
-        int dy = 0;
-        int g = 0;
-        std::tie(n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g) = GetParam();
+        auto [n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g] = GetParam();
         miopenConvolutionDescriptor_t convDesc;
         miopenTensorDescriptor_t inDesc, weiDesc, outDesc;
 
@@ -476,26 +445,25 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
                                                     static_cast<int*>(pads),
                                                     static_cast<int*>(strides),
                                                     static_cast<int*>(dilations),
-                                                    miopenConvolution), miopenStatusSuccess);
+                                                    miopenConvolution),
+                  miopenStatusSuccess);
         ASSERT_EQ(miopenSetConvolutionGroupCount(convDesc, g), miopenStatusSuccess);
 
         ASSERT_EQ(miopenCreateTensorDescriptor(&inDesc), miopenStatusSuccess);
         ASSERT_EQ(miopenCreateTensorDescriptor(&weiDesc), miopenStatusSuccess);
         ASSERT_EQ(miopenCreateTensorDescriptor(&outDesc), miopenStatusSuccess);
 
+        ASSERT_EQ(miopenSetTensorDescriptor(
+                      inDesc, miopen_type<TRef>{}, in_len.size(), in_len.data(), in_strides.data()),
+                  miopenStatusSuccess);
         ASSERT_EQ(
             miopenSetTensorDescriptor(
-                inDesc, miopen_type<TRef>{}, in_len.size(), in_len.data(), in_strides.data()), miopenStatusSuccess);
-        ASSERT_EQ(miopenSetTensorDescriptor(weiDesc,
-                                            miopen_type<TRef>{},
-                                            wei_len.size(),
-                                            wei_len.data(),
-                                            wei_strides.data()), miopenStatusSuccess);
-        ASSERT_EQ(miopenSetTensorDescriptor(outDesc,
-                                            miopen_type<Tout>{},
-                                            out_len.size(),
-                                            out_len.data(),
-                                            out_strides.data()), miopenStatusSuccess);
+                weiDesc, miopen_type<TRef>{}, wei_len.size(), wei_len.data(), wei_strides.data()),
+            miopenStatusSuccess);
+        ASSERT_EQ(
+            miopenSetTensorDescriptor(
+                outDesc, miopen_type<Tout>{}, out_len.size(), out_len.data(), out_strides.data()),
+            miopenStatusSuccess);
 
         bool valid_result = false;
 
@@ -507,33 +475,25 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(out);
 #if MIOPEN_BACKEND_OPENCL
-            status = clEnqueueWriteBuffer(q,
-                                            in_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * in_sz,
-                                            in.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
+            status = clEnqueueWriteBuffer(
+                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
             status |= clEnqueueWriteBuffer(q,
-                                            wei_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * wei_sz,
-                                            wei.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
+                                           wei_dev,
+                                           CL_TRUE,
+                                           0,
+                                           sizeof(TRef) * wei_sz,
+                                           wei.data.data(),
+                                           0,
+                                           nullptr,
+                                           nullptr);
             ASSERT_EQ(status, CL_SUCCESS);
 #elif MIOPEN_BACKEND_HIP
-            ASSERT_EQ(hipMemcpy(
-                        in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
-                    hipSuccess);
-            ASSERT_EQ(hipMemcpy(wei_dev,
-                                wei.data.data(),
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
+                hipSuccess);
             /// \anchor copy_non_packed_output_before_convolution
             /// \note Output is a non-packed tensor, which means there are
             /// elements that convolution will not update. In order to verify
@@ -542,10 +502,9 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             /// Therefore, we copy the output to the GPU buffer after
             /// initializing it with random values.
             ///
-            ASSERT_EQ(hipMemcpy(out_dev,
-                                out.data.data(),
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
+                hipSuccess);
 #endif
             cpu_convolution_forward(miopen::deref(convDesc).GetSpatialDimension(),
                                     in,
@@ -557,24 +516,24 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
                                     miopen::deref(convDesc).GetGroupCount());
 
             ASSERT_EQ(miopenConvolutionForwardImmediate(
-                        handle,
-                        weiDesc,
-                        wei_dev,
-                        inDesc,
-                        in_dev,
-                        convDesc,
-                        outDesc,
-                        out_dev,
-                        nullptr,
-                        0,
-                        miopen::solver::Id("ConvDirectNaiveConvFwd").Value()),
-                    miopenStatusSuccess);
+                          handle,
+                          weiDesc,
+                          wei_dev,
+                          inDesc,
+                          in_dev,
+                          convDesc,
+                          outDesc,
+                          out_dev,
+                          nullptr,
+                          0,
+                          miopen::solver::Id("ConvDirectNaiveConvFwd").Value()),
+                      miopenStatusSuccess);
 
             tensor<Tout> out_host(out_len, out_strides);
-            ASSERT_EQ(hipMemcpy(out_host.data.data(),
-                                out_dev,
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyDeviceToHost), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(
+                    out_host.data.data(), out_dev, sizeof(Tout) * out_sz, hipMemcpyDeviceToHost),
+                hipSuccess);
 
             // we expect excact match, since use integer
             valid_result = verify_tensor(out_host, out);
@@ -588,67 +547,64 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             rand_tensor_integer(in);
 #if MIOPEN_BACKEND_OPENCL
             status = clEnqueueWriteBuffer(q,
-                                            out_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * out_sz,
-                                            out.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
+                                          out_dev,
+                                          CL_TRUE,
+                                          0,
+                                          sizeof(TRef) * out_sz,
+                                          out.data.data(),
+                                          0,
+                                          nullptr,
+                                          nullptr);
             status |= clEnqueueWriteBuffer(q,
-                                            wei_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * wei_sz,
-                                            wei.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
+                                           wei_dev,
+                                           CL_TRUE,
+                                           0,
+                                           sizeof(TRef) * wei_sz,
+                                           wei.data.data(),
+                                           0,
+                                           nullptr,
+                                           nullptr);
             ASSERT_EQ(status, CL_SUCCESS);
 #elif MIOPEN_BACKEND_HIP
             /// \ref copy_non_packed_output_before_convolution
-            ASSERT_EQ(hipMemcpy(
-                        in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
-                    hipSuccess);
-            EXPECT_EQ(hipMemcpy(out_dev,
-                                out.data.data(),
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
-            EXPECT_EQ(hipMemcpy(wei_dev,
-                                wei.data.data(),
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
+                hipSuccess);
 #endif
             cpu_convolution_backward_data(miopen::deref(convDesc).GetSpatialDimension(),
-                                            in,
-                                            wei,
-                                            out,
-                                            miopen::deref(convDesc).GetConvPads(),
-                                            miopen::deref(convDesc).GetConvStrides(),
-                                            miopen::deref(convDesc).GetConvDilations(),
-                                            miopen::deref(convDesc).GetGroupCount());
+                                          in,
+                                          wei,
+                                          out,
+                                          miopen::deref(convDesc).GetConvPads(),
+                                          miopen::deref(convDesc).GetConvStrides(),
+                                          miopen::deref(convDesc).GetConvDilations(),
+                                          miopen::deref(convDesc).GetGroupCount());
 
             EXPECT_EQ(miopenConvolutionBackwardDataImmediate(
-                        handle,
-                        outDesc,
-                        out_dev,
-                        weiDesc,
-                        wei_dev,
-                        convDesc,
-                        inDesc,
-                        in_dev,
-                        nullptr,
-                        0,
-                        miopen::solver::Id("ConvDirectNaiveConvBwd").Value()),
-                    miopenStatusSuccess);
+                          handle,
+                          outDesc,
+                          out_dev,
+                          weiDesc,
+                          wei_dev,
+                          convDesc,
+                          inDesc,
+                          in_dev,
+                          nullptr,
+                          0,
+                          miopen::solver::Id("ConvDirectNaiveConvBwd").Value()),
+                      miopenStatusSuccess);
 
             tensor<TRef> in_host(in_len, in_strides);
 
-            ASSERT_EQ(hipMemcpy(in_host.data.data(),
-                                in_dev,
-                                sizeof(TRef) * in_sz,
-                                hipMemcpyDeviceToHost), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_host.data.data(), in_dev, sizeof(TRef) * in_sz, hipMemcpyDeviceToHost),
+                hipSuccess);
 
             // we expect excact match, since use integer
             valid_result = verify_tensor(in_host, in);
@@ -660,38 +616,29 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(wei);
 #if MIOPEN_BACKEND_OPENCL
+            status |= clEnqueueWriteBuffer(
+                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
             status |= clEnqueueWriteBuffer(q,
-                                            in_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * in_sz,
-                                            in.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                            out_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * out_sz,
-                                            out.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
+                                           out_dev,
+                                           CL_TRUE,
+                                           0,
+                                           sizeof(TRef) * out_sz,
+                                           out.data.data(),
+                                           0,
+                                           nullptr,
+                                           nullptr);
             ASSERT_EQ(status, CL_SUCCESS);
 #elif MIOPEN_BACKEND_HIP
-            ASSERT_EQ(hipMemcpy(
-                        in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
-                    hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
+                hipSuccess);
             /// \ref copy_non_packed_output_before_convolution
-            ASSERT_EQ(hipMemcpy(wei_dev,
-                                wei.data.data(),
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
-            ASSERT_EQ(hipMemcpy(out_dev,
-                                out.data.data(),
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
+                hipSuccess);
 #endif
             cpu_convolution_backward_weight(miopen::deref(convDesc).GetSpatialDimension(),
                                             in,
@@ -703,40 +650,37 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
                                             miopen::deref(convDesc).GetGroupCount());
 
             EXPECT_EQ(miopenConvolutionBackwardWeightsImmediate(
-                        handle,
-                        outDesc,
-                        out_dev,
-                        inDesc,
-                        in_dev,
-                        convDesc,
-                        weiDesc,
-                        wei_dev,
-                        nullptr,
-                        0,
-                        miopen::solver::Id("ConvDirectNaiveConvWrw").Value()),
-                    miopenStatusSuccess);
+                          handle,
+                          outDesc,
+                          out_dev,
+                          inDesc,
+                          in_dev,
+                          convDesc,
+                          weiDesc,
+                          wei_dev,
+                          nullptr,
+                          0,
+                          miopen::solver::Id("ConvDirectNaiveConvWrw").Value()),
+                      miopenStatusSuccess);
 
             tensor<TRef> wei_host(wei_len, wei_strides);
 
-            ASSERT_EQ(hipMemcpy(wei_host.data.data(),
-                                wei_dev,
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyDeviceToHost), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(
+                    wei_host.data.data(), wei_dev, sizeof(TRef) * wei_sz, hipMemcpyDeviceToHost),
+                hipSuccess);
 
             // we expect excact match, since use integer
             valid_result = verify_tensor(wei_host, wei);
         }
 
-        // auto error        = miopen::rms_range(out_host.data, out.data);
-        // auto tolerance = get_default_tolerence<TRef>();
-        // bool valid_result = error <= tolerance;
         std::cout << "n:" << n << ", c:" << c << ", hi:" << hi << ", wi:" << wi << ", k:" << k
-                    << ", ho:" << ho << ", wo:" << wo << ", fy:" << fy << ",fx:" << fx
-                    << ", py:" << py << ", px:" << px << ", sy:" << sy << ", sx:" << sx
-                    << ", dy:" << dy << ",dx:" << dx << ", g:" << g
-                    << ", dir:" << direction_to_string(direction)
-                    << ", type:" << miopen_type_to_string(miopen_type<TRef>{})
-                    << ", layout:" << layout_string << ", valid:" << valid_result << std::endl;
+                  << ", ho:" << ho << ", wo:" << wo << ", fy:" << fy << ",fx:" << fx
+                  << ", py:" << py << ", px:" << px << ", sy:" << sy << ", sx:" << sx
+                  << ", dy:" << dy << ",dx:" << dx << ", g:" << g
+                  << ", dir:" << direction_to_string(direction)
+                  << ", type:" << miopen_type_to_string(miopen_type<TRef>{})
+                  << ", layout:" << layout_string << ", valid:" << valid_result << std::endl;
         EXPECT_EQ(valid_result, true);
 
         miopenDestroyConvolutionDescriptor(convDesc);
@@ -764,33 +708,11 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
         miopenCreate(&handle);
     }
 
-    void TearDown() override
-    {
-        miopenDestroy(handle);
-    }
+    void TearDown() override { miopenDestroy(handle); }
 
     void Run()
     {
-        int n = 0;
-        int di = 0;
-        int wi = 0;
-        int hi = 0;
-        int c = 0;
-        int k = 0;
-        int fz = 0;
-        int fx = 0;
-        int fy = 0;
-        int pz = 0;
-        int px = 0;
-        int py = 0;
-        int sz = 0;
-        int sx = 0;
-        int sy = 0;
-        int dz = 0;
-        int dx = 0;
-        int dy = 0;
-        int g = 0;
-        std::tie(n, di, wi, hi, c, k, fz, fx, fy, pz, px, py, sz, sx, sy, dz, dx, dy, g) = GetParam();
+        auto [n, di, wi, hi, c, k, fz, fx, fy, pz, px, py, sz, sx, sy, dz, dx, dy, g] = GetParam();
 
         miopenConvolutionDescriptor_t convDesc;
         miopenTensorDescriptor_t inDesc, weiDesc, outDesc;
@@ -840,43 +762,41 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(TRef) * wei_sz, nullptr, nullptr);
         cl_mem out_dev =
             clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(Tout) * out_sz, nullptr, nullptr);
-        EXPECT_EQ(status, CL_SUCCESS);
+        ASSERT_EQ(status, CL_SUCCESS);
 #elif MIOPEN_BACKEND_HIP
         void* in_dev;
         void* wei_dev;
         void* out_dev;
 
-        EXPECT_EQ(hipMalloc(&in_dev, sizeof(TRef) * in_sz), hipSuccess);
-        EXPECT_EQ(hipMalloc(&wei_dev, sizeof(TRef) * wei_sz), hipSuccess);
-        EXPECT_EQ(hipMalloc(&out_dev, sizeof(Tout) * out_sz), hipSuccess);
+        ASSERT_EQ(hipMalloc(&in_dev, sizeof(TRef) * in_sz), hipSuccess);
+        ASSERT_EQ(hipMalloc(&wei_dev, sizeof(TRef) * wei_sz), hipSuccess);
+        ASSERT_EQ(hipMalloc(&out_dev, sizeof(Tout) * out_sz), hipSuccess);
 #endif
-        EXPECT_EQ(miopenCreateConvolutionDescriptor(&convDesc), miopenStatusSuccess);
-        EXPECT_EQ(miopenInitConvolutionNdDescriptor(convDesc,
+        ASSERT_EQ(miopenCreateConvolutionDescriptor(&convDesc), miopenStatusSuccess);
+        ASSERT_EQ(miopenInitConvolutionNdDescriptor(convDesc,
                                                     3,
                                                     static_cast<int*>(pads),
                                                     static_cast<int*>(strides),
                                                     static_cast<int*>(dilations),
-                                                    miopenConvolution), miopenStatusSuccess);
-        EXPECT_EQ(miopenSetConvolutionGroupCount(convDesc, g), miopenStatusSuccess);
+                                                    miopenConvolution),
+                  miopenStatusSuccess);
+        ASSERT_EQ(miopenSetConvolutionGroupCount(convDesc, g), miopenStatusSuccess);
 
-        EXPECT_EQ(miopenCreateTensorDescriptor(&inDesc), miopenStatusSuccess);
-        EXPECT_EQ(miopenCreateTensorDescriptor(&weiDesc), miopenStatusSuccess);
-        EXPECT_EQ(miopenCreateTensorDescriptor(&outDesc), miopenStatusSuccess);
+        ASSERT_EQ(miopenCreateTensorDescriptor(&inDesc), miopenStatusSuccess);
+        ASSERT_EQ(miopenCreateTensorDescriptor(&weiDesc), miopenStatusSuccess);
+        ASSERT_EQ(miopenCreateTensorDescriptor(&outDesc), miopenStatusSuccess);
 
-        EXPECT_EQ(
+        ASSERT_EQ(miopenSetTensorDescriptor(
+                      inDesc, miopen_type<TRef>{}, in_len.size(), in_len.data(), in_strides.data()),
+                  miopenStatusSuccess);
+        ASSERT_EQ(
             miopenSetTensorDescriptor(
-                inDesc, miopen_type<TRef>{}, in_len.size(), in_len.data(), in_strides.data()),
+                weiDesc, miopen_type<TRef>{}, wei_len.size(), wei_len.data(), wei_strides.data()),
             miopenStatusSuccess);
-        EXPECT_EQ(miopenSetTensorDescriptor(weiDesc,
-                                            miopen_type<TRef>{},
-                                            wei_len.size(),
-                                            wei_len.data(),
-                                            wei_strides.data()), miopenStatusSuccess);
-        EXPECT_EQ(miopenSetTensorDescriptor(outDesc,
-                                            miopen_type<Tout>{},
-                                            out_len.size(),
-                                            out_len.data(),
-                                            out_strides.data()), miopenStatusSuccess);
+        ASSERT_EQ(
+            miopenSetTensorDescriptor(
+                outDesc, miopen_type<Tout>{}, out_len.size(), out_len.data(), out_strides.data()),
+            miopenStatusSuccess);
 
         bool valid_result = false;
 
@@ -888,38 +808,29 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(out);
 #if MIOPEN_BACKEND_OPENCL
-            status = clEnqueueWriteBuffer(q,
-                                            in_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * in_sz,
-                                            in.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
+            status = clEnqueueWriteBuffer(
+                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
             status |= clEnqueueWriteBuffer(q,
-                                            wei_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * wei_sz,
-                                            wei.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
-            EXPECT_EQ(status, CL_SUCCESS);
+                                           wei_dev,
+                                           CL_TRUE,
+                                           0,
+                                           sizeof(TRef) * wei_sz,
+                                           wei.data.data(),
+                                           0,
+                                           nullptr,
+                                           nullptr);
+            ASSERT_EQ(status, CL_SUCCESS);
 #elif MIOPEN_BACKEND_HIP
-            EXPECT_EQ(hipMemcpy(
-                        in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
-                    hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
+                hipSuccess);
             /// \ref copy_non_packed_output_before_convolution
-            EXPECT_EQ(hipMemcpy(out_dev,
-                                out.data.data(),
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
-            EXPECT_EQ(hipMemcpy(wei_dev,
-                                wei.data.data(),
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
+                hipSuccess);
 #endif
             cpu_convolution_forward(miopen::deref(convDesc).GetSpatialDimension(),
                                     in,
@@ -930,26 +841,26 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
                                     miopen::deref(convDesc).GetConvDilations(),
                                     miopen::deref(convDesc).GetGroupCount());
 
-            EXPECT_EQ(miopenConvolutionForwardImmediate(
-                        handle,
-                        weiDesc,
-                        wei_dev,
-                        inDesc,
-                        in_dev,
-                        convDesc,
-                        outDesc,
-                        out_dev,
-                        nullptr,
-                        0,
-                        miopen::solver::Id("ConvDirectNaiveConvFwd").Value()),
-                    miopenStatusSuccess);
+            ASSERT_EQ(miopenConvolutionForwardImmediate(
+                          handle,
+                          weiDesc,
+                          wei_dev,
+                          inDesc,
+                          in_dev,
+                          convDesc,
+                          outDesc,
+                          out_dev,
+                          nullptr,
+                          0,
+                          miopen::solver::Id("ConvDirectNaiveConvFwd").Value()),
+                      miopenStatusSuccess);
 
             tensor<Tout> out_host(out_len, out_strides);
 
-            EXPECT_EQ(hipMemcpy(out_host.data.data(),
-                                out_dev,
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyDeviceToHost), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(
+                    out_host.data.data(), out_dev, sizeof(Tout) * out_sz, hipMemcpyDeviceToHost),
+                hipSuccess);
 
             // we expect excact match, since use integer
             valid_result = verify_tensor(out_host, out);
@@ -963,67 +874,64 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             rand_tensor_integer(in);
 #if MIOPEN_BACKEND_OPENCL
             status = clEnqueueWriteBuffer(q,
-                                            out_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * out_sz,
-                                            out.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
+                                          out_dev,
+                                          CL_TRUE,
+                                          0,
+                                          sizeof(TRef) * out_sz,
+                                          out.data.data(),
+                                          0,
+                                          nullptr,
+                                          nullptr);
             status |= clEnqueueWriteBuffer(q,
-                                            wei_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * wei_sz,
-                                            wei.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
-            EXPECT_EQ(status, CL_SUCCESS);
+                                           wei_dev,
+                                           CL_TRUE,
+                                           0,
+                                           sizeof(TRef) * wei_sz,
+                                           wei.data.data(),
+                                           0,
+                                           nullptr,
+                                           nullptr);
+            ASSERT_EQ(status, CL_SUCCESS);
 #elif MIOPEN_BACKEND_HIP
             /// \ref copy_non_packed_output_before_convolution
-            EXPECT_EQ(hipMemcpy(
-                        in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
-                    hipSuccess);
-            EXPECT_EQ(hipMemcpy(out_dev,
-                                out.data.data(),
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
-            EXPECT_EQ(hipMemcpy(wei_dev,
-                                wei.data.data(),
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
+                hipSuccess);
 #endif
             cpu_convolution_backward_data(miopen::deref(convDesc).GetSpatialDimension(),
-                                            in,
-                                            wei,
-                                            out,
-                                            miopen::deref(convDesc).GetConvPads(),
-                                            miopen::deref(convDesc).GetConvStrides(),
-                                            miopen::deref(convDesc).GetConvDilations(),
-                                            miopen::deref(convDesc).GetGroupCount());
+                                          in,
+                                          wei,
+                                          out,
+                                          miopen::deref(convDesc).GetConvPads(),
+                                          miopen::deref(convDesc).GetConvStrides(),
+                                          miopen::deref(convDesc).GetConvDilations(),
+                                          miopen::deref(convDesc).GetGroupCount());
 
-            EXPECT_EQ(miopenConvolutionBackwardDataImmediate(
-                        handle,
-                        outDesc,
-                        out_dev,
-                        weiDesc,
-                        wei_dev,
-                        convDesc,
-                        inDesc,
-                        in_dev,
-                        nullptr,
-                        0,
-                        miopen::solver::Id("ConvDirectNaiveConvBwd").Value()),
-                    miopenStatusSuccess);
+            ASSERT_EQ(miopenConvolutionBackwardDataImmediate(
+                          handle,
+                          outDesc,
+                          out_dev,
+                          weiDesc,
+                          wei_dev,
+                          convDesc,
+                          inDesc,
+                          in_dev,
+                          nullptr,
+                          0,
+                          miopen::solver::Id("ConvDirectNaiveConvBwd").Value()),
+                      miopenStatusSuccess);
 
             tensor<TRef> in_host(in_len, in_strides);
 
-            EXPECT_EQ(hipMemcpy(in_host.data.data(),
-                                in_dev,
-                                sizeof(TRef) * in_sz,
-                                hipMemcpyDeviceToHost), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_host.data.data(), in_dev, sizeof(TRef) * in_sz, hipMemcpyDeviceToHost),
+                hipSuccess);
 
             // we expect excact match, since use integer
             valid_result = verify_tensor(in_host, in);
@@ -1035,38 +943,29 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(wei);
 #if MIOPEN_BACKEND_OPENCL
+            status |= clEnqueueWriteBuffer(
+                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
             status |= clEnqueueWriteBuffer(q,
-                                            in_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * in_sz,
-                                            in.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                            out_dev,
-                                            CL_TRUE,
-                                            0,
-                                            sizeof(TRef) * out_sz,
-                                            out.data.data(),
-                                            0,
-                                            nullptr,
-                                            nullptr);
-            EXPECT_EQ(status, CL_SUCCESS);
+                                           out_dev,
+                                           CL_TRUE,
+                                           0,
+                                           sizeof(TRef) * out_sz,
+                                           out.data.data(),
+                                           0,
+                                           nullptr,
+                                           nullptr);
+            ASSERT_EQ(status, CL_SUCCESS);
 #elif MIOPEN_BACKEND_HIP
-            EXPECT_EQ(hipMemcpy(
-                        in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
-                    hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
+                hipSuccess);
             /// \ref copy_non_packed_output_before_convolution
-            EXPECT_EQ(hipMemcpy(wei_dev,
-                                wei.data.data(),
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
-            EXPECT_EQ(hipMemcpy(out_dev,
-                                out.data.data(),
-                                sizeof(Tout) * out_sz,
-                                hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
+                hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
+                hipSuccess);
 #endif
             cpu_convolution_backward_weight(miopen::deref(convDesc).GetSpatialDimension(),
                                             in,
@@ -1077,44 +976,44 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
                                             miopen::deref(convDesc).GetConvDilations(),
                                             miopen::deref(convDesc).GetGroupCount());
 
-            EXPECT_EQ(miopenConvolutionBackwardWeightsImmediate(
-                        handle,
-                        outDesc,
-                        out_dev,
-                        inDesc,
-                        in_dev,
-                        convDesc,
-                        weiDesc,
-                        wei_dev,
-                        nullptr,
-                        0,
-                        miopen::solver::Id("ConvDirectNaiveConvWrw").Value()),
-                    miopenStatusSuccess);
+            ASSERT_EQ(miopenConvolutionBackwardWeightsImmediate(
+                          handle,
+                          outDesc,
+                          out_dev,
+                          inDesc,
+                          in_dev,
+                          convDesc,
+                          weiDesc,
+                          wei_dev,
+                          nullptr,
+                          0,
+                          miopen::solver::Id("ConvDirectNaiveConvWrw").Value()),
+                      miopenStatusSuccess);
 
             tensor<TRef> wei_host(wei_len, wei_strides);
 
-            EXPECT_EQ(hipMemcpy(wei_host.data.data(),
-                                wei_dev,
-                                sizeof(TRef) * wei_sz,
-                                hipMemcpyDeviceToHost), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpy(
+                    wei_host.data.data(), wei_dev, sizeof(TRef) * wei_sz, hipMemcpyDeviceToHost),
+                hipSuccess);
 
             // we expect excact match, since use integer
             valid_result = verify_tensor(wei_host, wei, 8.0); // max possible int
-                                                                // 2*14*14*10*(2*2) = 15680, hence
-                                                                // int interval might be 8
+                                                              // 2*14*14*10*(2*2) = 15680, hence
+                                                              // int interval might be 8
         }
 
         // auto error        = miopen::rms_range(out_host.data, out.data);
         // auto tolerance = get_default_tolerence<TRef>();
         // bool valid_result = error <= tolerance;
         std::cout << "n:" << n << ", c:" << c << ", di:" << di << ", hi:" << hi << ", wi:" << wi
-                    << ", k:" << k << ", do:" << do_ << ", ho:" << ho << ", wo:" << wo
-                    << ", fz:" << fz << ", fy:" << fy << ",fx:" << fx << ", pz:" << pz
-                    << ", py:" << py << ", px:" << px << ", sz:" << sz << ", sy:" << sy
-                    << ", sx:" << sx << ", dz:" << dz << ", dy:" << dy << ", dx:" << dx
-                    << ", g:" << g << ", dir:" << direction_to_string(direction)
-                    << ", type:" << miopen_type_to_string(miopen_type<TRef>{})
-                    << ", layout:" << layout_string << ", valid:" << valid_result << std::endl;
+                  << ", k:" << k << ", do:" << do_ << ", ho:" << ho << ", wo:" << wo
+                  << ", fz:" << fz << ", fy:" << fy << ",fx:" << fx << ", pz:" << pz
+                  << ", py:" << py << ", px:" << px << ", sz:" << sz << ", sy:" << sy
+                  << ", sx:" << sx << ", dz:" << dz << ", dy:" << dy << ", dx:" << dx << ", g:" << g
+                  << ", dir:" << direction_to_string(direction)
+                  << ", type:" << miopen_type_to_string(miopen_type<TRef>{})
+                  << ", layout:" << layout_string << ", valid:" << valid_result << std::endl;
         EXPECT_EQ(valid_result, true);
 
         miopenDestroyConvolutionDescriptor(convDesc);
@@ -1130,204 +1029,200 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
 } // namespace
 
 // 2d NCHW
-using GPU_reference_kernel_fwd_2d_NCHW_FP32_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::Forward, float, float, miopenTensorNCHW>;
-using GPU_reference_kernel_fwd_2d_NCHW_FP16_FP16 = gpu_reference_conv_2d<miopen::conv::Direction::Forward,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNCHW>;
-using GPU_reference_kernel_fwd_2d_NCHW_BFP16_BFP16 = gpu_reference_conv_2d<miopen::conv::Direction::Forward,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNCHW>;
-using GPU_reference_kernel_fwd_2d_NCHW_I8_I32 = gpu_reference_conv_2d<miopen::conv::Direction::Forward,
-                                   int8_t,
-                                   int32_t,
-                                   miopenTensorNCHW>;
+using GPU_reference_kernel_fwd_2d_NCHW_FP32_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, float, float, miopenTensorNCHW>;
+using GPU_reference_kernel_fwd_2d_NCHW_FP16_FP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNCHW>;
+using GPU_reference_kernel_fwd_2d_NCHW_BFP16_BFP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, bfloat16, bfloat16, miopenTensorNCHW>;
+using GPU_reference_kernel_fwd_2d_NCHW_I8_I32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, int8_t, int32_t, miopenTensorNCHW>;
 
-using GPU_reference_kernel_fwd_2d_NCHW_I8_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::Forward, int8_t, float, miopenTensorNCHW>;
+using GPU_reference_kernel_fwd_2d_NCHW_I8_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, int8_t, float, miopenTensorNCHW>;
 
-using GPU_reference_kernel_bwd_2d_NCHW_FP32_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
-                                   float,
-                                   float,
-                                   miopenTensorNCHW>;
+using GPU_reference_kernel_bwd_2d_NCHW_FP32_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardData, float, float, miopenTensorNCHW>;
 
-using GPU_reference_kernel_bwd_2d_NCHW_FP16_FP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNCHW>;
+using GPU_reference_kernel_bwd_2d_NCHW_FP16_FP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNCHW>;
 
-using GPU_reference_kernel_bwd_2d_NCHW_BFP16_BFP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNCHW>;
+using GPU_reference_kernel_bwd_2d_NCHW_BFP16_BFP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNCHW>;
 
-using GPU_reference_kernel_bww_2d_NCHW_FP32_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
-                                   float,
-                                   float,
-                                   miopenTensorNCHW>;
+using GPU_reference_kernel_bww_2d_NCHW_FP32_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights, float, float, miopenTensorNCHW>;
 
-using GPU_reference_kernel_bww_2d_NCHW_FP16_FP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNCHW>;
+using GPU_reference_kernel_bww_2d_NCHW_FP16_FP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNCHW>;
 
-using GPU_reference_kernel_bww_2d_NCHW_BFP16_BFP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNCHW>;
+using GPU_reference_kernel_bww_2d_NCHW_BFP16_BFP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNCHW>;
 
 // 3d NCDHW
-using GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::Forward, float, float, miopenTensorNCDHW>;
+using GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, float, float, miopenTensorNCDHW>;
 
-using GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNCDHW>;
 
-using GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, bfloat16, bfloat16, miopenTensorNCDHW>;
 
-using GPU_reference_kernel_fwd_3d_NCDHW_I8_I32 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   int8_t,
-                                   int32_t,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_fwd_3d_NCDHW_I8_I32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, int8_t, int32_t, miopenTensorNCDHW>;
 
-using GPU_reference_kernel_fwd_3d_NCDHW_I8_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   int8_t,
-                                   float,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_fwd_3d_NCDHW_I8_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, int8_t, float, miopenTensorNCDHW>;
 
-using GPU_reference_kernel_bwd_3d_NCDHW_FP32_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
-                                   float,
-                                   float,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_bwd_3d_NCDHW_FP32_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardData, float, float, miopenTensorNCDHW>;
 
-using GPU_reference_kernel_bwd_3d_NCDHW_FP16_FP16 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_bwd_3d_NCDHW_FP16_FP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNCDHW>;
 
-using GPU_reference_kernel_bwd_3d_NCDHW_BFP16_BFP16 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_bwd_3d_NCDHW_BFP16_BFP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNCDHW>;
 
-using GPU_reference_kernel_bww_3d_NCDHW_FP32_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
-                                   float,
-                                   float,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_bww_3d_NCDHW_FP32_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
+                          float,
+                          float,
+                          miopenTensorNCDHW>;
 
-using GPU_reference_kernel_bww_3d_NCDHW_FP16_FP16 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_bww_3d_NCDHW_FP16_FP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNCDHW>;
 
-using GPU_reference_kernel_bww_3d_NCDHW_BFP32_BFP32 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNCDHW>;
+using GPU_reference_kernel_bww_3d_NCDHW_BFP32_BFP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNCDHW>;
 
 // 2d NHWC
-using GPU_reference_kernel_fwd_2d_NHWC_FP32_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::Forward, float, float, miopenTensorNHWC>;
-using GPU_reference_kernel_fwd_2d_NHWC_FP16_FP16 = gpu_reference_conv_2d<miopen::conv::Direction::Forward,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNHWC>;
-using GPU_reference_kernel_fwd_2d_NHWC_BFP16_BFP16 = gpu_reference_conv_2d<miopen::conv::Direction::Forward,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNHWC>;
-using GPU_reference_kernel_fwd_2d_NHWC_I8_I32 = gpu_reference_conv_2d<miopen::conv::Direction::Forward,
-                                   int8_t,
-                                   int32_t,
-                                   miopenTensorNHWC>;
+using GPU_reference_kernel_fwd_2d_NHWC_FP32_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, float, float, miopenTensorNHWC>;
+using GPU_reference_kernel_fwd_2d_NHWC_FP16_FP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNHWC>;
+using GPU_reference_kernel_fwd_2d_NHWC_BFP16_BFP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, bfloat16, bfloat16, miopenTensorNHWC>;
+using GPU_reference_kernel_fwd_2d_NHWC_I8_I32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, int8_t, int32_t, miopenTensorNHWC>;
 
-using GPU_reference_kernel_fwd_2d_NHWC_I8_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::Forward, int8_t, float, miopenTensorNHWC>;
+using GPU_reference_kernel_fwd_2d_NHWC_I8_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::Forward, int8_t, float, miopenTensorNHWC>;
 
-using GPU_reference_kernel_bwd_2d_NHWC_FP32_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
-                                   float,
-                                   float,
-                                   miopenTensorNHWC>;
+using GPU_reference_kernel_bwd_2d_NHWC_FP32_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardData, float, float, miopenTensorNHWC>;
 
-using GPU_reference_kernel_bwd_2d_NHWC_FP16_FP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNHWC>;
+using GPU_reference_kernel_bwd_2d_NHWC_FP16_FP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNHWC>;
 
-using GPU_reference_kernel_bwd_2d_NHWC_BFP16_BFP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNHWC>;
+using GPU_reference_kernel_bwd_2d_NHWC_BFP16_BFP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardData,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNHWC>;
 
-using GPU_reference_kernel_bww_2d_NHWC_FP32_FP32 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
-                                   float,
-                                   float,
-                                   miopenTensorNHWC>;
+using GPU_reference_kernel_bww_2d_NHWC_FP32_FP32 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights, float, float, miopenTensorNHWC>;
 
-using GPU_reference_kernel_bww_2d_NHWC_FP16_FP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNHWC>;
+using GPU_reference_kernel_bww_2d_NHWC_FP16_FP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNHWC>;
 
-using GPU_reference_kernel_bww_2d_NHWC_BFP16_BFP16 = gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNHWC>;
+using GPU_reference_kernel_bww_2d_NHWC_BFP16_BFP16 =
+    gpu_reference_conv_2d<miopen::conv::Direction::BackwardWeights,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNHWC>;
 
 // 3d NCDHW
-using GPU_reference_kernel_fwd_3d_NDHWC_FP32_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::Forward, float, float, miopenTensorNDHWC>;
+using GPU_reference_kernel_fwd_3d_NDHWC_FP32_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, float, float, miopenTensorNDHWC>;
 
-using GPU_reference_kernel_fwd_3d_NDHWC_FP16_FP16 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_fwd_3d_NDHWC_FP16_FP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNDHWC>;
 
-using GPU_reference_kernel_fwd_3d_NDHWC_BFP16_BFP16 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_fwd_3d_NDHWC_BFP16_BFP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, bfloat16, bfloat16, miopenTensorNDHWC>;
 
-using GPU_reference_kernel_fwd_3d_NDHWC_I8_I32 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   int8_t,
-                                   int32_t,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_fwd_3d_NDHWC_I8_I32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, int8_t, int32_t, miopenTensorNDHWC>;
 
-using GPU_reference_kernel_fwd_3d_NDHWC_I8_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::Forward,
-                                   int8_t,
-                                   float,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_fwd_3d_NDHWC_I8_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::Forward, int8_t, float, miopenTensorNDHWC>;
 
-using GPU_reference_kernel_bwd_3d_NDHWC_FP32_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
-                                   float,
-                                   float,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_bwd_3d_NDHWC_FP32_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardData, float, float, miopenTensorNDHWC>;
 
-using GPU_reference_kernel_bwd_3d_NDHWC_FP16_FP16 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_bwd_3d_NDHWC_FP16_FP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNDHWC>;
 
-using GPU_reference_kernel_bwd_3d_NDHWC_BFP16_BFP16 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_bwd_3d_NDHWC_BFP16_BFP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardData,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNDHWC>;
 
-using GPU_reference_kernel_bww_3d_NDHWC_FP32_FP32 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
-                                   float,
-                                   float,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_bww_3d_NDHWC_FP32_FP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
+                          float,
+                          float,
+                          miopenTensorNDHWC>;
 
-using GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
-                                   half_float::half,
-                                   half_float::half,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
+                          half_float::half,
+                          half_float::half,
+                          miopenTensorNDHWC>;
 
-using GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32 = gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
-                                   bfloat16,
-                                   bfloat16,
-                                   miopenTensorNDHWC>;
+using GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32 =
+    gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
+                          bfloat16,
+                          bfloat16,
+                          miopenTensorNDHWC>;
 
 TEST_P(GPU_reference_kernel_fwd_2d_NCHW_FP32_FP32, Test) { Run(); }
 TEST_P(GPU_reference_kernel_fwd_2d_NCHW_FP16_FP16, Test) { Run(); }
@@ -1377,50 +1272,182 @@ TEST_P(GPU_reference_kernel_bww_3d_NDHWC_FP32_FP32, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32, Test) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NCHW_FP32_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NCHW_FP16_FP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NCHW_BFP16_BFP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NCHW_I8_I32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NCHW_I8_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_2d_NCHW_FP32_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_2d_NCHW_FP16_FP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_2d_NCHW_BFP16_BFP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_2d_NCHW_FP32_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_2d_NCHW_FP16_FP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_2d_NCHW_BFP16_BFP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NCHW_FP32_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NCHW_FP16_FP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NCHW_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NCHW_I8_I32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NCHW_I8_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_2d_NCHW_FP32_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_2d_NCHW_FP16_FP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_2d_NCHW_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_2d_NCHW_FP32_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_2d_NCHW_FP16_FP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_2d_NCHW_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NCDHW_I8_I32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NCDHW_I8_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_3d_NCDHW_FP32_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_3d_NCDHW_FP16_FP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_3d_NCDHW_BFP16_BFP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_3d_NCDHW_FP32_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_3d_NCDHW_FP16_FP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_3d_NCDHW_BFP32_BFP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NCDHW_I8_I32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NCDHW_I8_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_3d_NCDHW_FP32_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_3d_NCDHW_FP16_FP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_3d_NCDHW_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_3d_NCDHW_FP32_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_3d_NCDHW_FP16_FP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_3d_NCDHW_BFP32_BFP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NHWC_FP32_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NHWC_FP16_FP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NHWC_BFP16_BFP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NHWC_I8_I32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_2d_NHWC_I8_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_2d_NHWC_FP32_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_2d_NHWC_FP16_FP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_2d_NHWC_BFP16_BFP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_2d_NHWC_FP32_FP32, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_2d_NHWC_FP16_FP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_2d_NHWC_BFP16_BFP16, ::testing::ValuesIn(GenCases2D()), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NHWC_FP32_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NHWC_FP16_FP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NHWC_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NHWC_I8_I32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_2d_NHWC_I8_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_2d_NHWC_FP32_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_2d_NHWC_FP16_FP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_2d_NHWC_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_2d_NHWC_FP32_FP32,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_2d_NHWC_FP16_FP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_2d_NHWC_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases2D()),
+                         [](const auto& info) { return NameGenerator(info); });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NDHWC_FP32_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NDHWC_FP16_FP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NDHWC_BFP16_BFP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NDHWC_I8_I32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_fwd_3d_NDHWC_I8_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_3d_NDHWC_FP32_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_3d_NDHWC_FP16_FP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bwd_3d_NDHWC_BFP16_BFP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_3d_NDHWC_FP32_FP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32, ::testing::ValuesIn(GenCases3D()), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NDHWC_FP32_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NDHWC_FP16_FP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NDHWC_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NDHWC_I8_I32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_fwd_3d_NDHWC_I8_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_3d_NDHWC_FP32_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_3d_NDHWC_FP16_FP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bwd_3d_NDHWC_BFP16_BFP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_3d_NDHWC_FP32_FP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32,
+                         ::testing::ValuesIn(GenCases3D()),
+                         [](const auto& info) { return NameGenerator(info); });
