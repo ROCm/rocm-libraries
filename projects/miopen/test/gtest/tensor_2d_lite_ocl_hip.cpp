@@ -48,19 +48,17 @@ std::vector<TensorsConfig> TensorsConfigs()
 #define KiB 1024ul
     std::vector<TensorsConfig> configs;
     int N;
-    int C = 4;
+    int C{4};
 #if PERF_ENABLE
     for(N = (1 * KiB); N <= (1024 * KiB); N *= 2)
-    {
-        configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
-    }
+        configs.push_back({{N, C, 1, 1}, {C, 1, 1, 1}, {N, C, 1, 1}, {C, 1, 1, 1}});
 #else
     N = 32 * KiB;
-    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
+    configs.push_back({{N, C, 1, 1}, {C, 1, 1, 1}, {N, C, 1, 1}, {C, 1, 1, 1}});
     N = 128 * KiB;
-    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
+    configs.push_back({{N, C, 1, 1}, {C, 1, 1, 1}, {N, C, 1, 1}, {C, 1, 1, 1}});
     N = 1024 * KiB;
-    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
+    configs.push_back({{N, C, 1, 1}, {C, 1, 1, 1}, {N, C, 1, 1}, {C, 1, 1, 1}});
 #endif
     return configs;
 }
