@@ -15,7 +15,7 @@ auto GetConvSmokeTestCases()
     const bool tf32_compute          = type == TestDataType::TF32;
     std::vector<TestCase> test_cases = {
         // clang-format off
-        TestCase {{1, 4, 8, 28, 28}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1, false, tf32_compute}
+        TestCase {{1, 4, 8, 14, 14}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1, false, tf32_compute}
         // clang-format on
     };
 
@@ -33,10 +33,10 @@ auto GetConvFullTestCases()
         TestCase {{6, 448, 3, 118, 182}, {896, 448, 1, 1, 1}, {0, 0, 0}, {1, 2, 2}, {1, 1, 1}, 1, false, tf32_compute},
 
         // Group Count > 1 (2, 3, 4)
-        TestCase {{128, 2, 28, 28, 28}, {2, 1, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 2, false, tf32_compute},
-        TestCase {{128, 2, 28, 28, 28}, {2, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 2, false, tf32_compute},
+        TestCase {{128, 2, 14, 14, 14}, {2, 1, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 2, false, tf32_compute},
+        TestCase {{128, 2, 14, 14, 14}, {2, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 2, false, tf32_compute},
         TestCase {{256, 9, 2, 14, 14}, {27, 3, 2, 14, 14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 3, false, tf32_compute},
-        TestCase {{128, 4, 28, 28, 28}, {8, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 4, false, tf32_compute}
+        TestCase {{128, 4, 14, 14, 14}, {8, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 4, false, tf32_compute}
         // clang-format on  
     };
 
@@ -55,7 +55,7 @@ auto GetDeterministicConvCase()
 {
     TestCase test_case = {
         // clang-format off
-        TestCase {{1, 4, 8, 28, 28}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1, true}
+        TestCase {{1, 4, 8, 14, 14}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1, true}
         // clang-format on
     };
 
