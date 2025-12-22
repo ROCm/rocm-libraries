@@ -48,27 +48,27 @@ CMake module providing:
 flowchart TD
     A[Project CMakeLists.txt] -->|include| B[TestCategories.cmake]
     A -->|call| C[apply_test_category_labels<br/>target, yaml, workdir]
-    
+
     B -->|find_package| D[Python3]
     C -->|execute_process| E[parse_test_categories.py]
-    
+
     E -->|read| F[test_categories.yaml]
     E -->|detect| G[OS & GPU Architecture]
     E -->|apply| H[Exclusion Rules]
     E -->|generate| I[CMake Code]
-    
+
     I -->|write to| J[Generated CMake<br/>build/test_categories.cmake]
-    
+
     J -->|add_test| K[Test Registration]
     J -->|set_tests_properties| L[Labels & Timeouts]
-    
+
     K --> M[CTest Execution]
     L --> M
-    
+
     M -->|ctest -L category_name| N[Run by Category]
     M -->|ctest -L label| O[Run by Label]
     M -->|ctest --timeout 600| P[Run with Timeout]
-    
+
     style A fill:#e1f5ff
     style E fill:#fff4e1
     style J fill:#e8f5e9
@@ -90,7 +90,7 @@ execution_settings:
   default_timeout: 300
   category_timeouts:
     category_name: 600
-  
+
   # Global exclusions applied to all categories
   exclude: ["*always_exclude*"]
   exclude_windows: ["*linux_only*"]
@@ -127,7 +127,7 @@ include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
 
 if(BUILD_TESTING)
     enable_testing()
-    
+
     # Apply test categorization
     apply_test_category_labels(
         myproject-test                               # Test executable name
@@ -163,5 +163,3 @@ ctest -N
 Projects currently using this architecture:
 
 - **miopen** - [test_categories.yaml](../../projects/miopen/test/gtest/test_categories.yaml) | [CMakeLists.txt](../../projects/miopen/test/gtest/CMakeLists.txt)
-
-
