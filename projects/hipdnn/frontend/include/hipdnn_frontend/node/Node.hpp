@@ -164,6 +164,12 @@ public:
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "Node " + self().attributes.name + " does not have a compute_data_type set"};
         }
+
+        for(const auto& tensorAttr : getNodeOutputTensorAttributes())
+        {
+            HIPDNN_CHECK_ERROR(tensorAttr->validate());
+        }
+
         return {ErrorCode::OK, ""};
     }
 

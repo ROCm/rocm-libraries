@@ -193,20 +193,24 @@ public:
                     "Tensor " + _name + " does not have a data type set"};
         }
 
+        HIPDNN_RETURN_IF_TRUE(_isVirtual && get_pass_by_value(),
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name + " cannot be virtual and pass by value");
+        HIPDNN_RETURN_IF_NE(_dim.size(),
+                            _stride.size(),
+                            ErrorCode::INVALID_VALUE,
+                            "Tensor " + _name + " dims and strides have different sizes");
+
+        HIPDNN_RETURN_IF_TRUE(_dim.empty(),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "Tensor " + _name + " dims must be non-empty");
+
+        auto isPositive = [](int64_t value) constexpr { return value > 0; };
+        HIPDNN_RETURN_IF_FALSE(std::all_of(_dim.begin(), _dim.end(), isPositive),
+                               ErrorCode::INVALID_VALUE,
+                               "Tensor " + _name + " must have only positive dimensions");
+
         return {ErrorCode::OK, ""};
-    }
-
-    bool validate_dims_set_and_positive() const // NOLINT(readability-identifier-naming
-    {
-        auto isPositive = [](int64_t value) constexpr { return value > 0; };
-        return !_dim.empty() && std::all_of(_dim.begin(), _dim.end(), isPositive);
-    }
-
-    bool validate_dims_and_strides_set_and_positive() const // NOLINT(readability-identifier-naming
-    {
-        auto isPositive = [](int64_t value) constexpr { return value > 0; };
-        return validate_dims_set_and_positive() && _stride.size() == _dim.size()
-               && std::all_of(_stride.begin(), _stride.end(), isPositive);
     }
 
     flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>
