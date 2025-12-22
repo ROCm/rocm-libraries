@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 # C samples (for header compatibility check)
-# Note: HIP CUDA backend headers use C++ features (reinterpret_cast, auto, etc.)
-# so this C-only test is only applicable for ROCm/HIP builds
 if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP)
     add_executable(example_c_headers)
     target_sources(example_c_headers PRIVATE
@@ -37,7 +35,7 @@ set_target_properties(example_handle PROPERTIES
 )
 
 # C++ samples that require older CUDA versions
-if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDA_VERSION LESS 11))
+if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDAToolkit_VERSION VERSION_LESS 11))
     add_executable(example_csrmv)
     target_sources(example_csrmv PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/example_csrmv.cpp"

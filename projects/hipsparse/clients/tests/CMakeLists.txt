@@ -24,12 +24,6 @@ else()
     endif()
 endif()
 
-# Make matrices accessible to test executable
-# Test executable is in clients/staging/ and looks for ../matrices/
-# TheRock CI expects matrices at clients/matrices/ (set via HIPSPARSE_CLIENTS_MATRICES_DIR)
-# Jenkins expects them accessible via relative path from executable
-file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/clients")
-
 add_executable(hipsparse-test)
 
 target_sources(hipsparse-test PRIVATE
@@ -149,9 +143,9 @@ if(HIPSPARSE_ENABLE_HIP)
 elseif(HIPSPARSE_ENABLE_CUDA)
   if(CUDAToolkit_VERSION MATCHES "12.8")
     include(cuda/12.8/CMakeLists.txt)
-    message("Building hipsparse-test executable using CUDA_VERSION ${CUDAToolkit_VERSION}")
+    message("Building hipsparse-test executable using CUDAToolkit_VERSION ${CUDAToolkit_VERSION}")
   else()
-    message("ERROR: Testing on CUDA_VERSION ${CUDAToolkit_VERSION} not supported.")
+    message("ERROR: Testing on CUDAToolkit_VERSION ${CUDAToolkit_VERSION} not supported.")
   endif()
 endif()
 
@@ -171,31 +165,9 @@ if(HIPSPARSE_ENABLE_CUDA)
     target_link_libraries(hipsparse-test PRIVATE CUDA::cudart CUDA::cuda_driver)
 endif()
 
-# Set output directory - Jenkins expects clients/staging
 set_target_properties(hipsparse-test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
-
-# # Create symlink/copy for matrices after build completes
-# if(WIN32)
-#     # On Windows: Copy matrices directory after build to avoid symlink issues
-#     add_custom_command(
-#         TARGET hipsparse-test POST_BUILD
-#         COMMAND ${CMAKE_COMMAND} -E copy_directory
-#             "${PROJECT_BINARY_DIR}/matrices"
-#             "${PROJECT_BINARY_DIR}/clients/matrices"
-#         COMMENT "Copying matrices for Windows test environment"
-#     )
-# else()
-#     # On Linux: Copy matrices directory after build
-#     add_custom_command(
-#         TARGET hipsparse-test POST_BUILD
-#         COMMAND ${CMAKE_COMMAND} -E copy_directory
-#             "${PROJECT_BINARY_DIR}/matrices"
-#             "${PROJECT_BINARY_DIR}/clients/matrices"
-#         COMMENT "Copying matrices for Linux test environment"
-#     )
-# endif()
 
 # Build mtx2csr converter
 if(NOT CONVERT_SOURCE)
@@ -262,12 +234,10 @@ add_custom_target(hipsparse-test-data
 
 add_dependencies(hipsparse-test hipsparse-test-data hipsparse-common)
 
-# Install test-specific files (tests component)
+
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 rocm_install(FILES ${HIPSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test" COMPONENT tests)
 
-# Install matrices for tests component - needed for TheRock CI artifact testing
-# TheRock CI expects matrices at <install-prefix>/clients/matrices/
 rocm_install(
     DIRECTORY "${PROJECT_BINARY_DIR}/clients/matrices/"
     DESTINATION "clients/matrices"
