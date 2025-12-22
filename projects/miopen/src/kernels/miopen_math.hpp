@@ -146,16 +146,16 @@ __forceinline__ __device__ ushort pow(ushort x, ushort y)
 __forceinline__ __device__ ushort tan(ushort x)
 {
     bf16_ushort_conversion_t bf_x{x};
-    bf16_ushort_conversion_t sinVal{float_to_bfloat16(sin(float_to_bfloat16(bf_x.usi)))};
-    bf16_ushort_conversion_t cosVal{float_to_bfloat16(cos(float_to_bfloat16(bf_x.usi)))};
+    bf16_ushort_conversion_t sinVal{float_to_bfloat16(sin(bfloat16_to_float(bf_x.usi)))};
+    bf16_ushort_conversion_t cosVal{float_to_bfloat16(cos(bfloat16_to_float(bf_x.usi)))};
 
     return bf16_ushort_conversion_t{.bf16 = sinVal.bf16 / cosVal.bf16}.usi;
 }
 __forceinline__ __device__ ushort tanh(ushort x)
 {
     bf16_ushort_conversion_t bf_x{x};
-    bf16_ushort_conversion_t two{float_to_bfloat16(2.0f)};
-    bf16_ushort_conversion_t one{float_to_bfloat16(1.0f)};
+    bf16_ushort_conversion_t two{.usi = float_to_bfloat16(2.0f)};
+    bf16_ushort_conversion_t one{.usi = float_to_bfloat16(1.0f)};
     bf16_ushort_conversion_t exp2x{exp(float_to_bfloat16(two.bf16 * bf_x.bf16))};
     bf16_ushort_conversion_t numerator{.bf16 = exp2x.bf16 - one.bf16};
     bf16_ushort_conversion_t denominator{.bf16 = exp2x.bf16 + one.bf16};
@@ -210,6 +210,13 @@ __forceinline__ __device__ FpVecType exp(FpVecType x)
         out.w = detail::exp(x.w);
         return out;
     }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::exp(x.x);
+        out.y = detail::exp(x.y);
+        return out;
+    }
     else if constexpr(VecSize == 1)
     {
         return detail::exp(x);
@@ -231,6 +238,13 @@ __forceinline__ __device__ FpVecType log(FpVecType x)
         out.y = detail::log(x.y);
         out.z = detail::log(x.z);
         out.w = detail::log(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::log(x.x);
+        out.y = detail::log(x.y);
         return out;
     }
     else if constexpr(VecSize == 1)
@@ -256,6 +270,13 @@ __forceinline__ __device__ FpVecType sqrt(FpVecType x)
         out.w = detail::sqrt(x.w);
         return out;
     }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::sqrt(x.x);
+        out.y = detail::sqrt(x.y);
+        return out;
+    }
     else if constexpr(VecSize == 1)
     {
         return detail::sqrt(x);
@@ -277,6 +298,13 @@ __forceinline__ __device__ FpVecType rsqrt(FpVecType x)
         out.y = detail::rsqrt(x.y);
         out.z = detail::rsqrt(x.z);
         out.w = detail::rsqrt(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::rsqrt(x.x);
+        out.y = detail::rsqrt(x.y);
         return out;
     }
     else if constexpr(VecSize == 1)
@@ -302,6 +330,13 @@ __forceinline__ __device__ FpVecType fma(FpVecType a, FpVecType b, FpVecType c)
         out.w = detail::fma(a.w, b.w, c.w);
         return out;
     }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::fma(a.x, b.x, c.x);
+        out.y = detail::fma(a.y, b.y, c.y);
+        return out;
+    }
     else if constexpr(VecSize == 1)
     {
         return detail::fma(a, b, c);
@@ -325,6 +360,13 @@ __forceinline__ __device__ FpVecType fmax(FpVecType x, FpVecType y)
         out.w = detail::fmax(x.w, y.w);
         return out;
     }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::fmax(x.x, y.x);
+        out.y = detail::fmax(x.y, y.y);
+        return out;
+    }
     else if constexpr(VecSize == 1)
     {
         return detail::fmax(x, y);
@@ -346,6 +388,13 @@ __forceinline__ __device__ FpVecType fmin(FpVecType x, FpVecType y)
         out.y = detail::fmin(x.y, y.y);
         out.z = detail::fmin(x.z, y.z);
         out.w = detail::fmin(x.w, y.w);
+        return out;
+    }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::fmin(x.x, y.x);
+        out.y = detail::fmin(x.y, y.y);
         return out;
     }
     else if constexpr(VecSize == 1)
@@ -383,6 +432,13 @@ __forceinline__ __device__ FpVecType tanh(FpVecType x)
         out.w = detail::tanh(x.w);
         return out;
     }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::tanh(x.x);
+        out.y = detail::tanh(x.y);
+        return out;
+    }
     else if constexpr(VecSize == 1)
     {
         return detail::tanh(x);
@@ -406,6 +462,13 @@ __forceinline__ __device__ FpVecType pow(FpVecType x, FpVecType y)
         out.w = detail::pow(x.w, y.w);
         return out;
     }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::pow(x.x, y.x);
+        out.y = detail::pow(x.y, y.y);
+        return out;
+    }
     else if constexpr(VecSize == 1)
     {
         return detail::pow(x, y);
@@ -427,6 +490,13 @@ __forceinline__ __device__ FpVecType fabs(FpVecType x)
         out.y = detail::fabs(x.y);
         out.z = detail::fabs(x.z);
         out.w = detail::fabs(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 2)
+    {
+        FpVecType out;
+        out.x = detail::fabs(x.x);
+        out.y = detail::fabs(x.y);
         return out;
     }
     else if constexpr(VecSize == 1)

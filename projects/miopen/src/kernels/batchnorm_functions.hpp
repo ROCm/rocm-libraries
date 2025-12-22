@@ -53,6 +53,13 @@ __forceinline__ __device__ __host__ void _accumulate4(T1& a, T2 const& b)
 }
 
 template <typename T1, typename T2, typename T3>
+__forceinline__ __device__ __host__ void _accumulate_mad2(T1& a, T2 const& b, T3 const& c)
+{
+    a = fma(cast<T1>(b.x), cast<T1>(c.x), a);
+    a = fma(cast<T1>(b.y), cast<T1>(c.y), a);
+}
+
+template <typename T1, typename T2, typename T3>
 __forceinline__ __device__ __host__ void _accumulate_mad4(T1& a, T2 const& b, T3 const& c)
 {
     a = fma(cast<T1>(b.x), cast<T1>(c.x), a);
@@ -97,6 +104,10 @@ __forceinline__ __device__ __host__ void _accumulate_mad(TAccum& a, T const& b, 
     if constexpr(TSize == TaccumSize)
     {
         a = fma(b, c, a);
+    }
+    else if constexpr(TaccumSize == 1 && TSize == 2)
+    {
+        detail::_accumulate_mad2(a, b, c);
     }
     else if constexpr(TaccumSize == 1 && TSize == 4)
     {

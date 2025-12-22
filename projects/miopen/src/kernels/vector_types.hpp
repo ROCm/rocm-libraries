@@ -135,7 +135,7 @@ __forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
 } // namespace detail
 
 template <typename OutType, typename InType>
-__forceinline__ __device__ __host__ auto cast(InType input)
+__forceinline__ __device__ __host__ OutType cast(InType input)
 {
     using InTypeInfo  = mapped_vector_info<InType>;
     using OutTypeInfo = mapped_vector_info<OutType>;
@@ -149,6 +149,11 @@ __forceinline__ __device__ __host__ auto cast(InType input)
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.z),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.w)};
+    }
+    else if constexpr(inSize == outSize && outSize == 2)
+    {
+        return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y)};
     }
     else if constexpr(inSize == outSize && outSize == 1)
     {
