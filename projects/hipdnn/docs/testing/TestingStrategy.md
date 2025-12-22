@@ -136,14 +136,14 @@ Tests must work in the following environments:
 
 | Environment Type | Supported Methods |
 |-----------------|-------------------|
-| **CLI Build Environment** | `ninja check`, `ninja check_ctest` |
+| **CLI Build Environment** | `ninja check`, `ninja check-verbose` |
 | **IDE** | Visual Studio Code and extensions like TestMate |
 | **Artifacts** | • Installed testing artifacts<br>• Running built test executables |
 | **Operating System** | • Windows<br>• Supported Linux distros |
 
 > [!TIP]
-> `ninja unit-check` runs fast, isolated unit and API tests.
-> `ninja integration-check` runs slower, end-to-end integration tests.
+> `ninja unit-check` runs fast, isolated unit and API tests (also: `unit-check-verbose`).<br>
+> `ninja integration-check` runs slower, end-to-end integration tests (also: `integration-check-verbose`).
 
 ### GPU Requirements
 - **Without GPU**: All GPU tests must be skippable (warnings, not errors)

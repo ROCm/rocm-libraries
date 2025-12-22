@@ -92,6 +92,12 @@ target_link_libraries(your_target hip::host hip::device)
 
 hipDNN uses the spdlog header-only library for logging. See the [Environment docs](./Environment.md#logging-configuration) for further details.
 
+> [!CAUTION]
+> There is a known issue on Windows where logging must be explicitly shut down before the application exits to ensure all log messages are flushed and resources are released. See [spdlog Windows Issues](https://github.com/gabime/spdlog/wiki/Asynchronous-logging#windows-issues) for more information.
+> ```cpp
+> spdlog::shutdown();
+> ```
+
 ### Working with Schemas
 
 hipDNN uses FlatBuffers for schema-based data objects to describe graphs and operations.

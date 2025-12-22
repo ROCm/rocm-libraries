@@ -243,8 +243,9 @@ namespace rocRoller
 
                 k.mapper.purge(opTag);
                 k.mapper.connect<User>(opTag, userTag);
+                k.mapper.connect<User>(storeLDSOp, userTag);
                 k.mapper.connect<LDS>(storeLDSOp, ldsTag);
-                k.mapper.connect<User>(loadLDSOp, userTag); // For F6 Padding
+                k.mapper.connect<User>(loadLDSOp, userTag);
                 k.mapper.connect<LDS>(loadLDSOp, ldsTag);
 
                 if(isLoad)
