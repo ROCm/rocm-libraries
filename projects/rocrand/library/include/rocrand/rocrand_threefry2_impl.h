@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,31 +68,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace rocrand_device
 {
-
-template<class value>
-__forceinline__ __device__ __host__ int threefry_rotation_array(int index) = delete;
-
-template<>
-__forceinline__ __device__ __host__ int threefry_rotation_array<unsigned int>(int index)
-{
-    // Output from skein_rot_search (srs32x2-X5000.out)
-    // Random seed = 1. BlockSize = 64 bits. sampleCnt =  1024. rounds =  8, minHW_or=28
-    // Start: Tue Jul 12 11:11:33 2011
-    // rMin = 0.334. #0206[*07] [CRC=1D9765C0. hw_OR=32. cnt=16384. blkSize=  64].format
-    static constexpr int THREEFRY_ROTATION_32_2[8] = {13, 15, 26, 6, 17, 29, 16, 24};
-    return THREEFRY_ROTATION_32_2[index];
-}
-
-template<>
-__forceinline__ __device__ __host__ int threefry_rotation_array<unsigned long long>(int index)
-{
-    // Output from skein_rot_search: (srs64_B64-X1000)
-    // Random seed = 1. BlockSize = 128 bits. sampleCnt =  1024. rounds =  8, minHW_or=57
-    // Start: Tue Mar  1 10:07:48 2011
-    // rMin = 0.136. #0325[*15] [CRC=455A682F. hw_OR=64. cnt=16384. blkSize= 128].format
-    static constexpr int THREEFRY_ROTATION_64_2[8] = {16, 42, 12, 31, 16, 32, 24, 21};
-    return THREEFRY_ROTATION_64_2[index];
-}
 
 template<typename state_value, typename value, unsigned int Nrounds>
 class threefry_engine2_base
@@ -186,23 +161,7 @@ protected:
         X.x += ks[0];
         X.y += ks[1];
 
-        for(unsigned int round_idx = 0; round_idx < Nrounds; round_idx++)
-        {
-            X.x += X.y;
-            X.y = rotl<value>(X.y, threefry_rotation_array<value>(round_idx & 7u));
-            X.y ^= X.x;
-
-            if((round_idx & 3u) == 3)
-            {
-                unsigned int inject_idx = round_idx / 4;
-                // InjectKey(r = 1 + inject_idx)
-                X.x += ks[(1 + inject_idx) % 3];
-                X.y += ks[(2 + inject_idx) % 3];
-                X.y += 1 + inject_idx;
-            }
-        }
-
-        return X;
+        return rounds_2<state_value, value, Nrounds>(X, ks);
     }
 
     /// Advances the internal state to skip \p offset numbers.

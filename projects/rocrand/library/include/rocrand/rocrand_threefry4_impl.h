@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,50 +68,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace rocrand_device
 {
-
-template<class value>
-__forceinline__ __device__ __host__ int threefry_rotation_array(int indexX, int indexY) = delete;
-
-template<>
-__forceinline__ __device__ __host__ int threefry_rotation_array<unsigned int>(int indexX,
-                                                                              int indexY)
-{
-    // Output from skein_rot_search: (srs-B128-X5000.out)
-    // Random seed = 1. BlockSize = 64 bits. sampleCnt =  1024. rounds =  8, minHW_or=28
-    // Start: Mon Aug 24 22:41:36 2009
-    // ...
-    // rMin = 0.472. #0A4B[*33] [CRC=DD1ECE0F. hw_OR=31. cnt=16384. blkSize= 128].format
-    static constexpr int THREEFRY_ROTATION_32_4[8][2] = {
-        {10, 26},
-        {11, 21},
-        {13, 27},
-        {23,  5},
-        { 6, 20},
-        {17, 11},
-        {25, 10},
-        {18, 20}
-    };
-    return THREEFRY_ROTATION_32_4[indexX][indexY];
-}
-
-template<>
-__forceinline__ __device__ __host__ int threefry_rotation_array<unsigned long long>(int indexX,
-                                                                                    int indexY)
-{
-    // These are the R_256 constants from the Threefish reference sources
-    // with names changed to R_64x4... */
-    static constexpr int THREEFRY_ROTATION_64_4[8][2] = {
-        {14, 16},
-        {52, 57},
-        {23, 40},
-        { 5, 37},
-        {25, 33},
-        {46, 12},
-        {58, 22},
-        {32, 32}
-    };
-    return THREEFRY_ROTATION_64_4[indexX][indexY];
-}
 
 template<typename state_value, typename value, unsigned int Nrounds>
 class threefry_engine4_base
@@ -208,42 +164,7 @@ protected:
         X.z += ks[2];
         X.w += ks[3];
 
-        for(unsigned int round_idx = 0; round_idx < Nrounds; round_idx++)
-        {
-            int rot_0 = threefry_rotation_array<value>(round_idx & 7u, 0);
-            int rot_1 = threefry_rotation_array<value>(round_idx & 7u, 1);
-            if((round_idx & 2u) == 0)
-            {
-                X.x += X.y;
-                X.y = rotl<value>(X.y, rot_0);
-                X.y ^= X.x;
-                X.z += X.w;
-                X.w = rotl<value>(X.w, rot_1);
-                X.w ^= X.z;
-            }
-            else
-            {
-                X.x += X.w;
-                X.w = rotl<value>(X.w, rot_0);
-                X.w ^= X.x;
-                X.z += X.y;
-                X.y = rotl<value>(X.y, rot_1);
-                X.y ^= X.z;
-            }
-
-            if((round_idx & 3u) == 3)
-            {
-                unsigned int inject_idx = round_idx / 4;
-                // InjectKey(r = 1 + inject_idx)
-                X.x += ks[(1 + inject_idx) % 5];
-                X.y += ks[(2 + inject_idx) % 5];
-                X.z += ks[(3 + inject_idx) % 5];
-                X.w += ks[(4 + inject_idx) % 5];
-                X.w += 1 + inject_idx;
-            }
-        }
-
-        return X;
+        return rounds_4<state_value, value, Nrounds>(X, ks);
     }
 
     /// Advances the internal state to skip \p offset numbers.
