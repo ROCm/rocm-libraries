@@ -410,7 +410,7 @@ inline size_t blockSize(RocblasltContractionProblem::ScalingFormat s)
     switch(s)
     {
     case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
-    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         return 32;
     default:
         return 1;
@@ -425,7 +425,7 @@ inline std::vector<size_t> preSwizzleSizeForScale(RocblasltContractionProblem::S
     // - swizzleScale must be enabled
     switch(s)
     {
-    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         // MI instruction is forced to 16x16x128, so the third element is 4 (i.e., 128/scaleBlockSize)
         return {32, 8, 4};
     default:

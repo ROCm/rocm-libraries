@@ -52,11 +52,11 @@ struct Arguments
 {
     enum ScalingFormat
     {
-        None                = 0,
-        Scalar              = 1,
-        Vector              = 2,
-        Block_32_UE8M0      = 3,
-        Block_32_UE8M0_32_8 = 1001,
+        None                    = 0,
+        Scalar                  = 1,
+        Vector                  = 2,
+        Block_32_UE8M0          = 3,
+        Block_32_UE8M0_32_8_EXT = 1001,
     };
 
     /*************************************************************************

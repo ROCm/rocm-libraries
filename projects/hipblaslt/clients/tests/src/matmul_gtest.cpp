@@ -129,7 +129,7 @@ namespace
                     name << "_SAV";
                 else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0)
                     name << "_SAMX_32_UE8M0";
-                else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8)
+                else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                     name << "_SAMX_32_UE8M0_32_8";
 
                 if(arg.scaleB == hipblaslt_scaling_format::Scalar)
@@ -138,7 +138,7 @@ namespace
                     name << "_SBV";
                 else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0)
                     name << "_SBMX_32_UE8M0";
-                else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8)
+                else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                     name << "_SBMX_32_UE8M0_32_8";
 
                 if(arg.scaleC)

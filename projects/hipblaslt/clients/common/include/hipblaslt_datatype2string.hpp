@@ -61,11 +61,11 @@ typedef enum class _hipblaslt_bias_source
 
 typedef enum class _hipblaslt_scaling_format
 {
-    none                = 0,
-    Scalar              = 1,
-    Vector              = 2,
-    Block_32_UE8M0      = 3,
-    Block_32_UE8M0_32_8 = 1001,
+    none                    = 0,
+    Scalar                  = 1,
+    Vector                  = 2,
+    Block_32_UE8M0          = 3,
+    Block_32_UE8M0_32_8_EXT = 1001,
 } hipblaslt_scaling_format;
 
 inline bool isBlockScaling(hipblaslt_scaling_format s)
@@ -79,7 +79,7 @@ inline int blockSize(hipblaslt_scaling_format s)
     switch(s)
     {
     case hipblaslt_scaling_format::Block_32_UE8M0:
-    case hipblaslt_scaling_format::Block_32_UE8M0_32_8:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
         return 32;
     default:
         return 1;
@@ -92,7 +92,7 @@ inline std::vector<size_t> preSwizzleSizeForScale(hipblaslt_scaling_format s)
     switch(s)
     {
     // preSwizzleSize: {swizzleTileMN, 256 / swizzleTileMN, matrixInstruction.k / scaleBlockSize}
-    case hipblaslt_scaling_format::Block_32_UE8M0_32_8:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
         return {32, 8, 4};
     default:
         return {};

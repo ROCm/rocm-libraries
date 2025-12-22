@@ -156,7 +156,7 @@ Real precisions 1 bytes (fnuz) dst bf8_fnuz: &real_precisions_1b_fnuz_dst_bf8_fn
   - *f8bf8_fnuz_precision_dst_bf8_fnuz
   - *bf8f8_fnuz_precision_dst_bf8_fnuz
 
-Real precisions 1 byte dst 1 byte (fnuz): &real_precisions_1b_fnuz_dst_1b_fnuz
+Real precisions 1 byte dst 1 byte: &real_precisions_1b_fnuz_dst_1b_fnuz
   - *f8_fnuz_precision_dst_f8_fnuz
   - *bf8_fnuz_precision_dst_f8_fnuz
   - *f8bf8_fnuz_precision_dst_f8_fnuz
@@ -337,7 +337,7 @@ Real mix precisions fp8: &real_mix_precisions_fp8_fnuz
     { a_type: f16_r, b_type: f8_fnuz_r, c_type: f8_fnuz_r, d_type: f8_fnuz_r, compute_type: c_f32_fast_f16_r, scale_type: f32_r}
 
 # MX Datatypes
-Real precisions MX: &real_precisions_mx
+Real precisions 1 bytes: &real_precisions_mx
   - &mxf8_mxfp8_precision_dst_fp32
     { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   - &mxf8_mxbfp8_precision_dst_fp32

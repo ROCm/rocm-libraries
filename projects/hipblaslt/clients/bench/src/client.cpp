@@ -916,7 +916,7 @@ try
         if(s == 3)
             return hipblaslt_scaling_format::Block_32_UE8M0;
         if(s == 1001)
-            return hipblaslt_scaling_format::Block_32_UE8M0_32_8;
+            return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         return hipblaslt_scaling_format::none;
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);

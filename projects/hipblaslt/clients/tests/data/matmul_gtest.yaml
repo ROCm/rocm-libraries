@@ -2306,7 +2306,7 @@ Tests:
   requested_solution_num: 3
   gpu_arch: '950'
 
-# MX datatypes with pre-swizzle for swizzle tile {32, 8} (scaleA/B: 1001 = Block_32_UE8M0_32_8)
+# MX datatypes with pre-swizzle for swizzle tile {32, 8} (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT)
 # Tests the preSwizzleScale functionality
 # Uses 16x16x128 MI instruction (subTileK = 128/32 = 4)
 # Requires workgroup tile 128x128x256 for swizzle tile {32, 8} compatibility (WGT.k >= 256)

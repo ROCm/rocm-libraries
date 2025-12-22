@@ -58,7 +58,20 @@ struct std::hash<ScaleType>
         size_t blockColSizeHash = std::hash<size_t>{}(s.blockColSize);
         size_t typeHash         = std::hash<rocRoller::DataType>{}(s.type);
 
-        return modeHash ^ (blockRowSizeHash << 1) ^ (blockColSizeHash << 2) ^ (typeHash << 3);
+        // Hash the preSwizzleTile vector by combining hashes of its elements
+        // Uses boost::hash_combine technique:
+        // - 0x9e3779b9: Golden ratio constant (2^32 / phi) for good bit distribution
+        // - Bit shifts (<< 6, >> 2): Ensures element order matters in final hash
+        // - XOR (^=): Combines new hash with accumulated value
+        size_t preSwizzleTileHash = 0;
+        for(const auto& elem : s.preSwizzleTile)
+        {
+            preSwizzleTileHash ^= std::hash<size_t>{}(elem) + 0x9e3779b9 + (preSwizzleTileHash << 6)
+                                  + (preSwizzleTileHash >> 2);
+        }
+
+        return modeHash ^ (blockRowSizeHash << 1) ^ (blockColSizeHash << 2) ^ (typeHash << 3)
+               ^ (preSwizzleTileHash << 4);
     }
 };
 

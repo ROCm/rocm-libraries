@@ -87,7 +87,7 @@ inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat sc
         return "2";
     case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         return "3";
-    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         return "1001";
     default:
         return "";
