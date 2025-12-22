@@ -774,7 +774,7 @@ namespace rocsparse
     }
 
     // Global spinlock for odd-sized array edge cases
-    __device__ unsigned int g_fp16_lock = 0;
+    inline __device__ unsigned int g_fp16_lock = 0;
 
     template <typename T>
     __device__ __forceinline__ T wfreduce_sum_mask(T sum, unsigned long long int active_mask)
@@ -822,6 +822,9 @@ namespace rocsparse
                     // Handle unpaired last element
                     half old_val = *addr;
                     *addr        = __hadd(old_val, __float2half(tmp));
+
+                    // Ensure the write is visible to other threads before releasing the lock
+                    __threadfence();
 
                     // Release spinlock
                     atomicExch(&g_fp16_lock, 0U);
@@ -891,7 +894,7 @@ namespace rocsparse
     }
 
     // Global spinlock for odd-sized bfloat16 array edge cases
-    __device__ unsigned int g_bf16_lock = 0;
+    inline __device__ unsigned int g_bf16_lock = 0;
 
     __device__ rocsparse_bfloat16 atomic_add_by_CAS(rocsparse_bfloat16* base_ptr,
                                                     int                 idx,
@@ -924,6 +927,9 @@ namespace rocsparse
                     // Handle unpaired last element
                     rocsparse_bfloat16 old_val = *addr;
                     *addr = static_cast<rocsparse_bfloat16>(static_cast<float>(old_val) + tmp);
+
+                    // Ensure the write is visible to other threads before releasing the lock
+                    __threadfence();
 
                     // Release spinlock
                     atomicExch(&g_bf16_lock, 0U);
