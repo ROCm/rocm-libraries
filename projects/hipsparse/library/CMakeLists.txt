@@ -23,10 +23,10 @@ target_compile_options(hipsparse PRIVATE -Wno-unused-command-line-argument -Wall
 
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_NVIDIA__)
-    target_link_libraries(hipsparse PRIVATE hip::host)
+    target_link_libraries(hipsparse PUBLIC hip::host)
 elseif(HIPSPARSE_ENABLE_HIP)
     target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_AMD__)
-    target_link_libraries(hipsparse PRIVATE hip::host)
+    target_link_libraries(hipsparse PUBLIC hip::host)
 endif()
 
 add_subdirectory(include)

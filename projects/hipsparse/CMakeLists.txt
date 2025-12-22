@@ -105,6 +105,10 @@ endif()
 
 # --- Packaging and installation ---
 
+if(HIPSPARSE_ENABLE_HOST)
+    rocm_package_setup_component(runtime)
+endif()
+
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
@@ -232,7 +236,7 @@ if(HIPSPARSE_ENABLE_COVERAGE)
     
     add_custom_target(coverage_analysis
         COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-        COMMAND $<TARGET_FILE:hipsparse-test> --gtest_filter=\"\{GTEST_FILTER}\"
+        COMMAND $<TARGET_FILE:hipsparse-test> --gtest_filter=\"\${GTEST_FILTER}\"
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests for coverage analysis"
     )
