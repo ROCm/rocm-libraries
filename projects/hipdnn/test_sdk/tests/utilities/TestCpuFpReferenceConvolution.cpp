@@ -239,6 +239,38 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionFwdInferenceBasic)
     EXPECT_DOUBLE_EQ(outputTensor.getHostValue(0, 0, 1, 1), 99.0);
 }
 
+TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionFwdInferenceBasic)
+{
+    Tensor<int8_t> inputTensor({1, 1, 4, 4});
+    Tensor<int8_t> weightTensor({1, 1, 3, 3});
+    Tensor<int8_t> outputTensor({1, 1, 2, 2});
+
+    // Fill input with sequential values
+    for(int i = 0; i < 16; ++i)
+    {
+        inputTensor.memory().hostData()[i] = static_cast<int8_t>(i + 1);
+    }
+
+    // Fill weights with 1s
+    for(int i = 0; i < 9; ++i)
+    {
+        weightTensor.memory().hostData()[i] = 1.0;
+    }
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolution::fprop<int8_t, int8_t, int8_t, int32_t>(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Same expected values as fp32 test
+    EXPECT_EQ(outputTensor.getHostValue(0, 0, 0, 0), 54);
+    EXPECT_EQ(outputTensor.getHostValue(0, 0, 0, 1), 63);
+    EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 0), 90);
+    EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 99);
+}
+
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceWithDilation)
 {
     // Test with dilation = 2
@@ -1072,6 +1104,33 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionBwdDataBasic)
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 }
 
+TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionBwdDataBasic)
+{
+    // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
+    Tensor<int8_t> inputTensor({1, 1, 4, 4});
+    Tensor<int8_t> weightTensor({1, 1, 3, 3});
+    Tensor<int8_t> outputTensor({1, 1, 2, 2});
+
+    // gradOutput values: simple pattern
+    outputTensor.setHostValue(1, 0, 0, 0, 0);
+    outputTensor.setHostValue(2, 0, 0, 0, 1);
+    outputTensor.setHostValue(3, 0, 0, 1, 0);
+    outputTensor.setHostValue(4, 0, 0, 1, 1);
+
+    // Weight values: simple 3x3 kernel
+    for(size_t i = 0; i < 9; ++i)
+    {
+        weightTensor.memory().hostData()[i] = static_cast<int8_t>(i + 1);
+    }
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolution::dgrad<int8_t, int8_t, int8_t, int32_t>(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+}
+
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSimple)
 {
     // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
@@ -1879,6 +1938,42 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionWrwBasic)
 
     // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
     EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 5.0);
+}
+
+TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionWrwBasic)
+{
+    // Minimal sanity test for wgrad using smallest possible tensor sizes
+    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
+    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
+    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
+    Tensor<int8_t> inputTensor({1, 1, 2, 2});
+    Tensor<int8_t> gradWeightTensor({1, 1, 1, 1});
+    Tensor<int8_t> gradOutputTensor({1, 1, 2, 2});
+
+    // Set input values: [1, 2; 3, 4]
+    inputTensor.setHostValue(1, 0, 0, 0, 0);
+    inputTensor.setHostValue(2, 0, 0, 0, 1);
+    inputTensor.setHostValue(3, 0, 0, 1, 0);
+    inputTensor.setHostValue(4, 0, 0, 1, 1);
+
+    // Set gradient output values: [1, 1; 1, 1]
+    gradOutputTensor.setHostValue(1, 0, 0, 0, 0);
+    gradOutputTensor.setHostValue(1, 0, 0, 0, 1);
+    gradOutputTensor.setHostValue(1, 0, 0, 1, 0);
+    gradOutputTensor.setHostValue(1, 0, 0, 1, 1);
+
+    // Initialize weight to zero
+    gradWeightTensor.setHostValue(0, 0, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolution::wgrad<int8_t, int8_t, int8_t, int32_t>(
+        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
+
+    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 1 = 10
+    EXPECT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 10);
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightMultiBatch)
