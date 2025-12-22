@@ -1,0 +1,838 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2025 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#include <rocRoller/KernelGraph/Transforms/ScheduleMultiplyAndLDS.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
+
+#include <rocRoller/Graph/GraphUtilities.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
+#include <rocRoller/Utilities/Concepts.hpp>
+
+namespace rocRoller::KernelGraph
+{
+    namespace ScheduleMultiplyAndLDSDetail
+    {
+        /**
+         * Glossary: Within this file, a 'chain' refers to
+         *
+         *  - a series of nodes of the same type that are all directly connected to each other
+         *    with Sequence edges, or
+         *  - a vector containing the node IDs of those nodes, or
+         *  - a vector containing the node IDs ot those nodes, but filtered according to
+         *    some criteria.
+         */
+
+        using vec  = std::vector<int>;
+        using vec2 = std::vector<vec>;
+        using vec3 = std::vector<vec2>;
+
+        /**
+         * Identifies groups within `nodes` that are directly connected in a linear chain.
+         *
+         * If the connections between `nodes` is:
+         *
+         * 1 -> 2 -> 3 -> 4 -> NOP -> 5 -> 6 -> 7 -> 8
+         *
+         * This would return 2 vectors, {1, 2, 3, 4} and {5, 6, 7, 8}.
+         */
+        vec2 makeChains(KernelGraph const& graph, std::vector<int> nodes)
+        {
+            std::ranges::sort(nodes, TopologicalCompare(graph));
+            Log::debug("makeChains({})", ShowValue(nodes));
+
+            auto isBarrier = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::Barrier>(idx).has_value();
+            };
+
+            for(int i = 0; i + 1 < nodes.size(); i++)
+            {
+                auto order = graph.control.compareNodes(UpdateCache, nodes[i], nodes[i + 1]);
+                AssertFatal(order == ControlGraph::NodeOrdering::LeftFirst,
+                            ShowValue(order),
+                            ShowValue(nodes[i]),
+                            ShowValue(nodes[i + 1]));
+            }
+
+            vec2 rv;
+
+            if(nodes.empty())
+                return rv;
+
+            std::vector<int> currentChain;
+
+            currentChain.push_back(nodes[0]);
+
+            for(int i = 1; i < nodes.size(); i++)
+            {
+
+                if(!graph.control.findEdge(currentChain.back(), nodes[i]))
+                {
+                    rv.push_back(std::move(currentChain));
+                    currentChain.clear();
+                }
+
+                currentChain.push_back(nodes[i]);
+            }
+
+            rv.push_back(std::move(currentChain));
+
+            return rv;
+        }
+
+        /**
+         * Given a SetCoordinate node, find the actual memory node associated with it.
+         * Given a memory node, just return that node.
+         *
+         * SetCoordinate(3) -> Body -> SetCoordinate(4) -> Body -> LoadLDSTile(5)
+         *
+         * getLDSNode(graph, 3) should return 5.
+         * getLDSNode(graph, 5) should also return 5.
+         */
+        int getLDSNode(KernelGraph const& graph, int node)
+        {
+            while(auto body = graph.control.getOutputNodeIndices<ControlGraph::Body>(node).only())
+            {
+                node = *body;
+            }
+
+            return node;
+        }
+
+        /**
+         * Get the data type associated with the memory node associated with the
+         * SetCoordinate node.
+         */
+        DataType getLDSType(KernelGraph const& graph, int node)
+        {
+            node = getLDSNode(graph, node);
+
+            auto ldsType = getDataType(graph.control.getNode(node));
+            AssertFatal(ldsType != DataType::None);
+            return ldsType;
+        };
+
+        using ChainTypes = std::vector<std::map<DataType, int>>;
+
+        std::string toString(std::map<DataType, int> const& typeCounts)
+        {
+            auto fmtPair = [](std::pair<DataType, int> const& pair) -> std::string {
+                return fmt::format("{}: {}", toString(pair.first), pair.second);
+            };
+
+            auto formatted = typeCounts | std::views::transform(fmtPair);
+
+            return fmt::format("[{}]", fmt::join(formatted, ","));
+        }
+
+        std::string toString(ChainTypes const& chainTypes)
+        {
+            auto ts = [](auto val) { return toString(val); };
+
+            auto formatted = chainTypes | std::views::transform(ts);
+
+            return fmt::format("{{{}}}", fmt::join(formatted, ", "));
+        }
+
+        /**
+         * Given a chain of (multiply) nodes, modify it to only contain those nodes that are the
+         * last nodes that read a DataFlowTag. Returns a parallel vector containing the data
+         * types read by each node.
+         */
+        ChainTypes filterLastCoordinateReads(KernelGraph const& graph, vec& chain)
+        {
+            ControlFlowRWTracer tracer(graph);
+
+            auto coordDataType = [&](int coord) -> DataType {
+                for(auto rw : tracer.coordinatesReadWrite(coord))
+                {
+                    auto rwType = getDataType(graph.control.getNode(rw.control));
+                    if(rwType != DataType::None)
+                        return rwType;
+                }
+
+                return DataType::None;
+            };
+
+            // Map from coord to the last op that uses that coord.
+            std::unordered_map<int, int> lastUses;
+
+            for(auto op : chain)
+            {
+                auto records = tracer.opReadWrite(op);
+                for(auto rec : records)
+                {
+                    if(rec.rw == ControlFlowRWTracer::READ)
+                        lastUses[rec.coordinate] = op;
+                }
+            }
+
+            // Map from op to the count of each data type used by it.
+            std::unordered_map<int, std::map<DataType, int>> lastUsedTypes;
+
+            for(auto const& [coord, op] : lastUses)
+                lastUsedTypes[op][coordDataType(coord)]++;
+
+            std::vector<int> newChain;
+            ChainTypes       rv;
+
+            int skipCount = 0;
+            for(auto op : chain)
+            {
+                auto iter = lastUsedTypes.find(op);
+
+                if(iter != lastUsedTypes.end())
+                {
+                    Log::debug("filterLastCoordinateReads: Skipped {}.", skipCount);
+                    skipCount = 0;
+
+                    newChain.push_back(op);
+                    rv.push_back(iter->second);
+                }
+                else
+                {
+                    skipCount++;
+                }
+            }
+            Log::debug("filterLastCoordinateReads: Skipped {}.", skipCount);
+            Log::debug("-------------------------------------------------");
+
+            chain = newChain;
+
+            return rv;
+        }
+
+        /**
+         * Given a graph,
+         *
+         * - Finds chains of multiply nodes
+         * - Filters those chains to only the ones that are the last reads of some tag.
+         * - Returns those chains as well as info about the data types of those tags.
+         */
+        std::tuple<vec2, std::vector<ChainTypes>>
+            findMultiplyChainsAndCoords(KernelGraph const& graph)
+        {
+            auto isMultiply = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
+            };
+
+            auto multiplies = graph.control.getNodes().filter(isMultiply).to<std::vector>();
+
+            auto chains = makeChains(graph, std::move(multiplies));
+
+            std::vector<ChainTypes> chainTypes;
+
+            for(auto& chain : chains)
+                chainTypes.push_back(filterLastCoordinateReads(graph, chain));
+
+            return {chains, chainTypes};
+        }
+
+        vec2 findMultiplyChains(KernelGraph const& graph)
+        {
+            auto isMultiply = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
+            };
+
+            auto multiplies = graph.control.getNodes().filter(isMultiply).to<std::vector>();
+
+            auto rv = makeChains(graph, std::move(multiplies));
+
+            for(auto& chain : rv)
+                auto _ = filterLastCoordinateReads(graph, chain);
+
+            return rv;
+        }
+
+        void getImmediateBodyParents(KernelGraph const& graph, std::vector<int>& nodes)
+        {
+            auto isSetCoordinate = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::SetCoordinate>(idx).has_value();
+            };
+
+            for(auto& node : nodes)
+            {
+                while(auto bodyParent = graph.control.getInputNodeIndices<ControlGraph::Body>(node)
+                                            .filter(isSetCoordinate)
+                                            .only())
+                {
+                    node = *bodyParent;
+                }
+            }
+        }
+
+        vec2 findLoadLDSChains(KernelGraph const& graph)
+        {
+            auto isLoadLDSTile = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::LoadLDSTile>(idx).has_value();
+            };
+
+            auto nodes = graph.control.getNodes().filter(isLoadLDSTile).to<std::vector>();
+            getImmediateBodyParents(graph, nodes);
+
+            return makeChains(graph, std::move(nodes));
+        }
+
+        std::string abbrev(LayoutType t)
+        {
+            switch(t)
+            {
+            case LayoutType::SCRATCH:
+                return "SCR";
+            case LayoutType::MATRIX_A:
+                return "A";
+            case LayoutType::MATRIX_B:
+                return "B";
+            case LayoutType::MATRIX_ACCUMULATOR:
+                return "ACC";
+            case LayoutType::None:
+                return "N/A";
+            case LayoutType::Count:
+                return "MAX";
+            }
+
+            return "";
+        }
+
+        /**
+         * Logs a nice table that will show which nodes in `chain` use which DataFlowTags, and
+         * what type they are. Very useful for determining what the schedule should be.
+         */
+        void logChainTagTable(KernelGraph const& graph, vec chain)
+        {
+            ControlFlowRWTracer tracer(graph);
+
+            std::vector<int>                              coords;
+            std::map<int, DataType>                       coordDataTypes;
+            std::map<int, rocRoller::LayoutType>          coordLayouts;
+            std::map<int, ControlFlowRWTracer::ReadWrite> useTypes;
+            std::map<int, int>                            lastUses;
+
+            {
+                std::set<int> coordSet;
+                for(auto& op : chain)
+                {
+                    while(auto child
+                          = graph.control.getOutputNodeIndices<ControlGraph::Body>(op).only())
+                    {
+                        op = *child;
+                    }
+                }
+
+                std::unordered_set<int> nodes(chain.begin(), chain.end());
+                for(auto const& rec : tracer.coordinatesReadWrite())
+                {
+                    if(nodes.contains(rec.control))
+                        coordSet.insert(rec.coordinate);
+                }
+
+                for(auto op : chain)
+                {
+                    auto records = tracer.opReadWrite(op);
+                    for(auto rec : records)
+                    {
+                        lastUses[rec.coordinate] = op;
+                        auto iter                = useTypes.find(rec.coordinate);
+                        if(iter == useTypes.end())
+                            useTypes[rec.coordinate] = rec.rw;
+                        else
+                            iter->second = combine(iter->second, rec.rw);
+                    }
+                }
+
+                for(auto const& rec : tracer.coordinatesReadWrite())
+                {
+                    if(rec.rw == ControlFlowRWTracer::WRITE && coordSet.contains(rec.coordinate)
+                       && !coordDataTypes.contains(rec.coordinate))
+                    {
+                        auto node  = graph.control.getNode(rec.control);
+                        auto dtype = getDataType(node);
+                        if(dtype != DataType::None)
+                            coordDataTypes[rec.coordinate] = dtype;
+                    }
+                }
+
+                for(auto coord : coordSet)
+                    if(!coordDataTypes.contains(coord))
+                        coordDataTypes[coord] = DataType::None;
+
+                coordLayouts = [&]() {
+                    auto getCoordLayout = [&](int coord) {
+                        auto mt = graph.coordinates.get<CoordinateGraph::MacroTile>(coord);
+
+                        LayoutType lt = LayoutType::None;
+                        if(mt)
+                            lt = mt->layoutType;
+
+                        return std::make_pair(coord, lt);
+                    };
+
+                    auto theView = coordSet | std::views::transform(getCoordLayout);
+
+                    return std::map(theView.begin(), theView.end());
+                }();
+
+                auto coordOrder = [&](int a, int b) {
+                    auto typeA = useTypes[a], typeB = useTypes[b];
+
+                    if(typeA != typeB)
+                        return typeA < typeB;
+
+                    return TopologicalCompare(graph)(lastUses[a], lastUses[b]);
+                };
+
+                {
+                    auto isWantedCoord = [&](int coord) {
+                        auto dtype = coordDataTypes.at(coord);
+                        if(dtype == DataType::None)
+                            return false;
+
+                        auto const& info = DataTypeInfo::Get(dtype);
+
+                        return info.packing > 1;
+                    };
+
+                    auto tmp = coordSet | std::views::filter(isWantedCoord);
+                    coords   = std::vector(tmp.begin(), tmp.end());
+                }
+
+                std::ranges::sort(coords, coordOrder);
+            }
+
+            auto getCoordLayout = [&](int coord) { return coordLayouts.at(coord); };
+
+            auto value     = [](auto const& x) { return x.second; };
+            auto lastNodes = [&]() {
+                auto tmp = lastUses | std::views::transform(value);
+                return std::unordered_set(tmp.begin(), tmp.end());
+            }();
+
+            auto isLast = [&](int x) { return lastNodes.contains(x); };
+            auto lasts  = [&]() {
+                auto tmp = chain | std::views::filter(isLast);
+                return std::vector(tmp.begin(), tmp.end());
+            }();
+
+            auto formatElement = [](auto el) -> std::string { return fmt::format("{:^6}", el); };
+
+            auto getDtype = [&](int coord) { return TypeAbbrev(coordDataTypes[coord]); };
+
+            auto msg = fmt::format("|{}|{}",
+                                   formatElement(""),
+                                   fmt::join(coords | std::views::transform(formatElement), "|"));
+
+            std::string line(msg.size(), '=');
+
+            msg += fmt::format("\n{}\n", line);
+
+            msg += fmt::format("|{}|{}\n{}\n",
+                               formatElement(""),
+                               fmt::join(coords | std::views::transform(getDtype)
+                                             | std::views::transform(formatElement),
+                                         "|"),
+                               line);
+
+            msg += fmt::format("\n{}\n", line);
+
+            msg += fmt::format("|{}|{}\n{}\n",
+                               formatElement(""),
+                               fmt::join(coords | std::views::transform(getCoordLayout)
+                                             | std::views::transform(abbrev)
+                                             | std::views::transform(formatElement),
+                                         "|"),
+                               line);
+
+            for(auto op : chain)
+            {
+                auto records    = tracer.opReadWrite(op);
+                auto lookupNode = [&](int coord) -> std::string {
+                    for(auto const& rec : records)
+                    {
+                        if(rec.coordinate == coord)
+                        {
+                            switch(rec.rw)
+                            {
+                            case ControlFlowRWTracer::READ:
+                                return "V";
+                            case ControlFlowRWTracer::WRITE:
+                                return "^";
+                            case ControlFlowRWTracer::READWRITE:
+                                return "X";
+                            default:
+                                break;
+                            }
+                        }
+                    }
+                    return " ";
+                };
+
+                msg += fmt::format("|{}|{}\n",
+                                   formatElement(op),
+                                   fmt::join(coords | std::views::transform(lookupNode)
+                                                 | std::views::transform(formatElement),
+                                             "|"));
+            }
+
+            msg += fmt::format("Lasts: ({})({})\n", lasts.size(), fmt::join(lasts, ", "));
+
+            Log::debug("\n{}", msg);
+        }
+
+        vec2 findLoadTiledChains(KernelGraph const& graph)
+        {
+            auto isLoadTiled = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::LoadTiled>(idx).has_value();
+            };
+
+            auto nodes = graph.control.getNodes().filter(isLoadTiled).to<std::vector>();
+            getImmediateBodyParents(graph, nodes);
+
+            return makeChains(graph, std::move(nodes));
+        }
+
+        vec2 findD2LDSChains(KernelGraph const& graph)
+        {
+            auto isD2LDS = [&](int idx) -> bool {
+                return graph.control.get<ControlGraph::LoadTileDirect2LDS>(idx).has_value();
+            };
+
+            auto nodes = graph.control.getNodes().filter(isD2LDS).to<std::vector>();
+            getImmediateBodyParents(graph, nodes);
+
+            return makeChains(graph, std::move(nodes));
+        }
+
+        std::string showChains(vec2 const& chains)
+        {
+            std::ostringstream msg;
+
+            for(auto const& chain : chains)
+            {
+                msg << " - {";
+                streamJoin(msg, chain, ", ");
+                msg << "} (" << chain.size() << ")" << std::endl;
+            }
+
+            return msg.str();
+        }
+
+        std::string showGroups(vec3 const& groups)
+        {
+            std::string rv;
+
+            for(auto const& group : groups)
+            {
+                rv += fmt::format("-=-=-=-= Group: =-=-=-=-\n{}\n", showChains(group));
+            }
+
+            rv += fmt::format("{} groups\n", groups.size());
+
+            return rv;
+        }
+
+        /**
+         * Given groups of chains (grouped by node type), identifies which chains of different
+         * types are parallel to each other. Returns sets of chains that each contain at least 2
+         * chains and are parallel to each other.
+         *
+         * E.g. Input:
+         *
+         * {
+         *     {
+         *         {chain of multiply A}, {chain of multiply B}, chain of multiply C}},
+         *     {
+         *         {chain of LoadLDSTile E}, {chain of LoadLDSTile F},
+         *         {chain of LoadLDSTile G}, {chain of LoadLDSTile H}},
+         *     }
+         * }
+         *
+         * Let's say that:
+         *     * Chain E is not parallel to anything because it's before the K loop
+         *       (it's for prefetching)
+         *     * Chain A is parallel to chain F
+         *     * Chain B is parallel to chain G
+         *     * Chain C is parallel to chain H
+         *
+         * The return value should be:
+         * {
+         *      { {chain A}, {chain F} },
+         *      { {chain B}, {chain G} },
+         *      { {chain C}, {chain H} }
+         * }
+         *
+         * TODO: This *might* reverse the order of each set (i.e. {{chain F}, {chain A}})
+         * Verify if this is the case and update the comment if so.
+         */
+        vec3 identifyParallelChains(KernelGraph const& graph, vec3 groups)
+        {
+            vec3 rv;
+            if(groups.empty())
+                return rv;
+
+            while(!groups.empty())
+            {
+                auto myGroup = std::move(groups.back());
+                groups.pop_back();
+
+                bool hasJoined = false;
+
+                for(auto& myChain : myGroup)
+                {
+                    AssertFatal(!myChain.empty());
+                    auto myNode  = myChain.front();
+                    auto myStack = controlStack(myNode, graph);
+                    myStack.pop_back();
+                    AssertFatal(!myStack.empty());
+
+                    for(auto& aGroup : rv)
+                    {
+                        bool canJoin = true;
+                        for(auto const& aChain : aGroup)
+                        {
+                            AssertFatal(!aChain.empty());
+
+                            auto aNode = aChain.front();
+
+                            auto aStack = controlStack(aNode, graph);
+                            aStack.pop_back();
+                            AssertFatal(!aStack.empty());
+
+                            if(myStack.back() != aStack.back())
+                            {
+                                Log::debug("{} can't join {} due to different parents ({}/{})",
+                                           myNode,
+                                           aNode,
+                                           myStack.back(),
+                                           aStack.back());
+                                canJoin = false;
+                                break;
+                            }
+
+                            auto order = graph.control.compareNodes(UpdateCache, myNode, aNode);
+                            if(order != ControlGraph::NodeOrdering::Undefined)
+                            {
+                                Log::debug("{} can't join {} due to defined order ({})",
+                                           myNode,
+                                           aNode,
+                                           toString(order));
+                                canJoin = false;
+                                break;
+                            }
+                        }
+                        if(canJoin)
+                        {
+                            aGroup.push_back(std::move(myChain));
+                            hasJoined = true;
+                            break;
+                        }
+                    }
+
+                    if(!hasJoined)
+                    {
+                        rv.push_back({std::move(myChain)});
+                    }
+                }
+            }
+
+            for(auto iter = rv.begin(); iter != rv.end();)
+            {
+                if(iter->size() < 2)
+                    iter = rv.erase(iter);
+                else
+                    ++iter;
+            }
+
+            for(auto const& group : rv)
+            {
+                for(auto const& chain : group)
+                {
+                    logChainTagTable(graph, chain);
+                }
+            }
+
+            return rv;
+        }
+
+        struct ParallelChainSet
+        {
+            vec multiplyChain;
+            vec ldsChain;
+
+            ChainTypes            multiplyTagTypes;
+            std::vector<DataType> ldsChainTypes;
+        };
+
+        template <std::ranges::forward_range ARange, std::ranges::forward_range BRange>
+        Generator<
+            std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<BRange>>>
+            zip(ARange const& a, BRange const& b)
+        {
+            auto aIter = a.begin();
+            auto bIter = b.begin();
+
+            for(; aIter != a.end() && bIter != b.end(); ++aIter, ++bIter)
+            {
+                co_yield std::make_tuple(*aIter, *bIter);
+            }
+        }
+
+        template <std::ranges::forward_range ARange,
+                  std::ranges::forward_range BRange,
+                  std::ranges::forward_range CRange>
+        Generator<std::tuple<std::ranges::range_value_t<ARange>,
+                             std::ranges::range_value_t<BRange>,
+                             std::ranges::range_value_t<CRange>>>
+            zip(ARange const& a, BRange const& b, CRange const& c)
+        {
+            auto aIter = a.begin();
+            auto bIter = b.begin();
+            auto cIter = c.begin();
+
+            for(; aIter != a.end() && bIter != b.end() && cIter != c.end();
+                ++aIter, ++bIter, ++cIter)
+            {
+                co_yield std::make_tuple(*aIter, *bIter, *cIter);
+            }
+        }
+
+        std::vector<ParallelChainSet>
+            identifyParallelMultiplyAndLDSChainsWithTypes(KernelGraph const& graph)
+        {
+            auto [multiplyChains, multiplyCoordTypes] = findMultiplyChainsAndCoords(graph);
+            auto ldsChains                            = findLoadLDSChains(graph);
+
+            Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
+            Log::debug("LDS chains: \n{}", showChains(ldsChains));
+
+            auto chainSets
+                = identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains)});
+
+            AssertFatal(chainSets.size() == multiplyCoordTypes.size(),
+                        ShowValue(chainSets.size()),
+                        ShowValue(multiplyCoordTypes.size()));
+
+            std::vector<ParallelChainSet> rv;
+
+            auto getType = [&](int node) { return getLDSType(graph, node); };
+
+            for(auto const& [chains, types] : zip(chainSets, multiplyCoordTypes))
+            {
+                auto ldsTypes = chains.at(0) | std::views::transform(getType);
+
+                rv.push_back(
+                    {chains.at(1), chains.at(0), types, {ldsTypes.begin(), ldsTypes.end()}});
+            }
+
+            return rv;
+        }
+
+        void distributeChains(KernelGraph& graph, std::vector<ParallelChainSet> const& chainSets)
+        {
+            for(auto const& chainSet : chainSets)
+            {
+                std::map<DataType, int> multiplyTypeCounts, ldsTypeCounts;
+
+                multiplyTypeCounts[DataType::FP4x8]  = 14;
+                multiplyTypeCounts[DataType::E8M0x4] = 8;
+
+                AssertFatal(chainSet.multiplyChain.size() == chainSet.multiplyTagTypes.size(),
+                            ShowValue(chainSet.multiplyChain.size()),
+                            ShowValue(chainSet.multiplyTagTypes.size()));
+
+                auto ldsIter = chainSet.ldsChain.begin();
+                AssertFatal(ldsIter != chainSet.ldsChain.end());
+
+                auto ldsType = getLDSType(graph, *ldsIter);
+                Log::debug("First LDS: {} ({})", *ldsIter, toString(ldsType));
+
+                for(auto const& [multiply, multiplyTypes] :
+                    zip(chainSet.multiplyChain, chainSet.multiplyTagTypes))
+                {
+                    for(auto const& [dtype, count] : multiplyTypes)
+                    {
+                        multiplyTypeCounts[dtype] += count;
+                    }
+
+                    auto ldsCount = 0;
+                    while(ldsIter != chainSet.ldsChain.end()
+                          && multiplyTypeCounts[ldsType] > ldsTypeCounts[ldsType])
+                    {
+                        Log::debug("{} -> {} Mul: {}, LDS: {} ({})",
+                                   multiply,
+                                   *ldsIter,
+                                   toString(multiplyTypeCounts),
+                                   toString(ldsTypeCounts),
+                                   getLDSNode(graph, *ldsIter));
+                        graph.control.chain<ControlGraph::Sequence>(multiply, *ldsIter);
+
+                        ldsTypeCounts[ldsType]++;
+
+                        ++ldsIter;
+                        if(ldsIter != chainSet.ldsChain.end())
+                            ldsType = getLDSType(graph, *ldsIter);
+
+                        ++ldsCount;
+                    }
+
+                    if(ldsCount == 0 && ldsIter != chainSet.ldsChain.end())
+                        Log::debug("Skipping multiply {}. LDS: {} ({})",
+                                   multiply,
+                                   *ldsIter,
+                                   toString(ldsType));
+                }
+
+                Log::debug("Multiply type counts: {{{}}}", toString(multiplyTypeCounts));
+                Log::debug("LDS type counts: {{{}}}", toString(ldsTypeCounts));
+            }
+        }
+    }
+
+    KernelGraph ScheduleMultiplyAndLDS::apply(KernelGraph const& original)
+    {
+        using namespace ScheduleMultiplyAndLDSDetail;
+
+        auto rv = original;
+
+        auto something = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
+
+        for(auto chainSet : something)
+        {
+            auto ts = [](auto x) { return toString(x); };
+            Log::debug("Chains:\nMultiplies: {{{}}}({})\nTypes: {}({})\nLDS: "
+                       "{{{}}}({})\nTypes: {}({})",
+                       fmt::join(chainSet.multiplyChain, ", "),
+                       chainSet.multiplyChain.size(),
+                       toString(chainSet.multiplyTagTypes),
+                       chainSet.multiplyTagTypes.size(),
+                       fmt::join(chainSet.ldsChain, ", "),
+                       chainSet.ldsChain.size(),
+                       fmt::join(chainSet.ldsChainTypes | std::views::transform(ts), ", "),
+                       chainSet.ldsChainTypes.size());
+        }
+
+        distributeChains(rv, something);
+        return rv;
+    }
+}
