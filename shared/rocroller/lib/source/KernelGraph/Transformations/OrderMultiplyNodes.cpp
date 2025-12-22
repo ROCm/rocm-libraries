@@ -34,11 +34,11 @@ namespace rocRoller::KernelGraph
 {
     namespace OrderMultiplyNodesDetail
     {
-        std::unordered_map<int, std::vector<int>> getGroupedMultiplyNodes(KernelGraph const& graph)
+        template <typename T>
+        std::unordered_map<int, std::vector<int>> getGroupedNodes(KernelGraph const& graph)
         {
-            auto multiplyNodes = graph.control.getNodes().filter([&graph](int idx) {
-                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
-            });
+            auto multiplyNodes = graph.control.getNodes().filter(
+                [&graph](int idx) { return graph.control.get<T>(idx).has_value(); });
 
             std::unordered_map<int, std::vector<int>> rv;
             for(auto node : multiplyNodes)
@@ -49,6 +49,11 @@ namespace rocRoller::KernelGraph
                 rv[*parent].push_back(node);
             }
             return rv;
+        }
+
+        std::unordered_map<int, std::vector<int>> getGroupedMultiplyNodes(KernelGraph const& graph)
+        {
+            return getGroupedNodes<ControlGraph::Multiply>(graph);
         }
 
         BestNodeOrder::BestNodeOrder(KernelGraph const& graph)
@@ -74,6 +79,108 @@ namespace rocRoller::KernelGraph
                         "These nodes should not contain each other",
                         ShowValue(a),
                         ShowValue(b));
+
+            return std::nullopt;
+        }
+
+        std::vector<int> const& BestNodeOrder::aTagReplacements(int node) const
+        {
+            {
+                auto iter = m_aTagReplacements.find(node);
+                if(iter != m_aTagReplacements.end())
+                    return iter->second;
+            }
+
+            auto getLoopOp = [&](int op) -> std::optional<int> {
+                auto stack = controlStack(op, m_graph);
+
+                for(auto parent : std::views::reverse(stack))
+                {
+                    if(m_graph.control.get<ControlGraph::ForLoopOp>(parent))
+                        return parent;
+                }
+
+                return std::nullopt;
+            };
+
+            auto nodeLoop = getLoopOp(node);
+
+            auto isLeft = [](ControlToCoordinateMapper::Connection const& c) {
+                auto arg = getNaryArgument(c);
+                return arg == NaryArgument::LHS || arg == NaryArgument::LHS_SCALE;
+            };
+
+            auto          connections_ = m_graph.mapper.getConnections(node);
+            auto          connections  = connections_ | std::views::filter(isLeft);
+            std::set<int> tags;
+
+            for(auto const& connection : connections)
+            {
+                Log::debug("Op {}, Connection {}", node, toString(connection));
+                tags.insert(connection.coordinate);
+            }
+
+            std::map<int, int> tagNodes;
+            for(auto const& tag : tags)
+            {
+                auto tagTrace = m_tracer.coordinatesReadWrite(tag);
+
+                for(auto const& rw : tagTrace)
+                {
+                    if(rw.rw == ControlFlowRWTracer::WRITE
+                       && m_graph.control.get<ControlGraph::LoadLDSTile>(rw.control)
+                       //    && m_graph.control.compareNodes(UpdateCache, node, rw.control)
+                       //           == ControlGraph::NodeOrdering::LeftFirst
+                       && getLoopOp(rw.control) == nodeLoop)
+                    {
+                        auto iter = tagNodes.find(tag);
+                        if(iter == tagNodes.end()
+                           || m_graph.control.compareNodes(UpdateCache, iter->second, rw.control)
+                                  == ControlGraph::NodeOrdering::RightFirst)
+                        {
+                            tagNodes[tag] = rw.control;
+                        }
+                    }
+                }
+            }
+
+            std::vector<int> rv;
+            rv.reserve(tagNodes.size());
+
+            for(auto const& [_, op] : tagNodes)
+                rv.push_back(op);
+
+            std::ranges::sort(rv, TopologicalCompare(m_graph));
+
+            m_aTagReplacements[node] = std::move(rv);
+
+            auto showEntry = [](std::pair<int, std::vector<int>> const& entry) {
+                auto const& [tag, deps] = entry;
+                return fmt::format("Multiply {}: ({})", tag, fmt::join(deps, ", "));
+            };
+
+            auto iter = m_aTagReplacements.find(node);
+            Log::debug(showEntry(*iter));
+
+            return m_aTagReplacements[node];
+        }
+
+        std::optional<bool> BestNodeOrder::orderByATagReplacements(int a, int b) const
+        {
+            auto const& as = aTagReplacements(a);
+            auto const& bs = aTagReplacements(b);
+
+            auto aIter = as.begin(), bIter = bs.begin();
+            for(; aIter != as.end() && bIter != bs.end(); ++aIter, ++bIter)
+            {
+                if(auto order = existingOrder(*aIter, *bIter))
+                    return *order;
+            }
+
+            if(aIter != as.end())
+                return true;
+            if(bIter != bs.end())
+                return false;
 
             return std::nullopt;
         }
@@ -205,6 +312,9 @@ namespace rocRoller::KernelGraph
 
         bool BestNodeOrder::operator()(int a, int b) const
         {
+            if(auto order = orderByATagReplacements(a, b))
+                return *order;
+
             if(auto order = orderByDownstreamMemoryNodes(a, b))
                 return *order;
 
@@ -253,8 +363,51 @@ namespace rocRoller::KernelGraph
             return subGraph;
         }
 
-        void orderNodes(KernelGraph const& graph, std::vector<int>& nodes)
+        ControlGraph::ControlGraph
+            createOrderGraph(KernelGraph const& graph, std::vector<int> nodes, auto const& comp)
         {
+            ControlGraph::ControlGraph rv;
+
+            for(int idx : nodes)
+                rv.setElement(idx, graph.control.getElement(idx));
+
+            for(int idxA : nodes)
+            {
+                for(int idxB : nodes)
+                {
+                    if(idxA != idxB && comp(idxA, idxB))
+                        rv.chain<ControlGraph::Sequence>(idxA, idxB);
+                }
+            }
+
+            removeRedundantSequenceEdges(rv);
+
+            return rv;
+        }
+
+        std::vector<int>
+            getDesiredOrder(KernelGraph const& graph, std::vector<int> nodes, auto const& comp)
+        {
+            std::ranges::sort(nodes, comp);
+            return nodes;
+        }
+
+        void BestNodeOrder::populateCache(auto range) const
+        {
+            for(auto x : range)
+            {
+                aTagReplacements(x);
+                downstreamMemoryNode(x);
+                reversedTagDependencies(x);
+            }
+        }
+
+        void orderNodes(KernelGraph const& graph, std::vector<int>& nodes, auto const& comp)
+        {
+            {
+                std::set tmp(nodes.begin(), nodes.end());
+                Log::debug("Pre-existing order:\n{}", graph.control.nodeOrderTableString(tmp));
+            }
             // Simply including existing order in `BestNodeOrder` and calling `sort` can
             // lead to a situation where existing nodes appear out of program order.
             //
@@ -264,9 +417,11 @@ namespace rocRoller::KernelGraph
             // 2. Walk that subgraph in topological order, using `BestNodeOrder` to decide
             // which node to pick next when there are multiple topologically valid options.
 
+            auto desiredOrder = getDesiredOrder(graph, nodes, comp);
+
             auto subGraph = OrderMultiplyNodesDetail::createSubGraph(graph, nodes);
 
-            auto candidates = subGraph.roots().to<std::list>();
+            auto candidates = subGraph.roots().to<std::deque>();
 
             std::unordered_set<int> remainingNodes(nodes.begin(), nodes.end());
             remainingNodes.reserve(nodes.size());
@@ -293,22 +448,15 @@ namespace rocRoller::KernelGraph
 
             nodes.clear();
 
-            BestNodeOrder comp(graph);
+            std::ranges::sort(candidates, comp);
+            Log::debug("Starting with ({})", fmt::join(candidates, ","));
 
             while(!remainingNodes.empty() || !candidates.empty())
             {
-                auto iter = candidates.begin();
-                AssertFatal(iter != candidates.end());
-                auto minIter = iter;
-                ++iter;
-                for(; iter != candidates.end(); ++iter)
-                {
-                    if(comp(*iter, *minIter))
-                        minIter = iter;
-                }
-
-                auto nextNode = *minIter;
-                candidates.erase(minIter);
+                std::ranges::sort(candidates, comp);
+                auto nextNode = candidates.front();
+                candidates.pop_front();
+                Log::debug("Picking {}", nextNode);
 
                 nodes.push_back(nextNode);
                 completedNodes.insert(nextNode);
@@ -318,30 +466,255 @@ namespace rocRoller::KernelGraph
                     auto outputNodes
                         = subGraph.getOutputNodeIndices<ControlGraph::Sequence>(nextNode);
 
+                    std::set<int> newNodes;
+
                     for(auto outputNode : outputNodes)
                     {
                         if(nodeSatisfied(outputNode))
                         {
+                            newNodes.insert(outputNode);
                             candidates.push_back(outputNode);
                             remainingNodes.erase(outputNode);
                         }
                     }
+
+                    if(!newNodes.empty())
+                    {
+                        Log::debug("Adding ({})", fmt::join(newNodes, ", "));
+                        std::ranges::sort(candidates, comp);
+                        Log::debug("Now ({})", fmt::join(candidates, ", "));
+                    }
+                }
+            }
+
+            Log::debug("Desired order: \n{}", fmt::join(desiredOrder, "\n"));
+            Log::debug("Actual order: \n{}", fmt::join(nodes, "\n"));
+        }
+
+        struct ExchangeOrder
+        {
+            int getMultiply(int exchange) const
+            {
+                auto isMultiply = [this](int idx) {
+                    return graph.control.get<ControlGraph::Multiply>(idx).has_value();
+                };
+
+                return graph.control.getOutputNodeIndices<ControlGraph::Sequence>(exchange)
+                    .filter(isMultiply)
+                    .only()
+                    .value();
+            }
+
+            bool operator()(int a, int b) const
+            {
+                if(a == b)
+                    return false;
+
+                auto aMultiply = getMultiply(a);
+                auto bMultiply = getMultiply(b);
+
+                if(aMultiply == bMultiply)
+                    return false;
+
+                return TopologicalCompare(graph)(aMultiply, bMultiply);
+            }
+
+            KernelGraph const& graph;
+        };
+
+        void BestNodeOrder::logTagData() const
+        {
+            auto showEntry = [](std::pair<int, std::vector<int>> const& entry) {
+                auto const& [tag, deps] = entry;
+                return fmt::format("Multiply {}: ({})\n", tag, fmt::join(deps, ", "));
+            };
+
+            auto entries = m_aTagReplacements | std::views::transform(showEntry);
+
+            Log::debug("Tag info: {}", fmt::join(entries, ""));
+        }
+
+        void breakupNodes(KernelGraph& graph, std::vector<int> const& nodes)
+        {
+            auto getLoopOp = [&](int op) -> std::optional<int> {
+                auto stack = controlStack(op, graph);
+
+                for(auto parent : std::views::reverse(stack))
+                {
+                    if(graph.control.get<ControlGraph::ForLoopOp>(parent))
+                        return parent;
+                }
+
+                return std::nullopt;
+            };
+
+            auto loop = getLoopOp(nodes.front()).value_or(-1);
+
+            auto colouring = colourByUnrollValue(graph, -1);
+
+            Log::debug(toString(colouring));
+
+            using Colour = std::set<std::pair<int, int>>;
+
+            std::map<Colour, std::vector<int>> reverse;
+
+            for(auto node : nodes)
+            {
+                auto const& opColour = colouring.operationColour.at(node);
+
+                Colour key(opColour.begin(), opColour.end());
+
+                reverse[key].push_back(node);
+            }
+
+            for(auto& [key, keyOps] : reverse)
+            {
+                std::ranges::sort(keyOps, TopologicalCompare(graph));
+            }
+
+            std::set<int> edgesToKeep;
+
+            for(auto& [key, keyOps] : reverse)
+            {
+                for(int idx = 0; idx + 1 < keyOps.size(); idx++)
+                {
+                    auto thisEdge = graph.control.findEdge(keyOps[idx], keyOps[idx + 1]);
+
+                    if(!thisEdge)
+                    {
+                        AssertFatal(graph.control.compareNodes(
+                                        UseCacheIfAvailable, keyOps[idx], keyOps[idx + 1])
+                                    == ControlGraph::NodeOrdering::LeftFirst);
+
+                        thisEdge = graph.control.addElement(
+                            ControlGraph::Sequence(), {keyOps[idx]}, {keyOps[idx + 1]});
+                    }
+
+                    edgesToKeep.insert(*thisEdge);
+                }
+            }
+
+            Log::debug("Keeping edges ({})", fmt::join(edgesToKeep, ", "));
+
+            auto notMultiply = [&graph](int idx) {
+                if(graph.control.getElementType(idx) != Graph::ElementType::Node)
+                    return false;
+
+                return !(graph.control.get<ControlGraph::Multiply>(idx).has_value());
+            };
+
+            std::map<int, int> connectionsToKeep;
+
+            for(auto node : nodes)
+            {
+                auto upstreamNode
+                    = graph.control.breadthFirstVisit(node, Graph::Direction::Upstream)
+                          .filter(notMultiply)
+                          .take(1)
+                          .only();
+
+                AssertFatal(upstreamNode.has_value(), ShowValue(node));
+
+                AssertFatal(getLoopOp(node) == getLoopOp(*upstreamNode), ShowValue(node));
+
+                connectionsToKeep[node] = *upstreamNode;
+            }
+
+            Log::debug("Got connections.");
+
+            for(auto nodeA : nodes)
+            {
+                for(auto nodeB : nodes)
+                {
+                    if(nodeA == nodeB)
+                        continue;
+
+                    auto thisEdge = graph.control.findEdge(nodeA, nodeB);
+
+                    if(thisEdge.has_value() && !edgesToKeep.contains(*thisEdge))
+                    {
+                        graph.control.deleteElement(*thisEdge);
+                        graph.control.chain<ControlGraph::Sequence>(connectionsToKeep.at(nodeB),
+                                                                    nodeB);
+                    }
                 }
             }
         }
+
+    }
+    KernelGraph RemoveImplicitScheduling::apply(KernelGraph const& original)
+    {
+        auto rv = original;
+
+        auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(rv);
+        for(auto& [parent, nodes] : groupedMultiplyNodes)
+        {
+            OrderMultiplyNodesDetail::breakupNodes(rv, nodes);
+        }
+
+        return rv;
     }
 
     KernelGraph OrderMultiplyNodes::apply(KernelGraph const& original)
     {
-        auto rv                   = original;
-        auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(rv);
-        for(auto& [parent, nodes] : groupedMultiplyNodes)
-        {
-            OrderMultiplyNodesDetail::orderNodes(rv, nodes);
+        auto rv = original;
 
-            for(size_t idx = 0; idx + 1 < nodes.size(); idx++)
+        {
+            auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(rv);
+            for(auto& [parent, nodes] : groupedMultiplyNodes)
             {
-                rv.control.chain<ControlGraph::Sequence>(nodes[idx], nodes[idx + 1]);
+                {
+                    OrderMultiplyNodesDetail::BestNodeOrder comp(rv);
+                    // Pre-populate cache because some STL algorithms take the comparator by value.
+                    comp.populateCache(nodes);
+                    OrderMultiplyNodesDetail::orderNodes(rv, nodes, comp);
+                    comp.logTagData();
+                }
+
+                for(size_t idx = 0; idx + 1 < nodes.size(); idx++)
+                {
+                    rv.control.chain<ControlGraph::Sequence>(nodes[idx], nodes[idx + 1]);
+                }
+            }
+        }
+
+        return rv;
+    }
+
+    KernelGraph OrderExchangeNodes::apply(KernelGraph const& original)
+    {
+        auto rv = original;
+
+        {
+            auto groupedExchangeNodes
+                = OrderMultiplyNodesDetail::getGroupedNodes<ControlGraph::Exchange>(rv);
+            for(auto& [parent, nodes] : groupedExchangeNodes)
+            {
+                OrderMultiplyNodesDetail::ExchangeOrder comp{rv};
+                OrderMultiplyNodesDetail::orderNodes(rv, nodes, comp);
+
+                for(size_t idx = 0; idx + 1 < nodes.size(); idx++)
+                {
+                    rv.control.chain<ControlGraph::Sequence>(nodes[idx], nodes[idx + 1]);
+
+                    {
+                        auto idxMultiply = comp.getMultiply(nodes[idx]);
+                        if(rv.control.compareNodes(UseCacheIfAvailable, idxMultiply, nodes[idx + 1])
+                           == ControlGraph::NodeOrdering::Undefined)
+                        {
+                            rv.control.chain<ControlGraph::Sequence>(idxMultiply, nodes[idx + 1]);
+                        }
+                    }
+
+                    {
+                        auto idxMultiply = comp.getMultiply(nodes[idx + 1]);
+                        if(rv.control.compareNodes(UseCacheIfAvailable, idxMultiply, nodes[idx])
+                           == ControlGraph::NodeOrdering::Undefined)
+                        {
+                            rv.control.chain<ControlGraph::Sequence>(nodes[idx], idxMultiply);
+                        }
+                    }
+                }
             }
         }
 

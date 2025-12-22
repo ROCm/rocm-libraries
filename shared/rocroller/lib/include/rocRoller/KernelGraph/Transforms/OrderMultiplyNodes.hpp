@@ -34,6 +34,28 @@ namespace rocRoller
     {
         ConstraintStatus NoUnorderedMultiplyNodes(const KernelGraph& k);
 
+        class RemoveImplicitScheduling : public GraphTransform
+        {
+        public:
+            RemoveImplicitScheduling() = default;
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "RemoveImplicitScheduling";
+            }
+
+            inline std::vector<GraphConstraint> preConstraints() const override
+            {
+                return {};
+            }
+
+            inline std::vector<GraphConstraint> postConstraints() const override
+            {
+                return {};
+            }
+        };
+
         class OrderMultiplyNodes : public GraphTransform
         {
         public:
@@ -53,6 +75,29 @@ namespace rocRoller
             inline std::vector<GraphConstraint> postConstraints() const override
             {
                 return {&NoUnorderedMultiplyNodes};
+            }
+        };
+
+        class OrderExchangeNodes : public GraphTransform
+        {
+        public:
+            OrderExchangeNodes() = default;
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "OrderExchangeNodes";
+            }
+
+            inline std::vector<GraphConstraint> preConstraints() const override
+            {
+                return {};
+            }
+
+            inline std::vector<GraphConstraint> postConstraints() const override
+            {
+                return {};
+                // return {&NoUnorderedExchangeNodes};
             }
         };
     }
