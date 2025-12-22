@@ -54,7 +54,7 @@ namespace
         if(handle->is_device_memory_size_query())
         {
             //If rocblas_use_only_gemm is true then it is required to allocate extra workspace memory
-            static bool constexpr FORCEGEMM = true;
+            static bool constexpr FORCEGEMM = false;
             if(FORCEGEMM) //rocblas_use_only_gemm<T>(handle, n, k))
             {
                 if(!n)
