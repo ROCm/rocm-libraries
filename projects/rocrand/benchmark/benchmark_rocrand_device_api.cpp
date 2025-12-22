@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,11 +37,50 @@
 #include <string>
 #include <vector>
 
+#include "benchmark_occupancy_helper.hpp"
+
+// Dublicate from rocrand.h. Default maximum thread count for most generators.
+// Higher values (like 1024) typically cause register pressure and slowdowns
+// in state-heavy generators like Sobol.
+#ifndef ROCRAND_DEFAULT_MAX_BLOCK_SIZE
+    #define ROCRAND_DEFAULT_MAX_BLOCK_SIZE 256
+#endif
+
+// Specifically for Threefry.
+// Threefry has very low register usage, so 1024 threads
+// helps hide memory latency better.
+#ifndef ROCRAND_THREEFRY_MAX_BLOCK_SIZE
+    #define ROCRAND_THREEFRY_MAX_BLOCK_SIZE 1024
+#endif
+
 #ifndef DEFAULT_RAND_N
     #define DEFAULT_RAND_N (1024 * 1024 * 128)
 #endif
 
-template<typename EngineState>
+#define REGISTER_BENCHMARK(ENGINE_STATE, RNG_TYPE, KERNEL_NAME)                                 \
+    {                                                                                           \
+        auto k_ptr = generate_kernel<ENGINE_STATE, unsigned int, generator_uint<ENGINE_STATE>>; \
+                                                                                                \
+        launch_params p = get_benchmark_launch_parameters(k_ptr,                                \
+                                                          KERNEL_NAME,                          \
+                                                          input_threads,                        \
+                                                          input_blocks,                         \
+                                                          input_provision);                     \
+                                                                                                \
+        std::string context_key = "config/" + std::string(KERNEL_NAME);                         \
+        std::string launch_info = "Blocks: " + std::to_string(p.blocks)                         \
+                                  + ", Threads: " + std::to_string(p.threads)                   \
+                                  + ", Occupancy: " + std::to_string(p.occupancy);              \
+                                                                                                \
+        benchmark::AddCustomContext(context_key, launch_info);                                  \
+        ctx.blocks  = p.blocks;                                                                 \
+        ctx.threads = p.threads;                                                                \
+        add_benchmarks<ENGINE_STATE>(ctx, stream, benchmarks, RNG_TYPE);                        \
+    }
+
+template<typename EngineState,
+         typename std::enable_if<
+             !std::is_same<EngineState, rocrand_state_threefry2x32_20>::value>::type* = nullptr>
 __global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
 void init_kernel(EngineState*             states,
                  const unsigned long long seed,
@@ -53,9 +92,47 @@ void init_kernel(EngineState*             states,
     states[state_id] = state;
 }
 
-template<typename EngineState, typename T, typename Generator>
-__global__
-__launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+template<typename EngineState,
+         typename std::enable_if<
+             std::is_same<EngineState, rocrand_state_threefry2x32_20>::value>::type* = nullptr>
+__global__ __launch_bounds__(ROCRAND_THREEFRY_MAX_BLOCK_SIZE)
+void init_kernel(EngineState*             states,
+                 const unsigned long long seed,
+                 const unsigned long long offset)
+{
+    const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
+    EngineState        state;
+    rocrand_init(seed, state_id, offset, &state);
+    states[state_id] = state;
+}
+
+template<typename EngineState,
+         typename T,
+         typename Generator,
+         typename std::enable_if<
+             !std::is_same<EngineState, rocrand_state_threefry2x32_20>::value>::type* = nullptr>
+__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
+{
+    const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int stride   = gridDim.x * blockDim.x;
+
+    EngineState  state = states[state_id];
+    unsigned int index = state_id;
+    while(index < size)
+    {
+        data[index] = generator(&state);
+        index += stride;
+    }
+    states[state_id] = state;
+}
+
+template<typename EngineState,
+         typename T,
+         typename Generator,
+         typename std::enable_if<
+             std::is_same<EngineState, rocrand_state_threefry2x32_20>::value>::type* = nullptr>
+__global__ __launch_bounds__(ROCRAND_THREEFRY_MAX_BLOCK_SIZE)
 void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -299,32 +376,38 @@ struct runner<rocrand_state_sobol32>
 {
     rocrand_state_sobol32* states;
     size_t                 dimensions;
+    dim3                   grid_config;
+    dim3                   block_config;
 
-    runner(const size_t dimensions,
+    runner(const size_t dims,
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
     {
-        this->dimensions = dimensions;
+        dimensions   = dims;
+        block_config = dim3(static_cast<unsigned int>(threads));
+
+        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        grid_config
+            = dim3(static_cast<unsigned int>(blocks_x), static_cast<unsigned int>(dimensions));
+
+        const size_t states_size = grid_config.x * grid_config.y * block_config.x;
+
+        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_sobol32)));
 
         const unsigned int* h_directions;
         ROCRAND_CHECK(
             rocrand_get_direction_vectors32(&h_directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
-
-        const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_sobol32)));
 
         unsigned int* directions;
         const size_t  size = dimensions * 32 * sizeof(unsigned int);
         HIP_CHECK(hipMalloc(&directions, size));
         HIP_CHECK(hipMemcpy(directions, h_directions, size, hipMemcpyHostToDevice));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
-            states,
-            directions,
-            static_cast<unsigned int>(offset));
+        init_sobol_kernel<<<grid_config, block_config>>>(states,
+                                                         directions,
+                                                         static_cast<unsigned int>(offset));
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -337,20 +420,23 @@ struct runner<rocrand_state_sobol32>
         HIP_CHECK(hipFree(states));
     }
 
+    /**
+    * @note blocks and threads arguments are ignored. This runner uses the 
+    * grid_config and block_config determined during construction to ensure
+    * valid indexing into the dimension-arranged state array.
+    */
     template<typename T, typename Generator>
-    void generate(const size_t     blocks,
-                  const size_t     threads,
+    void generate(const size_t /*blocks*/,
+                  const size_t /*threads*/,
                   hipStream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
     {
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        generate_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads), 0, stream>>>(
-            states,
-            data,
-            size / dimensions,
-            generator);
+        generate_sobol_kernel<<<grid_config, block_config, 0, stream>>>(states,
+                                                                        data,
+                                                                        size / dimensions,
+                                                                        generator);
     }
 };
 
@@ -359,14 +445,25 @@ struct runner<rocrand_state_scrambled_sobol32>
 {
     rocrand_state_scrambled_sobol32* states;
     size_t                           dimensions;
+    dim3                             grid_config;
+    dim3                             block_config;
 
-    runner(const size_t dimensions,
+    runner(const size_t dims,
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
     {
-        this->dimensions = dimensions;
+        dimensions   = dims;
+        block_config = dim3(static_cast<unsigned int>(threads));
+
+        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        grid_config
+            = dim3(static_cast<unsigned int>(blocks_x), static_cast<unsigned int>(dimensions));
+
+        const size_t states_size
+            = static_cast<size_t>(grid_config.x) * grid_config.y * block_config.x;
+        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_scrambled_sobol32)));
 
         const unsigned int* h_directions;
         const unsigned int* h_constants;
@@ -375,9 +472,6 @@ struct runner<rocrand_state_scrambled_sobol32>
             rocrand_get_direction_vectors32(&h_directions,
                                             ROCRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6));
         ROCRAND_CHECK(rocrand_get_scramble_constants32(&h_constants));
-
-        const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_scrambled_sobol32)));
 
         unsigned int* directions;
         const size_t  directions_size = dimensions * 32 * sizeof(unsigned int);
@@ -390,8 +484,7 @@ struct runner<rocrand_state_scrambled_sobol32>
         HIP_CHECK(
             hipMemcpy(scramble_constants, h_constants, constants_size, hipMemcpyHostToDevice));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
+        init_scrambled_sobol_kernel<<<grid_config, block_config>>>(
             states,
             directions,
             scramble_constants,
@@ -409,20 +502,23 @@ struct runner<rocrand_state_scrambled_sobol32>
         HIP_CHECK(hipFree(states));
     }
 
+    /**
+    * @note blocks and threads arguments are ignored. This runner uses the 
+    * grid_config and block_config determined during construction to ensure
+    * valid indexing into the dimension-arranged state array.
+    */
     template<typename T, typename Generator>
-    void generate(const size_t     blocks,
-                  const size_t     threads,
+    void generate(const size_t /*blocks*/,
+                  const size_t /*threads*/,
                   hipStream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
     {
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        generate_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads), 0, stream>>>(
-            states,
-            data,
-            size / dimensions,
-            generator);
+        generate_sobol_kernel<<<grid_config, block_config, 0, stream>>>(states,
+                                                                        data,
+                                                                        size / dimensions,
+                                                                        generator);
     }
 };
 
@@ -431,31 +527,36 @@ struct runner<rocrand_state_sobol64>
 {
     rocrand_state_sobol64* states;
     size_t                 dimensions;
+    dim3                   grid_config;
+    dim3                   block_config;
 
-    runner(const size_t dimensions,
+    runner(const size_t dims,
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
     {
-        this->dimensions = dimensions;
+        dimensions   = dims;
+        block_config = dim3(static_cast<unsigned int>(threads));
+
+        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        grid_config
+            = dim3(static_cast<unsigned int>(blocks_x), static_cast<unsigned int>(dimensions));
+
+        const size_t states_size
+            = static_cast<size_t>(grid_config.x) * grid_config.y * block_config.x;
+        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_sobol64)));
 
         const unsigned long long* h_directions;
         ROCRAND_CHECK(
             rocrand_get_direction_vectors64(&h_directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
-
-        const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_sobol64)));
 
         unsigned long long int* directions;
         const size_t            size = dimensions * 64 * sizeof(unsigned long long int);
         HIP_CHECK(hipMalloc(&directions, size));
         HIP_CHECK(hipMemcpy(directions, h_directions, size, hipMemcpyHostToDevice));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(states,
-                                                                         directions,
-                                                                         offset);
+        init_sobol_kernel<<<grid_config, block_config>>>(states, directions, offset);
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -468,20 +569,23 @@ struct runner<rocrand_state_sobol64>
         HIP_CHECK(hipFree(states));
     }
 
+    /**
+    * @note blocks and threads arguments are ignored. This runner uses the 
+    * grid_config and block_config determined during construction to ensure
+    * valid indexing into the dimension-arranged state array.
+    */
     template<typename T, typename Generator>
-    void generate(const size_t     blocks,
-                  const size_t     threads,
+    void generate(const size_t /*blocks*/,
+                  const size_t /*threads*/,
                   hipStream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
     {
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        generate_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads), 0, stream>>>(
-            states,
-            data,
-            size / dimensions,
-            generator);
+        generate_sobol_kernel<<<grid_config, block_config, 0, stream>>>(states,
+                                                                        data,
+                                                                        size / dimensions,
+                                                                        generator);
     }
 };
 
@@ -490,14 +594,25 @@ struct runner<rocrand_state_scrambled_sobol64>
 {
     rocrand_state_scrambled_sobol64* states;
     size_t                           dimensions;
+    dim3                             grid_config;
+    dim3                             block_config;
 
-    runner(const size_t dimensions,
+    runner(const size_t dims,
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
     {
-        this->dimensions = dimensions;
+        dimensions   = dims;
+        block_config = dim3(static_cast<unsigned int>(threads));
+
+        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        grid_config
+            = dim3(static_cast<unsigned int>(blocks_x), static_cast<unsigned int>(dimensions));
+
+        const size_t states_size
+            = static_cast<size_t>(grid_config.x) * grid_config.y * block_config.x;
+        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_scrambled_sobol64)));
 
         const unsigned long long* h_directions;
         const unsigned long long* h_constants;
@@ -506,9 +621,6 @@ struct runner<rocrand_state_scrambled_sobol64>
             rocrand_get_direction_vectors64(&h_directions,
                                             ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6));
         ROCRAND_CHECK(rocrand_get_scramble_constants64(&h_constants));
-
-        const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_scrambled_sobol64)));
 
         unsigned long long int* directions;
         const size_t            directions_size = dimensions * 64 * sizeof(unsigned long long int);
@@ -521,12 +633,10 @@ struct runner<rocrand_state_scrambled_sobol64>
         HIP_CHECK(
             hipMemcpy(scramble_constants, h_constants, constants_size, hipMemcpyHostToDevice));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
-            states,
-            directions,
-            scramble_constants,
-            offset);
+        init_scrambled_sobol_kernel<<<grid_config, block_config>>>(states,
+                                                                   directions,
+                                                                   scramble_constants,
+                                                                   offset);
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -540,20 +650,23 @@ struct runner<rocrand_state_scrambled_sobol64>
         HIP_CHECK(hipFree(states));
     }
 
+    /**
+     * @note blocks and threads arguments are ignored. This runner uses the 
+     * grid_config and block_config determined during construction to ensure
+     * valid indexing into the dimension-arranged state array.
+     */
     template<typename T, typename Generator>
-    void generate(const size_t     blocks,
-                  const size_t     threads,
+    void generate(const size_t /*blocks*/,
+                  const size_t /*threads*/,
                   hipStream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
     {
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
-        generate_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads), 0, stream>>>(
-            states,
-            data,
-            size / dimensions,
-            generator);
+        generate_sobol_kernel<<<grid_config, block_config, 0, stream>>>(states,
+                                                                        data,
+                                                                        size / dimensions,
+                                                                        generator);
     }
 };
 
@@ -961,8 +1074,21 @@ int main(int argc, char* argv[])
                                 1,
                                 "number of dimensions of quasi-random values");
     parser.set_optional<size_t>("trials", "trials", 20, "number of trials");
-    parser.set_optional<size_t>("blocks", "blocks", 256, "number of blocks");
-    parser.set_optional<size_t>("threads", "threads", 256, "number of threads in each block");
+    parser.set_optional<size_t>(
+        "blocks",
+        "blocks",
+        0,
+        "number of blocks. If 0, computed automatically based on occupancy and provision");
+    parser.set_optional<size_t>(
+        "threads",
+        "threads",
+        0,
+        "number of threads in each block. If 0, computed automatically to maximize occupancy");
+    parser.set_optional<size_t>(
+        "provision",
+        "provision",
+        1,
+        "number of waves per Compute Unit (multiplier for automatic block computation).");
     parser.set_optional<std::vector<double>>(
         "lambda",
         "lambda",
@@ -980,54 +1106,57 @@ int main(int argc, char* argv[])
     ctx.size       = parser.get<size_t>("size");
     ctx.dimensions = parser.get<size_t>("dimensions");
     ctx.trials     = parser.get<size_t>("trials");
-    ctx.blocks     = parser.get<size_t>("blocks");
-    ctx.threads    = parser.get<size_t>("threads");
     ctx.lambdas    = parser.get<std::vector<double>>("lambda");
+
+    int input_threads   = parser.get<size_t>("threads");
+    int input_blocks    = parser.get<size_t>("blocks");
+    int input_provision = parser.get<size_t>("provision");
+
+    //Sanity input check for a negative provision
+    if(input_provision <= 0)
+    {
+        fprintf(stderr, "[Error] Input provision must be greater than 0.\n");
+        exit(EXIT_FAILURE);
+    }
 
     benchmark::AddCustomContext("size", std::to_string(ctx.size));
     benchmark::AddCustomContext("dimensions", std::to_string(ctx.dimensions));
     benchmark::AddCustomContext("trials", std::to_string(ctx.trials));
-    benchmark::AddCustomContext("blocks", std::to_string(ctx.blocks));
-    benchmark::AddCustomContext("threads", std::to_string(ctx.threads));
+    benchmark::AddCustomContext("threads", std::to_string(input_threads));
+    benchmark::AddCustomContext("blocks", std::to_string(input_blocks));
+    benchmark::AddCustomContext("provision", std::to_string(input_provision));
 
     std::vector<benchmark::internal::Benchmark*> benchmarks = {};
 
     // MT19937 has no kernel implementation
-    add_benchmarks<rocrand_state_lfsr113>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_LFSR113);
-    add_benchmarks<rocrand_state_mrg31k3p>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_MRG31K3P);
-    add_benchmarks<rocrand_state_mrg32k3a>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_MRG32K3A);
-    add_benchmarks<rocrand_state_mtgp32>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_MTGP32);
-    add_benchmarks<rocrand_state_philox4x32_10>(ctx,
-                                                stream,
-                                                benchmarks,
-                                                ROCRAND_RNG_PSEUDO_PHILOX4_32_10);
-    add_benchmarks<rocrand_state_scrambled_sobol32>(ctx,
-                                                    stream,
-                                                    benchmarks,
-                                                    ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32);
-    add_benchmarks<rocrand_state_scrambled_sobol64>(ctx,
-                                                    stream,
-                                                    benchmarks,
-                                                    ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64);
-    add_benchmarks<rocrand_state_sobol32>(ctx, stream, benchmarks, ROCRAND_RNG_QUASI_SOBOL32);
-    add_benchmarks<rocrand_state_sobol64>(ctx, stream, benchmarks, ROCRAND_RNG_QUASI_SOBOL64);
-    add_benchmarks<rocrand_state_threefry2x32_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY2_32_20);
-    add_benchmarks<rocrand_state_threefry4x32_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY4_32_20);
-    add_benchmarks<rocrand_state_threefry2x64_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY2_64_20);
-    add_benchmarks<rocrand_state_threefry4x64_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY4_64_20);
-    add_benchmarks<rocrand_state_xorwow>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_XORWOW);
+    REGISTER_BENCHMARK(rocrand_state_lfsr113, ROCRAND_RNG_PSEUDO_LFSR113, "lfsr113");
+    REGISTER_BENCHMARK(rocrand_state_mrg31k3p, ROCRAND_RNG_PSEUDO_MRG31K3P, "mrg31k3p");
+    REGISTER_BENCHMARK(rocrand_state_mrg32k3a, ROCRAND_RNG_PSEUDO_MRG32K3A, "mrg32k3a");
+    REGISTER_BENCHMARK(rocrand_state_mtgp32, ROCRAND_RNG_PSEUDO_MTGP32, "mtgp32");
+    REGISTER_BENCHMARK(rocrand_state_philox4x32_10,
+                       ROCRAND_RNG_PSEUDO_PHILOX4_32_10,
+                       "philox4x32_10")
+    REGISTER_BENCHMARK(rocrand_state_scrambled_sobol32,
+                       ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32,
+                       "scrambled_sobol32")
+    REGISTER_BENCHMARK(rocrand_state_scrambled_sobol64,
+                       ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64,
+                       "scrambled_sobol64")
+    REGISTER_BENCHMARK(rocrand_state_sobol32, ROCRAND_RNG_QUASI_SOBOL32, "sobol32")
+    REGISTER_BENCHMARK(rocrand_state_sobol64, ROCRAND_RNG_QUASI_SOBOL64, "sobol64")
+    REGISTER_BENCHMARK(rocrand_state_threefry2x32_20,
+                       ROCRAND_RNG_PSEUDO_THREEFRY2_32_20,
+                       "threefry2x32_20")
+    REGISTER_BENCHMARK(rocrand_state_threefry4x32_20,
+                       ROCRAND_RNG_PSEUDO_THREEFRY4_32_20,
+                       "threefry4x32_20")
+    REGISTER_BENCHMARK(rocrand_state_threefry2x64_20,
+                       ROCRAND_RNG_PSEUDO_THREEFRY2_64_20,
+                       "threefry2x64_20")
+    REGISTER_BENCHMARK(rocrand_state_threefry4x64_20,
+                       ROCRAND_RNG_PSEUDO_THREEFRY4_64_20,
+                       "threefry4x64_20")
+    REGISTER_BENCHMARK(rocrand_state_xorwow, ROCRAND_RNG_PSEUDO_XORWOW, "xorwow");
 
     // Use manual timing
     for(auto& b : benchmarks)

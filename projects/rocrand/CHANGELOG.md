@@ -3,6 +3,18 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND x.y.z for ROCm x.y.z
+
+### Added
+
+* Occupancy-based tooling for benchmark workload increase.
+* New `provision` command-line parameter for `benchmark_rocrand_device_api` - a multiplier for automatic block computation.
+
+### Changed
+
+* Updated `benchmark_rocrand_device_api` to use occupancy-based tooling to increase benchmark workloads.
+
+
 ## rocRAND 4.2.0 for ROCm 7.2
 
 ### Removed
