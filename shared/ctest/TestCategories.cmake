@@ -32,5 +32,3 @@ function(apply_test_category_labels target_name yaml_file working_dir)
     # Include and execute the generated CMake code
     include("${CATEGORY_CMAKE}")
 endfunction()
-
-
