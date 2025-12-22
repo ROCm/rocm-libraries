@@ -95,7 +95,8 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     std::vector<std::vector<int>> dataset1_lens         = {{2, 2}, {1, 2}, {2, 1}};
     std::vector<std::vector<int>> dataset1_strides      = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
     std::vector<std::vector<int>> dataset1_pads         = {{0, 0}}; // WORKAROUND_ISSUE_1670
-    std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint8, miopenIndexUint32};
+    std::vector<miopenIndexType_t> dataset1_index_types = {
+        miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
 
     // Generate cartesian product for dataset 1
     for(const auto& input_dims : dataset1_inputs)
