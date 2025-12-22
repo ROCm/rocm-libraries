@@ -75,7 +75,7 @@ LockFile::LockFile(const fs::path& path_, PassKey) : path(path_)
             fs::permissions(path, FS_ENUM_PERMS_ALL);
         }
 
-        flock   = decltype(flock)(path.string());
+        flock = decltype(flock)(path.string());
     }
     catch(const fs::filesystem_error& ex)
     {

@@ -94,11 +94,14 @@ public:
     file_lock(const file_lock&) = delete;
     file_lock& operator=(const file_lock&) = delete;
 
-    file_lock(file_lock&& rhs) noexcept { std::swap(*this, rhs); }
+    file_lock(file_lock&& rhs) noexcept { this->swap(rhs); }
 
     file_lock& operator=(file_lock&& rhs) noexcept
     {
-        std::swap(*this, rhs);
+        if(this != &rhs)
+        {
+            this->swap(rhs);
+        }
         return *this;
     }
 
@@ -171,6 +174,8 @@ private:
         BOOL ok       = LockFileEx(handle, flags, 0, MAXDWORD, MAXDWORD, &ov);
         return ok != 0;
     }
+
+    void swap(file_lock& rhs) noexcept { std::swap(handle, rhs.handle); }
 #else
     int fd{-1};
 
@@ -193,6 +198,8 @@ private:
 
         return true;
     }
+
+    void swap(file_lock& rhs) noexcept { std::swap(fd, rhs.fd); }
 #endif
 };
 } // namespace miopen
