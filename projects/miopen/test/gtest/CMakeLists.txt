@@ -268,3 +268,13 @@ endif()
 
 message(STATUS "gtest env: MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR}")
 message(STATUS "gtest env: MIOPEN_TEST_COMPOSABLEKERNEL=${MIOPEN_TEST_COMPOSABLEKERNEL}")
+
+#Enable the test categories in test_categories.yaml
+include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+        message(STATUS "YAML-based test categorization")
+        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}")
+else()
+        message(STATUS "No test categorization (YAML missing)")
+endif()
+
