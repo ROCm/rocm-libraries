@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -29,10 +30,10 @@ namespace {
 
 struct Pooling2dTestCase
 {
-    std::vector<int> input_dims; // [N, C, H, W]
-    std::vector<int> lens;       // [H, W]
-    std::vector<int> pads;       // [H, W]
-    std::vector<int> strides;    // [H, W]
+    std::array<int, 4> input_dims; // [N, C, H, W]
+    std::array<int, 2> lens;       // [H, W]
+    std::array<int, 2> pads;       // [H, W]
+    std::array<int, 2> strides;     // [H, W]
     miopenIndexType_t index_type;
     miopenPoolingMode_t mode;
     int wsidx;
@@ -53,20 +54,22 @@ struct Pooling2dTestCase
 };
 
 // Helper function to calculate output spatial dimensions for 2D pooling
-std::vector<int> CalculateOutputDims(const std::vector<int>& input_dims,
-                                     const std::vector<int>& lens,
-                                     const std::vector<int>& strides,
-                                     const std::vector<int>& pads)
+std::array<int, 4> CalculateOutputDims(const std::array<int, 4>& input_dims,
+                                        const std::array<int, 2>& lens,
+                                        const std::array<int, 2>& strides,
+                                        const std::array<int, 2>& pads)
 {
     // input_dims is [N, C, H, W]
     // Returns [N, C, H_out, W_out]
-    std::vector<int> output_dims = {input_dims[0], input_dims[1]};
+    std::array<int, 4> output_dims;
+    output_dims[0] = input_dims[0];
+    output_dims[1] = input_dims[1];
     for(int i = 0; i < 2; i++)
     {
         int input_size = input_dims[i + 2];
         int output_size =
             (input_size + 2 * pads[i] - lens[i]) / strides[i] + 1;
-        output_dims.push_back(output_size);
+        output_dims[i + 2] = output_size;
     }
     return output_dims;
 }
@@ -149,11 +152,8 @@ bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
             // Check if index_max is sufficient for output spatial dimensions
             auto output_dims = CalculateOutputDims(
                 test_case.input_dims, test_case.lens, test_case.strides, test_case.pads);
-            size_t output_spatial_product = 1;
-            for(size_t i = 2; i < output_dims.size(); i++)
-            {
-                output_spatial_product *= static_cast<size_t>(output_dims[i]);
-            }
+            size_t output_spatial_product =
+                static_cast<size_t>(output_dims[2]) * static_cast<size_t>(output_dims[3]);
             if(index_max <= output_spatial_product)
             {
                 return false;
@@ -216,7 +216,13 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
                             for(int wsidx : wsidx_values)
                             {
                                 Pooling2dTestCase test_case = {
-                                    input_dims, lens, pads, strides, index_type, mode, wsidx};
+                                    {input_dims[0], input_dims[1], input_dims[2], input_dims[3]},
+                                    {lens[0], lens[1]},
+                                    {pads[0], pads[1]},
+                                    {strides[0], strides[1]},
+                                    index_type,
+                                    mode,
+                                    wsidx};
                                 if(ShouldIncludeTestCase(test_case))
                                 {
                                     test_cases.push_back(test_case);
@@ -335,22 +341,69 @@ void RunPooling2dTest(const Pooling2dTestCase& test_case)
     }
 }
 
+std::string GetPooling2dTestCaseName(const testing::TestParamInfo<Pooling2dTestCase>& info)
+{
+    const auto& tc = info.param;
+    std::ostringstream os;
+    os << tc; // Use operator<< to format
+    std::string result = os.str();
+    // Convert to valid test name format: remove spaces, brackets, colons, commas
+    // Replace with underscores and remove separators
+    std::string name;
+    name.reserve(result.size());
+    for(char c : result)
+    {
+        if(c == '[' || c == ']' || c == ':' || c == ',' || c == ' ')
+        {
+            if(!name.empty() && name.back() != '_')
+                name += '_';
+        }
+        else
+        {
+            name += c;
+        }
+    }
+    // Remove trailing underscores and clean up multiple consecutive underscores
+    std::string cleaned;
+    cleaned.reserve(name.size());
+    bool last_was_underscore = false;
+    for(char c : name)
+    {
+        if(c == '_')
+        {
+            if(!last_was_underscore)
+            {
+                cleaned += c;
+                last_was_underscore = true;
+            }
+        }
+        else
+        {
+            cleaned += c;
+            last_was_underscore = false;
+        }
+    }
+    // Remove trailing underscore if present
+    if(!cleaned.empty() && cleaned.back() == '_')
+        cleaned.pop_back();
+    return cleaned;
+}
+
 } // namespace
 
-class GPU_Pooling2d_FP32 : public testing::TestWithParam<Pooling2dTestCase>
+template <typename T>
+struct Pooling2dCommon : public testing::TestWithParam<Pooling2dTestCase>
 {
     void SetUp() override { prng::reset_seed(); }
 };
 
-class GPU_Pooling2d_FP16 : public testing::TestWithParam<Pooling2dTestCase>
-{
-    void SetUp() override { prng::reset_seed(); }
-};
+using GPU_Pooling2d_FP32 = Pooling2dCommon<float>;
+using GPU_Pooling2d_FP16 = Pooling2dCommon<half_float::half>;
 
 TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { RunPooling2dTest<float>(GetParam()); }
 
 TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { RunPooling2dTest<half_float::half>(GetParam()); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP32, testing::ValuesIn(GetPooling2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP32, testing::ValuesIn(GetPooling2dTestCases()), GetPooling2dTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP16, testing::ValuesIn(GetPooling2dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP16, testing::ValuesIn(GetPooling2dTestCases()), GetPooling2dTestCaseName);
