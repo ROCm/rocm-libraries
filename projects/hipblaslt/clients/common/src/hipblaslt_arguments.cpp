@@ -141,9 +141,9 @@ void Arguments::init()
         wgm_vector[i] = -1;
     }
 
-    print_solution_found = false;
-    flush                = false;
-    tensile_solution_selection_method   = -1;
+    print_solution_found              = false;
+    flush                             = false;
+    tensile_solution_selection_method = -1;
 }
 
 // Function to print Arguments out to stream in YAML format

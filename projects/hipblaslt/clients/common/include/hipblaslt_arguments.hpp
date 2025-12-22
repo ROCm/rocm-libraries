@@ -52,10 +52,10 @@ struct Arguments
 {
     enum ScalingFormat
     {
-        None   = 0,
-        Scalar = 1,
-        Vector = 2,
-        Block_32_UE8M0  = 3,
+        None                = 0,
+        Scalar              = 1,
+        Vector              = 2,
+        Block_32_UE8M0      = 3,
         Block_32_UE8M0_32_8 = 1001,
     };
 
@@ -860,7 +860,7 @@ namespace ArgumentsHelper
             func("beta", arg.get_beta<decltype(T)>());
         };
 };
-    // clang-format on
+// clang-format on
 
 #else
 #error "Unsupported C++ version"

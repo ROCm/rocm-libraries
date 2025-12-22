@@ -26,7 +26,7 @@
 
 #include "parameter_selection.hpp"
 
-const int SWIZZLE_BLOCK_SIZE           = 64;
+const int SWIZZLE_BLOCK_SIZE = 64;
 
 std::string SolutionParameters::toString() const
 {
@@ -42,7 +42,8 @@ std::string SolutionParameters::toString() const
     result << "LoadB: " << loadPathB << std::endl;
     result << "LDS Usage";
     result << " D:" << (storeLDSD ? "On" : "Off") << std::endl;
-    result << "Workgroup Mapping: Dim:" << workgroupMappingDim << " RemapXCC:" << workgroupRemapXCC << std::endl;
+    result << "Workgroup Mapping: Dim:" << workgroupMappingDim << " RemapXCC:" << workgroupRemapXCC
+           << std::endl;
     result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
            << " LDSFactor:" << prefetchLDSFactor << " MixMemOps:" << prefetchMixMemOps << std::endl;
     result << "Block Scale Options:" << " Swizzle Scale:" << swizzleScale
@@ -76,16 +77,16 @@ std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
     if(requiredX != -1 && requiredY == -1)
     {
         x = requiredX;
-        if (gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+        if(gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % 4 == 0)
             y = 4;
     }
-    else if (requiredX == -1 && requiredY != -1)
+    else if(requiredX == -1 && requiredY != -1)
     {
         y = requiredY;
-        if (gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+        if(gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % 4 == 0)
             x = 4;
     }
-    else if (requiredX != -1 && requiredY != -1)
+    else if(requiredX != -1 && requiredY != -1)
     {
         x = requiredX;
         y = requiredY;
@@ -99,46 +100,48 @@ std::shared_ptr<SolutionParameters>
                           const SolutionIndexParameters& solutionIndexParameters)
 {
     namespace SolutionParams = rocRoller::Parameters::Solution;
-    auto gemm = std::make_shared<SolutionParameters>();
+    auto gemm                = std::make_shared<SolutionParameters>();
 
-    gemm->kernelType = kernelType;
+    gemm->kernelType    = kernelType;
     gemm->workgroupTile = solutionIndexParameters.workgroupTile;
 
     // Check if pre-swizzled scale data is requested
     // preSwizzleTile format: {tileMN, tileK, subTileK} e.g., {32, 8, 4}
     bool hasPreSwizzleA = kernelType.scaleTypeA.preSwizzleTile.size() == 3;
     bool hasPreSwizzleB = kernelType.scaleTypeB.preSwizzleTile.size() == 3;
-    bool hasPreSwizzle = hasPreSwizzleA && hasPreSwizzleB;
+    bool hasPreSwizzle  = hasPreSwizzleA && hasPreSwizzleB;
 
     // Get preSwizzleTileMN for MI selection (0 if no pre-swizzle)
     size_t preSwizzleTileMN = 0;
-    if (hasPreSwizzleA)
+    if(hasPreSwizzleA)
     {
         // AssertFatal(kernelType.scaleTypeA.preSwizzleTile[0] == kernelType.scaleTypeB.preSwizzleTile[0],
         //            "preSwizzleTileMN must be the same for both scale types");
         preSwizzleTileMN = kernelType.scaleTypeA.preSwizzleTile[0];
     }
 
-    gemm->machineInstruction = pickMI(gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile, preSwizzleTileMN);
+    gemm->machineInstruction = pickMI(
+        gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile, preSwizzleTileMN);
 
-    gemm->prefetchInFlight = preferredUnrolling(kernelType.typeA, kernelType.typeB, gemm->workgroupTile);
+    gemm->prefetchInFlight
+        = preferredUnrolling(kernelType.typeA, kernelType.typeB, gemm->workgroupTile);
     if(gemm->prefetchInFlight <= 1)
         gemm->prefetch = false;
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if (kernelType.scaleTypeA.mode != rocRoller::Operations::ScaleMode::Separate ||
-        kernelType.scaleTypeB.mode != rocRoller::Operations::ScaleMode::Separate)
+    if(kernelType.scaleTypeA.mode != rocRoller::Operations::ScaleMode::Separate
+       || kernelType.scaleTypeB.mode != rocRoller::Operations::ScaleMode::Separate)
     {
-        gemm->swizzleScale = false;
-        gemm->prefetchScale = false;
+        gemm->swizzleScale   = false;
+        gemm->prefetchScale  = false;
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
     else if(solutionIndexParameters.workgroupTile.m >= 128
-        && solutionIndexParameters.workgroupTile.n >= 128)
+            && solutionIndexParameters.workgroupTile.n >= 128)
     {
-        gemm->swizzleScale  = true;
+        gemm->swizzleScale = true;
         // Use BufferToVGPR for swizzle scale (matches rocRoller client --loadScale_A BufferToVGPR)
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
@@ -152,7 +155,7 @@ std::shared_ptr<SolutionParameters>
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDSViaVGPR;
     }
 
-    auto workgroupSize = pickWorkgroupSize(gemm);
+    auto workgroupSize   = pickWorkgroupSize(gemm);
     gemm->workgroupSizeX = workgroupSize.first;
     gemm->workgroupSizeY = workgroupSize.second;
 
@@ -178,19 +181,21 @@ std::shared_ptr<SolutionParameters>
 
     // LDS can only be used for scaling data with certain workgroup tile sizes
     auto workgroupSizeTotal = gemm->workgroupSizeX * gemm->workgroupSizeY;
-    auto numScaleElementsA = 0;
+    auto numScaleElementsA  = 0;
     if(gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize != 0)
     {
         numScaleElementsA = gemm->workgroupTile.m
-          * (gemm->workgroupTile.k
-             / (gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize));
+                            * (gemm->workgroupTile.k
+                               / (gemm->kernelType.scaleTypeA.blockRowSize
+                                  * gemm->kernelType.scaleTypeA.blockColSize));
     }
     auto numScaleElementsB = 0;
     if(gemm->kernelType.scaleTypeB.blockRowSize * gemm->kernelType.scaleTypeB.blockColSize != 0)
     {
         numScaleElementsB = gemm->workgroupTile.n
-          * (gemm->workgroupTile.k
-             / (gemm->kernelType.scaleTypeB.blockRowSize * gemm->kernelType.scaleTypeB.blockColSize));
+                            * (gemm->workgroupTile.k
+                               / (gemm->kernelType.scaleTypeB.blockRowSize
+                                  * gemm->kernelType.scaleTypeB.blockColSize));
     }
     if(numScaleElementsA % workgroupSizeTotal != 0)
     {
@@ -206,12 +211,12 @@ std::shared_ptr<SolutionParameters>
     if(!solutionIndexParameters.workgroupMapping)
     {
         gemm->workgroupMappingDim = -1;
-        gemm->workgroupRemapXCC = false;
+        gemm->workgroupRemapXCC   = false;
     }
     else
     {
         gemm->workgroupMappingDim = 0;
-        gemm->workgroupRemapXCC = true;
+        gemm->workgroupRemapXCC   = true;
     }
 
     // Pass StreamK flag from solution index parameters
@@ -221,11 +226,11 @@ std::shared_ptr<SolutionParameters>
     if(gemm->streamK)
     {
         gemm->workgroupMappingDim = -1;
-        gemm->workgroupRemapXCC = false;
+        gemm->workgroupRemapXCC   = false;
     }
 
     // Select swizzle tile size
-    if (gemm->swizzleScale)
+    if(gemm->swizzleScale)
     {
         gemm->swizzleTileSize = selectSwizzleTileSize(
             gemm->workgroupTile,
@@ -236,7 +241,6 @@ std::shared_ptr<SolutionParameters>
             gemm->kernelType.scaleTypeA.blockRowSize * gemm->kernelType.scaleTypeA.blockColSize,
             gemm->kernelType.scaleTypeA.preSwizzleTile);
     }
-
 
     return gemm;
 }

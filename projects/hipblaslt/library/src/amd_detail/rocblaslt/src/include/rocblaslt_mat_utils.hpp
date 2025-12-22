@@ -223,14 +223,14 @@ inline rocblaslt_status
                                   const void*               alpha,
                                   const RocblasltContractionProblem::ScalingFormat scaleAType,
                                   const RocblasltContractionProblem::ScalingFormat scaleBType,
-                                  void*&         E,
-                                  hipDataType&   aux_type,
-                                  int64_t&       lde,
-                                  int64_t&       batch_stride_e,
-                                  void*&         bias,
-                                  hipDataType&   bias_type,
-                                  void*&         scaleAlphaVec,
-                                  bool&          gradient)
+                                  void*&                                           E,
+                                  hipDataType&                                     aux_type,
+                                  int64_t&                                         lde,
+                                  int64_t&                                         batch_stride_e,
+                                  void*&                                           bias,
+                                  hipDataType&                                     bias_type,
+                                  void*&                                           scaleAlphaVec,
+                                  bool&                                            gradient)
 {
     // Set status
     rocblaslt_status status = rocblaslt_status_continue;

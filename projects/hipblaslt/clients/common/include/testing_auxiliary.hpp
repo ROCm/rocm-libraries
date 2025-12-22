@@ -1791,7 +1791,8 @@ void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_GELU_AUX);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX_BIAS")
                 == HIPBLASLT_EPILOGUE_GELU_AUX_BIAS);
-    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID") == HIPBLASLT_EPILOGUE_SIGMOID);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID")
+                == HIPBLASLT_EPILOGUE_SIGMOID);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU") == HIPBLASLT_EPILOGUE_DGELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU_BGRAD")
                 == HIPBLASLT_EPILOGUE_DGELU_BGRAD);

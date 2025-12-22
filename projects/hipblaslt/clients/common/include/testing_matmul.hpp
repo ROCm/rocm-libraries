@@ -756,7 +756,8 @@ auto _clamp = [](auto in, auto alpha, auto beta) -> decltype(in) {
 };
 
 auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    return static_cast<decltype(in)>(static_cast<decltype(in)>(1)/(static_cast<decltype(in)>(1) + std::exp(-in)));
+    return static_cast<decltype(in)>(static_cast<decltype(in)>(1)
+                                     / (static_cast<decltype(in)>(1) + std::exp(-in)));
 };
 
 void testing_matmul_bad_arg(const Arguments& arg)
@@ -1395,9 +1396,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         stride_d[i] = do_batched[i] ? arg.stride_c[i] : ldd[i] * N[i];
         stride_e[i] = do_batched[i] ? arg.stride_e[i] : lde[i] * N[i];
 
-        size_A[i]
-            = stride_a[i] == 0 ? lda[i] * A_col[i] * num_batches[i]
-                               : lda[i] <= stride_a[i] ? stride_a[i] * num_batches[i] : lda[i] * A_col[i];
+        size_A[i] = stride_a[i] == 0        ? lda[i] * A_col[i] * num_batches[i]
+                    : lda[i] <= stride_a[i] ? stride_a[i] * num_batches[i]
+                                            : lda[i] * A_col[i];
         // for (!do_swizzle_a) case, we can use size_dA and stride_da instead of size_A and stride_a
         size_dA[i]   = size_A[i];
         stride_da[i] = stride_a[i];
@@ -1420,9 +1421,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_dA[i] = num_batches[i] * stride_swizzle;
         }
 
-        size_B[i]
-            = stride_b[i] == 0 ? ldb[i] * B_col[i] * num_batches[i]
-                               : ldb[i] <= stride_b[i] ? stride_b[i] * num_batches[i] : ldb[i] * B_col[i];
+        size_B[i] = stride_b[i] == 0        ? ldb[i] * B_col[i] * num_batches[i]
+                    : ldb[i] <= stride_b[i] ? stride_b[i] * num_batches[i]
+                                            : ldb[i] * B_col[i];
         // for (!do_swizzle_b) case, we can use size_dB and stride_db instead of size_B and stride_b
         size_dB[i]   = size_B[i];
         stride_db[i] = stride_b[i];
@@ -1444,14 +1445,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             size_dB[i] = num_batches[i] * stride_swizzle;
         }
-        size_C[i]
-            = stride_c[i] == 0 ? ldc[i] * N[i] * num_batches[i]
-                               : ldc[i] <= stride_c[i] ? stride_c[i] * num_batches[i] : ldc[i] * N[i];
-        size_D[i]
-            = stride_d[i] == 0 ? ldd[i] * N[i] * num_batches[i]
-                               : ldd[i] <= stride_d[i] ? stride_d[i] * num_batches[i] : ldd[i] * N[i];
-        size_E[i] = arg.use_e ? (stride_e[i] == 0 ? lde[i] * N[i] * num_batches[i]
-                                                  : lde[i] <= stride_e[i] ? stride_e[i] * num_batches[i] : lde[i] * N[i])
+        size_C[i] = stride_c[i] == 0        ? ldc[i] * N[i] * num_batches[i]
+                    : ldc[i] <= stride_c[i] ? stride_c[i] * num_batches[i]
+                                            : ldc[i] * N[i];
+        size_D[i] = stride_d[i] == 0        ? ldd[i] * N[i] * num_batches[i]
+                    : ldd[i] <= stride_d[i] ? stride_d[i] * num_batches[i]
+                                            : ldd[i] * N[i];
+        size_E[i] = arg.use_e ? (stride_e[i] == 0        ? lde[i] * N[i] * num_batches[i]
+                                 : lde[i] <= stride_e[i] ? stride_e[i] * num_batches[i]
+                                                         : lde[i] * N[i])
                               : 0;
         if(arg.c_equal_d)
         {
@@ -1874,9 +1876,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01)
             {
-                hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
-                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float "
+                                  "or uniform_01, not "
+                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
             if(arg.algo_method == 1)
@@ -1927,9 +1929,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01)
             {
-                hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
-                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float "
+                                  "or uniform_01, not "
+                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
             if(arg.algo_method == 1)
@@ -2013,9 +2015,27 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.dump_matrix)
             {
-                hipblasltDispatchValuesToFile(transA, TiA, M[i], K[i], lda[i], hA[i].buf(), "batch_"+ std::to_string(i)+"_A_input.txt");
-                hipblasltDispatchValuesToFile(transB, TiB, K[i], N[i], ldb[i], hB[i].buf(), "batch_"+ std::to_string(i)+"_B_input.txt");
-                hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[i], N[i], ldc[i], hC[i].buf(), "batch_"+ std::to_string(i)+"_C_input.txt");
+                hipblasltDispatchValuesToFile(transA,
+                                              TiA,
+                                              M[i],
+                                              K[i],
+                                              lda[i],
+                                              hA[i].buf(),
+                                              "batch_" + std::to_string(i) + "_A_input.txt");
+                hipblasltDispatchValuesToFile(transB,
+                                              TiB,
+                                              K[i],
+                                              N[i],
+                                              ldb[i],
+                                              hB[i].buf(),
+                                              "batch_" + std::to_string(i) + "_B_input.txt");
+                hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                              To,
+                                              M[i],
+                                              N[i],
+                                              ldc[i],
+                                              hC[i].buf(),
+                                              "batch_" + std::to_string(i) + "_C_input.txt");
             }
         }
 
@@ -2247,7 +2267,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
             }
-            else if (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8)
+            else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8)
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             }
@@ -3645,9 +3665,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.flush)
         {
             static std::unordered_map<std::string, double> flush_times_cache;
-            static std::mutex mtx;
-            std::lock_guard<std::mutex> lock(mtx);
-            std::string device_uuid(deviceProps.uuid.bytes);
+            static std::mutex                              mtx;
+            std::lock_guard<std::mutex>                    lock(mtx);
+            std::string                                    device_uuid(deviceProps.uuid.bytes);
             if(!flush_times_cache.count(device_uuid))
             {
                 for(int i = 0; i < flush_iter; i++)
@@ -3655,7 +3675,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, flush_time_used, stream);
                 for(int i = 0; i < flush_iter; i++)
                     hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                post_gpu_time(arg.use_gpu_timer, event_gpu_time_start, event_gpu_time_end, flush_time_used, stream);
+                post_gpu_time(arg.use_gpu_timer,
+                              event_gpu_time_start,
+                              event_gpu_time_end,
+                              flush_time_used,
+                              stream);
                 flush_time_used /= flush_iter;
                 flush_times_cache[device_uuid] = flush_time_used;
             }
@@ -3996,8 +4020,20 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 if(arg.dump_matrix)
                 {
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[0], N[0], ldd[0], hD_1[0].buf(), "batch_0_D_output.txt");
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[0], N[0], ldd[0], hD_gold[0].buf(), "batch_0_D_Gold_output.txt");
+                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                  To,
+                                                  M[0],
+                                                  N[0],
+                                                  ldd[0],
+                                                  hD_1[0].buf(),
+                                                  "batch_0_D_output.txt");
+                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                  To,
+                                                  M[0],
+                                                  N[0],
+                                                  ldd[0],
+                                                  hD_gold[0].buf(),
+                                                  "batch_0_D_Gold_output.txt");
                 }
                 check(stream,
                       arg,

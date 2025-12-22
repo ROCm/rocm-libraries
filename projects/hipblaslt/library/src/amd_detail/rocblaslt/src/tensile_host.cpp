@@ -311,8 +311,8 @@ namespace
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
             return TensileLite::ActivationType::Clamp;
-	    case ROCBLASLT_EPILOGUE_SIGMOID:
-	        return TensileLite::ActivationType::Sigmoid;
+        case ROCBLASLT_EPILOGUE_SIGMOID:
+            return TensileLite::ActivationType::Sigmoid;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
         case ROCBLASLT_EPILOGUE_BGRADA:
@@ -700,7 +700,7 @@ namespace
                 : "",
             problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides().size()
                 ? std::to_string(
-                    problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[1])
+                      problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[1])
                 : "",
             "--stride_a",
             problem.a().strides()[2],
@@ -715,7 +715,7 @@ namespace
                 : "",
             problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides().size()
                 ? std::to_string(
-                    problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[2])
+                      problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[2])
                 : "",
             "--alpha",
             ToString(inputs.alpha),
@@ -797,8 +797,8 @@ namespace
 
     inline void logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
                                               const TensileLite::ContractionInputs&      inputs,
-                                              const int&                                 solutionIndex,
-                                              bool                                       flush,
+                                              const int&     solutionIndex,
+                                              bool           flush,
                                               const int32_t& rotatingBufferSize,
                                               const int32_t& coldIterations,
                                               const int32_t& hotIterations,
@@ -882,7 +882,7 @@ namespace
                     "algo_method",
                     2,
                     "solution_index",
-                    solutionIndex,                                          
+                    solutionIndex,
                     "activation_type",
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
@@ -1145,8 +1145,8 @@ namespace
     inline void
         logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
                                       const TensileLite::ContractionGroupedInputs&      inputs,
-                                      const int&                                        solutionIndex,
-                                      bool                                              flush,
+                                      const int&     solutionIndex,
+                                      bool           flush,
                                       const int32_t& rotatingBufferSize,
                                       const int32_t& coldIterations,
                                       const int32_t& hotIterations,
@@ -1275,7 +1275,7 @@ namespace
             "algo_method",
             2,
             "solution_index",
-            solutionIndex,                                          
+            solutionIndex,
             "activation_type",
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
@@ -2089,7 +2089,7 @@ namespace
             return m_devicePropMap.at(deviceName);
         }
 #else
-        auto&                            get_device_property() const
+        auto& get_device_property() const
         {
             return m_deviceProp;
         }
@@ -2637,7 +2637,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
            || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
         {
-            auto autoGsuVal = solution->calculateAutoGSU(data->problem, &(*hardware));
+            auto autoGsuVal  = solution->calculateAutoGSU(data->problem, &(*hardware));
             auto Granularity = solution->computeGranularities(
                 *hardware,
                 data->problem.c().sizes()[0],
@@ -3996,8 +3996,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
                     std::ostringstream msg;
-                    msg << "Match "
-                        << "[" << i << "]: " << solution->description();
+                    msg << "Match " << "[" << i << "]: " << solution->description();
                     solution->problemPredicate->debugEval(tensile_prob.gemms[i], msg);
                     msg << std::endl;
                     log_info(__func__, msg.str());

@@ -71,10 +71,10 @@ struct MachineInstructionSize
  */
 struct SwizzleTileSize
 {
-    int m;  // For matrix A scale (M direction)
-    int k;   // For matrix A scale (K direction)
-    int n;  // For matrix B scale (N direction)
-    int l;   // For matrix B scale (L/K direction)
+    int m; // For matrix A scale (M direction)
+    int k; // For matrix A scale (K direction)
+    int n; // For matrix B scale (N direction)
+    int l; // For matrix B scale (L/K direction)
 };
 
 /**
@@ -94,7 +94,7 @@ struct SolutionIndexParameters
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };
 
-int parametersToIndex(const SolutionIndexParameters& params);
+int                     parametersToIndex(const SolutionIndexParameters& params);
 SolutionIndexParameters indexToParameters(int index);
 
 size_t maxNumberSolutions();
@@ -113,38 +113,53 @@ size_t maxNumberSolutions();
  */
 inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
                                      rocRoller::DataType typeB,
-                                     WorkGroupTileSize wgt,
-                                     size_t preSwizzleTileMN = 0) {
-    if (typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16) {
+                                     WorkGroupTileSize   wgt,
+                                     size_t              preSwizzleTileMN = 0)
+{
+    if(typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16)
+    {
         return {32, 32, 8, 1};
-    } else if (typeA == rocRoller::DataType::Float) {
+    }
+    else if(typeA == rocRoller::DataType::Float)
+    {
         return {32, 32, 2, 1};
-    } else {
+    }
+    else
+    {
         // For pre-swizzled scale data, MI instruction must be 16x16x128
         // This ensures subTileK = MI.k / scaleBlockSize = 128 / 32 = 4
-        if (preSwizzleTileMN != 0) {
+        if(preSwizzleTileMN != 0)
+        {
             assert(preSwizzleTileMN == 32 && "preSwizzleTileMN must be 32 for pre-swizzled data");
             return {16, 16, 128, 1};
         }
 
         // Default selection logic when no pre-swizzle constraint
-        if ((typeA == rocRoller::DataType::FP6 || typeA == rocRoller::DataType::BF6 ||
-             typeB == rocRoller::DataType::FP6 || typeB == rocRoller::DataType::BF6) &&
-            ((wgt.m == 256 && wgt.n == 64) || (wgt.m == 64 && wgt.n == 256))) {
+        if((typeA == rocRoller::DataType::FP6 || typeA == rocRoller::DataType::BF6
+            || typeB == rocRoller::DataType::FP6 || typeB == rocRoller::DataType::BF6)
+           && ((wgt.m == 256 && wgt.n == 64) || (wgt.m == 64 && wgt.n == 256)))
+        {
             return {32, 32, 64, 1};
-        } else if (wgt.k % 128 == 0) {
+        }
+        else if(wgt.k % 128 == 0)
+        {
             return {16, 16, 128, 1};
-        } else {
+        }
+        else
+        {
             return {32, 32, 64, 1};
         }
     }
 }
 
-constexpr int preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt) {
+constexpr int
+    preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt)
+{
     // Other datatypes run out of registers when prefetchInFlight is too
     // large.
     // There is an error with smaller tile sizes and larger prefetchInFlight.
-    if (typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32 && wgt.n > 32)
+    if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
+       && wgt.n > 32)
         return 4;
     else
         return 2;
