@@ -247,6 +247,7 @@ class GEMMSolution:
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
+    tailLoops: bool = True
 
     version: str = ""
 
