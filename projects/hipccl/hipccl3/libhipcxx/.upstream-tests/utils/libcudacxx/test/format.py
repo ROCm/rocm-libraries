@@ -221,6 +221,8 @@ class LibcxxTestFormat(object):
             # (https://github.com/ROCm/libhipcxx/issues/14)
             max_retry = 3 #if is_flaky else 1
             time_out_detected = False
+            compile_cmd = "None"
+            out = "None"
             for retry_count in range(max_retry):
                 try:
                     # Compile the test
@@ -315,12 +317,34 @@ class LibcxxTestFormat(object):
                              b'NODISCARD']
             if any(test_str in contents for test_str in test_str_list):
                 test_cxx.flags += ['-Werror=unused-result']
-        cmd, out, err, rc = test_cxx.compile(source_path, out=os.devnull)
-        check_rc = lambda rc: rc == 0 if use_verify else rc != 0
-        report = libcudacxx.util.makeReport(cmd, out, err, rc)
-        if check_rc(rc):
-            return lit.Test.Result(lit.Test.PASS, report)
-        else:
-            report += ('Expected compilation to fail!\n' if not use_verify else
-                       'Expected compilation using verify to pass!\n')
-            return lit.Test.Result(lit.Test.FAIL, report)
+        cmd = ""
+        out = "None"
+        report = ""
+        # TODO(AMD): set this to 1 again when tests have stabilized with TheRock
+        # (https://github.com/ROCm/libhipcxx/issues/14)
+        max_retry = 3 #if is_flaky else 1
+        time_out_detected = False
+        for retry_count in range(max_retry):
+            try:
+                cmd, out, err, rc = test_cxx.compile(source_path, out=os.devnull)
+            except (libcudacxx.util.ExecuteCommandTimeoutException, lit.util.ExecuteCommandTimeoutException) as e:
+                err = str(e)
+                rc = -42
+                out = "None"
+                result_expected = False
+                time_out_detected = True
+            check_rc = lambda rc: rc == 0 if use_verify else rc != 0
+            report = libcudacxx.util.makeReport(cmd, out, err, rc)
+            if time_out_detected:
+                if retry_count + 1 == max_retry:
+                    return lit.Test.Result(lit.Test.TIMEOUT, report)
+                else:
+                    continue
+            else:
+                if check_rc(rc):
+                    res = lit.Test.PASS if retry_count == 0 else lit.Test.FLAKYPASS
+                    return lit.Test.Result(res, report)
+                else:
+                    report += ('Expected compilation to fail!\n' if not use_verify else
+                            'Expected compilation using verify to pass!\n')
+                    return lit.Test.Result(lit.Test.FAIL, report)
