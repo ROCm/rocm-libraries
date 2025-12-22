@@ -43,6 +43,7 @@ private:
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineHeuristicDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _executionPlanDesc;
+
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
@@ -335,6 +336,31 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    std::pair<std::unordered_set<std::shared_ptr<TensorAttributes>>,
+              std::unordered_set<std::shared_ptr<TensorAttributes>>>
+        getGraphInputTensorAttributesAndRemainder() const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allNodeOutputs;
+        std::unordered_set<std::shared_ptr<TensorAttributes>> graphInputs;
+
+        auto collectNodeOutputs = [&](const INode& node) {
+            auto nodeOutputs = node.getNodeOutputTensorAttributes();
+            allNodeOutputs.insert(nodeOutputs.begin(), nodeOutputs.end());
+        };
+        auto collectGraphInputs = [&](const INode& node) {
+            auto nodeInputs = node.getNodeInputTensorAttributes();
+            std::copy_if(nodeInputs.begin(),
+                         nodeInputs.end(),
+                         std::inserter(graphInputs, graphInputs.end()),
+                         [&](const auto& nodePtr) { return allNodeOutputs.count(nodePtr) == 0; });
+        };
+
+        visit(collectNodeOutputs);
+        visit(collectGraphInputs);
+
+        return {graphInputs, allNodeOutputs};
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -346,35 +372,22 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
+        auto [inputTensors, remainingTensors] = getGraphInputTensorAttributesAndRemainder();
 
-        auto result = checkNoDuplicateTensorIdsImpl(allTensors);
-        if(result.code != ErrorCode::OK)
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors = inputTensors;
+        allTensors.insert(remainingTensors.begin(), remainingTensors.end());
+
+        HIPDNN_CHECK_ERROR(checkNoDuplicateTensorIdsImpl(allTensors));
+
+        HIPDNN_CHECK_ERROR(topologicallySortGraph());
+
+        for(const auto& tensor : inputTensors)
         {
-            return result;
+            tensor->fill_from_context(graph_attributes);
+            HIPDNN_CHECK_ERROR(tensor->validate());
         }
 
-        result = topologicallySortGraph();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        result = validateSubtree();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        for(const auto& tensor : allTensors)
-        {
-            result = tensor->validate();
-            if(result.code != ErrorCode::OK)
-            {
-                return result;
-            }
-        }
+        HIPDNN_CHECK_ERROR(validateSubtree());
 
         return {ErrorCode::OK, ""};
     }
