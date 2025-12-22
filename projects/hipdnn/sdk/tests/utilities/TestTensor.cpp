@@ -39,7 +39,7 @@ TEST(TestTensor, BasicRowMajorUsage)
     EXPECT_EQ(tensor.strides()[3], 1);
 }
 
-TEST(TestTensor, FillWithValues)
+TEST(TestTensor, FillWithValuesPacked)
 {
     Tensor<float> tensor({1, 2, 3, 4});
 
@@ -52,7 +52,19 @@ TEST(TestTensor, FillWithValues)
     }
 }
 
-TEST(TestTensor, FillWithRandomValues)
+TEST(TestTensor, FillWithValuesNonPacked)
+{
+    Tensor<float> tensor({1, 2, 3, 4}, {30, 15, 5, 1});
+
+    tensor.fillWithValue(1.0f);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        EXPECT_FLOAT_EQ(1.0f, (*reinterpret_cast<const float*>((*it))));
+    }
+}
+
+TEST(TestTensor, FillWithRandomValuesPacked)
 {
     Tensor<float> tensor({1, 2, 3, 4});
 
@@ -63,6 +75,20 @@ TEST(TestTensor, FillWithRandomValues)
     {
         EXPECT_GE(buffer[i], 1.0f);
         EXPECT_LE(buffer[i], 3.0f);
+    }
+}
+
+TEST(TestTensor, FillWithRandomValuesNonPacked)
+{
+    Tensor<float> tensor({1, 2, 3, 4}, {30, 15, 5, 1});
+
+    tensor.fillWithRandomValues(1.0f, 3.0f);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*reinterpret_cast<const float*>((*it)))};
+        EXPECT_GE(val, 1.0f);
+        EXPECT_LE(val, 3.0f);
     }
 }
 
