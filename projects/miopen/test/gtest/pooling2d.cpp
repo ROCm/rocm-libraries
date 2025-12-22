@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <vector>
 #include <gtest/gtest.h>
@@ -11,7 +12,18 @@
 #include <miopen/logger.hpp>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
+#include "../network_data.hpp"
 #include "../pooling_common.hpp"
+
+// Configuration define matching the original ctest behavior
+// These can be overridden at compile time via -D flags
+// TEST_GET_INPUT_TENSOR: When 1, uses get_inputs() function to generate input shapes.
+//                        When 0, uses predefined input shapes (first 9 from the original 18).
+//                        When 1, uses all shapes from get_inputs(0), matching the original ctest
+//                        behavior when TEST_GET_INPUT_TENSOR is enabled.
+#ifndef TEST_GET_INPUT_TENSOR
+#define TEST_GET_INPUT_TENSOR 0
+#endif
 
 namespace {
 
@@ -40,13 +52,133 @@ struct Pooling2dTestCase
     }
 };
 
+// Helper function to calculate output spatial dimensions for 2D pooling
+std::vector<int> CalculateOutputDims(const std::vector<int>& input_dims,
+                                     const std::vector<int>& lens,
+                                     const std::vector<int>& strides,
+                                     const std::vector<int>& pads)
+{
+    // input_dims is [N, C, H, W]
+    // Returns [N, C, H_out, W_out]
+    std::vector<int> output_dims = {input_dims[0], input_dims[1]};
+    for(int i = 0; i < 2; i++)
+    {
+        int input_size = input_dims[i + 2];
+        int output_size =
+            (input_size + 2 * pads[i] - lens[i]) / strides[i] + 1;
+        output_dims.push_back(output_size);
+    }
+    return output_dims;
+}
+
+// Helper function to get index max value
+size_t GetIndexMax(miopenIndexType_t index_type)
+{
+    switch(index_type)
+    {
+    case miopenIndexUint8: return std::numeric_limits<uint8_t>::max();
+    case miopenIndexUint16: return std::numeric_limits<uint16_t>::max();
+    case miopenIndexUint32: return std::numeric_limits<uint32_t>::max();
+    case miopenIndexUint64: return std::numeric_limits<uint64_t>::max();
+    default: return SIZE_MAX;
+    }
+}
+
+// Helper function to check if a test case should be included
+bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
+{
+    // Check 1: Validate dimensions (spt_dim == 2 for 2D pooling)
+    int spt_dim = static_cast<int>(test_case.input_dims.size()) - 2;
+    if(spt_dim != 2)
+    {
+        return false;
+    }
+
+    // Check 2: Validate kernel size doesn't exceed input + padding
+    for(int i = 0; i < spt_dim; i++)
+    {
+        if(test_case.lens[i] >
+           (test_case.input_dims[i + 2] + static_cast<int>(2) * test_case.pads[i]))
+        {
+            return false;
+        }
+    }
+
+    // Check 3: Skip wide dataset with wsidx=0 and max pooling
+    bool is_wide_dataset = false;
+    for(int i = 0; i < spt_dim; i++)
+    {
+        if(test_case.lens[i] >= 35) // Wide window threshold
+        {
+            is_wide_dataset = true;
+            break;
+        }
+    }
+    if(test_case.wsidx == 0 && test_case.mode == miopenPoolingMax && is_wide_dataset)
+    {
+        return false;
+    }
+
+    // Check 4: Skip uint8/uint16 max pooling with wsidx=1 in 2D
+    if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1 &&
+       (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
+    {
+        return false;
+    }
+
+    // Check 5: Index range validation for max pooling
+    if(test_case.mode == miopenPoolingMax)
+    {
+        size_t index_max = GetIndexMax(test_case.index_type);
+
+        if(test_case.wsidx == 0) // miopenPoolingWorkspaceIndexMask
+        {
+            // Check if index_max is sufficient for the pooling window
+            size_t lens_product = 1;
+            for(int len : test_case.lens)
+            {
+                lens_product *= static_cast<size_t>(len);
+            }
+            if(index_max <= lens_product)
+            {
+                return false;
+            }
+        }
+        else // miopenPoolingWorkspaceIndexImage (wsidx == 1)
+        {
+            // Check if index_max is sufficient for output spatial dimensions
+            auto output_dims = CalculateOutputDims(
+                test_case.input_dims, test_case.lens, test_case.strides, test_case.pads);
+            size_t output_spatial_product = 1;
+            for(size_t i = 2; i < output_dims.size(); i++)
+            {
+                output_spatial_product *= static_cast<size_t>(output_dims[i]);
+            }
+            if(index_max <= output_spatial_product)
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 {
     std::vector<Pooling2dTestCase> test_cases;
 
     // Dataset 0: Default dataset (various tensor sizes)
+    std::vector<std::vector<int>> dataset0_inputs;
+#if TEST_GET_INPUT_TENSOR
+    // When TEST_GET_INPUT_TENSOR = 1, use get_inputs() function (matching original ctest behavior)
+    int batch_factor = 0; // Default batch factor matching original ctest
+    std::set<std::vector<int>> in_dim_set = get_inputs<int>(batch_factor);
+    dataset0_inputs.assign(in_dim_set.begin(), in_dim_set.end());
+#else
+    // When TEST_GET_INPUT_TENSOR = 0, use predefined shapes
     // Limited to 9 input shapes (matching generate_multi_data_limited with limit_multiplier=9)
-    std::vector<std::vector<int>> dataset0_inputs = {
+    dataset0_inputs = {
         {1, 19, 1024, 2048},
         {10, 3, 32, 32},
         {5, 32, 8, 8},
@@ -56,6 +188,7 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
         {1, 384, 13, 13},
         {1, 96, 27, 27},
         {2, 160, 7, 7}}; // First 9 from the original 18
+#endif
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
     std::vector<std::vector<int>> dataset0_pads         = {{0, 0}, {1, 1}};
@@ -66,6 +199,8 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     std::vector<int> wsidx_values = {0, 1};
 
     // Generate cartesian product for dataset 0
+    // This matches the original ctest test_pooling2d behavior (default dataset, dataset_id=0)
+    // Filter invalid combinations at generation time instead of skipping at runtime
     for(const auto& input_dims : dataset0_inputs)
     {
         for(const auto& lens : dataset0_lens)
@@ -80,8 +215,12 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
                         {
                             for(int wsidx : wsidx_values)
                             {
-                                test_cases.push_back(
-                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
+                                Pooling2dTestCase test_case = {
+                                    input_dims, lens, pads, strides, index_type, mode, wsidx};
+                                if(ShouldIncludeTestCase(test_case))
+                                {
+                                    test_cases.push_back(test_case);
+                                }
                             }
                         }
                     }
@@ -90,71 +229,9 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
         }
     }
 
-    // Dataset 1: Minimal dataset (asymmetric configs, small tensors)
-    std::vector<std::vector<int>> dataset1_inputs       = {{1, 4, 4, 4}};
-    std::vector<std::vector<int>> dataset1_lens         = {{2, 2}, {1, 2}, {2, 1}};
-    std::vector<std::vector<int>> dataset1_strides      = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
-    std::vector<std::vector<int>> dataset1_pads         = {{0, 0}}; // WORKAROUND_ISSUE_1670
-    std::vector<miopenIndexType_t> dataset1_index_types = {
-        miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
-
-    // Generate cartesian product for dataset 1
-    for(const auto& input_dims : dataset1_inputs)
-    {
-        for(const auto& lens : dataset1_lens)
-        {
-            for(const auto& strides : dataset1_strides)
-            {
-                for(const auto& pads : dataset1_pads)
-                {
-                    for(const auto& index_type : dataset1_index_types)
-                    {
-                        for(const auto& mode : modes)
-                        {
-                            for(int wsidx : wsidx_values)
-                            {
-                                test_cases.push_back(
-                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Dataset 2: Wide window dataset
-    std::vector<std::vector<int>> dataset2_inputs = {
-        {1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
-    std::vector<std::vector<int>> dataset2_lens    = {{35, 35}, {100, 100}, {255, 255}, {410, 400}};
-    std::vector<std::vector<int>> dataset2_strides = {{1, 1}};
-    std::vector<std::vector<int>> dataset2_pads    = {{0, 0}};
-    std::vector<miopenIndexType_t> dataset2_index_types = {miopenIndexUint32};
-
-    // Generate cartesian product for dataset 2
-    for(const auto& input_dims : dataset2_inputs)
-    {
-        for(const auto& lens : dataset2_lens)
-        {
-            for(const auto& strides : dataset2_strides)
-            {
-                for(const auto& pads : dataset2_pads)
-                {
-                    for(const auto& index_type : dataset2_index_types)
-                    {
-                        for(const auto& mode : modes)
-                        {
-                            for(int wsidx : wsidx_values)
-                            {
-                                test_cases.push_back(
-                                    {input_dims, lens, pads, strides, index_type, mode, wsidx});
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Note: Dataset 1 (asymmetric) and Dataset 2 (wide window) are tested separately
+    // via pooling2d_asymmetric.cpp and pooling2d_wide.cpp to maintain the same
+    // structure as the original ctest implementation.
 
     return test_cases;
 }
@@ -174,123 +251,6 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
         test_case.mode, miopenPaddingDefault, test_case.lens, test_case.strides, test_case.pads};
     filter.SetIndexType(test_case.index_type);
     filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(test_case.wsidx));
-
-    // Validate dimensions
-    auto input_desc = miopen::TensorDescriptor(miopen_type<T>{}, test_case.input_dims);
-    int spt_dim     = static_cast<int>(test_case.input_dims.size()) - 2;
-
-    if(spt_dim != 2)
-    {
-        GTEST_SKIP() << "Only 2D pooling is supported (spt_dim == 2)";
-    }
-
-    for(int i = 0; i < spt_dim; i++)
-    {
-        if(test_case.lens[i] >
-           (input_desc.GetLengths()[i + 2] + static_cast<uint64_t>(2) * test_case.pads[i]))
-        {
-            GTEST_SKIP() << "Invalid config: lens[" << i << "] > (input_dims[" << i + 2
-                         << "] + 2 * pads[" << i << "])";
-        }
-    }
-
-    // Skip configurations that are not implemented or would cause crashes
-    // Skip wide dataset with wsidx=0 and max pooling (not implemented in 2D max backward solvers)
-    bool is_wide_dataset = false;
-    // Check if this is a wide dataset configuration (dataset 2: large lens relative to input)
-    for(int i = 0; i < spt_dim; i++)
-    {
-        if(test_case.lens[i] >= 35) // Wide window threshold
-        {
-            is_wide_dataset = true;
-            break;
-        }
-    }
-    if(test_case.wsidx == 0 && test_case.mode == miopenPoolingMax && is_wide_dataset)
-    {
-        GTEST_SKIP() << "Config skipped: Workspace index mask mode is not implemented "
-                        "yet in 2D max backward solvers that support wide pooling window";
-    }
-
-    // Skip configurations that would cause "Index range not enough" exception
-    // The original ctest skips ALL uint8/uint16 max pooling with wsidx=1 in 2D
-    // (matching the original ctest behavior: spt_dim == 2 && wsidx == 1 && mode == Max)
-    if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1 &&
-       (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
-    {
-        GTEST_SKIP() << "Config skipped: uint"
-                     << (test_case.index_type == miopenIndexUint8 ? 8 : 16)
-                     << " index is too small (spt_dim == 2 && wsidx == 1) && mode == Max";
-    }
-
-    // Additional check: Skip if index_max is insufficient for the pooling window or output
-    if(test_case.mode == miopenPoolingMax)
-    {
-        // Calculate index_max based on index type from test_case
-        size_t index_max = 0;
-        switch(test_case.index_type)
-        {
-        case miopenIndexUint8: index_max = std::numeric_limits<uint8_t>::max(); break;
-        case miopenIndexUint16: index_max = std::numeric_limits<uint16_t>::max(); break;
-        case miopenIndexUint32: index_max = std::numeric_limits<uint32_t>::max(); break;
-        case miopenIndexUint64: index_max = std::numeric_limits<uint64_t>::max(); break;
-        default:
-            index_max = SIZE_MAX; // Unknown type, assume it's large enough
-            break;
-        }
-
-        // For max pooling backward, check if index range is sufficient
-        if(test_case.wsidx == 0) // miopenPoolingWorkspaceIndexMask
-        {
-            // Check if index_max is sufficient for the pooling window
-            size_t lens_product = 1;
-            for(int len : test_case.lens)
-            {
-                lens_product *= static_cast<size_t>(len);
-            }
-            if(index_max <= lens_product)
-            {
-                int index_bits = 0;
-                switch(test_case.index_type)
-                {
-                case miopenIndexUint8: index_bits = 8; break;
-                case miopenIndexUint16: index_bits = 16; break;
-                case miopenIndexUint32: index_bits = 32; break;
-                case miopenIndexUint64: index_bits = 64; break;
-                default: index_bits = 0; break;
-                }
-                GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
-                             << index_max << ") <= lens product (" << lens_product
-                             << ") for max pooling backward with workspace index mask mode";
-            }
-        }
-        else // miopenPoolingWorkspaceIndexImage (wsidx == 1)
-        {
-            // Check if index_max is sufficient for output spatial dimensions
-            auto output_tensor            = get_output_tensor(filter, input);
-            size_t output_spatial_product = 1;
-            for(size_t i = 2; i < output_tensor.desc.GetLengths().size(); i++)
-            {
-                output_spatial_product *= static_cast<size_t>(output_tensor.desc.GetLengths()[i]);
-            }
-            if(index_max <= output_spatial_product)
-            {
-                int index_bits = 0;
-                switch(test_case.index_type)
-                {
-                case miopenIndexUint8: index_bits = 8; break;
-                case miopenIndexUint16: index_bits = 16; break;
-                case miopenIndexUint32: index_bits = 32; break;
-                case miopenIndexUint64: index_bits = 64; break;
-                default: index_bits = 0; break;
-                }
-                GTEST_SKIP() << "Index range not enough: uint" << index_bits << " index_max ("
-                             << index_max << ") <= output spatial product ("
-                             << output_spatial_product
-                             << ") for max pooling backward with workspace index image mode";
-            }
-        }
-    }
 
     // Run forward pooling
     std::vector<Index> indices;
@@ -316,7 +276,7 @@ void RunPooling2dTestWithIndexType(const Pooling2dTestCase& test_case)
     // Validate indices are populated (required for max pooling backward)
     if(test_case.mode == miopenPoolingMax && indices.empty())
     {
-        GTEST_SKIP() << "Indices not populated for max pooling backward";
+        GTEST_FAIL() << "Indices not populated for max pooling backward";
     }
 
     verify_backward_pooling<2> backward_verifier;
@@ -391,34 +351,6 @@ TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { RunPooling2dTest<float>(GetPar
 
 TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { RunPooling2dTest<half_float::half>(GetParam()); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Pooling2d_FP32,
-                         testing::ValuesIn(GetPooling2dTestCases()),
-                         [](const testing::TestParamInfo<Pooling2dTestCase>& info) {
-                             const auto& tc = info.param;
-                             std::ostringstream os;
-                             os << "input_dims_";
-                             miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
-                             miopen::LogRange(os, tc.lens, "_") << "_pads_";
-                             miopen::LogRange(os, tc.pads, "_") << "_strides_";
-                             miopen::LogRange(os, tc.strides, "_")
-                                 << "_idx" << static_cast<int>(tc.index_type) << "_mode"
-                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
-                             return os.str();
-                         });
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP32, testing::ValuesIn(GetPooling2dTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Pooling2d_FP16,
-                         testing::ValuesIn(GetPooling2dTestCases()),
-                         [](const testing::TestParamInfo<Pooling2dTestCase>& info) {
-                             const auto& tc = info.param;
-                             std::ostringstream os;
-                             os << "input_dims_";
-                             miopen::LogRange(os, tc.input_dims, "_") << "_lens_";
-                             miopen::LogRange(os, tc.lens, "_") << "_pads_";
-                             miopen::LogRange(os, tc.pads, "_") << "_strides_";
-                             miopen::LogRange(os, tc.strides, "_")
-                                 << "_idx" << static_cast<int>(tc.index_type) << "_mode"
-                                 << static_cast<int>(tc.mode) << "_ws" << tc.wsidx;
-                             return os.str();
-                         });
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP16, testing::ValuesIn(GetPooling2dTestCases()));
