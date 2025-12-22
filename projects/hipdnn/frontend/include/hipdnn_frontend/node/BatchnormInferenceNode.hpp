@@ -84,12 +84,6 @@ public:
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(mean, 2, "Mean tensor"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(invVar, 2, "Inverse variance tensor"));
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "BatchnormInferenceNode: Input tensor (x) dimensions and strides must be set and "
-            "positive");
-
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape during inference just as in training.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].

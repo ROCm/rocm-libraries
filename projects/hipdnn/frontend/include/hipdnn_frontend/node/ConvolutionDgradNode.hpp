@@ -63,11 +63,6 @@ public:
 
         auto& dyDims = dy->get_dim();
 
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionDgradNode: dy tensor dimensions and strides must be set and positive");
-
         HIPDNN_RETURN_IF_LT(
             dyDims.size(),
             3,
@@ -75,11 +70,6 @@ public:
             "ConvolutionDgradNode: dy tensor must have at least 3 dimensions (N, C, spatial)");
 
         auto& wDims = w->get_dim();
-
-        HIPDNN_RETURN_IF_FALSE(
-            w->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionDgradNode: Weight tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(
             wDims.size(),
@@ -96,7 +86,6 @@ public:
             "ConvolutionDgradNode: dy tensor channels must match weight tensor output channels");
 
         auto& dxDims = dx->get_dim();
-        auto& dxStrides = dx->get_stride();
 
         if(!dxDims.empty())
         {
@@ -131,19 +120,6 @@ public:
                 ErrorCode::INVALID_VALUE,
                 "ConvolutionDgradNode: Weight tensor output channels must be divisible by "
                 "the number of groups");
-
-            HIPDNN_RETURN_IF_FALSE(
-                dx->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionDgradNode: dx tensor dimensions must be set and positive");
-        }
-
-        if(!dxStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(dx->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionDgradNode: dx tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         // Validate spatial parameter counts match spatial dimensions

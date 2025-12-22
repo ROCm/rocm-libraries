@@ -63,11 +63,6 @@ public:
         // Validate input tensor dimensions and strides
         auto& xDims = x->get_dim();
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionFpropNode: Input tensor dimensions and strides must be set and positive");
-
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
@@ -76,11 +71,6 @@ public:
 
         // Validate weight tensor dimensions and strides
         auto& wDims = w->get_dim();
-
-        HIPDNN_RETURN_IF_FALSE(
-            w->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionFpropNode: Weight tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(
             wDims.size(),
@@ -111,7 +101,6 @@ public:
 
         // Validate output tensor dimensions and strides if they are set
         auto& yDims = y->get_dim();
-        auto& yStrides = y->get_stride();
 
         if(!yDims.empty())
         {
@@ -135,19 +124,6 @@ public:
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionFpropNode: Output tensor channels must match weight "
                                 "tensor output channels");
-
-            HIPDNN_RETURN_IF_FALSE(
-                y->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionFpropNode: Output tensor dimensions must be set and positive");
-        }
-
-        if(!yStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(y->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionFpropNode: Output tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         // Validate spatial parameter counts match spatial dimensions

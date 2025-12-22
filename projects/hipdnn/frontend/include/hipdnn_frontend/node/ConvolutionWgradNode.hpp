@@ -48,7 +48,6 @@ public:
         auto& xDims = x->get_dim();
         auto& dyDims = dy->get_dim();
         auto& dwDims = dw->get_dim();
-        auto& dwStrides = dw->get_stride();
 
         auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
         auto& prePadding = attributes.get_pre_padding();
@@ -72,22 +71,12 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ConvolutionWgradNode missing dilation for pre-validation");
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: x tensor dimensions and strides must be set and positive");
-
         // dy implicitly checked here too since they must be equal
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor must have at least 3 dimensions (N, C, spatial)");
-
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: dy tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(dyDims.size(),
                             xDims.size(),
@@ -132,11 +121,6 @@ public:
                 "ConvolutionWgradNode: dw tensor output channels must be divisible by "
                 "the number of groups");
 
-            HIPDNN_RETURN_IF_FALSE(
-                dw->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionWgradNode: dw tensor dimensions must be set and positive");
-
             // Verifies that spatial dimensions are compatible
             for(size_t i = 0; i < spatialDims; ++i)
             {
@@ -169,14 +153,6 @@ public:
                         + ") does not match expected dimension (" + std::to_string(expectedDyDim)
                         + ") given x dimensions, kernel size, padding, stride, and dilation");
             }
-        }
-
-        if(!dwStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(dw->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionWgradNode: dw tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         HIPDNN_RETURN_IF_NE(

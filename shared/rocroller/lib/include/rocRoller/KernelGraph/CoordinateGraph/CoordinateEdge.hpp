@@ -158,6 +158,11 @@ namespace rocRoller
         };
 
         /**
+         * BaseAddress - denotes base address for Global instructions
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(BaseAddress);
+
+        /**
          * Buffer - denotes SRD for MUBUF instructions
          */
         RR_EMPTY_STRUCT_WITH_NAME(Buffer);
