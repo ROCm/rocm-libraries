@@ -62,10 +62,10 @@ get_filename_component(CMAKE_MATRICES_DIR "${CMAKE_MATRICES_DIR}"
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 if(HIPSPARSE_ENABLE_ASAN)
-  execute_process(COMMAND "${CMAKE_CXX_COMPILER}" "${CONVERT_SOURCE}" -O3 -fsanitize=address -static-libsan -o "${PROJECT_BINARY_DIR}/mtx2csr.exe"
+  execute_process(COMMAND "${CMAKE_CXX_COMPILER}" "${CONVERT_SOURCE}" -O3 -fsanitize=address -static-libsan -o "${PROJECT_BINARY_DIR}/clients/mtx2csr.exe"
     RESULT_VARIABLE STATUS)
 else()
-  execute_process(COMMAND "${CMAKE_CXX_COMPILER}" "${CONVERT_SOURCE}" -O3 -o "${PROJECT_BINARY_DIR}/mtx2csr.exe"
+  execute_process(COMMAND "${CMAKE_CXX_COMPILER}" "${CONVERT_SOURCE}" -O3 -o "${PROJECT_BINARY_DIR}/clients/mtx2csr.exe"
     RESULT_VARIABLE STATUS)
 endif()
 
@@ -144,7 +144,7 @@ foreach(i RANGE 0 ${len1})
     else()
       file(RENAME "${HIPSPARSE_MTX_DIR}/${mat}/${mat}.mtx" "${CMAKE_MATRICES_DIR}/${mat}.mtx")
     endif()
-    execute_process(COMMAND "${PROJECT_BINARY_DIR}/mtx2csr.exe" "${mat}.mtx" "${mat}.csr"
+    execute_process(COMMAND "${PROJECT_BINARY_DIR}/clients/mtx2csr.exe" "${mat}.mtx" "${mat}.csr"
       RESULT_VARIABLE STATUS
       WORKING_DIRECTORY "${CMAKE_MATRICES_DIR}")
     if(STATUS AND NOT STATUS EQUAL 0)

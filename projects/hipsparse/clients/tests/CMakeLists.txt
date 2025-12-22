@@ -6,17 +6,17 @@ find_package(GTest REQUIRED)
 # Download or copy client matrices
 if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
     # Download matrices
-    set(CMAKE_MATRICES_DIR "${PROJECT_BINARY_DIR}/matrices" CACHE STRING "Matrices directory.")
+    set(CMAKE_MATRICES_DIR "${PROJECT_BINARY_DIR}/clients/matrices" CACHE STRING "Matrices directory.")
     file(MAKE_DIRECTORY "${CMAKE_MATRICES_DIR}")
     
     set(CONVERT_SOURCE "${PROJECT_SOURCE_DIR}/deps/convert.cpp" CACHE STRING "Convert tool mtx2csr.")
     include("${PROJECT_SOURCE_DIR}/cmake/ClientMatrices.cmake")
 else()
     # Copy matrices
-    if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
-        message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
+    if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/clients/matrices")
+        message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/clients/matrices")
 
-        file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
+        file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/clients/matrices)
 
         if(STATUS AND NOT STATUS EQUAL 0)
             message(FATAL_ERROR "Failed to copy matrix .csr files, aborting.")
@@ -176,26 +176,26 @@ set_target_properties(hipsparse-test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
 
-# Create symlink/copy for matrices after build completes
-if(WIN32)
-    # On Windows: Copy matrices directory after build to avoid symlink issues
-    add_custom_command(
-        TARGET hipsparse-test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${PROJECT_BINARY_DIR}/matrices"
-            "${PROJECT_BINARY_DIR}/clients/matrices"
-        COMMENT "Copying matrices for Windows test environment"
-    )
-else()
-    # On Linux: Copy matrices directory after build
-    add_custom_command(
-        TARGET hipsparse-test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${PROJECT_BINARY_DIR}/matrices"
-            "${PROJECT_BINARY_DIR}/clients/matrices"
-        COMMENT "Copying matrices for Linux test environment"
-    )
-endif()
+# # Create symlink/copy for matrices after build completes
+# if(WIN32)
+#     # On Windows: Copy matrices directory after build to avoid symlink issues
+#     add_custom_command(
+#         TARGET hipsparse-test POST_BUILD
+#         COMMAND ${CMAKE_COMMAND} -E copy_directory
+#             "${PROJECT_BINARY_DIR}/matrices"
+#             "${PROJECT_BINARY_DIR}/clients/matrices"
+#         COMMENT "Copying matrices for Windows test environment"
+#     )
+# else()
+#     # On Linux: Copy matrices directory after build
+#     add_custom_command(
+#         TARGET hipsparse-test POST_BUILD
+#         COMMAND ${CMAKE_COMMAND} -E copy_directory
+#             "${PROJECT_BINARY_DIR}/matrices"
+#             "${PROJECT_BINARY_DIR}/clients/matrices"
+#         COMMENT "Copying matrices for Linux test environment"
+#     )
+# endif()
 
 # Build mtx2csr converter
 if(NOT CONVERT_SOURCE)
@@ -210,12 +210,12 @@ if(NOT WIN32)
 endif()
 set_target_properties(mtx2csr PROPERTIES
     OUTPUT_NAME "mtx2csr.exe"
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients"
 )
 
 set(HIPSPARSE_CLIENTMATRICES "${PROJECT_SOURCE_DIR}/cmake/hipsparse_clientmatrices.cmake")
 
-set(HIPSPARSE_CONVERT "${PROJECT_BINARY_DIR}/hipsparse_mtx2csr")
+set(HIPSPARSE_CONVERT "${PROJECT_BINARY_DIR}/clients/hipsparse_mtx2csr")
 add_custom_command(
     OUTPUT "${HIPSPARSE_CONVERT}"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:mtx2csr> "${HIPSPARSE_CONVERT}"
@@ -254,7 +254,7 @@ add_custom_target(hipsparse-common
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
-                   COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" -m ${PROJECT_BINARY_DIR}/matrices -I "${PROJECT_SOURCE_DIR}/clients/include" "${HIPSPARSE_TEST_YAML_INCLUDE}" -o "${HIPSPARSE_TEST_DATA}"
+                   COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" -m ${PROJECT_BINARY_DIR}/clients/matrices -I "${PROJECT_SOURCE_DIR}/clients/include" "${HIPSPARSE_TEST_YAML_INCLUDE}" -o "${HIPSPARSE_TEST_DATA}"
                    DEPENDS "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${HIPSPARSE_TEST_YAML_INCLUDE}" "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" ${HIPSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(hipsparse-test-data
@@ -269,7 +269,7 @@ rocm_install(FILES ${HIPSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/
 # Install matrices for tests component - needed for TheRock CI artifact testing
 # TheRock CI expects matrices at <install-prefix>/clients/matrices/
 rocm_install(
-    DIRECTORY "${PROJECT_BINARY_DIR}/matrices/"
+    DIRECTORY "${PROJECT_BINARY_DIR}/clients/matrices/"
     DESTINATION "clients/matrices"
     COMPONENT tests
     FILES_MATCHING PATTERN "*.csr"
@@ -297,27 +297,22 @@ rocm_install(
     DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
 )
 
-# Windows-specific DLL copying (using script to avoid foreach in CMakeLists)
+# Windows-specific DLL copying
 if(WIN32)
-    set(COPY_DLLS_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/copy_test_dlls.cmake")
-    file(WRITE "${COPY_DLLS_SCRIPT}" "
-file(GLOB dll_files
-    LIST_DIRECTORIES OFF
-    \"\$ENV{HIP_DIR}/bin/*.dll\"
-    \"\$ENV{HIP_DIR}/bin/hipinfo.exe\"
-    \"\${ROCSPARSE_PATH}/bin/rocsparse.dll\"
-    \"${PROJECT_SOURCE_DIR}/rtest.*\"
-    \"C:/Windows/System32/libomp140*.dll\"
-)
-foreach(dll IN LISTS dll_files)
-    file(COPY \"\${dll}\" DESTINATION \"${PROJECT_BINARY_DIR}/clients/staging/\")
-endforeach()
-")
-    add_custom_command(
-        TARGET hipsparse-test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -P "${COPY_DLLS_SCRIPT}"
-        COMMENT "Copying third-party DLLs for tests"
+    # For now adding in all .dll as dependency chain is not cmake based on win32
+    file(GLOB third_party_dlls
+        LIST_DIRECTORIES OFF
+        CONFIGURE_DEPENDS
+        $ENV{HIP_DIR}/bin/*.dll
+        $ENV{HIP_DIR}/bin/hipinfo.exe
+        ${ROCSPARSE_PATH}/bin/rocsparse.dll
+        ${PROJECT_SOURCE_DIR}/rtest.*
+        C:/Windows/System32/libomp140*.dll
     )
+    foreach(file_i ${third_party_dlls})
+        add_custom_command(TARGET hipsparse-test POST_BUILD 
+            COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/clients/staging/)
+    endforeach(file_i)
 endif()
 
 add_test(hipsparse-test hipsparse-test)

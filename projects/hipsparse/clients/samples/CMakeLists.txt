@@ -11,7 +11,7 @@ if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP)
     )
     target_link_libraries(example_c_headers PRIVATE hipsparse::samples-common)
     set_target_properties(example_c_headers PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     if(HIPSPARSE_ENABLE_HIP)
@@ -21,7 +21,7 @@ if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP)
         )
         target_link_libraries(example_axpyi PRIVATE hipsparse::samples-common)
         set_target_properties(example_axpyi PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
         )
     endif()
 endif()
@@ -33,7 +33,7 @@ target_sources(example_handle PRIVATE
 )
 target_link_libraries(example_handle PRIVATE hipsparse::samples-common)
 set_target_properties(example_handle PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
 
 # C++ samples that require older CUDA versions
@@ -44,7 +44,7 @@ if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDA_VERSION LESS 11)
     )
     target_link_libraries(example_csrmv PRIVATE hipsparse::samples-common)
     set_target_properties(example_csrmv PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     add_executable(example_hybmv)
@@ -53,7 +53,7 @@ if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDA_VERSION LESS 11)
     )
     target_link_libraries(example_hybmv PRIVATE hipsparse::samples-common)
     set_target_properties(example_hybmv PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
 endif()
 
@@ -67,7 +67,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_auxiliary hipsparse_fortran)
     target_link_libraries(example_fortran_auxiliary PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_auxiliary PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_csrsv2
@@ -78,7 +78,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_csrsv2 hipsparse_fortran)
     target_link_libraries(example_fortran_csrsv2 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csrsv2 PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_bsric02
@@ -89,7 +89,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_bsric02 hipsparse_fortran)
     target_link_libraries(example_fortran_bsric02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_bsric02 PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_csric02
@@ -100,7 +100,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_csric02 hipsparse_fortran)
     target_link_libraries(example_fortran_csric02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csric02 PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_bsrilu02
@@ -111,7 +111,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_bsrilu02 hipsparse_fortran)
     target_link_libraries(example_fortran_bsrilu02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_bsrilu02 PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_csrilu02
@@ -122,7 +122,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_csrilu02 hipsparse_fortran)
     target_link_libraries(example_fortran_csrilu02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csrilu02 PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_csrsm2
@@ -133,7 +133,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_csrsm2 hipsparse_fortran)
     target_link_libraries(example_fortran_csrsm2 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csrsm2 PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_dotci
@@ -144,7 +144,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_dotci hipsparse_fortran)
     target_link_libraries(example_fortran_dotci PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_dotci PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_roti
@@ -155,7 +155,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_roti hipsparse_fortran)
     target_link_libraries(example_fortran_roti PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_roti PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_spmv
@@ -166,7 +166,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_spmv hipsparse_fortran)
     target_link_libraries(example_fortran_spmv PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_spmv PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
     
     # Fortran example: example_fortran_bsrmm
@@ -177,7 +177,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     add_dependencies(example_fortran_bsrmm hipsparse_fortran)
     target_link_libraries(example_fortran_bsrmm PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_bsrmm PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
     )
 endif()
 

@@ -48,7 +48,7 @@ set(TEST_MD5HASH
 )
 
 if(NOT CMAKE_MATRICES_DIR)
-  set(CMAKE_MATRICES_DIR "${PROJECT_BINARY_DIR}/matrices")
+  set(CMAKE_MATRICES_DIR "${PROJECT_BINARY_DIR}/clients/matrices")
   message(WARNING "Unspecified CMAKE_MATRICES_DIR, the default value of CMAKE_MATRICES_DIR is set to '${CMAKE_MATRICES_DIR}'")
 endif()
 
