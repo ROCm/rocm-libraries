@@ -120,8 +120,9 @@ if(BUILD_TEST)
 endif(BUILD_TEST)
 
 if(BUILD_BENCHMARK)
+  set(BENCHMARK_VERSION 1.8.0)
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(benchmark CONFIG QUIET)
+    find_package(benchmark ${BENCHMARK_VERSION} CONFIG QUIET)
   endif()
   if(NOT TARGET benchmark::benchmark)
     message(STATUS "Google Benchmark not found. Fetching...")
@@ -130,7 +131,7 @@ if(BUILD_BENCHMARK)
     FetchContent_Declare(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v1.8.0
+      GIT_TAG        v${BENCHMARK_VERSION}
     )
     set(HAVE_STD_REGEX ON)
     set(RUN_HAVE_STD_REGEX 1)

@@ -1,16 +1,16 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include <ck_tile/builder/reflect/instance_traits_util.hpp>
-#include <ck/utility/data_type.hpp>
-#include <ck/utility/sequence.hpp>
-#include <ck/utility/blkgemmpipe_scheduler.hpp>
-#include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
-#include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
-#include <ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp>
-#include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
+#include <gtest/gtest.h>
+#include "ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp"
+#include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
+#include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
+#include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
+#include "ck/utility/data_type.hpp"
+#include "ck/utility/scheduler_enum.hpp"
+#include "ck/utility/sequence.hpp"
+#include "ck_tile/builder/reflect/instance_traits_util.hpp"
 
 namespace ck_tile::reflect::detail {
 namespace {
@@ -202,8 +202,8 @@ TEST(InstanceTraitsUtil, PipelineVersionNameReturnsCorrectStrings)
 TEST(InstanceTraitsUtil, LoopSchedulerNameReturnsCorrectStrings)
 {
     using enum ck::LoopScheduler;
-    EXPECT_THAT(std::vector<std::string_view> names = {loop_scheduler_name(Default),
-                                                       loop_scheduler_name(Interwave)},
+    EXPECT_THAT((std::vector<std::string_view>{loop_scheduler_name(Default),
+                                               loop_scheduler_name(Interwave)}),
                 ElementsAre("Default", "Interwave"));
 }
 
@@ -265,6 +265,16 @@ TEST(InstanceTraitsUtil, SequenceNameReturnsSeqStringForTwoValueSequence)
 TEST(InstanceTraitsUtil, SequenceNameReturnsSeqStringForMultipleValueSequence)
 {
     EXPECT_EQ((sequence_name<ck::Sequence<256, 128, 64, 32, 16>>()), "Seq(256,128,64,32,16)");
+}
+
+TEST(InstanceTraitsUtil, TypeOrTypeTupleNameReturnsCorrectStringForScalarDataType)
+{
+    EXPECT_EQ(type_or_type_tuple_name<float>(), "fp32");
+}
+
+TEST(InstanceTraitsUtil, TypeOrTypeTupleNameReturnsCorrectStringForTupleOfDataTypes)
+{
+    EXPECT_EQ((type_or_type_tuple_name<ck::Tuple<ck::half_t, float>>()), "Tuple(fp16,fp32)");
 }
 
 } // namespace

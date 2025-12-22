@@ -12,10 +12,6 @@ endif()
 
 set(CMAKE_CXX_COMPILER "${rocm_bin}/clang++.exe")
 
-if (NOT python)
-  set(python "python") # take default for windows
-endif()
-
 # working
 #set(CMAKE_Fortran_COMPILER "C:/Strawberry/c/bin/gfortran.exe")
 

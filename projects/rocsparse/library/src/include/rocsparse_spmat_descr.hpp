@@ -114,6 +114,7 @@ public:
                                             rocsparse_index_base idx_base,
                                             rocsparse_datatype   val_type);
 
+
     static rocsparse_spmat_descr create_bell(int64_t              rows,
                                              int64_t              cols,
                                              rocsparse_direction  block_dir,
@@ -214,4 +215,56 @@ public:
     void set_col_batch_dist(int64_t value);
     void set_val_batch_dist(int64_t value);
     void set_ell_width(int64_t value);
+  
+    int64_t             sell_slice_size{};
+    int64_t             sell_colval_size{};
+  
+#if 0
+    _rocsparse_spmat_descr() = default;
+    _rocsparse_spmat_descr(rocsparse_format     format,
+                           bool                 analysed,
+                           int64_t              batch_count,
+                           int64_t              m,
+                           int64_t              n,
+                           int64_t              nnz,
+                           rocsparse_datatype   val_datatype,
+                           const void*          const_val_data,
+                           void*                val_data,
+                           int64_t              val_stride,
+                           rocsparse_indextype  row_indextype,
+                           const void*          const_row_data,
+                           void*                row_data,
+                           int64_t              row_stride,
+                           rocsparse_indextype  col_indextype,
+                           const void*          const_col_data,
+                           void*                col_data,
+                           int64_t              col_stride,
+                           rocsparse_index_base base,
+                           rocsparse_mat_descr  descr,
+                           rocsparse_mat_info   info);
+
+    _rocsparse_spmat_descr(rocsparse_format     format,
+                           bool                 analysed,
+                           int64_t              batch_count,
+                           int64_t              mb,
+                           int64_t              nb,
+                           int64_t              nnzb,
+                           rocsparse_direction  block_dir,
+                           int64_t              block_dim,
+                           rocsparse_datatype   val_datatype,
+                           const void*          const_val_data,
+                           void*                val_data,
+                           int64_t              val_stride,
+                           rocsparse_indextype  row_indextype,
+                           const void*          const_row_data,
+                           void*                row_data,
+                           int64_t              row_stride,
+                           rocsparse_indextype  col_indextype,
+                           const void*          const_col_data,
+                           void*                col_data,
+                           int64_t              col_stride,
+                           rocsparse_index_base base,
+                           rocsparse_mat_descr  descr,
+                           rocsparse_mat_info   info);
+#endif
 };

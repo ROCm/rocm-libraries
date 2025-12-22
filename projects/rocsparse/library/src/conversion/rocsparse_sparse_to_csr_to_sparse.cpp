@@ -80,6 +80,7 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         switch(source_->get_format())
         {
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -258,6 +259,7 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
             break;
         }
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }

@@ -1,5 +1,5 @@
-/* Copyright © Advanced Micro Devices, Inc., or its affiliates. */
-/* SPDX-License-Identifier:  MIT */
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <algorithm>
 #include <limits>
@@ -21,11 +21,6 @@ namespace miopen_legacy_plugin
 
 namespace
 {
-
-std::string getNodeName(const hipdnn_sdk::data_objects::Node& node)
-{
-    return node.name() != nullptr ? node.name()->str() : "";
-}
 
 bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph)
 {
@@ -53,7 +48,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -88,7 +83,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -124,7 +119,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -234,6 +229,13 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
         return false;
     }
 
+    if(opGraph.getNode(0).compute_data_type() != hipdnn_sdk::data_objects::DataType::FLOAT)
+    {
+        HIPDNN_LOG_ERROR("Convolution plan builder only supports nodes with an fp32 "
+                         "compute_data_type");
+        return false;
+    }
+
     const auto& node = opGraph.getNode(0);
     bool ret = false;
 
@@ -300,10 +302,10 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
                 + std::to_string(opGraph.nodeCount()) + " nodes");
     }
 
-    const auto& node = opGraph.getNode(0);
+    const auto& nodeWrapper = opGraph.getNodeWrapper(0);
+    const auto nodeName = nodeWrapper.name();
 
-    std::string nodeName = getNodeName(node);
-    switch(node.attributes_type())
+    switch(nodeWrapper.attributesType())
     {
     case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         HIPDNN_LOG_INFO("Building convolution fwd plan for node: {}", nodeName);
@@ -321,7 +323,7 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for convolution plan builder: "
-                + std::string(hipdnn_sdk::data_objects::toString(node.attributes_type())));
+                + std::string(hipdnn_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
 }
 

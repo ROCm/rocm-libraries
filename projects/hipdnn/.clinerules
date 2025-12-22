@@ -40,7 +40,7 @@
 
 #### Test Naming Guidelines
 
-Rules below apply ONLY to the TestSuite name (first parameter of `TEST` / `TEST_F` / `TEST_P`). The TestCase (second parameter) can be descriptive but should still avoid the reserved keywords where noted. 
+Rules below apply ONLY to the TestSuite name (first parameter of `TEST` / `TEST_F` / `TEST_P`). The TestCase (second parameter) can be descriptive but should still avoid the reserved keywords where noted.
 TestCase should be PascalCase.
 
 **Ordering & Composition (left → right):**

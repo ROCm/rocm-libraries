@@ -10,9 +10,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class PointwiseAttributes : public Attributes<PointwiseAttributes>
 {
@@ -248,5 +246,4 @@ private:
     }
 };
 typedef PointwiseAttributes Pointwise_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

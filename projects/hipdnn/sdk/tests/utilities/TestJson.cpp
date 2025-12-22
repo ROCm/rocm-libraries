@@ -7,9 +7,9 @@
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_sdk::data_objects;
 
@@ -23,8 +23,9 @@ void toJsonAndBackTestSuite(const hipdnn_sdk::data_objects::Graph* graph,
     builder.Finish(newGraphBuilder);
     auto newGraph = hipdnn_sdk::data_objects::GetGraph(builder.GetBufferPointer());
 
-    EXPECT_EQ(graph->compute_type(), newGraph->compute_type()) << context;
-    EXPECT_EQ(graph->io_type(), newGraph->io_type()) << context;
+    EXPECT_EQ(graph->compute_data_type(), newGraph->compute_data_type()) << context;
+    EXPECT_EQ(graph->intermediate_data_type(), newGraph->intermediate_data_type()) << context;
+    EXPECT_EQ(graph->io_data_type(), newGraph->io_data_type()) << context;
     EXPECT_EQ(graph->name()->str(), newGraph->name()->str()) << context;
 
     ASSERT_EQ(graph->tensors()->size(), newGraph->tensors()->size()) << context;
@@ -50,35 +51,63 @@ void toJsonAndBackTestSuite(const hipdnn_sdk::data_objects::Graph* graph,
 
 TEST(TestJson, GraphToJsonAndBack)
 {
+    auto nodeAttributeValues = EnumValuesNodeAttributes();
+    auto maxEnumValue = static_cast<size_t>(hipdnn_sdk::data_objects::NodeAttributes::MAX);
+    for(size_t i = 0; i <= maxEnumValue; i++)
     {
-        auto graphBuilder = hipdnn_sdk::test_utilities::createEmptyValidGraph();
-        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+        auto enumValue = nodeAttributeValues[i];
+        flatbuffers::FlatBufferBuilder graphBuilder;
+        const hipdnn_sdk::data_objects::Graph* graph = nullptr;
+        std::string context;
 
-        toJsonAndBackTestSuite(graph, "(empty valid graph)");
-    }
-    {
-        auto graphBuilder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
-        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+        switch(enumValue)
+        {
+        case hipdnn_sdk::data_objects::NodeAttributes::NONE:
+            graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(empty valid graph)";
+            break;
+        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid batchnorm inference graph)";
+            break;
+        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid batchnorm backward graph)";
+            break;
+        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid batchnorm forward training graph)";
+            break;
+        case hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createPointwiseGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid pointwise graph)";
+            break;
+        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid convolution forward graph)";
+            break;
+        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid convolution backward graph)";
+            break;
+        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+            graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid convolution weight gradient graph)";
+            break;
+        default:
+            FAIL() << "Unhandled NodeAttributes enum value";
+            break;
+        }
 
-        toJsonAndBackTestSuite(graph, "(valid batchnorm inference graph)");
-    }
-    {
-        auto graphBuilder = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph();
-        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
-
-        toJsonAndBackTestSuite(graph, "(valid batchnorm backward graph)");
-    }
-    {
-        auto graphBuilder = hipdnn_sdk::test_utilities::createBatchnormGraph();
-        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
-
-        toJsonAndBackTestSuite(graph, "(valid batchnorm backward graph)");
-    }
-    {
-        auto graphBuilder = hipdnn_sdk::test_utilities::createPointwiseGraph();
-        auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
-
-        toJsonAndBackTestSuite(graph, "(valid pointwise graph)");
+        toJsonAndBackTestSuite(graph, context);
     }
 }
 

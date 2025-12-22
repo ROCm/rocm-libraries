@@ -11,13 +11,14 @@
 #include <gtest/gtest.h>
 #include <utility>
 
+#include "TestPluginConstants.hpp"
 #include "plugin/PluginCore.hpp"
-#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
-#include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 
 namespace
 {
@@ -78,7 +79,7 @@ protected:
 
 bool TestPluginCallback::s_callbackCalled = false;
 
-const std::filesystem::path TEST_PLUGIN_DIR = "lib/test_plugins";
+const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPluginDefaultDir());
 
 const auto PLUGIN_PATH1 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
 const auto PLUGIN_PATH2 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN2_NAME;

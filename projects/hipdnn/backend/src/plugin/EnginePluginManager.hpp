@@ -11,9 +11,7 @@
 #include "HipdnnException.hpp"
 #include "PluginCore.hpp"
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 class EnginePluginManager : public PluginManagerBase<EnginePlugin>
@@ -49,5 +47,4 @@ private:
     std::set<int64_t> _engineIds;
 };
 
-} // namespace plugin
-} // namespace hipdnn_backend
+} // namespace hipdnn_backend::plugin

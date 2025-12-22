@@ -1,15 +1,7 @@
 # find_package(PythonInterp)
 # # TODO: Check PYTHON_VERSION_MAJOR
 
-find_program(VIRTUALENV_PYTHON_EXE ${python})
-if(NOT VIRTUALENV_PYTHON_EXE)
-    # look for non default name
-    if(${python} MATCHES "python3")
-        find_program(VIRTUALENV_PYTHON_EXE python)
-    else()
-        find_program(VIRTUALENV_PYTHON_EXE python3)
-    endif()
-endif()
+find_program(VIRTUALENV_PYTHON_EXE ${Python3_EXECUTABLE})
 
 set(VIRTUALENV_HOME_DIR ${CMAKE_BINARY_DIR}/virtualenv CACHE PATH "Path to virtual environment")
 

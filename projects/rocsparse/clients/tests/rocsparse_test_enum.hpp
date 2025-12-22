@@ -134,37 +134,41 @@ static constexpr std::size_t countof2(T (&)[N])
   TRANSFORM_ROCSPARSE_TEST_ENUM(sparse_to_dense_coo)			\
   TRANSFORM_ROCSPARSE_TEST_ENUM(sparse_to_dense_csc)			\
   TRANSFORM_ROCSPARSE_TEST_ENUM(sparse_to_dense_csr)			\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(sparse_to_sparse)			\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(extract)			\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spgemm_bsr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spgemm_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(sparse_to_sparse)			    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(extract)			            \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spgemm_bsr)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spgemm_csr)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spgemm_reuse_csr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_csr)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_reuse_csr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_csr_2)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_csr_2)				    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spgeam_reuse_csr_2)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmat_descr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_bell)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_bsr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_coo)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_csc)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_csr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_bell)			\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_coo)			\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_csc)			\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_csr)			\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_bsr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_coo_aos)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_coo)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_csr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_csc)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_ell)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_bsr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmat_descr)				    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_bell)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_bsr)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_coo)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_csc)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_csr)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_bell)			    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_coo)			    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_csc)			    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmm_batched_csr)			    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_bsr)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_coo_aos)				    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_coo)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_csr)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_csc)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_ell)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_sell)				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_bsr)				    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_coo_aos)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_coo)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csr_res)            \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csr_res_multiple)   \
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csc)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_ell)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_sell)				    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spsm_coo)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(spsm_csr)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_coo)				\

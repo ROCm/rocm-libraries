@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 
 import os
 import json
@@ -8,12 +11,31 @@ import multiprocessing
 import concurrent.futures
 from pathlib import Path
 import logging
-from commons.validation_utils import (
-    is_tile_config_valid,
-    is_trait_combination_valid,
-    get_dtype_string,
-    get_abc_layouts,
-)
+import importlib.util
+
+
+def _import_validation_utils():
+    """Import validation utilities from commons directory."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+
+    # Load the module dynamically
+    spec = importlib.util.spec_from_file_location(
+        "validation_utils",
+        os.path.join(parent_dir, "commons", "gemm_validation_utils.py"),
+    )
+    validation_utils = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validation_utils)
+
+    return validation_utils
+
+
+# Import validation functions
+_validation_utils = _import_validation_utils()
+is_tile_config_valid = _validation_utils.is_tile_config_valid
+is_trait_combination_valid = _validation_utils.is_trait_combination_valid
+get_dtype_string = _validation_utils.get_dtype_string
+get_abc_layouts = _validation_utils.get_abc_layouts
 
 logging.basicConfig(level=logging.INFO)
 
@@ -315,13 +337,6 @@ class GemmKernelBuilder:
             "compv4": "ck_tile::GemmPipelineAgBgCrCompV4",
         }
 
-        # Map pipeline names to base pipeline for hot loop detection
-        base_pipeline_map = {
-            "mem": "ck_tile::BaseGemmPipelineAgBgCrMem",
-            "compv3": "ck_tile::BaseGemmPipelineAgBgCrCompV3",
-            "compv4": "ck_tile::BaseGemmPipelineAgBgCrCompV4",
-        }
-
         # Map scheduler names to the correct enum values
         scheduler_type_map = {
             "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
@@ -401,33 +416,10 @@ struct SelectedKernel {{
     
     // Tile partitioner
     using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;
-    
-    // Traits
-    using Traits = ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout, NumWaveGroups>;
-    
-    // Pipeline problem
-    using GemmPipelineProblem = ck_tile::GemmPipelineProblem<
-        ADataType,
-        BDataType,
-        AccDataType,
-        TileShape,
-        Traits>;
-    
-    // Base pipeline for hot loop detection
-    using BaseGemmPipeline = {base_pipeline_map.get(pipeline)}<GemmPipelineProblem>;
 
     static float launch(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& stream) {{
-        const ck_tile::index_t k_grain = args.k_batch * TileK;
-        const ck_tile::index_t K_split = (args.K + k_grain - 1) / k_grain * TileK;
-        const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
-        const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
-        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
         
-        float ave_time{{0}};
-
-        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_, const auto memory_operation_) {{
-            constexpr bool has_hot_loop_v = has_hot_loop_.value;
-            constexpr auto tail_number_v = tail_number_.value;
+        const auto Run = [&](const auto memory_operation_) {{
             constexpr auto scheduler = {scheduler_type_map.get(scheduler)};
             [[maybe_unused]] constexpr auto memory_operation = memory_operation_.value;
 
@@ -440,9 +432,7 @@ struct SelectedKernel {{
                                                 ALayout, BLayout, CLayout, TransposeC,
                                                 UseStructuredSparsity, UsePersistentKernel,
                                                 NumWaveGroups, Preshuffle>,
-                scheduler,
-                has_hot_loop_v,
-                tail_number_v>;
+                scheduler>;
             
             using GemmPipeline = {pipeline_impl_map.get(pipeline)}<UniversalGemmProblem>;
             
@@ -520,28 +510,23 @@ struct SelectedKernel {{
             
             // Launch kernel
             constexpr int kBlockPerCu = {k_block_per_cu};
-            ave_time = ck_tile::launch_kernel(
+            float ave_time = ck_tile::launch_kernel(
                 stream,
                 ck_tile::make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
             
             return ave_time;
         }};
 
-        const auto RunSplitk = [&](const auto has_hot_loop_, const auto tail_number_) {{
-            if(args.k_batch == 1) {{
-                Run(has_hot_loop_,
-                    tail_number_,
-                    ck_tile::integral_constant<ck_tile::memory_operation_enum,
-                                            ck_tile::memory_operation_enum::set>{{}});
-            }} else {{
-                Run(has_hot_loop_,
-                    tail_number_,
-                    ck_tile::integral_constant<ck_tile::memory_operation_enum,
-                                            ck_tile::memory_operation_enum::atomic_add>{{}});
-            }}
-        }};
+        float ave_time = 0.f;
 
-        BaseGemmPipeline::TailHandler(RunSplitk, has_hot_loop, tail_num);
+        if(args.k_batch == 1) {{
+            ave_time = Run(ck_tile::integral_constant<ck_tile::memory_operation_enum,
+                                        ck_tile::memory_operation_enum::set>{{}});
+        }} else {{
+            ave_time = Run(ck_tile::integral_constant<ck_tile::memory_operation_enum,
+                                        ck_tile::memory_operation_enum::atomic_add>{{}});
+        }}
+
         return ave_time;
     }}
 }};
@@ -563,6 +548,8 @@ struct SelectedKernel {{
         tile_configs = self._get_tile_configs()
         trait_combos = self._generate_trait_combinations()
         k_block_per_cu = self.config.get("k_block_per_cu")
+        if k_block_per_cu is None:
+            k_block_per_cu = 1
 
         # Prepare work items for parallel processing
         work_items = []
@@ -574,11 +561,12 @@ struct SelectedKernel {{
                         trait_combo,
                         k_block_per_cu,
                         self.working_path,
+                        self.gpu_target,
                         self.datatype,
                         self.layout,
+                        self.config_json,
                     )
                 )
-
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
         )
@@ -615,7 +603,6 @@ struct SelectedKernel {{
                     print(
                         f"  Progress: {completed}/{len(work_items)} kernels generated"
                     )
-
                 try:
                     result = future.result()
                     if result:
@@ -662,10 +649,19 @@ struct SelectedKernel {{
 
 def _generate_single_kernel_individual(work_item):
     """Worker function to generate a single individual kernel file"""
-    tile_config, trait_combo, k_block_per_cu, working_path, datatype, layout = work_item
+    (
+        tile_config,
+        trait_combo,
+        k_block_per_cu,
+        working_path,
+        gpu_target,
+        datatype,
+        layout,
+        config_json,
+    ) = work_item
 
     # Create a temporary builder instance for this worker
-    builder = GemmKernelBuilder(working_path, datatype, layout)
+    builder = GemmKernelBuilder(working_path, gpu_target, datatype, layout, config_json)
 
     try:
         kernel_name, instance_code = builder._generate_kernel_instance(
@@ -798,6 +794,8 @@ def main():
         )
 
         k_block_per_cu = builder.config.get("k_block_per_cu")
+        if k_block_per_cu is None:
+            k_block_per_cu = 1
 
         # Generate the kernel
         kernel_name, instance_code = builder._generate_kernel_instance(

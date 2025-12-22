@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T>
 void orgbr_ungbr_checkBadArgs(const rocblas_handle handle,
@@ -238,7 +239,7 @@ void orgbr_ungbr_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -255,11 +256,11 @@ void orgbr_ungbr_getPerfData(const rocblas_handle handle,
         orgbr_ungbr_initData<false, true, T>(handle, storev, m, n, k, dA, lda, dIpiv, hA, hIpiv, hW,
                                              size_W);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_orgbr_ungbr(handle, storev, m, n, k, dA.data(), lda, dIpiv.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
@@ -360,7 +361,7 @@ void testing_orgbr_ungbr(Arguments& argus)
         orgbr_ungbr_getError<T>(handle, storev, m, n, k, dA, lda, dIpiv, hA, hAr, hIpiv, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         orgbr_ungbr_getPerfData<T>(handle, storev, m, n, k, dA, lda, dIpiv, hA, hIpiv,
                                    &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                    argus.profile_kernels, argus.perf);

@@ -14,6 +14,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_frontend_tests
     main.cpp
+    TestAttributes.cpp
     TestBackendLoggingHelpers.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp
@@ -32,6 +33,7 @@ add_executable(
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestINode.cpp
+    TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
@@ -45,13 +47,7 @@ add_executable(
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
-    hipdnn_frontend_tests
-    GTest::gtest
-    GTest::gmock
-    hip::host
-    Threads::Threads
-    hipdnn_sdk
-    hipdnn_frontend
+    hipdnn_frontend_tests GTest::gtest GTest::gmock hip::host Threads::Threads hipdnn_test_sdk
 )
 clang_tidy_check(hipdnn_frontend_tests)
 

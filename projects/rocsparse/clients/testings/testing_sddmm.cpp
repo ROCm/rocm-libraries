@@ -66,6 +66,12 @@ void testing_sddmm_bad_arg(const Arguments& arg)
         exit(1);
         return;
     }
+    case rocsparse_format_sell:
+    {
+        std::cerr << "testing_sddmm not_implemented for sell format." << std::endl;
+        exit(1);
+        return;
+    }
     case rocsparse_format_bsr:
     {
         std::cerr << "testing_sddmm not_implemented for bsr format." << std::endl;
@@ -113,6 +119,13 @@ void testing_sddmm(const Arguments& arg)
     }
 
     case rocsparse_format_bell:
+    {
+        std::cerr << "rocsparse_status_not_implemented" << std::endl;
+        exit(1);
+        return;
+    }
+
+    case rocsparse_format_sell:
     {
         std::cerr << "rocsparse_status_not_implemented" << std::endl;
         exit(1);

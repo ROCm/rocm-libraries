@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # exit when a command exits with non-zero status; also when an unbound variable is referenced
 set -eu
 # pipefail is supported by many shells, not supported by sh and dash
@@ -22,7 +25,7 @@ GPU_TARGETS="gfx908;gfx90a;gfx942"
 if [ $# -ge 1 ]; then
     case "$1" in
         gfx*)
-            GPU_TARGETS=$1
+            GPU_TARGETS="$1"
             shift 1
             echo "GPU targets provided: $GPU_TARGETS"
             REST_ARGS=("$@")
@@ -41,8 +44,8 @@ cmake                                                                           
 -D CMAKE_CXX_FLAGS="-ftemplate-backtrace-limit=0  -fPIE  -Wno-gnu-line-marker -fbracket-depth=512" \
 -D CMAKE_BUILD_TYPE=Release                                                                       \
 -D BUILD_DEV=ON                                                                                   \
--D GPU_TARGETS=$GPU_TARGETS                                                                       \
+-D GPU_TARGETS="$GPU_TARGETS"                                                                     \
 -D CMAKE_VERBOSE_MAKEFILE:BOOL=ON                                                                 \
 -D USE_BITINT_EXTENSION_INT4=OFF                                                                  \
-"${REST_ARGS[@]}"                                                                                 \                                                                                     \
-${MY_PROJECT_SOURCE}
+"${REST_ARGS[@]}"                                                                                 \
+"${MY_PROJECT_SOURCE}"

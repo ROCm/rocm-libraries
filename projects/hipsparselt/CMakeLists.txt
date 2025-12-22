@@ -76,9 +76,12 @@ set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
 
 if(NOT HIPSPARSELT_ENABLE_CUDA)
-    set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
+    set(GPU_TARGETS "all" CACHE STRING "AMD GFX targets to cross-compile")
 
-    if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+    if(NOT GPU_TARGETS)
+        set(HIPSPARSELT_ENABLE_DEVICE OFF)
+        message(WARNING "No GPU targets specified, device libraries will not be built.")
+    elseif(GPU_TARGETS STREQUAL "all")
         hipsparselt_get_base_architectures(GPU_TARGETS)
     else()
         hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
@@ -179,7 +182,8 @@ endif()
 # --- Packaging and installation ---
 
 if(HIPSPARSELT_ENABLE_CLIENT)
-    include(ROCmClientPackages)
+    include(rocm_client_prerequisites)
+    rocm_set_client_package_prerequisites()
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
 endif()

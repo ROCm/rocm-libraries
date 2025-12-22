@@ -3,10 +3,11 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
-#include <hipdnn_sdk/test_utilities/ScopedExecute.hpp>
 #include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedExecute.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 namespace hipdnn_sdk::utilities
 {
@@ -22,7 +23,7 @@ TEST(TestFillTensorFromFile, InvalidPath)
 TEST(TestFillTensorFromFile, PathToDirectory)
 {
     Tensor<float> tensor({1});
-    hipdnn_sdk::test_utilities::ScopedDirectory dir("oijaweorij33");
+    hipdnn_test_sdk::utilities::ScopedDirectory dir("oijaweorij33");
     EXPECT_THROW(detail::fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
 
@@ -39,7 +40,8 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
 TEST(TestFillTensorFromFile, Valid)
 {
     std::filesystem::path filename = "SimpleTensor0123.bin";
-    test_utilities::ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
+    hipdnn_test_sdk::utilities::ScopedExecute fileDeleter(
+        [filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);
@@ -57,6 +59,8 @@ TEST(TestFillTensorFromFile, Valid)
 
 TEST(TestLoadGraphAndTensors, Valid)
 {
+    SKIP_IF_NO_DEVICES();
+
     std::filesystem::path filepath
         = utilities::getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
@@ -70,9 +74,9 @@ TEST(TestLoadGraphAndTensors, Valid)
 
     auto res = loadGraphAndTensors(filepath);
 
-    EXPECT_EQ(res.graph().compute_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().io_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().intermediate_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().compute_data_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().io_data_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().intermediate_data_type(), data_objects::DataType::FLOAT);
     EXPECT_EQ(res.graph().nodes()->size(), 1);
     EXPECT_EQ(res.graph().tensors()->size(), 6);
 

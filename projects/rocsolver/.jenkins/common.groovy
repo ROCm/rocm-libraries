@@ -27,10 +27,10 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false, boolean
                 withSparse = false
             }
         }
-
-        // in PRs targeting develop branch build ONLY what CI pipeline will test, unless github gfxall label
-        if (env.CHANGE_TARGET == "develop" && !pullRequest.labels.contains("gfxall"))
+        // in PRs targeting develop branch build ONLY what CI pipeline will test, unless github gfxall label or debug job
+        if (env.CHANGE_TARGET == "develop" && !pullRequest.labels.contains("gfxall") && !project.buildName.contains("Debug"))
         {
+
             // requires at command execution time ${auxiliary.gfxTargetParser()} to set gfx_var variable
             dynamicOptions = dynamicOptions + ' -a \$gfx_arch'
             // TODO if enabling address sanitizer 

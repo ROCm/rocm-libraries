@@ -75,6 +75,14 @@ def parse_args():
     parser.add_argument('-v', '--verbose', required=False, default = False, action='store_true',
                         help='Verbose build (optional, default: False)')
 
+    # Path to rocprim
+    parser.add_argument('--rocprim-path', dest='rocprim_path', required=False, default="",
+                        help='Path to rocprim')
+
+    # Path to directory containing matrices
+    parser.add_argument('--matrices-dir', dest='matrices_dir', required=False, default="",
+                        help='Path to directory containing matrices')
+
     # rocsparse
     parser.add_argument(     '--clients-only', dest='clients_only', required=False, default = False, action='store_true',
                         help='Build only clients with a pre-built library')
@@ -156,8 +164,7 @@ def config_cmd():
         cmake_options.append( generator )
 
         # CMAKE_PREFIX_PATH set to rocm_path and HIP_PATH set BY SDK Installer
-        raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
-        rocm_path = f'"{raw_rocm_path}"' # guard against spaces in path
+        rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
         # CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX=")
         cmake_platform_opts.append(f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"')
@@ -175,7 +182,7 @@ def config_cmd():
 
     cmake_options.extend( cmake_platform_opts )
 
-    cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path}"
+    cmake_base_options = f"-DROCM_PATH=\"{rocm_path}\" -DCMAKE_PREFIX_PATH:PATH=\"{rocm_path}\""
     cmake_options.append( cmake_base_options )
 
     # packaging options
@@ -184,8 +191,6 @@ def config_cmd():
 
     if os.getenv('CMAKE_CXX_COMPILER_LAUNCHER'):
         cmake_options.append( f"-DCMAKE_CXX_COMPILER_LAUNCHER={os.getenv('CMAKE_CXX_COMPILER_LAUNCHER')}" )
-
-    print( cmake_options )
 
     # build type
     cmake_config = ""
@@ -204,6 +209,40 @@ def config_cmd():
 
     create_dir( os.path.join(build_path, "clients") )
     os.chdir( build_path )
+
+    if args.rocprim_path != "":
+        rocprim_path = cmake_path(os.path.abspath(args.rocprim_path))
+        cmake_options.append(f'-Drocprim_DIR=\"{rocprim_path}\"')
+    
+    if args.matrices_dir != "":
+        matrices_dir = cmake_path(os.path.abspath(args.matrices_dir))
+    
+        if os.getenv("CXX"):
+            cxx_compiler = os.getenv("CXX")
+        else:
+            if os.name == "nt":
+                cxx_compiler = cmake_path(os.path.join(rocm_path, "bin", "clang++"))
+            else:
+                cxx_compiler = cmake_path(os.path.join(rocm_path, "bin", "amdclang++"))
+        
+        program_list = [
+        cmake_executable,
+            f'-DCMAKE_CXX_COMPILER={cxx_compiler}',
+            f'-DPROJECT_BINARY_DIR={matrices_dir}',
+            f'-DCMAKE_MATRICES_DIR={matrices_dir}',
+            f'-DROCM_PATH={rocm_path}',
+            '-DCMAKE_INSTALL_LIBDIR=lib',
+            '-P',
+            './cmake/ClientMatrices.cmake'
+        ]
+        proc = subprocess.run(
+            program_list,
+            cwd=src_path,
+            check=True,
+            stderr=subprocess.STDOUT,
+            shell=False)
+
+        cmake_options.append(f'-DCMAKE_MATRICES_DIR=\"{matrices_dir}\"')
 
     if args.build_with_rocblas:
         cmake_options.append(f"-DBUILD_WITH_ROCBLAS=ON")

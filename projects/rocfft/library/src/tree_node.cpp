@@ -545,7 +545,8 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                     void*                 in_buffer[],
                                     void*                 out_buffer[],
                                     rocfft_execution_info info,
-                                    size_t                multiPlanIdx)
+                                    size_t                multiPlanIdx,
+                                    const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -658,7 +659,8 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                void*                 in_buffer[],
                                void*                 out_buffer[],
                                rocfft_execution_info info,
-                               size_t                multiPlanIdx)
+                               size_t                multiPlanIdx,
+                               const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -701,7 +703,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
         }
         else
         {
-            // Inter-proccess communication
+            // Inter-process communication
 #if !defined ROCFFT_MPI_ENABLE
             throw std::runtime_error("MPI communication not enabled");
 #else
@@ -786,7 +788,8 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                               void*                 in_buffer[],
                               void*                 out_buffer[],
                               rocfft_execution_info info,
-                              size_t                multiPlanIdx)
+                              size_t                multiPlanIdx,
+                              const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -837,7 +840,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
         }
         else
         {
-            // Inter-proccess communication
+            // Inter-process communication
 #if !defined ROCFFT_MPI_ENABLE
             throw std::runtime_error("MPI communication not enabled");
 #else
@@ -920,7 +923,8 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
                                 void*                 in_buffer[],
                                 void*                 out_buffer[],
                                 rocfft_execution_info info,
-                                size_t                multiPlanIdx)
+                                size_t                multiPlanIdx,
+                                const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
     {

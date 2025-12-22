@@ -237,7 +237,7 @@ def getDockerImage(Map conf=[:])
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") // one image for each prefix 1: /usr/local 2:/opt/rocm
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
     def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
                      "--build-arg PREFIX=${prefixpath} " +
@@ -317,6 +317,29 @@ def getDockerImage(Map conf=[:])
     }
 
     return [dockerImage, image]
+}
+
+// New wrapper function to add gitStatusWrapper around getDockerImage
+def getDockerImageWithStatus(Map conf=[:]) {
+    def stageName = env.STAGE_NAME ?: "Docker Image"  
+    def credentialsID = env.monorepo_status_wrapper_creds
+    if (env.REPO_NAME == "MIOpen") {
+        credentialsID = env.miopen_git_creds
+    }
+    
+    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: "${env.REPO_NAME}") {
+        try {
+            return getDockerImage(conf) 
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                echo "The job was cancelled or aborted"
+                throw e
+        }
+        catch (Exception ex) {
+            echo "Error in getDockerImageWithStatus: ${ex.message}"
+            throw ex
+        }
+    }
 }
 
 def buildHipClangJob(Map conf=[:]){

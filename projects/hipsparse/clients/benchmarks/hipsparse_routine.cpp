@@ -233,6 +233,7 @@ constexpr const char* hipsparse_routine::to_string() const
 #include "testing_spmm_csr.hpp"
 #include "testing_spmv_coo.hpp"
 #include "testing_spmv_csr.hpp"
+#include "testing_spmv_sell.hpp"
 #include "testing_spsm_coo.hpp"
 #include "testing_spsm_csr.hpp"
 #include "testing_spsv_csr.hpp"

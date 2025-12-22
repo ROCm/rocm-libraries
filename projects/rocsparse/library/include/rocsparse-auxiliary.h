@@ -844,6 +844,7 @@ rocsparse_status rocsparse_const_spvec_get_values(rocsparse_const_spvec_descr de
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spvec_set_values(rocsparse_spvec_descr descr, void* values);
 
+
 /*! \ingroup aux_module
 *  \brief Sparse matrix to sparse matrix conversion.
 *

@@ -10,9 +10,9 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
@@ -146,7 +146,10 @@ protected:
             bool useManualUids)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
-        graph->set_name(graphName);
+        graph->set_name(graphName)
+            .set_io_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT);
 
         int64_t uid = 1;
         ConvolutionTestTensors tensors;

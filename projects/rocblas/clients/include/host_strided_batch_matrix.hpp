@@ -67,7 +67,7 @@ public:
         bool valid_parameters = this->m_nmemb > 0;
         if(valid_parameters)
         {
-            this->m_data = (T*)host_calloc_throw(this->m_nmemb, sizeof(T));
+            this->m_data = (T*)host_calloc(this->m_nmemb, sizeof(T));
         }
     }
 
@@ -78,7 +78,7 @@ public:
     {
         if(nullptr != this->m_data)
         {
-            free(this->m_data);
+            host_free(this->m_data);
             this->m_data = nullptr;
         }
     }

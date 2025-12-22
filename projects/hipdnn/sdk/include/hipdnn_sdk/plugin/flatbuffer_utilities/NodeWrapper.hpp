@@ -7,7 +7,6 @@
 #include <memory>
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 
 namespace hipdnn_plugin
 {
@@ -22,22 +21,21 @@ public:
     virtual const void* attributes() const = 0;
     virtual hipdnn_sdk::data_objects::NodeAttributes attributesType() const = 0;
     virtual const std::type_info& attributesClassType() const = 0;
+    virtual std::string name() const = 0;
+    virtual hipdnn_sdk::data_objects::DataType computeDataType() const = 0;
 
     template <typename T>
     const T& attributesAs() const
     {
         if(attributesClassType() != typeid(T))
         {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "Node attributes are not of the expected type");
+            throw std::invalid_argument("Node attributes are not of the expected type");
         }
 
         auto* attr = attributes();
         if(attr == nullptr)
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Node attributes are null");
+            throw std::invalid_argument("Node attributes are null");
         }
 
         return *static_cast<const T*>(attr);
@@ -60,25 +58,21 @@ public:
 
     const hipdnn_sdk::data_objects::Node& node() const override
     {
-        throwIfNotValid();
         return *_shallowNode;
     }
 
     const void* attributes() const override
     {
-        throwIfNotValid();
         return _shallowNode->attributes();
     }
 
     hipdnn_sdk::data_objects::NodeAttributes attributesType() const override
     {
-        throwIfNotValid();
         return _shallowNode->attributes_type();
     }
 
     const std::type_info& attributesClassType() const override
     {
-        throwIfNotValid();
         switch(attributesType())
         {
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
@@ -96,9 +90,19 @@ public:
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return typeid(hipdnn_sdk::data_objects::ConvolutionWrwAttributes);
         default:
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Node attributes type is not recognized");
+            throw std::invalid_argument("Node attributes type is not recognized");
         }
+    }
+
+    std::string name() const override
+    {
+        const auto& n = node();
+        return n.name() != nullptr ? n.name()->str() : "";
+    }
+
+    hipdnn_sdk::data_objects::DataType computeDataType() const override
+    {
+        return _shallowNode->compute_data_type();
     }
 
 private:
@@ -106,8 +110,7 @@ private:
     {
         if(!isValid())
         {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Node is null");
+            throw std::invalid_argument("Node is null");
         }
     }
 

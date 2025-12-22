@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -14,6 +14,11 @@ concept InputVectorTransferLimits = requires {
     requires Value.src_vector_dim > 0 && Value.src_scalar_per_vector > 0 &&
                      Value.lds_dst_scalar_per_vector > 0;
 };
+
+// Limits for input and output vector transfer (CK Tile).
+template <auto Value>
+concept TileInputOutputVectorTransferLimits =
+    requires { requires Value.a > 0 && Value.b > 0 && Value.c > 0; };
 
 // Limits for output vector transfer.
 template <auto Value>

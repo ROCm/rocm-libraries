@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -1760,6 +1760,8 @@ struct FastNumericArrayConverter<uint8_t, half_t, N>
 
 struct DynamicUnaryOp
 {
+    static constexpr const char* name = "DynamicUnaryOp";
+
     __host__ __device__ DynamicUnaryOp() = delete;
 
     __host__ __device__ DynamicUnaryOp(const Swish& swish)

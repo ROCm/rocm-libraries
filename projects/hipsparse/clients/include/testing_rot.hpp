@@ -38,7 +38,8 @@
 
 using namespace hipsparse_test;
 
-void testing_rot_bad_arg(void)
+template <typename I, typename T>
+void testing_rot_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
     int64_t size = 100;
@@ -88,14 +89,14 @@ void testing_rot_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_rot(Arguments argus)
+void testing_rot(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
     I size = argus.N;
     I nnz  = argus.nnz;
 
-    T hc_coeff = make_DataType<T>(argus.alpha);
-    T hs_coeff = make_DataType<T>(argus.beta);
+    T hc_coeff = make_DataType<T>(argus.c);
+    T hs_coeff = make_DataType<T>(argus.s);
 
     hipsparseIndexBase_t idxBase = argus.baseA;
 
@@ -118,7 +119,7 @@ hipsparseStatus_t testing_rot(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, size);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
     hipsparseInit<T>(hx_val_1, 1, nnz);
     hipsparseInit<T>(hy_1, 1, size);
 
@@ -245,8 +246,6 @@ hipsparseStatus_t testing_rot(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_ROT_HPP

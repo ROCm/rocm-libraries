@@ -259,7 +259,7 @@ size_t
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us_sync_device(void)
 {
-    hipDeviceSynchronize();
+    THROW_IF_HIP_ERROR(hipDeviceSynchronize());
 
     auto now = std::chrono::steady_clock::now();
     // now.time_since_epoch() is the duration since epoch
@@ -509,7 +509,9 @@ rocblas_local_handle::~rocblas_local_handle()
         rocblas_stream_end_capture();
 
     if(m_memory)
-        (hipFree)(m_memory);
+    {
+        PRINT_IF_HIP_ERROR((hipFree)(m_memory));
+    }
 
     if(m_hipblaslt_env_set)
     {
@@ -526,6 +528,8 @@ void rocblas_local_handle::rocblas_stream_begin_capture()
 
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle, &m_old_stream));
     CHECK_HIP_ERROR(hipStreamSynchronize(m_old_stream));
+
+    m_handle->set_stream_order_memory_allocation(true);
 
     CHECK_HIP_ERROR(hipStreamCreate(&m_graph_stream));
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_graph_stream));
@@ -551,6 +555,8 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_old_stream));
     CHECK_HIP_ERROR(hipStreamDestroy(m_graph_stream));
     m_graph_stream = nullptr;
+
+    m_handle->set_stream_order_memory_allocation(false);
 }
 
 void rocblas_parallel_initialize_thread(int id, size_t& memory_used)

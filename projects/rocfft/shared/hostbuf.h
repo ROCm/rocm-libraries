@@ -34,9 +34,9 @@
 #include <sys/mman.h>
 #endif
 
-struct HOSTBUF_MEM_USAGE
+struct HOSTBUF_MEM_USAGE : public std::runtime_error
 {
-    const std::string msg;
+    using std::runtime_error::runtime_error;
 };
 
 // Simple RAII class for host buffers.  T is the type of pointer that

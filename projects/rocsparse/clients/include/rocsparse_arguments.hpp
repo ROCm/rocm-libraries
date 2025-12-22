@@ -50,6 +50,7 @@ struct Arguments
     rocsparse_int col_block_dimA;
     rocsparse_int row_block_dimB;
     rocsparse_int col_block_dimB;
+    rocsparse_int sell_slice_size;
 
     rocsparse_int dimx;
     rocsparse_int dimy;
@@ -150,6 +151,8 @@ struct Arguments
     double boostvali;
 
     double tolm;
+    double rand_gen_min;
+    double rand_gen_max;
 
     bool graph_test;
     bool skip_reproducibility;
@@ -163,7 +166,8 @@ struct Arguments
     char hardware[32];
     char skip_hardware[32];
 
-    uint32_t req_memory;
+    uint32_t host_memory_gb;
+    uint32_t device_memory_gb;
 
     // Validate input format.
     // rocsparse_gentest.py is expected to conform to this format.
@@ -211,6 +215,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(col_block_dimA);
         ROCSPARSE_FORMAT_CHECK(row_block_dimB);
         ROCSPARSE_FORMAT_CHECK(col_block_dimB);
+        ROCSPARSE_FORMAT_CHECK(sell_slice_size);
         ROCSPARSE_FORMAT_CHECK(dimx);
         ROCSPARSE_FORMAT_CHECK(dimy);
         ROCSPARSE_FORMAT_CHECK(dimz);
@@ -296,6 +301,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(boostval);
         ROCSPARSE_FORMAT_CHECK(boostvali);
         ROCSPARSE_FORMAT_CHECK(tolm);
+        ROCSPARSE_FORMAT_CHECK(rand_gen_min);
+        ROCSPARSE_FORMAT_CHECK(rand_gen_max);
         ROCSPARSE_FORMAT_CHECK(graph_test);
         ROCSPARSE_FORMAT_CHECK(skip_reproducibility);
         ROCSPARSE_FORMAT_CHECK(sparsity_pattern_statistics);
@@ -307,7 +314,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(category);
         ROCSPARSE_FORMAT_CHECK(hardware);
         ROCSPARSE_FORMAT_CHECK(skip_hardware);
-        ROCSPARSE_FORMAT_CHECK(req_memory);
+        ROCSPARSE_FORMAT_CHECK(host_memory_gb);
+        ROCSPARSE_FORMAT_CHECK(device_memory_gb);
     }
 
     template <typename T>
@@ -461,6 +469,7 @@ private:
         print("col_block_dimA", arg.col_block_dimA);
         print("row_block_dimB", arg.row_block_dimB);
         print("col_block_dimB", arg.col_block_dimB);
+        print("sell_slice_size", arg.sell_slice_size);
         print("dim_x", arg.dimx);
         print("dim_y", arg.dimy);
         print("dim_z", arg.dimz);
@@ -514,6 +523,8 @@ private:
         print("boost_val", arg.boostval);
         print("boost_vali", arg.boostvali);
         print("tolm", arg.tolm);
+        print("rand_gen_min", arg.rand_gen_min);
+        print("rand_gen_max", arg.rand_gen_max);
         print("graph_test", arg.graph_test);
         print("skip_reproducibility", arg.skip_reproducibility);
         print("sparsity_pattern_statistics", arg.sparsity_pattern_statistics);
@@ -523,7 +534,8 @@ private:
         print("category", arg.category);
         print("hardware", arg.hardware);
         print("skip_hardware", arg.skip_hardware);
-        print("req_memory", arg.req_memory);
+        print("host_memory_gb", arg.host_memory_gb);
+        print("device_memory_gb", arg.device_memory_gb);
         print("unit_check", arg.unit_check);
         print("timing", arg.timing);
         print("iters", arg.iters);

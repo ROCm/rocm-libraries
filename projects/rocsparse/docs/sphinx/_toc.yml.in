@@ -14,13 +14,13 @@ subtrees:
   entries:
   - file: conceptual/rocsparse-design
     title: rocSPARSE design
+  - file: conceptual/storage-formats-sparse
+    title: Storage formats
 
 - caption: How to
   entries:
   - file: how-to/using-rocsparse
     title: Use rocSPARSE
-  - file: how-to/contribute
-    title: Contribute to rocSPARSE
 
 - caption: Examples
   entries:
@@ -55,3 +55,5 @@ subtrees:
 - caption: About
   entries:
   - file: license
+  - file: contribute
+    title: Contribute to rocSPARSE
