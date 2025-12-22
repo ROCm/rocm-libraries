@@ -1563,7 +1563,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = [
         SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all of LRA1 and the first instance of LRB1"),
         SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the second instance of LRB1"),
-        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete so GRA could begin. Makes sure LRB1 is completed so need for a barrier at 21"),
+        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete so GRA could begin. Makes sure LRB1 is completed so no need for a barrier at 21"),
         SBarrier(comment=""),
         SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for all LR. All of previous GRB (4) and current GRA (6), total of 10 can be outstanding"),
         SBarrier(comment=""),
