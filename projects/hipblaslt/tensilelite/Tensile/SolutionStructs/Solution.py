@@ -384,11 +384,17 @@ class Solution(collections.abc.Mapping):
     # a partial 32b read is required to read the last few elements of a row/col of A/B
     # i.e. ASEM * BPE % 4 != 0. In this case dword/dwordx4 DTL load will
     # zero out the entire partial 32b read and cause accuracy issues.
-    # For TLU = 0 we check AF{0,1}EM instead of ASEM.
-    if (aemA * bpeA) % 4 != 0 or not state["BufferLoad"]:
+    # TLU case, we check AF{0,1}EM instead of ASEM.
+    # TLU + ShiftPtr case, we can use wider global read for TailLoop. Enable Tailloop opt for DTL
+    # (ShiftPtr is default and not set to state["EdgeType"] yet here)
+    # if not (state["ProblemType"]["TLUA"] and state["EdgeType"] == "ShiftPtr") and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
+    if not (state["ProblemType"]["TLUA"]) and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
       state["NonDTLTailLoopA"] = True
-    if (aemB * bpeB) % 4 != 0 or not state["BufferLoad"]:
+      state["tailLoopOptA"] = False
+    # if not (state["ProblemType"]["TLUB"] and state["EdgeType"] == "ShiftPtr") and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
+    if not (state["ProblemType"]["TLUB"]) and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
       state["NonDTLTailLoopB"] = True
+      state["tailLoopOptB"] = False
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
@@ -2531,7 +2537,6 @@ class Solution(collections.abc.Mapping):
       for tc in ['A', 'B']:
         isDtlDoable = Solution.isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason)
         if (not state["DirectToVgpr%s"%tc]) and isDtlDoable:
-          state['tailLoopOpt%s'%tc] = False
           state["DirectToLds%s"%tc] = True
           state["LocalWriteUseSgpr%s"%tc] = True
         elif not isDtlDoable:
