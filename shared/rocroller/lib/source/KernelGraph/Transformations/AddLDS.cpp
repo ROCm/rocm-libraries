@@ -140,7 +140,8 @@ namespace rocRoller
             for(auto tag : graph.coordinates.getNodes<MacroTile>())
             {
                 auto tile = *graph.coordinates.get<MacroTile>(tag);
-                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS)
+                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS
+                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL)
                 {
                     retval.combine(false, concatenate("Tile has LDS memory type: ", tag));
                 }
@@ -158,8 +159,9 @@ namespace rocRoller
             auto [userTag, user] = k.getDimension<User>(opTag);
             auto [tileTag, tile] = k.getDimension<MacroTile>(opTag);
 
-            if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
-                 || tile.memoryType == MemoryType::WAVE_Direct2LDS))
+            if(not(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
+                   || tile.memoryType == MemoryType::WAVE_Direct2LDS
+                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL))
                 return;
 
             rocRoller::Log::getLogger()->debug(
@@ -222,6 +224,8 @@ namespace rocRoller
                     tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::LDS)
                     tile.memoryType = MemoryType::VGPR;
+                if(tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL)
+                    tile.memoryType = MemoryType::WAVE_FROM_GLOBAL;
                 k.coordinates.setElement(tileTag, tile);
 
                 if(!isLoad)
