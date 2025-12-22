@@ -544,7 +544,7 @@ float Col2Im3dGPU(const Handle& handle,
                   const uint32_t in_h,
                   const uint32_t in_w,
                   Data_t im,
-                  std::size_t im_offset,
+                  const uint64_t im_offset,
                   miopenDataType_t type)
 {
     std::string program_name = "MIOpenCol2Im3d.cpp";
