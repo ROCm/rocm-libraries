@@ -88,6 +88,7 @@ size_t GetIndexMax(miopenIndexType_t index_type)
 }
 
 // Helper function to check if a test case should be included
+// This matches the original ctest filtering logic for Dataset 0
 bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
 {
     // Check 1: Validate dimensions (spt_dim == 2 for 2D pooling)
@@ -125,6 +126,15 @@ bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
     // Check 4: Skip uint8/uint16 max pooling with wsidx=1 in 2D
     if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1 &&
        (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
+    {
+        return false;
+    }
+
+    // Check 5: Skip average pooling with wsidx=0 (workspace index modes are irrelevant for Average)
+    // This matches original ctest behavior: skip to optimize performance, but ensure wsidx=1 is tested
+    if(test_case.wsidx == 0 &&
+       (test_case.mode == miopenPoolingAverage ||
+        test_case.mode == miopenPoolingAverageInclusive))
     {
         return false;
     }
@@ -167,6 +177,14 @@ bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
 std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 {
     std::vector<Pooling2dTestCase> test_cases;
+
+    // Counters to limit non-uint8 index types (matching original ctest behavior)
+    // The original ctest limits these to speed up testing of the default dataset
+    int num_uint16_case           = 0;
+    int num_uint32_case          = 0;
+    int num_uint32_case_imgidx    = 0;
+    int num_uint64_case           = 0;
+    int num_uint64_case_imgidx    = 0;
 
     // Dataset 0: Default dataset (various tensor sizes)
     std::vector<std::vector<int>> dataset0_inputs;
@@ -225,7 +243,84 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
                                     wsidx};
                                 if(ShouldIncludeTestCase(test_case))
                                 {
-                                    test_cases.push_back(test_case);
+                                    // Apply original ctest limits for non-uint8 index types
+                                    // (matching skip_many_configs_with_non_int8_index logic)
+                                    bool should_add = true;
+                                    switch(index_type)
+                                    {
+                                    case miopenIndexUint16:
+                                        // Only test 5 uint16 cases total
+                                        if(num_uint16_case >= 5)
+                                        {
+                                            should_add = false;
+                                        }
+                                        else
+                                        {
+                                            ++num_uint16_case;
+                                        }
+                                        break;
+                                    case miopenIndexUint32:
+                                        // Only test 5 uint32 cases for each wsidx mode
+                                        if(wsidx == 0)
+                                        {
+                                            if(num_uint32_case >= 5)
+                                            {
+                                                should_add = false;
+                                            }
+                                            else
+                                            {
+                                                ++num_uint32_case;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            if(num_uint32_case_imgidx >= 5)
+                                            {
+                                                should_add = false;
+                                            }
+                                            else
+                                            {
+                                                ++num_uint32_case_imgidx;
+                                            }
+                                        }
+                                        break;
+                                    case miopenIndexUint64:
+                                        // Only test 5 uint64 cases for wsidx=0
+                                        // For wsidx=1, limit to 5 cases for 2D (spt_dim == 2)
+                                        if(wsidx == 0)
+                                        {
+                                            if(num_uint64_case >= 5)
+                                            {
+                                                should_add = false;
+                                            }
+                                            else
+                                            {
+                                                ++num_uint64_case;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // For 2D pooling (spt_dim == 2), limit to 5 cases
+                                            if(num_uint64_case_imgidx >= 5)
+                                            {
+                                                should_add = false;
+                                            }
+                                            else
+                                            {
+                                                ++num_uint64_case_imgidx;
+                                            }
+                                        }
+                                        break;
+                                    case miopenIndexUint8:
+                                    default:
+                                        // No limit for uint8
+                                        break;
+                                    }
+
+                                    if(should_add)
+                                    {
+                                        test_cases.push_back(test_case);
+                                    }
                                 }
                             }
                         }
