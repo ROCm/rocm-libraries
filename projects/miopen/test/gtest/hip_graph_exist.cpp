@@ -45,7 +45,7 @@
 
 namespace fs = std::filesystem;
 
-class ConvHipGraphTest : public ::testing::Test
+class GPU_HipGraphExist_NONE : public ::testing::Test
 {
 protected:
     std::string temp_dir;
@@ -317,7 +317,7 @@ protected:
     }
 };
 
-TEST_F(ConvHipGraphTest, VerifyConvHipGraphCreationWithRocprof)
+TEST_F(GPU_HipGraphExist_NONE, VerifyConvHipGraphCreationWithRocprof)
 {
     RunHipGraphTest("conv",
                     "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
@@ -325,20 +325,20 @@ TEST_F(ConvHipGraphTest, VerifyConvHipGraphCreationWithRocprof)
                     "conv_hip_graph");
 }
 
-TEST_F(ConvHipGraphTest, VerifyActivationHipGraphCreationWithRocprof)
+TEST_F(GPU_HipGraphExist_NONE, VerifyActivationHipGraphCreationWithRocprof)
 {
     RunHipGraphTest("activ",
                     "-n 100 -c 3 -H 32 -W 32 -m 3 -A 1 -B 1 -G 1 -F 0 -i 10 -V 1 -t 1",
                     "activ_hip_graph");
 }
 
-TEST_F(ConvHipGraphTest, VerifyBatchNormHipGraphCreationWithRocprof)
+TEST_F(GPU_HipGraphExist_NONE, VerifyBatchNormHipGraphCreationWithRocprof)
 {
     RunHipGraphTest(
         "bnorm", "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1", "bnorm_hip_graph");
 }
 
-TEST_F(ConvHipGraphTest, VerifyHipGraphNotCreatedWithoutFlag)
+TEST_F(GPU_HipGraphExist_NONE, VerifyHipGraphNotCreatedWithoutFlag)
 {
     // This test verifies that HIP Graph is NOT created when the flag is disabled
     // Skip test if rocprof is not available
