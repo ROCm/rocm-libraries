@@ -125,6 +125,8 @@ namespace TensileLite
                 iot::mapRequired(io, "CUOccupancy", s.CUOccupancy);
                 iot::mapRequired(io, "PrefetchGlobalRead", s.PrefetchGlobalRead);
                 iot::mapRequired(io, "MathClocksUnrolledLoop", s.MathClocksUnrolledLoop);
+                iot::mapRequired(io, "BankConflictMaxA", s.BankConflictMaxA);
+                iot::mapRequired(io, "BankConflictMaxB", s.BankConflictMaxB);
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);

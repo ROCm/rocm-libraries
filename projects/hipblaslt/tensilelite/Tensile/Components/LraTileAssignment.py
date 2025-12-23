@@ -143,7 +143,264 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         writer.vgprPool.checkIn(kReg)
         writer.vgprPool.checkIn(tmpVgpr)
 
+        # Analyze LDS Bank Conflicts
+        try:
+            result = self.analyzeLdsBankConflicts(writer, kernel, tP)
+            
+            # Store bank conflict metric in kernel (similar to MathClocksUnrolledLoop)
+            # BankConflictMax: ratio of max usage to average usage
+            # 1.0 = perfect uniform distribution, >1.0 = some banks are overused
+            tc = tP["tensorChar"]
+            if result['avg_bank_usage'] > 0:
+                bank_conflict_ratio = result['max_bank_usage'] / result['avg_bank_usage']
+                # Sanity check: ratio should never be less than 1.0 (max >= avg)
+                assert bank_conflict_ratio >= 1.0 - 1e-6, \
+                    f"BankConflictMax calculation error: ratio={bank_conflict_ratio:.6f} < 1.0 " \
+                    f"(max={result['max_bank_usage']}, avg={result['avg_bank_usage']:.2f})"
+            else:
+                bank_conflict_ratio = 1.0
+            kernel[f"BankConflictMax{tc}"] = bank_conflict_ratio
+            
+    
+        except Exception as e:
+            # Don't break compilation if analysis fails
+            # Set default value if analysis fails
+            kernel[f"BankConflictMax{tP['tensorChar']}"] = 1.0
+        
+        
+
         return module
+
+    def analyzeLdsBankConflicts(self, writer, kernel, tP, isDTVAB=False):
+        """
+        Analyze LDS bank conflicts for local read addresses.
+        This function EXACTLY mirrors LraTileAssignmentCode calculation logic.
+        Can access writer to get perpStride and permBlock.
+        
+        Args:
+            writer: KernelWriter instance
+            kernel: Kernel configuration dictionary
+            tP: Tensor parameters (tPA or tPB)
+        
+        Returns:
+            Dictionary with conflict analysis results
+        """
+        # === BEGIN: Copy ALL parameter setup from LraTileAssignmentCode ===
+        
+        enableLDSTr = tP.get("enableLDSTr", False)
+        tc = tP["tensorChar"]
+        tile01 = tP["tile01Idx"]
+        waveWidth = writer.states.kernel["WavefrontSize"]
+        inputPerThread = kernel["LocalReadVectorWidth"] if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
+        
+        # Handle Sparse
+        if kernel["ProblemType"]["Sparse"]:
+            if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]):
+                inputPerThread = inputPerThread // 2
+            elif tP["isM"]:
+                inputPerThread = inputPerThread // 8
+        
+        LdsPad = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
+        
+        # Parameters for get each type index
+        dividendForKId = kernel["MatrixInstM"] * kernel["MatrixInstB"]
+        num1DBlocks = kernel["MatrixInstBM"] if (tile01 == 0) else kernel["MatrixInstBN"]
+        num1DWaves = kernel["MIWaveGroup"][0] if (tile01 == 0) else kernel["MIWaveGroup"][1]
+        
+        if kernel["SourceSwap"]:
+            dividedForBlkId = kernel["MatrixInstM"] if (tile01 == 0) else (kernel["MatrixInstM"] * kernel["MatrixInstBM"])
+        else:
+            dividedForBlkId = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (tile01 == 0) else kernel["MatrixInstN"]
+        
+        dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
+        vectorWidth = kernel["VectorWidth%s"%tc]
+        if isDTVAB:
+            if tP["tlu"]:
+                vectorWidth = 1
+        # Get perpStride and permBlock from writer
+        abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
+        perpStride = abmatrixinfo.gNLCPerpStride
+        permBlock = abmatrixinfo.gNLCPermBlock
+        
+        # Strider for each type of index
+        umlds = kernel["UnrollMajorLDS%s" % tc]
+        mt = kernel["MacroTile%u" % tile01]
+        
+        if enableLDSTr:
+            strideTile = 4
+        else:
+            strideTile = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
+        
+        strideK = inputPerThread if umlds else (mt + LdsPad) * inputPerThread
+        strideK1 = 0
+        if enableLDSTr:
+            if kernel["UseGeneralizedNLCOne%s"%tc] and perpStride > 1:
+                strideK = 8
+            strideK1 = mt + LdsPad
+        
+        # FIXME SPARSE
+        if kernel["ProblemType"]["Sparse"] != 0:
+            if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() > 16:
+                isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
+                strideK = (inputPerThread if umlds else (mt + LdsPad) * inputPerThread) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] > inputPerThread else 1)
+        # Special case for new F8 MFMA
+        elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32:
+            if umlds:
+                strideK = 16
+            else:
+                strideK = (mt + LdsPad) * 16
+        elif kernel["UseF32XEmulation"] and not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
+            if umlds:
+                strideK = 4
+            else:
+                strideK = (mt + LdsPad) * 4
+        
+        strideBlock = kernel["MatrixInstM"] * strideTile
+        if enableLDSTr:
+            strideWave = kernel["MatrixInstM"] * vectorWidth
+        else:
+            strideWave = kernel["MatrixInstM"] * num1DBlocks * strideTile * vectorWidth
+        
+        # applyVWCalcEarly
+        applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0
+        
+        # === END: Parameter setup ===
+        
+        # Calculate read width in bytes
+        bpeDS = tP["bpeDS"]
+        read_width_bytes = inputPerThread * bpeDS
+        banks_per_thread = read_width_bytes // 4  # 4 bytes per bank
+        
+        # LDS configuration for AMD GPUs
+        num_banks = 32
+        bank_width = 4  # bytes
+        isWmma_v1 = writer.states.asmCaps["HasWMMA_V1"]
+        
+        # === BEGIN: Simulate address calculation for each thread ===
+        bank_map = {}  # bank_idx -> list of thread_ids
+        
+        for tid in range(waveWidth):
+            # "0. thread id in wave: wtid = tid % wavelength(%u)"
+            dividendReg = tid  # "Serial" = tid
+            wtid = dividendReg % waveWidth
+            kReg = wtid
+            dummy = 0
+            
+            # Step 1 - N offset
+            if enableLDSTr:
+                # "1. N offset: nIdx = wtid % 4"
+                tReg = kReg % 4
+                # "1. N offset: nIdx = wtid % MI_M(%d)"
+                sReg = kReg % dividendForKId
+                # "1. thread id in wave: k1Idx = mtid // 16"
+                sReg = sReg // 16
+                # "1. K1 offset: lrK1Offset = k1Idx * mStride(%u)"
+                sReg = sReg * 16  # This should be strideK1
+            else:
+                # "1. N offset: nIdx = wtid % MI_N(%u)"
+                tReg = kReg % kernel["MatrixInstN"]
+            
+            # apply VectorWidth early if needed
+            if applyVWCalcEarly:
+                tReg = tReg * vectorWidth
+                # perpPerm(tReg) - skip for now
+            
+            # "1. N offset: nOffset = nIdx * nStride(%u)"
+            tReg = tReg * strideTile
+            
+            if enableLDSTr:
+                # "1. offset in wave: lrOffset = bnOffset + lrKOffset"
+                tReg = tReg + sReg
+            
+            # Step 2 - Block offset
+            if num1DBlocks > 1:
+                # "2. block offset: bnIdx = wtid / dividedForBlkId(%u)"
+                dummy = kReg // dividedForBlkId
+                # "2. block offset: bnIdx = bnIdx % num1DBlocks(%u)"
+                dummy = dummy % num1DBlocks
+                # "2. block offset: bnOffset = bnIdx * strideBlock(%u)"
+                tReg = tReg + dummy * strideBlock
+            
+            # Step 4 - Apply vector width
+            if not applyVWCalcEarly:
+                tReg = tReg * vectorWidth
+            
+            # Step 5-6 - K (unroll) offset
+            if not isWmma_v1:
+                if (dividendForKId != waveWidth):
+                    if enableLDSTr:
+                        # "5.1 thread id in wave: mtid = wtid % 16"
+                        mReg = kReg % 16
+                        # "5.2 thread id in wave: k1Idx = mtid // 4"
+                        mReg = mReg // 4
+                        
+                    # "5. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))"
+                    kReg = kReg // dividendForKId
+                    
+                    if enableLDSTr:
+                        # "5. K offset: lrKOffset = kIdx * mStride(%u)"
+                        kReg = kReg * strideK
+                        
+                        if perpStride == 1:
+                            # "5.1 K1 offset: lrK1Offset = k1Idx * mStride(%u)"
+                            lrK1Offset = mReg * strideK1
+                            # "5.1 offset in wave: lrOffset = bnOffset + lrKOffset"
+                            kReg = kReg + lrK1Offset
+                        else:
+                            kReg = kReg + mReg
+                            # perpPerm(kReg) - skip
+                            kReg = kReg * strideK1
+                        # "6. offset in wave: lrOffset = bnOffset + lrKOffset"
+                        tReg = tReg + kReg
+                    else:
+                        # "5. K offset: lrKOffset = kIdx * mStride(%u); 6. offset in wave: lrOffset = bnOffset + lrKOffset"
+                        tReg = tReg + kReg * strideK
+            
+            # Step 7 - Wave offset
+            if num1DWaves > 1:
+                # "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)"
+                dummy = dividendReg // dividedForWaveId
+                # "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)"
+                dummy = dummy % num1DWaves
+                # "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset"
+                tReg = tReg + dummy * strideWave
+            
+            # === END: Address calculation ===
+            
+            # Convert to byte address
+            byte_address = tReg * bpeDS
+            
+            # Add LDS padding if enabled
+            if kernel["LdsBlockSizePerPad%s"%tc] != 0 and kernel["LdsPad%s"%tc] != 0:
+                padding = (byte_address // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * bpeDS
+                byte_address = byte_address + padding
+            
+            # Calculate all banks this thread accesses
+            thread_banks = set()
+            for byte_offset in range(0, read_width_bytes, bank_width):
+                addr = byte_address + byte_offset
+                bank_idx = (addr // bank_width) % num_banks
+                thread_banks.add(bank_idx)
+            
+            # Record which threads access which banks
+            for bank_idx in thread_banks:
+                if bank_idx not in bank_map:
+                    bank_map[bank_idx] = []
+                bank_map[bank_idx].append(tid)
+
+        # === Analyze conflicts based on bank usage uniformity ===
+        
+        # Calculate bank usage (how many threads access each bank)
+        bank_usage = [len(bank_map.get(i, [])) for i in range(num_banks)]
+        max_usage = max(bank_usage) if bank_usage else 0
+        
+        # Calculate average of ALL bank usage (including unused banks)
+        avg_usage = sum(bank_usage) / num_banks if num_banks > 0 else 0
+        
+        return {
+            'max_bank_usage': max_usage,
+            'avg_bank_usage': avg_usage,
+        }
 
     def LraTileAssignmentCode(self, writer, kernel, tP, tReg, kReg, tmpVgprRes, dividendReg="Serial", isDTVAB=False):
         module = Module("LraTileAssignmentCode")

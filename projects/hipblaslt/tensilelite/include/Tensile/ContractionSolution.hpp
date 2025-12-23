@@ -158,6 +158,8 @@ namespace TensileLite
         int CUOccupancy            = 0;
         int PrefetchGlobalRead     = 2;
         int MathClocksUnrolledLoop = 0;
+        double BankConflictMaxA    = 1.0;
+        double BankConflictMaxB    = 1.0;
 
         size_t synchronizerSizePerWG = 0;
 

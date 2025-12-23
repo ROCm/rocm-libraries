@@ -944,6 +944,8 @@ class Solution(collections.abc.Mapping):
     # initial info to be exported for solution prediction
     state["CUOccupancy"]            = -1
     state["MathClocksUnrolledLoop"] = 0
+    state["BankConflictMaxA"]       = 1.0
+    state["BankConflictMaxB"]       = 1.0
 
     Solution.assignProblemIndependentDerivedParameters(state, printRejectionReason, isaInfoMap)
 
