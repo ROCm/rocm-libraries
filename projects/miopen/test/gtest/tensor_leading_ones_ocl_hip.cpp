@@ -207,6 +207,9 @@ protected:
 
         network_config += std::to_string(data_type) + "-miopenTensorOpAdd-" +
                           std::to_string(global_threads) + "-" + std::to_string(local_threads);
+        std::cout << "MIOPEN_TYPE=" << miopen::GetDataType(data_type) << '\n';
+        std::cout << "work_per_wg=" << work_per_wg << "  num_wg=" << num_wg << "  bitmap=" << bitmap
+                  << '\n';
     }
 
     void runOCL() // run OCL kernel
@@ -234,17 +237,21 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
+            num_wg,
+            bitmap,
             alpha0,
             alpha1,
             beta,
             0LL, // Aoffset
             0LL, // Boffset
-            0LL, // Coffset
-            num_wg,
-            bitmap);
+            0LL  // Coffset
+        );
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
-
+        std::cout << "OCL:";
+        for(size_t i = 0; i < 16; ++i)
+            std::cout << ' ' << tensC_ocl.data[i];
+        std::cout << '\n';
 #if PERF_ENABLE
         ph.perfTest(handle,
                     kernel_name,
@@ -304,7 +311,10 @@ protected:
             bitmap);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
-
+        std::cout << "HIP:";
+        for(size_t i = 0; i < 16; ++i)
+            std::cout << ' ' << tensC_hip.data[i];
+        std::cout << '\n';
 #if PERF_ENABLE
         ph.perfTest(handle,
                     kernel_name,
