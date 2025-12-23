@@ -130,55 +130,94 @@ struct __numbers<__half>
 {
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __e() noexcept
   {
-    return __half_raw{0x4170u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x4170u};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __log2e() noexcept
   {
-    return __half_raw{0x3dc5u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x3dc5u};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __log10e() noexcept
   {
-    return __half_raw{0x36f3u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x36f3u};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __pi() noexcept
   {
-    return __half_raw{0x4248u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x4248u};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __inv_pi() noexcept
   {
-    return __half_raw{0x3518u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x3518u};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __inv_sqrtpi() noexcept
   {
-    return __half_raw{0x3883u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x3883u};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __ln2() noexcept
   {
-    return __half_raw{0x398cu};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x398cu};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __ln10() noexcept
   {
-    return __half_raw{0x409bu};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x409bu};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __sqrt2() noexcept
   {
-    return __half_raw{0x3da8u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x3da8u};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __sqrt3() noexcept
   {
-    return __half_raw{0x3eeeu};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x3eeeu};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __inv_sqrt3() noexcept
   {
-    return __half_raw{0x389eu};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x389eu};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __egamma() noexcept
   {
-    return __half_raw{0x389eu};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x389eu};
   }
   static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half __phi() noexcept
   {
-    return __half_raw{0x3e79u};
+    // TODO(HIP/AMD): remove this WAR once __half_raw has only the x member
+    // This WAR is necessary as otherwise the data member will be active and the
+    // passed value will be interpreted as a FLOAT16 instead of an unsigned int
+    return __half_raw{.x = 0x3e79u};
   }
 };
 #endif // _LIBCUDACXX_HAS_NVFP16()

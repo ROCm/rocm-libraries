@@ -80,7 +80,13 @@ __host__ __device__ constexpr void test_type()
   if constexpr (!cuda::std::is_same_v<T, __nv_fp8_e8m0>)
 #endif // _CCCL_HAS_NVFP8_E8M0
   {
-    test_isinf(T{}, false);
+    // TODO(HIP/AMD): remove this workaround once we can initialize a half with 0 as a constexpr
+    if constexpr (cuda::std::is_same_v<T, __half>){
+      test_isinf(__half{__half_raw{.x = 0}}, false);
+    }
+    else{
+      test_isinf(T{}, false);
+    }
   }
   test_isinf(cuda::std::numeric_limits<T>::min(), false);
   test_isinf(cuda::std::numeric_limits<T>::max(), false);

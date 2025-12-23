@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // <cmath>
 
 // clang-format off
@@ -59,7 +81,13 @@ __host__ __device__ constexpr void test_type()
   if constexpr (!cuda::std::is_same_v<T, __nv_fp8_e8m0>)
 #endif // _CCCL_HAS_NVFP8_E8M0
   {
-    test_fpclassify(T{}, FP_ZERO);
+    // TODO(HIP/AMD): remove this workaround once we can initialize a half with 0 as a constexpr
+    if constexpr (cuda::std::is_same_v<T, __half>){
+      test_fpclassify(__half{__half_raw{.x = 0}}, FP_ZERO);
+    }
+    else{
+      test_fpclassify(T{}, FP_ZERO);
+    }
   }
   test_fpclassify(cuda::std::numeric_limits<T>::min(), FP_NORMAL);
   test_fpclassify(cuda::std::numeric_limits<T>::max(), FP_NORMAL);
