@@ -357,6 +357,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AddCmdLineArgs()
                          "0",
                          "MIOpen tuning policy (Default=0, or no tuning policy set)",
                          "int");
+    AddHipGraphFlag(inflags);
 
     return miopenStatusSuccess;
 }
@@ -1030,16 +1031,14 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
     auto iters      = inflags.GetValueInt("iter");
     float lowtime   = 100000000.0;
     float avgtime   = 0.;
+    bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
-    for(int i = 0; i < iters; i++)
-    {
-
-        START_TIME
-
+    // Capture the graph for the first iteration (or if not using HIP graph, just execute)
+    int return_code = HipGraphCapture([&]() -> int {
         // if run fwd train
         if(forw == 1)
         { // training only
-            eAF = static_cast<Tref>(1.0) / (static_cast<Tref>(i) + static_cast<Tref>(1.0));
+            eAF = static_cast<Tref>(1.0);
             if(activ_mode == 0)
             {
                 runGPUFwdTrain(epsilon, eAF, alpha, beta);
@@ -1069,6 +1068,17 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
             printf("Batch normalization mode forward GPU selection out of range, skipping.\n");
             return miopenStatusNotImplemented;
         }
+        return miopenStatusSuccess;
+    });
+
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        HipGraphExecute();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1084,12 +1094,21 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
         if(inflags.GetValueStr("time") == "1")
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
         }
     }
+
+    HipGraphFinalize();
 
     if(WALL_CLOCK)
     {
@@ -1319,10 +1338,10 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                                   inflags.GetValueDouble("activ_beta"),
                                   static_cast<double>(0.0));
 
-    for(int i = 0; i < iters; i++)
-    {
-        START_TIME
+    bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
+    // Capture the graph for the first iteration (or if not using HIP graph, just execute)
+    int return_code = HipGraphCapture([&]() -> int {
         if(saveMeanVar)
         {
             if(activ_mode == 0)
@@ -1433,6 +1452,20 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                                                   activ_desc);
             }
         }
+        return miopenStatusSuccess;
+    });
+
+    if(return_code != miopenStatusSuccess)
+    {
+        miopenDestroyActivationDescriptor(activ_desc);
+        return return_code;
+    }
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        HipGraphExecute();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1447,25 +1480,22 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
         if(inflags.GetValueStr("time") == "1")
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
-
-            int in_n, in_c, in_h, in_w;
-            std::tie(in_n, in_c, in_h, in_w) = miopen::tien<4>(in.GetTensor().desc.GetLengths());
-            size_t M                         = in_n * in_c * in_h * in_w;
-            size_t dataSz = (M + 2 * in_c) * miopen::GetTypeSize(in.GetTensor().desc.GetType());
-            float rdCnt   = 2.0;
-            float wrCnt   = 1.0;
-            // layer, flopCnt, reads, writes, GFLOPS, GB/s, timeMs
-            printf("stats: bnormb, 0, %zu, %zu, 0, %f, %f\n",
-                   dataSz,
-                   dataSz,
-                   (rdCnt * dataSz + wrCnt * dataSz) / lowtime / 1e6,
-                   lowtime);
         }
     }
+
+    HipGraphFinalize();
+
     miopenDestroyActivationDescriptor(activ_desc);
 
     if(WALL_CLOCK)

@@ -2274,8 +2274,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
 
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = HipGraphCapture([&]() -> int {
         if(init_output_nan)
         {
             out.FillGpuBufferWithNans(handle, outputTensor);
@@ -2293,21 +2292,36 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
             ws ? ws->GetMem() : nullptr,
             ws_size,
             selected->solution_id);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        HipGraphExecute();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    HipGraphFinalize();
     
     if(wall_enabled)
     {
@@ -2599,12 +2613,12 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuFind()
     ResizeWorkspaceDev(ctx, ws_size);
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = HipGraphCapture([&]() -> int {
         if(init_output_nan)
         {
             din.FillGpuBufferWithNans(handle, inputTensor);
         }
+
         rc = miopenConvolutionBackwardData(GetHandle(),
                                            &alpha,
                                            outputTensor,
@@ -2619,21 +2633,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuFind()
                                            workspace_dev != nullptr ? workspace_dev->GetMem()
                                                                     : nullptr,
                                            ws_size);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        HipGraphExecute();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    HipGraphFinalize();
 
     if(wall_enabled)
     {
@@ -2813,8 +2842,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuFind()
     ResizeWorkspaceDev(ctx, ws_size);
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = HipGraphCapture([&]() -> int {
         if(init_output_nan)
         {
             dwei.FillGpuBufferWithNans(handle, weightTensor);
@@ -2834,21 +2862,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuFind()
                                               workspace_dev != nullptr ? workspace_dev->GetMem()
                                                                        : nullptr,
                                               ws_size);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        HipGraphExecute();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    HipGraphFinalize();
 
     if(wall_enabled)
     {
@@ -3056,8 +3099,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuImmed()
 
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = HipGraphCapture([&]() -> int {
         if(init_output_nan)
         {
             din.FillGpuBufferWithNans(handle, inputTensor);
@@ -3074,21 +3116,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuImmed()
                                                     ws ? ws->GetMem() : nullptr,
                                                     ws_size,
                                                     selected->solution_id);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        HipGraphExecute();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    HipGraphFinalize();
 
     if(wall_enabled)
     {
@@ -3191,8 +3248,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuImmed()
 
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = HipGraphCapture([&]() -> int {
         if(init_output_nan)
         {
             dwei.FillGpuBufferWithNans(handle, weightTensor);
@@ -3209,21 +3265,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuImmed()
                                                        ws ? ws->GetMem() : nullptr,
                                                        ws_size,
                                                        selected->solution_id);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        HipGraphExecute();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    HipGraphFinalize();
 
     if(wall_enabled)
     {

@@ -231,6 +231,7 @@ private:
     int iter       = 0;
 
     miopenDataType_t grad_type;
+    bool use_hip_graph = false;
 };
 
 template <typename Tgpu, typename Tref, typename Tgrad>
@@ -313,6 +314,8 @@ int AdamDriver<Tgpu, Tref, Tgrad>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+
+    AddHipGraphFlag(inflags);
 
     return miopenStatusSuccess;
 }
