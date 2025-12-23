@@ -363,8 +363,7 @@ target_link_libraries(enum_devices PRIVATE hip::host)
 add_custom_command(
     TARGET enum_devices
     POST_BUILD
-    COMMAND enum_devices resources.json
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMAND enum_devices "${CMAKE_BINARY_DIR}/resources.json"
     VERBATIM
 )
 
