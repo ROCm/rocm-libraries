@@ -111,11 +111,6 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels_impl.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SimpleFixture.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SourceMatcher.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Utilities.hpp"
 )

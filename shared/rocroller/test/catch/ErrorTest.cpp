@@ -29,8 +29,6 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
-#include "GenericContextFixture.hpp"
-#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -39,6 +37,8 @@
 
 #include <cctype>
 #include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 
 using namespace rocRoller;
 
@@ -259,33 +259,46 @@ namespace
     {
         return output.find("x = 7") != std::string::npos;
     }
+
+    static void requireDeath(void (*fn)())
+    {
+        pid_t pid = ::fork();
+        REQUIRE(pid >= 0);
+
+        if(pid == 0)
+        {
+            fn();
+            _exit(0);
+        }
+
+        int status = 0;
+        REQUIRE(::waitpid(pid, &status, 0) == pid);
+
+        if(WIFSIGNALED(status))
+            return;
+
+        REQUIRE(WIFEXITED(status));
+        REQUIRE(WEXITSTATUS(status) != 0);
+    }
 }
 
 TEST_CASE("ErrorTest: BaseErrorTest", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     REQUIRE_THROWS_AS(throw Error("Base rocRoller Error"), Error);
 }
 
 TEST_CASE("ErrorTest: BaseFatalErrorTest", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     REQUIRE_THROWS_AS(throw FatalError("Fatal rocRoller Error"), FatalError);
 }
 
 TEST_CASE("ErrorTest: BaseRecoverableErrorTest", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     REQUIRE_THROWS_AS(throw RecoverableError("Recoverable rocRoller Error"), RecoverableError);
 }
 
 TEST_CASE("ErrorTest: BaseFileNameTest", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     REQUIRE(std::string(GetBaseFileName("/absolute/path/to/file.txt"))
             == "/absolute/path/to/file.txt");
 
@@ -307,8 +320,6 @@ TEST_CASE("ErrorTest: BaseFileNameTest", "[utils][error]")
 
 TEST_CASE("ErrorTest: FatalErrorTest", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     int         IntA    = 5;
     int         IntB    = 3;
     std::string message = "FatalError Test";
@@ -349,8 +360,6 @@ TEST_CASE("ErrorTest: FatalErrorTest", "[utils][error]")
 
 TEST_CASE("ErrorTest: RecoverableErrorTest", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     std::string StrA    = "StrA";
     std::string StrB    = "StrB";
     std::string message = "RecoverableError Test";
@@ -379,41 +388,56 @@ TEST_CASE("ErrorTest: RecoverableErrorTest", "[utils][error]")
 
 TEST_CASE("ErrorTest: DontBreakOnThrow", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
     rocRoller::Settings::getInstance()->set(rocRoller::Settings::BreakOnThrow, false);
 
     REQUIRE_THROWS_AS([&] { rocRoller::Throw<rocRoller::FatalError>("Error"); }(),
                       rocRoller::FatalError);
+
+    Settings::reset();
+}
+
+TEST_CASE("ErrorTest: BreakOnThrow", "[utils][error][death]")
+{
+    requireDeath([] {
+        rocRoller::Settings::getInstance()->set(rocRoller::Settings::BreakOnThrow, true);
+        rocRoller::Throw<rocRoller::FatalError>("Error");
+    });
+}
+
+TEST_CASE("ErrorTest: BreakOnAssertFatal", "[utils][error][death]")
+{
+    requireDeath([] {
+        rocRoller::Settings::getInstance()->set(rocRoller::Settings::BreakOnThrow, true);
+        AssertFatal(0 == 1);
+    });
 }
 
 TEST_CASE("ErrorTest: ThrowIncludesSourceLocation", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
     REQUIRE_THROWS_MATCHES(
         Throw<FatalError>("Throw location test"),
         FatalError,
         WhatHasPrefixAndContains<FatalError>("ErrorTest.cpp", "Throw location test"));
+
+    Settings::reset();
 }
 
 TEST_CASE("ErrorTest: ThrowRecoverableIncludesSourceLocation", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
     REQUIRE_THROWS_MATCHES(
         Throw<RecoverableError>("Recoverable throw test"),
         RecoverableError,
         WhatHasPrefixAndContains<RecoverableError>("ErrorTest.cpp", "Recoverable throw test"));
+
+    Settings::reset();
 }
 
 TEST_CASE("ErrorTest: ThrowMultiPieceMessageIncludesSourceLocation", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
     int x = 7;
@@ -431,8 +455,6 @@ TEST_CASE("ErrorTest: ThrowMultiPieceMessageIncludesSourceLocation", "[utils][er
 
 TEST_CASE("ErrorTest: ThrowDoesNotReportErrorHppLocation", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
     REQUIRE_THROWS_MATCHES(Throw<FatalError>("Location sanity check"),
@@ -440,12 +462,12 @@ TEST_CASE("ErrorTest: ThrowDoesNotReportErrorHppLocation", "[utils][error]")
                            WhatHasPrefixAndContains<FatalError>("ErrorTest.cpp",
                                                                 "Location sanity check",
                                                                 /*mustNotContainErrorHpp=*/true));
+
+    Settings::reset();
 }
 
 TEST_CASE("ErrorTest: ThrowReportsHelperCallSiteWhenWrappedInHelper", "[utils][error]")
 {
-    rocRollerTest::SimpleFixture fixture;
-
     Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
     REQUIRE_THROWS_MATCHES(
@@ -454,4 +476,6 @@ TEST_CASE("ErrorTest: ThrowReportsHelperCallSiteWhenWrappedInHelper", "[utils][e
         rocRollerTest::WhatSatisfies<FatalError>(
             &HelperThrowMessageOk,
             "exception what() has ErrorTest.cpp:<line>: and contains 'Helper throw test'"));
+
+    Settings::reset();
 }
