@@ -939,6 +939,10 @@ if(BUILD_TESTING)
     target_compile_definitions(MIOpen PUBLIC $<BUILD_INTERFACE:MIOPEN_BUILD_TESTING>)
 endif()
 
+if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+    target_compile_definitions(MIOpen PRIVATE CK_EXPERIMENTAL_BUILDER)
+endif()
+
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     target_link_libraries(MIOpen PRIVATE frugally-deep::fdeep Eigen3::Eigen)
     if(NOT TARGET nlohmann_json)

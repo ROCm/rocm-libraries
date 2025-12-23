@@ -382,6 +382,16 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
         return {miopenStatusInvalidValue};
 
     ConvSolution result;
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+    result.ck_kernel_desc   = description;
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
+
     result.invoker_factory =
         [ck_args     = CKArgsType{problem},
          sh_conv_ptr = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
@@ -1139,6 +1149,16 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         return {miopenStatusInvalidValue};
     }
 
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+    result.ck_kernel_desc   = description;
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
+
     if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
     {
         auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
@@ -1287,9 +1307,18 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
         return {miopenStatusInvalidValue};
     }
 
+    ConvSolution result;
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string description = (*ptr_iter)->describe()->detailed();
+    result.ck_kernel_desc   = description;
+
+    if(!description.empty())
+    {
+        MIOPEN_LOG_I(description);
+    }
+#endif
     if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
     {
-        ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         miopenAlphaBetaCase_t alpha_beta_case = problem.GetAlphaBetaCase();
         auto ck_args                          = CKArgsType{problem};
@@ -1361,7 +1390,6 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     }
     else
     {
-        ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         result.invoker_factory = [kernel_id   = kernel_id,
                                   split_k     = split_k,
