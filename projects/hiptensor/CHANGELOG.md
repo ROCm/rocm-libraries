@@ -9,6 +9,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Added support for new GPU target gfx1100.
 * Added support for new GPU target gfx1101.
 * Added support for new GPU target gfx1102.
+* Added support for new GPU target gfx1103.
 * Added support for new GPU target gfx1150.
 * Added support for new GPU target gfx1151.
 * Added support for new GPU target gfx1152.
