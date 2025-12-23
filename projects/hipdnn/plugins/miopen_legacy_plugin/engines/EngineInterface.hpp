@@ -5,7 +5,7 @@
 
 #include <stdint.h>
 
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
