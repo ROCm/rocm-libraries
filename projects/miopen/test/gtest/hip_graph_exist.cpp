@@ -60,7 +60,7 @@ protected:
         GetTempPathA(MAX_PATH, temp_path);
         temp_dir = std::string(temp_path) + "miopen_hip_graph_test";
 #else
-        temp_dir = "/tmp/miopen_hip_graph_test";
+        temp_dir    = "/tmp/miopen_hip_graph_test";
 #endif
 
         // Create directory if it doesn't exist
