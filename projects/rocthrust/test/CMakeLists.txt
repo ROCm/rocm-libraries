@@ -363,8 +363,9 @@ target_link_libraries(enum_devices PRIVATE hip::host)
 add_custom_command(
     TARGET enum_devices
     POST_BUILD
-    COMMAND enum_devices ${CMAKE_BINARY_DIR}/resources.jsons
-    COMMENT "Generating resources.json file"
+    COMMAND enum_devices resources.json
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    VERBATIM
 )
 
 # Generate the resource spec file at install time
