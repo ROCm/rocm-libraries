@@ -146,7 +146,7 @@ protected:
             return 0;
         }
 
-        int count       = 0;
+        int count = 0;
         std::string line;
         while(std::getline(file, line))
         {
@@ -161,8 +161,8 @@ protected:
     }
 
     void RunHipGraphTest(const std::string& driver_type,
-                        const std::string& driver_args,
-                        const std::string& test_name)
+                         const std::string& driver_args,
+                         const std::string& test_name)
     {
         // Skip test if rocprof is not available
         std::string rocprof_check = ExecuteCommand(rocprof_cmd + " --version 2>&1");
@@ -181,7 +181,7 @@ protected:
         std::string driver_output = temp_dir + PATH_SEPARATOR + test_name + "_output.txt";
 
         std::ostringstream cmd;
-        
+
         // Change to temp directory first, then run rocprof from there
 #ifdef _WIN32
         cmd << "cd /d \"" << temp_dir << "\" && ";
@@ -201,117 +201,119 @@ protected:
 
         std::cout << "Executing command: " << cmd.str() << std::endl;
 
-    // Execute the command
-    int ret = std::system(cmd.str().c_str());
+        // Execute the command
+        int ret = std::system(cmd.str().c_str());
 
-    // Check if command executed successfully
-    // Note: rocprof may return non-zero even on success, so we check for output files
-    std::cout << "Command return code: " << ret << std::endl;
+        // Check if command executed successfully
+        // Note: rocprof may return non-zero even on success, so we check for output files
+        std::cout << "Command return code: " << ret << std::endl;
 
-    // Look for rocprof output files (rocprof creates files with default names in working dir)
-    // rocprof default output files: results.json, results.hip_stats.csv, etc.
-    std::vector<std::string> possible_trace_files = {
-        temp_dir + PATH_SEPARATOR + "results.json",
-        temp_dir + PATH_SEPARATOR + "results.hip_stats.csv",
-        temp_dir + PATH_SEPARATOR + "results.csv",
-        temp_dir + PATH_SEPARATOR + "hip_api_trace.txt",
-        temp_dir + PATH_SEPARATOR + "results.txt"};
+        // Look for rocprof output files (rocprof creates files with default names in working dir)
+        // rocprof default output files: results.json, results.hip_stats.csv, etc.
+        std::vector<std::string> possible_trace_files = {
+            temp_dir + PATH_SEPARATOR + "results.json",
+            temp_dir + PATH_SEPARATOR + "results.hip_stats.csv",
+            temp_dir + PATH_SEPARATOR + "results.csv",
+            temp_dir + PATH_SEPARATOR + "hip_api_trace.txt",
+            temp_dir + PATH_SEPARATOR + "results.txt"};
 
-    std::string trace_file;
-    
-    // List directory contents for debugging
-    std::cout << "Checking directory: " << temp_dir << std::endl;
-    std::cout << "Directory contents:" << std::endl;
-    for(const auto& entry : fs::directory_iterator(temp_dir))
-    {
-        std::cout << "  " << entry.path().filename().string() << std::endl;
-    }
-    
-    // Find the trace file
-    for(const auto& file : possible_trace_files)
-    {
-        if(fs::exists(file) && fs::file_size(file) > 0)
+        std::string trace_file;
+
+        // List directory contents for debugging
+        std::cout << "Checking directory: " << temp_dir << std::endl;
+        std::cout << "Directory contents:" << std::endl;
+        for(const auto& entry : fs::directory_iterator(temp_dir))
         {
-            trace_file = file;
-            std::cout << "Found trace file: " << trace_file 
-                      << " (size: " << fs::file_size(file) << " bytes)" << std::endl;
-            break;
+            std::cout << "  " << entry.path().filename().string() << std::endl;
         }
-    }
 
-    // If no trace file found, fail with helpful message
-    if(trace_file.empty())
-    {
-        FAIL() << "rocprof did not generate trace file. "
-               << "Expected files like results.json or results.hip_stats.csv in " << temp_dir;
-    }
-
-    // Parse the trace file for HIP Graph API calls
-    // Note: MIOpen uses Stream Capture API, not explicit Graph Construction API
-    int stream_begin_capture_count = CountOccurrences(trace_file, "hipStreamBeginCapture");
-    int stream_end_capture_count   = CountOccurrences(trace_file, "hipStreamEndCapture");
-    int graph_instantiate_count    = CountOccurrences(trace_file, "hipGraphInstantiate");
-    int graph_launch_count         = CountOccurrences(trace_file, "hipGraphLaunch");
-    int graph_destroy_count        = CountOccurrences(trace_file, "hipGraphDestroy");
-
-    // Print results
-    std::cout << "\n=== HIP Graph API Call Summary ===" << std::endl;
-    std::cout << "hipStreamBeginCapture: " << stream_begin_capture_count << std::endl;
-    std::cout << "hipStreamEndCapture:   " << stream_end_capture_count << std::endl;
-    std::cout << "hipGraphInstantiate:   " << graph_instantiate_count << std::endl;
-    std::cout << "hipGraphLaunch:        " << graph_launch_count << std::endl;
-    std::cout << "hipGraphDestroy:       " << graph_destroy_count << std::endl;
-
-    // Verify HIP Graph was created via Stream Capture API
-    EXPECT_GT(stream_begin_capture_count, 0)
-        << "hipStreamBeginCapture not called - HIP Graph capture was not started";
-    EXPECT_GT(stream_end_capture_count, 0)
-        << "hipStreamEndCapture not called - HIP Graph was not created from stream";
-    EXPECT_GT(graph_instantiate_count, 0)
-        << "hipGraphInstantiate not called - HIP Graph was not instantiated";
-    EXPECT_GT(graph_launch_count, 0) << "hipGraphLaunch not called - HIP Graph was not executed";
-
-    // Verify graph was reused (launched multiple times for iterations)
-    // The driver runs with -t 1 (timing enabled) which typically does multiple iterations
-    if(graph_launch_count > 1)
-    {
-        std::cout << "\n✓ Graph reused across " << graph_launch_count << " iterations"
-                  << std::endl;
-    }
-    else
-    {
-        std::cout << "\nNote: Graph launched only once (may be expected for single iteration)"
-                  << std::endl;
-    }
-
-    // Overall success check
-    bool hip_graph_detected = (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
-                                graph_instantiate_count > 0 && graph_launch_count > 0);
-
-    if(hip_graph_detected)
-    {
-        std::cout << "\n✓ SUCCESS: HIP Graph was created and executed" << std::endl;
-    }
-    else
-    {
-        std::cout << "\n✗ FAILED: HIP Graph operations not detected" << std::endl;
-        std::cout << "Expected: hipStreamBeginCapture, hipStreamEndCapture, hipGraphInstantiate, "
-                     "hipGraphLaunch"
-                  << std::endl;
-
-        // Print trace file content for debugging
-        std::cout << "\nTrace file content (first 50 lines):" << std::endl;
-        std::ifstream trace(trace_file);
-        std::string line;
-        int line_count = 0;
-        while(std::getline(trace, line) && line_count++ < 50)
+        // Find the trace file
+        for(const auto& file : possible_trace_files)
         {
-            std::cout << line << std::endl;
+            if(fs::exists(file) && fs::file_size(file) > 0)
+            {
+                trace_file = file;
+                std::cout << "Found trace file: " << trace_file << " (size: " << fs::file_size(file)
+                          << " bytes)" << std::endl;
+                break;
+            }
         }
-    }
 
-        ASSERT_TRUE(hip_graph_detected) << "HIP Graph was not properly created/executed for "
-                                        << driver_type;
+        // If no trace file found, fail with helpful message
+        if(trace_file.empty())
+        {
+            FAIL() << "rocprof did not generate trace file. "
+                   << "Expected files like results.json or results.hip_stats.csv in " << temp_dir;
+        }
+
+        // Parse the trace file for HIP Graph API calls
+        // Note: MIOpen uses Stream Capture API, not explicit Graph Construction API
+        int stream_begin_capture_count = CountOccurrences(trace_file, "hipStreamBeginCapture");
+        int stream_end_capture_count   = CountOccurrences(trace_file, "hipStreamEndCapture");
+        int graph_instantiate_count    = CountOccurrences(trace_file, "hipGraphInstantiate");
+        int graph_launch_count         = CountOccurrences(trace_file, "hipGraphLaunch");
+        int graph_destroy_count        = CountOccurrences(trace_file, "hipGraphDestroy");
+
+        // Print results
+        std::cout << "\n=== HIP Graph API Call Summary ===" << std::endl;
+        std::cout << "hipStreamBeginCapture: " << stream_begin_capture_count << std::endl;
+        std::cout << "hipStreamEndCapture:   " << stream_end_capture_count << std::endl;
+        std::cout << "hipGraphInstantiate:   " << graph_instantiate_count << std::endl;
+        std::cout << "hipGraphLaunch:        " << graph_launch_count << std::endl;
+        std::cout << "hipGraphDestroy:       " << graph_destroy_count << std::endl;
+
+        // Verify HIP Graph was created via Stream Capture API
+        EXPECT_GT(stream_begin_capture_count, 0)
+            << "hipStreamBeginCapture not called - HIP Graph capture was not started";
+        EXPECT_GT(stream_end_capture_count, 0)
+            << "hipStreamEndCapture not called - HIP Graph was not created from stream";
+        EXPECT_GT(graph_instantiate_count, 0)
+            << "hipGraphInstantiate not called - HIP Graph was not instantiated";
+        EXPECT_GT(graph_launch_count, 0)
+            << "hipGraphLaunch not called - HIP Graph was not executed";
+
+        // Verify graph was reused (launched multiple times for iterations)
+        // The driver runs with -t 1 (timing enabled) which typically does multiple iterations
+        if(graph_launch_count > 1)
+        {
+            std::cout << "\n✓ Graph reused across " << graph_launch_count << " iterations"
+                      << std::endl;
+        }
+        else
+        {
+            std::cout << "\nNote: Graph launched only once (may be expected for single iteration)"
+                      << std::endl;
+        }
+
+        // Overall success check
+        bool hip_graph_detected = (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
+                                   graph_instantiate_count > 0 && graph_launch_count > 0);
+
+        if(hip_graph_detected)
+        {
+            std::cout << "\n✓ SUCCESS: HIP Graph was created and executed" << std::endl;
+        }
+        else
+        {
+            std::cout << "\n✗ FAILED: HIP Graph operations not detected" << std::endl;
+            std::cout
+                << "Expected: hipStreamBeginCapture, hipStreamEndCapture, hipGraphInstantiate, "
+                   "hipGraphLaunch"
+                << std::endl;
+
+            // Print trace file content for debugging
+            std::cout << "\nTrace file content (first 50 lines):" << std::endl;
+            std::ifstream trace(trace_file);
+            std::string line;
+            int line_count = 0;
+            while(std::getline(trace, line) && line_count++ < 50)
+            {
+                std::cout << line << std::endl;
+            }
+        }
+
+        ASSERT_TRUE(hip_graph_detected)
+            << "HIP Graph was not properly created/executed for " << driver_type;
     }
 };
 
@@ -332,9 +334,8 @@ TEST_F(ConvHipGraphTest, VerifyActivationHipGraphCreationWithRocprof)
 
 TEST_F(ConvHipGraphTest, VerifyBatchNormHipGraphCreationWithRocprof)
 {
-    RunHipGraphTest("bnorm",
-                    "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1",
-                    "bnorm_hip_graph");
+    RunHipGraphTest(
+        "bnorm", "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1", "bnorm_hip_graph");
 }
 
 TEST_F(ConvHipGraphTest, VerifyHipGraphNotCreatedWithoutFlag)
@@ -355,7 +356,7 @@ TEST_F(ConvHipGraphTest, VerifyHipGraphNotCreatedWithoutFlag)
     std::string driver_output = temp_dir + PATH_SEPARATOR + "driver_no_graph_output.txt";
 
     std::ostringstream cmd;
-    
+
     // Change to temp directory first, then run rocprof from there
 #ifdef _WIN32
     cmd << "cd /d \"" << temp_dir << "\" && ";
@@ -416,13 +417,10 @@ TEST_F(ConvHipGraphTest, VerifyHipGraphNotCreatedWithoutFlag)
         << "hipStreamBeginCapture was called even though --use_hip_graph 0";
     EXPECT_EQ(stream_end_capture_count, 0)
         << "hipStreamEndCapture was called even though --use_hip_graph 0";
-    EXPECT_EQ(graph_launch_count, 0)
-        << "hipGraphLaunch was called even though --use_hip_graph 0";
+    EXPECT_EQ(graph_launch_count, 0) << "hipGraphLaunch was called even though --use_hip_graph 0";
 
-    if(stream_begin_capture_count == 0 && stream_end_capture_count == 0 &&
-       graph_launch_count == 0)
+    if(stream_begin_capture_count == 0 && stream_end_capture_count == 0 && graph_launch_count == 0)
     {
-        std::cout << "\n✓ SUCCESS: HIP Graph correctly NOT used when flag is disabled"
-                  << std::endl;
+        std::cout << "\n✓ SUCCESS: HIP Graph correctly NOT used when flag is disabled" << std::endl;
     }
 }
