@@ -24,10 +24,10 @@
 
 from rocisa.code import Module
 from rocisa.container import DSModifiers, vgpr, sgpr, SDWAModifiers, VOP3PModifiers, ContinuousRegister
-from rocisa.enum import SelectBit
+from rocisa.enum import SelectBit, InstType
 from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
                             VMovB32, VMovB64,VLShiftRightB32, VCvtPkFP8toF32, VCvtF32toF16, VCvtFP8toF32,VCvtScaleFP8toF16,VCvtScalePkFP8toF16, \
-                            VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, SNop, VSubF32, VSwapB32
+                            VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, SNop, VSubF32, VSwapB32, MFMAInstruction
 
 from ..Component import LocalRead
 
@@ -407,29 +407,41 @@ class LocalReadMFMA(LocalRead):
                                     vHi0 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + baseValuiIdx))
                                     vHi1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + baseValuiIdx))
 
-                                    # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
-                                    if kernel["UseDot2F32XEmulation"]:
-                                        packCodeT.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
-                                        packCodeT.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vHi0))
+                                    if kernel["UseMFMAF32XEmulation"]:
+                                        vTBase = str(v0t.regName)
+                                        vHiBase = str(vHi0.regName)
+                                        idMat = vgpr(writer.states.startVgprIdentityMatrix,2)
+                                        tmpDelay = writer.vgprPool.checkOut(1)
+                                        # We use a single MFMA 4x4x4_16b to perform 4 `vT - vHi` operations. 
+                                        # - A is set to negative identity matrix
+                                        # - no need for DPP as B has the same layout as C & D
+                                        packCodeT.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[4,4,4,16], mfma1k=False,acc=vgpr(vTBase,4), a=idMat, b=vgpr(vHiBase,2), acc2=vgpr(vTBase,4), 
+                                        comment="Calculate low bits for TF32 emulation"))
+                                        writer.vgprPool.checkIn(tmpDelay)
                                     else:
-                                        packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, comment="begin"+str(valuiIdx)))
-                                        packCodeT.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmp)))
-                                        packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, vgprMask=None, vi=1))
-                                        packCodeT.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmp)))
+                                        # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
+                                        if kernel["UseDot2F32XEmulation"]:
+                                            packCodeT.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
+                                            packCodeT.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vHi0))
+                                        else:
+                                            packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, comment="begin"+str(valuiIdx)))
+                                            packCodeT.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmp)))
+                                            packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, vgprMask=None, vi=1))
+                                            packCodeT.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmp)))
 
-                                    if kernel["UseDot2F32XEmulation"]:
-                                        packCodeT.add(VDot2CF32BF16(dst=v2t, src0=hex(0x8000bf80), src1=vHi1))
-                                    else:
-                                        packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi1))
-                                        packCodeT.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
+                                        if kernel["UseDot2F32XEmulation"]:
+                                            packCodeT.add(VDot2CF32BF16(dst=v2t, src0=hex(0x8000bf80), src1=vHi1))
+                                        else:
+                                            packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi1))
+                                            packCodeT.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
 
-                                    # We use cvt+sub pair since dot2 requires adding 4 wait states.
-                                    packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
-                                    packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
+                                        # We use cvt+sub pair since dot2 requires adding 4 wait states.
+                                        packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
+                                        packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
 
-                                    if kernel["UseDot2F32XEmulation"]:
-                                        packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
-                                        packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
+                                        if kernel["UseDot2F32XEmulation"]:
+                                            packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
+                                            packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
 
                                     for val in tmpvgpr:
                                         writer.vgprPool.checkIn(val)
@@ -453,6 +465,9 @@ class LocalReadMFMA(LocalRead):
                                         v5 = vgpr("Valu%s_X%u_I%u+%u+5"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v6 = vgpr("Valu%s_X%u_I%u+%u+6"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v7 = vgpr("Valu%s_X%u_I%u+%u+7"%(tc, bufferIdx, iui, baseValuiIdx))
+                                        if kernel["UseMFMAF32XEmulation"]:
+                                            # 5 wait states needed before the following CVT instructions
+                                            packCodeT.add(SNop(waitState = 4))
                                         packCodeT.add(VCvtPkF32toBF16(dst=v7, src0=v6, src1=v7, comment="pack final begin"))
                                         packCodeT.add(VCvtPkF32toBF16(dst=v6, src0=v4, src1=v5))
                                         packCodeT.add(VCvtPkF32toBF16(dst=v5, src0=v2, src1=v3))
