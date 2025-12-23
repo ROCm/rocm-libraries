@@ -32,6 +32,7 @@
 #include <tuple>
 #include <vector>
 #include <algorithm>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
@@ -1103,35 +1104,6 @@ public:
         std::cout << "  Excess Kurtosis: " << actual_excess_kurtosis 
                   << " (tolerance: ±" << excess_kurtosis_tolerance << ")\n";
         std::cout << "  Result: " << (normality_result ? "PASS" : "FAIL") << "\n";
-        
-            // Inside testForDataType(), after generating data, add:
-
-// Check if this is ocp_e2m3_mxfp6 and use debug version
-if constexpr (std::is_same_v<DataType, ocp_e2m3_mxfp6>) {
-    std::cout << "\n*** Using debug kurtosis for ocp_e2m3_mxfp6 ***\n";
-    
-    // Also print some statistics about the data distribution
-    std::map<double, int> value_counts;
-    for (const auto& v : data) {
-        value_counts[v]++;
-    }
-    
-    std::cout << "Unique values in data: " << value_counts.size() << "\n";
-    std::cout << "Top 10 most frequent values:\n";
-    
-    std::vector<std::pair<double, int>> sorted_counts(value_counts.begin(), value_counts.end());
-    std::sort(sorted_counts.begin(), sorted_counts.end(), 
-              [](const auto& a, const auto& b) { return a.second > b.second; });
-    
-    for (size_t i = 0; i < std::min(sorted_counts.size(), size_t(10)); i++) {
-        std::cout << "  value " << sorted_counts[i].first 
-                  << " appears " << sorted_counts[i].second << " times\n";
-    }
-    
-    // Call debug version
-    double debug_kurtosis = getExcessKurtosisDebug(data, "ocp_e2m3_mxfp6");
-    std::cout << "Debug Excess Kurtosis: " << debug_kurtosis << "\n";
-}
 
         EXPECT_TRUE(normality_result);
     }
