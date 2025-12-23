@@ -43,12 +43,13 @@ void Driver::AddGpuBufferCheckFlag(InputFlags& inflags)
 void Driver::AddHipGraphFlag(InputFlags& inflags)
 {
 #if MIOPEN_BACKEND_HIP
-    inflags.AddInputFlag("use_hip_graph",
-                         'Q',
-                         "0",
-                         "Use HIP stream capture/graph replay for steady-state iterations (HIP only). "
-                         "0: disabled (default), 1: enabled.",
-                         "int");
+    inflags.AddInputFlag(
+        "use_hip_graph",
+        'Q',
+        "0",
+        "Use HIP stream capture/graph replay for steady-state iterations (HIP only). "
+        "0: disabled (default), 1: enabled.",
+        "int");
 #else
     // Suppress unused parameter warning for non-HIP backends
     (void)inflags;
@@ -72,20 +73,25 @@ GPUMem::Check Driver::GetGpuBufferCheck(const InputFlags& inflags) const
 
 #if MIOPEN_BACKEND_HIP
 
-int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr) {
+int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr)
+{
     bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") != 0;
-    if(use_hip_graph) {
+    if(use_hip_graph)
+    {
         hipGraphIsProfilingToRestore = miopen::deref(GetHandle()).IsProfilingEnabled();
         miopenEnableProfiling(GetHandle(), false);
         int rc = HipGraphCaptureCapturing(functPtr);
         return rc;
-    } else {
+    }
+    else
+    {
         hipGraphFuncPtr = functPtr; // just memorize to execute later
         return miopenStatusSuccess;
     }
 }
 
-int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr) {
+int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr)
+{
 
     // // warm up:
     // int rc = functPtr();
@@ -122,14 +128,15 @@ int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr) {
     }
 
     return miopenStatusSuccess;
-
 }
 
-int Driver::HipGraphExecute(){
+int Driver::HipGraphExecute()
+{
 
     bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") == 1;
 
-    if(use_hip_graph) {
+    if(use_hip_graph)
+    {
         hipEventCreate(&hipGraphStartEvent);
         hipEventCreate(&hipGraphStopEvent);
         hipEventRecord(hipGraphStartEvent, q);
@@ -137,32 +144,41 @@ int Driver::HipGraphExecute(){
         hipEventRecord(hipGraphStopEvent, q);
         hipEventSynchronize(hipGraphStopEvent);
         hipEventElapsedTime(&hipGraphLastExecutionTime, hipGraphStartEvent, hipGraphStopEvent);
-        if(he == hipSuccess){
+        if(he == hipSuccess)
+        {
             return miopenStatusSuccess;
-        } else {
+        }
+        else
+        {
             hipGraphExecDestroy(hipGraphExec);
             hipGraphDestroy(hipGraph);
             return miopenStatusInternalError;
         }
-    } else {
+    }
+    else
+    {
         int rc = hipGraphFuncPtr(); // run without HIP graph
         return rc;
     }
 }
 
-void Driver::HipGraphFinalize(){
+void Driver::HipGraphFinalize()
+{
 
     bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") == 1;
 
-    if(use_hip_graph) {
+    if(use_hip_graph)
+    {
         hipStreamSynchronize(q);
         hipGraphExecDestroy(hipGraphExec);
         hipGraphDestroy(hipGraph);
-        if(hipGraphStartEvent != nullptr) {
+        if(hipGraphStartEvent != nullptr)
+        {
             hipEventDestroy(hipGraphStartEvent);
             hipGraphStartEvent = nullptr;
         }
-        if(hipGraphStopEvent != nullptr) {
+        if(hipGraphStopEvent != nullptr)
+        {
             hipEventDestroy(hipGraphStopEvent);
             hipGraphStopEvent = nullptr;
         }

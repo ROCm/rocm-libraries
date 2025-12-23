@@ -86,7 +86,7 @@ struct GPUMem
     };
 
 #if MIOPEN_BACKEND_OPENCL
-    GPUMem(){};
+    GPUMem() {};
     GPUMem(cl_context& ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
         : sz(psz), data_sz(pdata_sz)
     {
@@ -113,7 +113,7 @@ struct GPUMem
 
 #elif MIOPEN_BACKEND_HIP
 
-    GPUMem(){};
+    GPUMem() {};
     GPUMem(uint32_t ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
         : _ctx(ctx), sz(psz), data_sz(pdata_sz), check(ch)
     {
@@ -532,13 +532,13 @@ public:
     cl_command_queue& GetStream() { return q; }
 #elif MIOPEN_BACKEND_HIP
     hipStream_t& GetStream() { return q; }
-    using hipGraphFuncPtrType = std::function<int()>;
-    hipGraph_t hipGraph = nullptr;
+    using hipGraphFuncPtrType   = std::function<int()>;
+    hipGraph_t hipGraph         = nullptr;
     hipGraphExec_t hipGraphExec = nullptr;
     hipGraphFuncPtrType hipGraphFuncPtr;
     bool hipGraphIsProfilingToRestore;
-    hipEvent_t hipGraphStartEvent = nullptr;
-    hipEvent_t hipGraphStopEvent = nullptr;
+    hipEvent_t hipGraphStartEvent   = nullptr;
+    hipEvent_t hipGraphStopEvent    = nullptr;
     float hipGraphLastExecutionTime = 0.0f;
     int HipGraphCapture(hipGraphFuncPtrType functPtr);
     int HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr);
