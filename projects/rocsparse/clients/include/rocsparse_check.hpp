@@ -45,6 +45,12 @@ struct default_tolerance<_Float16>
 };
 
 template <>
+struct default_tolerance<rocsparse_bfloat16>
+{
+    static inline const rocsparse_bfloat16 value = 1.0e-2f;
+};
+
+template <>
 struct default_tolerance<float>
 {
     static constexpr float value = 1.0e-3f;
