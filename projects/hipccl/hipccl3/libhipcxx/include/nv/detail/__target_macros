@@ -152,6 +152,9 @@
 #  if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) 
 #    define _NV_TARGET_IS_HOST   0
 #    define _NV_TARGET_IS_DEVICE 1
+// NOTE(HIP/AMD): all supported AMD architectures should support at least
+// all hardware features that are supported up to sm_6X
+#    define _NV_TARGET_VAL 650
 #  else
 #    define _NV_TARGET_IS_HOST   1
 #    define _NV_TARGET_IS_DEVICE 0
