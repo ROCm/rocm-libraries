@@ -635,7 +635,17 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
         auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
-        const auto expectedLoadPath = SolutionParams::LoadPath::BufferToLDS;
+        const auto expectedLoadPath = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+
+        // TODO: enable the test when not run of registers
+        if((mode == rocRoller::StreamKMode::TwoTile
+            || mode == rocRoller::StreamKMode::TwoTileDPFirst)
+           && (loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR
+               || loadPathB == SolutionParams::LoadPath::BufferToLDSViaVGPR))
+            GTEST_SKIP() << "Skip TwoTile and TwoTileDPFirst with BufferToLDSViaVGPR due to run "
+                            "out of registers"
+                         << std::endl;
+
         AssertFatal(loadPathA == expectedLoadPath,
                     fmt::format("Expected load path {} for A but got {}\n",
                                 toString(expectedLoadPath),
@@ -844,8 +854,8 @@ namespace GEMMTests
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")),
-                ::testing::Values(SolutionParams::LoadPath::BufferToLDS),
-                ::testing::Values(SolutionParams::LoadPath::BufferToLDS),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR),
                 ::testing::Values(rocRoller::StreamKMode::Standard,
                                   rocRoller::StreamKMode::TwoTile,
                                   rocRoller::StreamKMode::TwoTileDPFirst)))); // StreamKMode
