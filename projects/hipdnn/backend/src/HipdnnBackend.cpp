@@ -75,7 +75,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
 
         delete handle;
 
-        LOG_API_SUCCESS(apiName, "handle destroyed");
+        LOG_API_SUCCESS(apiName, "handle destroyed", "");
     });
 }
 
@@ -130,7 +130,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
         hipdnn_backend::DescriptorFactory::destroy(descriptor);
 
-        LOG_API_SUCCESS(apiName, "descriptor destroyed");
+        LOG_API_SUCCESS(apiName, "descriptor destroyed", "");
     });
 }
 
