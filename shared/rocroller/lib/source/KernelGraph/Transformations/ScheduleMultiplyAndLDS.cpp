@@ -729,9 +729,9 @@ namespace rocRoller::KernelGraph
             auto chainSets
                 = identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains)});
 
-            AssertFatal(chainSets.size() == multiplyCoordTypes.size(),
-                        ShowValue(chainSets.size()),
-                        ShowValue(multiplyCoordTypes.size()));
+            // TODO: Generalize this?
+            if(chainSets.size() != multiplyCoordTypes.size())
+                return {};
 
             std::vector<ParallelChainSet> rv;
 
