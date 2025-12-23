@@ -5,8 +5,8 @@
 
 #include "BackendDescriptor.hpp"
 #include <flatbuffers/detached_buffer.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <memory>
 #include <vector>
 
@@ -16,7 +16,7 @@ namespace hipdnn_backend
 class GraphDescriptor : public HipdnnBackendDescriptorImpl<GraphDescriptor>
 {
 private:
-    std::unique_ptr<hipdnn_sdk::data_objects::GraphT> _graph;
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> _graph;
     hipdnnHandle_t _handle = nullptr;
     mutable flatbuffers::DetachedBuffer _graphSerializedBuffer;
 

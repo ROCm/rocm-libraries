@@ -442,7 +442,7 @@ public:
 
         flatbuffers::FlatBufferBuilder builder;
 
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
             tensorAttributes;
         for(auto& tensor : allTensors)
         {
@@ -452,7 +452,7 @@ public:
             }
         }
 
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
         for(auto& node : _sub_nodes)
         {
             if(node)
@@ -460,7 +460,7 @@ public:
                 nodes.emplace_back(node->pack_node(builder));
             }
         }
-        auto graph = hipdnn_sdk::data_objects::CreateGraphDirect(
+        auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
             builder,
             graph_attributes.get_name().c_str(),
             toSdkType(graph_attributes.get_compute_data_type()),

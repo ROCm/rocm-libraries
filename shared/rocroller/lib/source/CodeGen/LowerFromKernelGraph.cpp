@@ -665,16 +665,20 @@ namespace rocRoller
                         }
 
                         Log::debug("  immediate: count {}", assign.valueCount);
+
                         if(assign.regType == Register::Type::Accumulator
                            || assign.regType == Register::Type::Vector)
                         {
+                            auto const& typeInfo              = DataTypeInfo::Get(varType);
+                            int         physicalRegisterCount = valueCount * typeInfo.registerCount;
+
                             dest = m_context->registerTagManager()->getRegister(
                                 dimTag,
                                 assign.regType,
                                 varType,
                                 valueCount,
                                 Register::AllocationOptions{.contiguousChunkWidth
-                                                            = static_cast<int>(valueCount)});
+                                                            = physicalRegisterCount});
                         }
                         else
                         {
@@ -728,8 +732,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci)
             {
-                co_yield m_loadStoreTileGenerator.genComputeIndex(
-                    tag, ci, m_graph->buildTransformer(tag));
+                co_yield Instruction::Comment(concatenate("ComputeIndex ", tag));
             }
 
             Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)

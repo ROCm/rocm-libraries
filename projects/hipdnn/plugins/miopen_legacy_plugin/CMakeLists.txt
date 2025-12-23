@@ -70,7 +70,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
     find_package(hip REQUIRED)
-    find_package(hipdnn_sdk CONFIG REQUIRED)
+    find_package(hipdnn_data_sdk CONFIG REQUIRED)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 
     # Setup testing dependencies & tests for standalone build
@@ -127,7 +127,7 @@ target_include_directories(miopen_legacy_plugin_private PUBLIC ${CMAKE_CURRENT_S
 
 if(WIN32)
     # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
-    # when consuming the hipdnn_sdk.  We need to clear these options Refer to issue:
+    # when consuming the hipdnn_data_sdk.  We need to clear these options Refer to issue:
     # https://github.com/ROCm/TheRock/issues/2003
 
     if(TARGET spdlog::spdlog_header_only)
@@ -143,7 +143,7 @@ if(WIN32)
     endif()
 endif()
 
-target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
