@@ -1,8 +1,10 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+option(BUILD_PLUGIN_AS_DEPENDENCY "Build miopenplugin as a dependency of hipDNN" OFF)
+
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    message(STATUS "Building miopen legacy plugin standalone")
+    message(STATUS "Building miopenplugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
 
@@ -12,7 +14,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
     set(MIOPEN_LEGACY_PLUGIN "0.0.1")
-    project(hipDNN VERSION ${MIOPEN_LEGACY_PLUGIN} LANGUAGES CXX)
+    project(miopenplugin VERSION ${MIOPEN_LEGACY_PLUGIN} LANGUAGES CXX)
 
     if(NOT WIN32)
         # Only set if not already specified by user
@@ -39,11 +41,11 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     )
 
     # Enable testing for standalone build
-    option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
+    option(MIOPENPLUGIN_SKIP_TESTS "Skip building tests" OFF)
 
     list(
         PREPEND
-        HIPDNN_WARNING_COMPILE_OPTIONS
+        MIOPENPLUGIN_WARNING_COMPILE_OPTIONS
         -Werror # Treat all warnings as errors
         -Wall # Enable most common warnings
         -Wextra # Enable additional warnings not covered by -Wall
@@ -78,7 +80,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     include(Tests)
 
 else()
-    message(STATUS "Building miopen legacy plugin as a dependency")
+    message(STATUS "Building miopenplugin as a dependency")
 endif()
 
 if(WIN32)
@@ -144,7 +146,7 @@ if(WIN32)
 endif()
 
 target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
-target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(miopen_legacy_plugin_private PRIVATE ${MIOPENPLUGIN_WARNING_COMPILE_OPTIONS})
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_private)
@@ -156,7 +158,7 @@ target_link_libraries(miopen_legacy_plugin PRIVATE miopen_legacy_plugin_private)
 target_link_libraries(
     miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
 ) # Hide symbols from linked static libs
-target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(miopen_legacy_plugin PRIVATE ${MIOPENPLUGIN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     miopen_legacy_plugin
     PROPERTIES CXX_VISIBILITY_PRESET hidden
@@ -172,7 +174,7 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin)
 endif()
 
-if(NOT HIP_DNN_SKIP_TESTS)
+if(NOT MIOPENPLUGIN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 

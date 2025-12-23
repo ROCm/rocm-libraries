@@ -23,7 +23,7 @@ add_executable(
     IntegrationGpuConvBackwardWeights.cpp
 )
 
-target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(miopen_plugin_integration_test PRIVATE ${MIOPENPLUGIN_WARNING_COMPILE_OPTIONS})
 
 # To use the build tree plugin, we use the path relative to the test binary instead of the installed
 # libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk

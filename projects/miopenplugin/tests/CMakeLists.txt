@@ -39,7 +39,7 @@ add_executable(
     TestMiopenUtils.cpp
 )
 
-target_compile_options(miopen_legacy_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(miopen_legacy_plugin_tests PRIVATE ${MIOPENPLUGIN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
     miopen_legacy_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host
