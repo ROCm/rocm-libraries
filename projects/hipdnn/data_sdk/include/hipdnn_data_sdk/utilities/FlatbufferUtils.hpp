@@ -90,6 +90,12 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
             return static_cast<TargetType>(static_cast<float>(fp8));
         }
         break;
+    case data_objects::DataType::FP8_E5M2:
+        if(auto val = tensorAttr.value.AsFloat8Value())
+        {
+            return static_cast<TargetType>(val->value());
+        }
+        break;
     case data_objects::DataType::UNSET:
         throw std::runtime_error(std::string(paramName) + " tensor has UNSET data type");
     default:
