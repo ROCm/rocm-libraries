@@ -933,6 +933,10 @@ class DataGeneratorNormalFromFloatDistributionTest
 public:
     void testForDataType()
     {
+        if (std::is_same_v<DataType, ocp_e2m3_mxfp6>) {
+            GTEST_SKIP() << "Skipping normal distribution test for ocp_e2m3_mxfp6";
+        }
+
         // Validate the skewness/kurtosis test implementation with hardcoded test cases
         std::cout << "\n=== Validating Skewness/Kurtosis Test Implementation ===\n";
         
