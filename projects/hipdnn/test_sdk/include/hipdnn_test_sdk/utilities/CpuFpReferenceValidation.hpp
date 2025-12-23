@@ -49,8 +49,9 @@ public:
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
-            T absDiff = std::fabs(implValue - refValue);
-            T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
+            T absDiff = static_cast<T>(std::fabs(implValue - refValue));
+            T threshold
+                = _absoluteTolerance + _relativeTolerance * static_cast<T>(std::fabs(refValue));
 
             if(absDiff > threshold)
             {
