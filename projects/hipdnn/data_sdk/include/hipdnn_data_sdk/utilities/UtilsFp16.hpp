@@ -14,6 +14,43 @@ inline __HOST_DEVICE__ half operator""_h(long double value)
     return {static_cast<float>(value)};
 }
 
+inline __HOST_DEVICE__ half operator-(half a)
+{
+    auto r = static_cast<__half_raw>(a);
+    r.x ^= 0x8000u;
+    return r;
+}
+
+inline __HOST_DEVICE__ bool operator==(half a, half b)
+{
+    return static_cast<__half_raw>(a).x == static_cast<__half_raw>(b).x;
+}
+
+inline __HOST_DEVICE__ bool operator!=(half a, half b)
+{
+    return static_cast<__half_raw>(a).x != static_cast<__half_raw>(b).x;
+}
+
+inline __HOST_DEVICE__ bool operator<(half a, half b)
+{
+    return static_cast<__half_raw>(a).x < static_cast<__half_raw>(b).x;
+}
+
+inline __HOST_DEVICE__ bool operator>(half a, half b)
+{
+    return static_cast<__half_raw>(a).x > static_cast<__half_raw>(b).x;
+}
+
+inline __HOST_DEVICE__ bool operator<=(half a, half b)
+{
+    return static_cast<__half_raw>(a).x <= static_cast<__half_raw>(b).x;
+}
+
+inline __HOST_DEVICE__ bool operator>=(half a, half b)
+{
+    return static_cast<__half_raw>(a).x >= static_cast<__half_raw>(b).x;
+}
+
 namespace hipdnn_data_sdk::utilities::fp16
 {
 
@@ -33,7 +70,7 @@ inline __HOST_DEVICE__ half habs(half num)
 
 inline __HOST_DEVICE__ bool hisnan(__half x)
 {
-    __half_raw hr = x;
+    auto hr = static_cast<__half_raw>(x);
     return (hr.x & 0x7FFFU) > 0x7C00u;
 }
 

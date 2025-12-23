@@ -109,13 +109,13 @@ TEST(TestTensorValueAttributes, PackUnpackHalfValue)
     EXPECT_EQ(fbTensor->value_type(), TensorValue::Float16Value);
     auto hval = fbTensor->value_as_Float16Value();
     ASSERT_NE(hval, nullptr);
-    EXPECT_EQ(hval->value(), 1.0_h);
+    EXPECT_EQ(half(hval->value()), 1.0_h);
 
     auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
     ASSERT_EQ(unpacked->value.type, TensorValue::Float16Value);
     auto* halfVal = unpacked->value.AsFloat16Value();
     ASSERT_NE(halfVal, nullptr);
-    EXPECT_EQ(halfVal->value(), 1.0_h);
+    EXPECT_EQ(half(halfVal->value()), 1.0_h);
 }
 
 TEST(TestTensorValueAttributes, PackUnpackBFloat1Value)

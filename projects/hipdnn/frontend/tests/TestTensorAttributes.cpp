@@ -206,7 +206,8 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::DOUBLE, ErrorCode::OK},
            {DataType::UINT8, ErrorCode::OK},
            {DataType::INT32, ErrorCode::OK},
-           {DataType::INT8, ErrorCode::OK}};
+           {DataType::INT8, ErrorCode::OK},
+           {DataType::FP8_E4M3, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {
