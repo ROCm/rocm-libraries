@@ -4,10 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <MiopenLegacyPlugin.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginGraphTestUtils.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 

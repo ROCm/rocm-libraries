@@ -16,10 +16,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildBatchnormTrainGraph(
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
-        hipdnn_sdk::data_objects::DataType inputDataType,
-        hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-        hipdnn_sdk::data_objects::DataType meanVarianceDataType,
-        hipdnn_sdk::data_objects::DataType computeDataType,
+        hipdnn_data_sdk::data_objects::DataType inputDataType,
+        hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
+        hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
+        hipdnn_data_sdk::data_objects::DataType computeDataType,
         bool useOptionalTensors)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
@@ -49,7 +49,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         .set_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_dim({1})
         .set_stride({1})
-        .set_value(hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
+        .set_value(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
 
     hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_train");
@@ -154,21 +154,21 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildBatchnormFwdInferenceGraph(hipdnn_sdk::data_objects::DataType inputDataType,
-                                    hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-                                    hipdnn_sdk::data_objects::DataType meanVarianceDataType,
-                                    hipdnn_sdk::data_objects::DataType computeDataType,
+    buildBatchnormFwdInferenceGraph(hipdnn_data_sdk::data_objects::DataType inputDataType,
+                                    hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
+                                    hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
+                                    hipdnn_data_sdk::data_objects::DataType computeDataType,
                                     const std::vector<int64_t>& dims,
-                                    const hipdnn_sdk::utilities::TensorLayout& layout,
+                                    const hipdnn_data_sdk::utilities::TensorLayout& layout,
                                     bool isOutputVirtual = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormFwdInferenceTest");
 
-    auto strides = hipdnn_sdk::utilities::generateStrides(dims, layout.strideOrder);
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
-    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
@@ -228,10 +228,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildBatchnormBwdGraph(
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
-        hipdnn_sdk::data_objects::DataType inputDataType,
-        hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-        hipdnn_sdk::data_objects::DataType meanVarianceDataType,
-        hipdnn_sdk::data_objects::DataType computeDataType)
+        hipdnn_data_sdk::data_objects::DataType inputDataType,
+        hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
+        hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
+        hipdnn_data_sdk::data_objects::DataType computeDataType)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormBwdTest");

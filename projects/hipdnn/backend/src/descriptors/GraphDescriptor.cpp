@@ -102,7 +102,7 @@ hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
                       "GraphDescriptor::getSerializedGraph: graph is null");
 
         flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(hipdnn_sdk::data_objects::Graph::Pack(builder, _graph.get()));
+        builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, _graph.get()));
 
         _graphSerializedBuffer = builder.Release();
     }

@@ -37,7 +37,10 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    class GEMMTestLargeMacroTileGPU : public BaseGEMMContextFixture<>
+    // Params are: load A path, load B path
+    class GEMMTestLargeMacroTileGPU
+        : public BaseGEMMContextFixture<
+              std::tuple<SolutionParams::LoadPath, SolutionParams::LoadPath>>
     {
     };
 
@@ -46,6 +49,7 @@ namespace GEMMTests
         // NOTE: This test takes hours to finish
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem problem{.m = 1024, .n = 1024, .k = 256, .macM = 256, .macN = 256};
+        std::tie(problem.loadPathA, problem.loadPathB) = std::get<1>(GetParam());
         basicGEMM<float>(problem);
 
         // To see runtime of kernel generation, compile code with timer enabled and
@@ -67,8 +71,7 @@ namespace GEMMTests
         gemm.macN = 256;
         gemm.macK = 128;
 
-        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        std::tie(gemm.loadPathA, gemm.loadPathB) = std::get<1>(GetParam());
 
         // Use unrollK will significantly increase the kernel generation time.
         // To enable unrollK, maxVGPR has to be increased as well.
@@ -82,6 +85,14 @@ namespace GEMMTests
         // std::cout << TimerPool::summary() << std::endl;
     }
 
-    INSTANTIATE_TEST_SUITE_P(GEMMTestLargeMacroTile, GEMMTestLargeMacroTileGPU, currentGPUISA());
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestLargeMacroTile,
+        GEMMTestLargeMacroTileGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
 } // namespace GEMMTests

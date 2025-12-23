@@ -35,6 +35,7 @@
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
 
@@ -244,11 +245,6 @@ namespace LDSCopyTest
 
         auto k = m_context->kernel();
 
-        k->addArgument(
-            {"a", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
-        k->addArgument(
-            {"result", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-
         k->setKernelDimensions(2);
         auto one = Expression::literal(1u);
         auto workitemCountExpr
@@ -280,7 +276,20 @@ namespace LDSCopyTest
         if(m_context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context));
+        auto command = std::make_shared<rocRoller::Command>();
+        command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},
+                                  Operations::OperationTag(0),
+                                  ArgumentType::Value,
+                                  DataDirection::WriteOnly,
+                                  "result");
+        command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},
+                                  Operations::OperationTag(1),
+                                  ArgumentType::Value,
+                                  DataDirection::ReadOnly,
+                                  "a");
+
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context, command));
+        kgraph = kgraph.transform(std::make_shared<CleanArguments>(m_context, command));
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
