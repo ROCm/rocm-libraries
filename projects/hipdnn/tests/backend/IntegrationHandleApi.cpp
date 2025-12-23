@@ -4,6 +4,22 @@
 #include "hipdnn_backend.h"
 #include <gtest/gtest.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <test_plugins/TestPluginConstants.hpp>
+
+class IntegrationHandleApi : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        const std::array<const char*, 1> paths
+            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override {}
+};
 
 TEST(IntegrationHandleApi, CreateAndDestroy)
 {
