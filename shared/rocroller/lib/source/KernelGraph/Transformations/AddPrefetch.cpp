@@ -633,11 +633,58 @@ namespace rocRoller
 
             auto addLDSPrefetchChains = [&](int u, int pre, int post, bool duplicate) -> int {
                 std::vector<int> prefetchChain;
-                for(auto [_ignore1, _ignore2, chain] : m_prefetchFromLDSChains[forLoop][u])
+
+                std::map<std::tuple<NaryArgument, int>, std::vector<int>> ldsByArgAndSmallK;
+                std::map<NaryArgument, std::set<int>>                     ldsPrefetchValues;
+                for(auto [target, smallk, chain] : m_prefetchFromLDSChains[forLoop][u])
                 {
                     int dchain = duplicate ? duplicateChain(graph, {chain}) : chain;
-                    prefetchChain.push_back(dchain);
+                    AssertFatal(colouring.operationColour.contains(chain), ShowValue(chain));
+                    auto argument = colouring.operationColour.at(chain);
+                    ldsByArgAndSmallK[{argument, smallk}].push_back(dchain);
+                    ldsPrefetchValues[argument].insert(smallk);
                 }
+
+                /*
+                 */
+                auto mixDataAndScale = [&](auto dataArgument, auto scaleArgument) {
+                    auto numDataChains  = ldsByArgAndSmallK[{dataArgument, 0}].size();
+                    auto numScaleChains = ldsByArgAndSmallK[{scaleArgument, 0}].size();
+
+                    // Count unique "smallk" values
+                    int numDataPrefetchValues  = ldsPrefetchValues[dataArgument].size();
+                    int numScalePrefetchValues = ldsPrefetchValues[scaleArgument].size();
+
+                    if(numScaleChains > 0)
+                    {
+                        auto numDataPerScale = numDataChains / numScaleChains;
+
+                        for(int idxScale = 0; idxScale < numScaleChains; ++idxScale)
+                        {
+                            for(int idxData = 0; idxData < numDataPerScale; ++idxData)
+                            {
+                                for(int k = 0; k < numDataPrefetchValues; ++k)
+                                    prefetchChain.push_back(ldsByArgAndSmallK[{
+                                        dataArgument, k}][idxScale * numDataPerScale + idxData]);
+                            }
+
+                            for(int k = 0; k < numScalePrefetchValues; ++k)
+                                prefetchChain.push_back(
+                                    ldsByArgAndSmallK[{scaleArgument, k}][idxScale]);
+                        }
+                    }
+                    else
+                    {
+                        for(int idxData = 0; idxData < numDataPrefetchValues; ++idxData)
+                        {
+                            for(int k = 0; k < numDataPrefetchValues; ++k)
+                                prefetchChain.push_back(
+                                    ldsByArgAndSmallK[{dataArgument, k}][idxData]);
+                        }
+                    }
+                };
+                mixDataAndScale(NaryArgument::RHS, NaryArgument::RHS_SCALE);
+                mixDataAndScale(NaryArgument::LHS, NaryArgument::LHS_SCALE);
 
                 AssertFatal(!prefetchChain.empty());
 
@@ -1324,7 +1371,7 @@ namespace rocRoller
                                loadLDSTileTag,
                                prefetchLDSUnrollValue);
 
-                    auto target = getLDSOperationTarget(k, loadLDSTileTag);
+                    auto [target, direction] = getOperationTarget(loadLDSTileTag, k);
                     m_prefetchFromLDSChains[forLoop][u].insert(
                         {target, prefetchLDSUnrollValue, loadLDSTileChain});
                     m_prefetchUnrollBodyStarts[forLoop][u].erase(loadLDSTileChain);
