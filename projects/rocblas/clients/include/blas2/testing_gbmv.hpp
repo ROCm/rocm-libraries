@@ -267,11 +267,11 @@ void testing_gbmv(const Arguments& arg)
     hy_gold = hy;
 
     // copy data from CPU to device
-    dAb.transfer_from(hAb);
-    dx.transfer_from(hx);
-    dy.transfer_from(hy);
-    d_alpha.transfer_from(halpha);
-    d_beta.transfer_from(hbeta);
+    CHECK_HIP_ERROR(dAb.transfer_from(hAb));
+    CHECK_HIP_ERROR(dx.transfer_from(hx));
+    CHECK_HIP_ERROR(dy.transfer_from(hy));
+    CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+    CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
 
     double cpu_time_used;
     double error_host = 0.0, error_device = 0.0;
@@ -290,12 +290,12 @@ void testing_gbmv(const Arguments& arg)
                 (handle, transA, M, N, KL, KU, &h_alpha, dAb, lda, dx, incx, &h_beta, dy, incy));
             handle.post_test(arg);
 
-            hy.transfer_from(dy);
+            CHECK_HIP_ERROR(hy.transfer_from(dy));
         }
 
         if(arg.pointer_mode_device)
         {
-            dy.transfer_from(hy_gold);
+            CHECK_HIP_ERROR(dy.transfer_from(hy_gold));
 
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
             handle.pre_test(arg);
@@ -308,7 +308,7 @@ void testing_gbmv(const Arguments& arg)
             {
                 HOST_MEMCHECK(host_vector<T>, hy_copy, (dim_y, incy));
                 // copy output from device to CPU
-                hy.transfer_from(dy);
+                CHECK_HIP_ERROR(hy.transfer_from(dy));
 
                 // multi-GPU support
                 int device_id, device_count;
@@ -330,17 +330,17 @@ void testing_gbmv(const Arguments& arg)
                     DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (1));
                     DEVICE_MEMCHECK(device_vector<T>, d_beta_copy, (1));
 
-                    dAb_copy.transfer_from(hAb);
-                    dx_copy.transfer_from(hx);
-                    d_alpha_copy.transfer_from(halpha);
-                    d_beta_copy.transfer_from(hbeta);
+                    CHECK_HIP_ERROR(dAb_copy.transfer_from(hAb));
+                    CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
+                    CHECK_HIP_ERROR(d_alpha_copy.transfer_from(halpha));
+                    CHECK_HIP_ERROR(d_beta_copy.transfer_from(hbeta));
 
                     CHECK_ROCBLAS_ERROR(
                         rocblas_set_pointer_mode(handle_copy, rocblas_pointer_mode_device));
 
                     for(int runs = 0; runs < arg.iters; runs++)
                     {
-                        dy_copy.transfer_from(hy_gold);
+                        CHECK_HIP_ERROR(dy_copy.transfer_from(hy_gold));
                         DAPI_CHECK(rocblas_gbmv_fn,
                                    (handle_copy,
                                     transA,
@@ -357,7 +357,7 @@ void testing_gbmv(const Arguments& arg)
                                     dy_copy,
                                     incy));
                         // copy output from device to CPU
-                        hy_copy.transfer_from(dy_copy);
+                        CHECK_HIP_ERROR(hy_copy.transfer_from(dy_copy));
                         unit_check_general<T>(1, dim_y, incy, hy, hy_copy);
                     }
                 }
@@ -383,7 +383,7 @@ void testing_gbmv(const Arguments& arg)
         if(arg.pointer_mode_device)
         {
             // copy output from device to CPU
-            hy.transfer_from(dy);
+            CHECK_HIP_ERROR(hy.transfer_from(dy));
 
             if(arg.unit_check)
             {

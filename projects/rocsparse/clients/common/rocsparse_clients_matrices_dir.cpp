@@ -25,6 +25,9 @@
 #include "rocsparse_clients_envariables.hpp"
 #include "utility.hpp"
 
+#include <cstdio>
+#include <filesystem>
+
 //
 //
 //
@@ -36,26 +39,43 @@ private:
     bool        m_is_defined{};
     clients_matrices_dir()
     {
+        namespace fs       = std::filesystem;
         this->m_is_defined = rocsparse_clients_envariables::is_defined(
             rocsparse_clients_envariables::MATRICES_DIR);
         if(this->m_is_defined)
         {
             this->m_path
                 = rocsparse_clients_envariables::get(rocsparse_clients_envariables::MATRICES_DIR);
+        }
+
+        fs::path default_path = rocsparse_exepath();
+
+        static constexpr const char* possible_relative_paths[] = {
+            // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
+            "../matrices",
+            // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
+            "../clients/matrices",
+        };
+
+        for(const auto& rel_path : possible_relative_paths)
+        {
+            fs::path test_path = default_path / rel_path;
+            if(fs::exists(test_path))
             {
-                const size_t size = this->m_path.size();
-                if((size > 0) && (this->m_path[size - 1] != '/'))
-                    this->m_path += "/";
+                this->m_default_path = test_path.string() + "/";
+                break;
             }
         }
 
-        this->m_default_path = rocsparse_exepath();
+        if(this->m_default_path.empty())
         {
-            const size_t size = this->m_default_path.size();
-            if((size > 0) && (this->m_default_path[size - 1] != '/'))
-                this->m_default_path += "/";
+            std::cerr << "rocsparse: could not find matrices directory. Please set "
+                         "ROCSPARSE_CLIENTS_MATRICES_DIR "
+                         "environment variable, or use the option --matrices-dir"
+                      << std::endl;
+
+            throw rocsparse_status_internal_error;
         }
-        this->m_default_path += "../matrices/";
     }
 
 public:

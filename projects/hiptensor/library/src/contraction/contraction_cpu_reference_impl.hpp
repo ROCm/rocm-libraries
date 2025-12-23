@@ -34,12 +34,14 @@
 // CK includes
 #include <ck/library/tensor_operation_instance/gpu/contraction_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/contraction_scale.hpp>
+#include <ck/library/utility/host_tensor.hpp>
 #include <ck/tensor_operation/gpu/device/device_contraction_multiple_d.hpp>
 #include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
-#include <host_tensor.hpp>
 
 #include "contraction_meta_traits.hpp"
 #include "contraction_solution.hpp"
+
+using namespace ck;
 
 namespace hiptensor
 {
@@ -632,4 +634,3 @@ namespace hiptensor
     }
 
 } // namespace hiptensor
-

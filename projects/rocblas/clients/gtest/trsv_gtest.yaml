@@ -230,7 +230,6 @@ Tests:
   category: pre_checkin
   function:
         - trsv
-        - trsv_batched
         - trsv_strided_batched
   arguments: *common_args
   matrix_size:
@@ -239,6 +238,21 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
   graph_test: true
+
+  # TODO: see above graph test set, merge below when
+  # windows stack up to date and unified
+- name: trsv_batched_graph_test
+  category: pre_checkin
+  function:
+        - trsv_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:   192, lda:   192, stride_a: 36864 }
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  graph_test: true
+  os_flags: [ LINUX ]
 
 - name: trsv_repeatability_check
   category: stress

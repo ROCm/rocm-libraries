@@ -106,7 +106,7 @@ void testing_nrm2(const Arguments& arg)
 
     // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory, plz follow this practice
     host_vector<T> hx(N, incx);
-    Tr             cpu_result, hipblas_result_host, hipblas_result_device;
+    Tr             cpu_result{0}, hipblas_result_host{0}, hipblas_result_device{0};
 
     device_vector<T>  dx(N, incx);
     device_vector<Tr> d_hipblas_result(1);
@@ -114,7 +114,7 @@ void testing_nrm2(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dx.memcheck());
     CHECK_DEVICE_ALLOCATION(d_hipblas_result.memcheck());
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);

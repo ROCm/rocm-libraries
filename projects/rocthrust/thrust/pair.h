@@ -298,7 +298,7 @@ inline THRUST_HOST_DEVICE pair<T1, T2> make_pair(T1 x, T2 y);
  *  \tparam N This parameter selects the member of interest.
  *  \tparam T A \c pair type of interest.
  */
-template <size_t N, class T>
+template <_THRUST_STD::size_t N, class T>
 struct tuple_element;
 
 /*! This convenience metafunction is included for compatibility with

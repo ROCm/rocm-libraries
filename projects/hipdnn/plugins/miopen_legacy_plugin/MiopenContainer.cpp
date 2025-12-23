@@ -1,7 +1,5 @@
-/*
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
-*/
 
 #include <hipdnn_sdk/logging/Logger.hpp>
 
@@ -33,9 +31,8 @@ MiopenContainer::MiopenContainer()
     auto convPlanBuilder = std::make_unique<MiopenConvPlanBuilder>();
     miopenEngine->addPlanBuilder(std::move(convPlanBuilder));
 
-    // TODO: re-enable after integration tests are added
-    // auto convFwdBiasActivPlanBuilder = std::make_unique<MiopenConvFwdBiasActivPlanBuilder>();
-    // miopenEngine->addPlanBuilder(std::move(convFwdBiasActivPlanBuilder));
+    auto convFwdBiasActivPlanBuilder = std::make_unique<MiopenConvFwdBiasActivPlanBuilder>();
+    miopenEngine->addPlanBuilder(std::move(convFwdBiasActivPlanBuilder));
 
     _engineManager = std::make_unique<EngineManager>();
     _engineManager->addEngine(std::move(miopenEngine));

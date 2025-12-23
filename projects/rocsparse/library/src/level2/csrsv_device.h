@@ -281,9 +281,11 @@ namespace rocsparse
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const T* __restrict__ csr_val,
+                                           int64_t csr_val_inc,
                                            const T* __restrict__ x,
                                            int64_t x_inc,
                                            T* __restrict__ y,
+                                           int64_t y_inc,
                                            int* __restrict__ done_array,
                                            const J* __restrict__ map,
                                            int offset,
@@ -292,14 +294,15 @@ namespace rocsparse
                                            rocsparse_fill_mode  fill_mode,
                                            rocsparse_diag_type  diag_type)
     {
-        int lid = hipThreadIdx_x & (WF_SIZE - 1);
-        int wid = hipThreadIdx_x / WF_SIZE;
+        const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
+        int            wid = hipThreadIdx_x / WF_SIZE;
+
         // Scalarize wid, i.e. move it from a vector register to a scalar register, so all dependent
         // values can be loaded or computed with scalar instructions (idx, row, row_begin...)
         wid = rocsparse::read_first_lane(wid);
 
         // Index into the row map
-        J idx = hipBlockIdx_x * (BLOCKSIZE / WF_SIZE) + wid;
+        const J idx = hipBlockIdx_x * (BLOCKSIZE / WF_SIZE) + wid;
 
         // Shared memory to hold diagonal entry
         __shared__ T diagonal[BLOCKSIZE / WF_SIZE];
@@ -311,11 +314,11 @@ namespace rocsparse
         }
 
         // Get the row this warp will operate on
-        J row = map[idx + offset];
+        const J row = map[idx + offset];
 
         // Current row entry point and exit point
-        I row_begin = csr_row_ptr[row] - idx_base;
-        I row_end   = csr_row_ptr[row + 1] - idx_base;
+        const I row_begin = csr_row_ptr[row] - idx_base;
+        const I row_end   = csr_row_ptr[row + 1] - idx_base;
 
         // Local summation variable.
         T local_sum = static_cast<T>(0);
@@ -329,10 +332,10 @@ namespace rocsparse
         for(I j = row_begin + lid; j < row_end; j += WF_SIZE)
         {
             // Current column this lane operates on
-            J local_col = rocsparse::nontemporal_load(csr_col_ind + j) - idx_base;
+            const J local_col = rocsparse::nontemporal_load(csr_col_ind + j) - idx_base;
 
             // Local value this lane operates with
-            T local_val = rocsparse::nontemporal_load(csr_val + j);
+            T local_val = rocsparse::nontemporal_load(csr_val + j * csr_val_inc);
 
             // Check for numerical zero
             if(local_val == static_cast<T>(0) && local_col == row
@@ -397,7 +400,7 @@ namespace rocsparse
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
             // Local sum computation for each lane
-            local_sum = rocsparse::fma(-local_val, y[local_col], local_sum);
+            local_sum = rocsparse::fma(-local_val, y[local_col * y_inc], local_sum);
         }
 
         // Gather all local sums for each lane
@@ -415,7 +418,7 @@ namespace rocsparse
         if(lid == WF_SIZE - 1)
         {
             // Store the rows result in y
-            rocsparse::nontemporal_store(local_sum, &y[row]);
+            rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
 
             // Mark row as done
             __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);

@@ -4,15 +4,15 @@
 #include "engines/plans/MiopenBatchnormFwdInferencePlan.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace miopen_legacy_plugin;
 
 TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid batchnorm graph
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the batchnorm node and attributes
     const auto& node = graph.getNode(0);
@@ -31,8 +31,8 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
 TEST(TestMiopenBatchnormFwdInferenceParams, InitializesFusedActivationBiasWithAllTensors)
 {
     // Create a fused batchnorm fwd + activation graph
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the two required nodes
     const auto& batchnormInfNode = graph.getNode(0);

@@ -335,7 +335,9 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const auto ptrs = DeviceOpType::GetInstances();
     for(auto& ptr : ptrs)
     {
-        auto split_k = CkSplitkAutoDeduce;
+        // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
+        // The loop then restarts from 1 for the next conv instance.
+        auto split_k = 1;
         do
         {
             if(args.IsSupportedBySplitK(ptr, split_k))
@@ -1467,8 +1469,7 @@ template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
 ConvSolution
 MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& problem,
                                         InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
-                                        const bool use_tf32 = false)
+                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1476,14 +1477,10 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{}, int8_t{});
-        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{}, ck::half_t{});
-        case miopenFloat:
-            if(use_tf32)
-                return invoker_factory_maker_ncdhw(float{}, ck::tf32_t{});
-            else
-                return invoker_factory_maker_ncdhw(float{}, float{});
-        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{}, ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{});
+        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{});
+        case miopenFloat: return invoker_factory_maker_ncdhw(float{});
+        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:
@@ -1499,14 +1496,10 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{}, int8_t{});
-        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{}, ck::half_t{});
-        case miopenFloat:
-            if(use_tf32)
-                return invoker_factory_maker_ndhwc(float{}, ck::tf32_t{});
-            else
-                return invoker_factory_maker_ndhwc(float{}, float{});
-        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{}, ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{});
+        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{});
+        case miopenFloat: return invoker_factory_maker_ndhwc(float{});
+        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:

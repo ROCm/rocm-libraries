@@ -165,6 +165,11 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
+        // TODO: Remove this limitation for CK Wmma instances
+        if(conv_ptr->GetTypeString().find("Wmma") != -1)
+        {
+            return false;
+        }
         auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
         auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
         if(workspace_size != 0)
@@ -175,6 +180,11 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
     {
+        // TODO: Remove this limitation for CK Wmma instances
+        if(conv_ptr->GetTypeString().find("Wmma") != -1)
+        {
+            return false;
+        }
         auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
         auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
         if(workspace_size != 0)
@@ -630,6 +640,10 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(
         return false;
     if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
         return false;
+    // CK support disabled on Navi3 and Navi4 due to missing instances for WRW
+    if(StartsWith(ctx.GetStream().GetDeviceName(), "gfx12") ||
+       StartsWith(ctx.GetStream().GetDeviceName(), "gfx11"))
+        return false;
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
@@ -657,7 +671,7 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryWrwNCHW<2,
                                              false,
@@ -666,7 +680,7 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
                                              miopen::conv::WrWInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryNHWC<false,
                                           DeviceOpGWrwPtrs<T>,

@@ -7,7 +7,7 @@
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp"
 #include "PlanInterface.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <optional>
 
 namespace miopen_legacy_plugin

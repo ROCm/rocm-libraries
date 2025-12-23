@@ -120,6 +120,7 @@ namespace rocRoller::KernelGraph
             OFFSET,
             STRIDE,
             BUFFER,
+            BASEADDRESS,
 
             Count
         };

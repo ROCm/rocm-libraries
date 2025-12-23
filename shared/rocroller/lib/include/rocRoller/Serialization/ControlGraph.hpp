@@ -513,11 +513,6 @@ namespace rocRoller
         {
         };
 
-#ifdef ROCROLLER_USE_YAML_CPP
-        // LLVM serialization defines traits for vector<int>.
-        ROCROLLER_SERIALIZE_VECTOR(true, int);
-#endif
-
         template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::ControlGraph::ControlGraph, IO, Context>
         {

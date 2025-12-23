@@ -98,11 +98,6 @@ ENV PATH="/opt/rr-python-venv/bin:$PATH"
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# Install newer version of npm than is available on apt.
-# This includes diff2html-cli for code coverage report.
-ADD docker/setup-node /tmp
-RUN bash --login -ex /tmp/setup-node install && rm /tmp/setup-node
-
 # HipBLASLt
 RUN apt-get update && apt-get install -y \
     libmsgpack-dev \

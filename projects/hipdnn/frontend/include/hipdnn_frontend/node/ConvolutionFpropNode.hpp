@@ -63,11 +63,6 @@ public:
         // Validate input tensor dimensions and strides
         auto& xDims = x->get_dim();
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionFpropNode: Input tensor dimensions and strides must be set and positive");
-
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
@@ -76,11 +71,6 @@ public:
 
         // Validate weight tensor dimensions and strides
         auto& wDims = w->get_dim();
-
-        HIPDNN_RETURN_IF_FALSE(
-            w->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionFpropNode: Weight tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(
             wDims.size(),
@@ -111,7 +101,6 @@ public:
 
         // Validate output tensor dimensions and strides if they are set
         auto& yDims = y->get_dim();
-        auto& yStrides = y->get_stride();
 
         if(!yDims.empty())
         {
@@ -135,19 +124,6 @@ public:
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionFpropNode: Output tensor channels must match weight "
                                 "tensor output channels");
-
-            HIPDNN_RETURN_IF_FALSE(
-                y->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionFpropNode: Output tensor dimensions must be set and positive");
-        }
-
-        if(!yStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(y->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionFpropNode: Output tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         // Validate spatial parameter counts match spatial dimensions
@@ -207,6 +183,37 @@ public:
                                 0,
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionFpropNode: Post-padding must be non-negative");
+
+            if(!yDims.empty())
+            {
+                auto inputSize = xDims[i + 2];
+                auto kernelSize = wDims[i + 2];
+                auto outputSize = yDims[i + 2];
+
+                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+
+                HIPDNN_RETURN_IF_LT(numerator,
+                                    0,
+                                    ErrorCode::INVALID_VALUE,
+                                    "ConvolutionFpropNode: Input spatial dimension at index "
+                                        + std::to_string(i) + " (" + std::to_string(inputSize)
+                                        + ") is too small for the kernel size ("
+                                        + std::to_string(kernelSize) + ") and dilation ("
+                                        + std::to_string(dilationVal) + ")");
+
+                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+
+                HIPDNN_RETURN_IF_NE(
+                    outputSize,
+                    expectedOutputSize,
+                    ErrorCode::INVALID_VALUE,
+                    "ConvolutionFpropNode: Output tensor spatial dimension at index "
+                        + std::to_string(i) + " (" + std::to_string(outputSize)
+                        + ") does not match expected dimension ("
+                        + std::to_string(expectedOutputSize)
+                        + ") given input dimensions, kernel size, padding, stride, and dilation");
+            }
         }
 
         return {};

@@ -7,9 +7,7 @@
 #include <filesystem>
 #include <string_view>
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 class SharedLibrary
@@ -50,5 +48,4 @@ private:
     hipdnn_backend::platform_utilities::PluginLibHandle _libraryHandle;
 };
 
-} // namespace plugin
-} // hipdnn_backend
+} // namespace hipdnn_backend::plugin

@@ -503,6 +503,22 @@ namespace rocRoller
             DataType destinationType = DataType::None;
         };
 
+        struct Reinterpret : Unary
+        {
+            inline Reinterpret& copyParams(const Reinterpret& other)
+            {
+                destinationType = other.destinationType;
+
+                return *this;
+            }
+
+            constexpr static inline auto Type       = Category::Conversion;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 0;
+
+            DataType destinationType = DataType::None;
+        };
+
         struct LogicalNot : Unary
         {
             constexpr static inline auto Type       = Category::Logical;
@@ -675,6 +691,8 @@ namespace rocRoller
 
         template <DataType DATATYPE>
         ExpressionPtr convert(ExpressionPtr a);
+
+        ExpressionPtr reinterpret(DataType dt, ExpressionPtr a);
 
         ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
         ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
