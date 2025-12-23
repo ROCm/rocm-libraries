@@ -3,6 +3,12 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
+## hipBLAS 3.3.0
+
+### Added
+
+* Added the `hipblasSyrkEx()` API.
+
 ## hipBLAS 3.2.0 for ROCm 7.2
 
 ### Resolved issues

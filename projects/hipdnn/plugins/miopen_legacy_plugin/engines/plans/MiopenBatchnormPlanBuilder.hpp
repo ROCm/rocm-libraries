@@ -4,7 +4,7 @@
 #pragma once
 
 #include "PlanBuilderInterface.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_legacy_plugin
 {
@@ -20,12 +20,12 @@ public:
     MiopenBatchnormPlanBuilder& operator=(const MiopenBatchnormPlanBuilder&) = delete;
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                      const hipdnn_plugin::IGraph& opGraph) const override;
+                      const hipdnn_plugin_sdk::IGraph& opGraph) const override;
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_plugin::IGraph& opGraph) const override;
+                            const hipdnn_plugin_sdk::IGraph& opGraph) const override;
 
     void buildPlan(const HipdnnEnginePluginHandle& handle,
-                   const hipdnn_plugin::IGraph& opGraph,
+                   const hipdnn_plugin_sdk::IGraph& opGraph,
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
 };
 

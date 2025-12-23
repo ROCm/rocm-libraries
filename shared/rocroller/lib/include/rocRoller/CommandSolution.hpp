@@ -307,13 +307,17 @@ namespace rocRoller
 
         /**
          * @brief Returns the total number of bytes required for scratch space
+         *        for the specified scratch policy.
          *
-         * If this value is greather than 0, the user is required to allocate this
+         * If this value is greater than 0, the user is required to allocate this
          * amount of device memory and pass it into the kernel.
          *
+         * @param policy The scratch policy to query
+         * @param args The runtime arguments
          * @return size_t
          */
-        size_t scratchSpaceRequired(RuntimeArguments const& args) const;
+        size_t scratchSpaceRequired(Operations::ScratchPolicy policy,
+                                    RuntimeArguments const&   args) const;
 
         /**
          * @brief Returns the workgroup size

@@ -185,7 +185,7 @@ void testing_trtri_strided_batched(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dA.memcheck());
     CHECK_DEVICE_ALLOCATION(dinvA.memcheck());
 
-    double gpu_time_used, hipblas_error;
+    double gpu_time_used{0}, hipblas_error{0};
 
     // Initial Data on CPU
     hipblas_init_matrix(hA, arg, hipblas_client_never_set_nan, hipblas_triangular_matrix, true);

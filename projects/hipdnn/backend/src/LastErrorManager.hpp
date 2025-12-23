@@ -24,6 +24,7 @@ public:
     static hipdnnStatus_t setLastError(hipdnnStatus_t status, const char* message);
     static hipdnnStatus_t setLastError(hipdnnStatus_t status, const std::string& message);
     static const char* getLastError();
+    static void clearLastError();
 };
 
 } // namespace hipdnn_backend

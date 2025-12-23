@@ -9,26 +9,26 @@ TEST(TestTypes, ToSdkTypeDataTypes)
 {
     using namespace hipdnn_frontend;
 
-    EXPECT_EQ(toSdkType(DataType::FLOAT), hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(toSdkType(DataType::HALF), hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(toSdkType(DataType::BFLOAT16), hipdnn_sdk::data_objects::DataType::BFLOAT16);
-    EXPECT_EQ(toSdkType(DataType::DOUBLE), hipdnn_sdk::data_objects::DataType::DOUBLE);
-    EXPECT_EQ(toSdkType(DataType::UINT8), hipdnn_sdk::data_objects::DataType::UINT8);
-    EXPECT_EQ(toSdkType(DataType::INT32), hipdnn_sdk::data_objects::DataType::INT32);
-    EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_sdk::data_objects::DataType::UNSET);
+    EXPECT_EQ(toSdkType(DataType::FLOAT), hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(toSdkType(DataType::HALF), hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(toSdkType(DataType::BFLOAT16), hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+    EXPECT_EQ(toSdkType(DataType::DOUBLE), hipdnn_data_sdk::data_objects::DataType::DOUBLE);
+    EXPECT_EQ(toSdkType(DataType::UINT8), hipdnn_data_sdk::data_objects::DataType::UINT8);
+    EXPECT_EQ(toSdkType(DataType::INT32), hipdnn_data_sdk::data_objects::DataType::INT32);
+    EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
 }
 
 TEST(TestTypes, FromSdkTypeDataTypes)
 {
     using namespace hipdnn_frontend;
 
-    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::FLOAT), DataType::FLOAT);
-    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::HALF), DataType::HALF);
-    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::BFLOAT16), DataType::BFLOAT16);
-    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::DOUBLE), DataType::DOUBLE);
-    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::UINT8), DataType::UINT8);
-    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::INT32), DataType::INT32);
-    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FLOAT), DataType::FLOAT);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::HALF), DataType::HALF);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::BFLOAT16), DataType::BFLOAT16);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::DOUBLE), DataType::DOUBLE);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UINT8), DataType::UINT8);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT32), DataType::INT32);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
 TEST(TestTypes, ConvolutionModeConversion)
@@ -36,10 +36,10 @@ TEST(TestTypes, ConvolutionModeConversion)
     using namespace hipdnn_frontend;
 
     EXPECT_EQ(toSdkType(ConvolutionMode::CROSS_CORRELATION),
-              hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
     EXPECT_EQ(toSdkType(ConvolutionMode::CONVOLUTION),
-              hipdnn_sdk::data_objects::ConvMode::CONVOLUTION);
-    EXPECT_EQ(toSdkType(ConvolutionMode::NOT_SET), hipdnn_sdk::data_objects::ConvMode::UNSET);
+              hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION);
+    EXPECT_EQ(toSdkType(ConvolutionMode::NOT_SET), hipdnn_data_sdk::data_objects::ConvMode::UNSET);
 }
 
 TEST(TestTypes, PointwiseModeConversion)
@@ -47,8 +47,9 @@ TEST(TestTypes, PointwiseModeConversion)
     using namespace hipdnn_frontend;
 
     EXPECT_EQ(toSdkType(PointwiseMode::RELU_FWD),
-              hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD);
-    EXPECT_EQ(toSdkType(PointwiseMode::NOT_SET), hipdnn_sdk::data_objects::PointwiseMode::UNSET);
+              hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
+    EXPECT_EQ(toSdkType(PointwiseMode::NOT_SET),
+              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
 }
 
 TEST(TestTypes, HeuristicModeConversion)

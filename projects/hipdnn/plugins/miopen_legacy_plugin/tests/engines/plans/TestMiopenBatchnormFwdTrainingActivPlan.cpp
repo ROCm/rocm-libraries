@@ -3,8 +3,8 @@
 
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace miopen_legacy_plugin;
 
@@ -14,8 +14,8 @@ using namespace miopen_legacy_plugin;
 
 TEST(TestBatchnormFwdTrainingActivParams, InitializesRequiredTensorsFromValidGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -37,8 +37,8 @@ TEST(TestBatchnormFwdTrainingActivParams, InitializesRequiredTensorsFromValidGra
 
 TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -60,8 +60,8 @@ TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
 
 TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVariancePresent)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph(true);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true);
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -80,8 +80,8 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVariancePresent)
 
 TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVarianceMissing)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph(false);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(false);
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -98,9 +98,9 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVarianceMissing)
 
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenRunningStatsProvided)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph(
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         true, true); // with mean/variance and running stats
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -112,13 +112,13 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenRunningStatsProvided)
 
     // Should throw because running stats are provided
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, HasRunningStatsReturnsFalseWhenNotProvided)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -140,38 +140,39 @@ TEST(TestBatchnormFwdTrainingActivParams, HasRunningStatsReturnsFalseWhenNotProv
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTensor)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
     std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
 
     // Missing epsilon tensor (ID 5)
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN node referencing non-existent epsilon tensor
-    auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormAttributes(
+    auto bnormAttributes = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(
         builder,
         1,
         3,
@@ -186,16 +187,16 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTe
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
-    auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -204,24 +205,24 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTe
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         3);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
-        hipdnn_sdk::data_objects::DataType::UNSET,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_data_sdk::data_objects::DataType::UNSET,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -243,78 +244,85 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTe
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenBnOutputDoesNotMatchActivationInput)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
     std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y_bn", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 6, "y_wrong", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y_bn", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "y_wrong",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        true));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributes(
+    hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
         builder.CreateString("epsilon"),
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         0,
         0,
         false,
-        hipdnn_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 7, "final_out", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 7, "final_out", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN node with output tensor 2
     auto bnormAttributes
-        = hipdnn_sdk::data_objects::CreateBatchnormAttributes(builder,
-                                                              1,
-                                                              3,
-                                                              4,
-                                                              5,
-                                                              0,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              2, // BN output
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+        = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(builder,
+                                                                   1,
+                                                                   3,
+                                                                   4,
+                                                                   5,
+                                                                   0,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2, // BN output
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
     // Activation with input tensor 6 (wrong - should be 2)
-    auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -323,24 +331,24 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenBnOutputDoesNotMatchActivati
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         7);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
-        hipdnn_sdk::data_objects::DataType::UNSET,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_data_sdk::data_objects::DataType::UNSET,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -351,13 +359,14 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenBnOutputDoesNotMatchActivati
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredXTensor)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
@@ -365,66 +374,66 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredXTensor)
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     // Missing x tensor (ID 1)
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributes(
+    hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
         builder.CreateString("epsilon"),
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         0,
         0,
         false,
-        hipdnn_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 7, "final_out", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 7, "final_out", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN node referencing missing x tensor
     auto bnormAttributes
-        = hipdnn_sdk::data_objects::CreateBatchnormAttributes(builder,
-                                                              1, // Missing x tensor
-                                                              3,
-                                                              4,
-                                                              5,
-                                                              0,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              2,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+        = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(builder,
+                                                                   1, // Missing x tensor
+                                                                   3,
+                                                                   4,
+                                                                   5,
+                                                                   0,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
-    auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -433,24 +442,24 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredXTensor)
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         7);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
-        hipdnn_sdk::data_objects::DataType::UNSET,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_data_sdk::data_objects::DataType::UNSET,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -461,75 +470,76 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredXTensor)
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredScaleTensor)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
     std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
     // Missing scale tensor (ID 3)
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributes(
+    hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
         builder.CreateString("epsilon"),
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         0,
         0,
         false,
-        hipdnn_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 7, "final_out", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 7, "final_out", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN node referencing missing scale tensor
     auto bnormAttributes
-        = hipdnn_sdk::data_objects::CreateBatchnormAttributes(builder,
-                                                              1,
-                                                              3, // Missing scale tensor
-                                                              4,
-                                                              5,
-                                                              0,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              2,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+        = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(builder,
+                                                                   1,
+                                                                   3, // Missing scale tensor
+                                                                   4,
+                                                                   5,
+                                                                   0,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
-    auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -538,24 +548,24 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredScaleTensor)
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         7);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
-        hipdnn_sdk::data_objects::DataType::UNSET,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_data_sdk::data_objects::DataType::UNSET,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -566,75 +576,76 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredScaleTensor)
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredBiasTensor)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
     std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, true));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
     // Missing bias tensor (ID 4)
 
-    hipdnn_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributes(
+    hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
         builder.CreateString("epsilon"),
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         0,
         0,
         false,
-        hipdnn_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 7, "final_out", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 7, "final_out", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // BN node referencing missing bias tensor
     auto bnormAttributes
-        = hipdnn_sdk::data_objects::CreateBatchnormAttributes(builder,
-                                                              1,
-                                                              3,
-                                                              4, // Missing bias tensor
-                                                              5,
-                                                              0,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              2,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt,
-                                                              flatbuffers::nullopt);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+        = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(builder,
+                                                                   1,
+                                                                   3,
+                                                                   4, // Missing bias tensor
+                                                                   5,
+                                                                   0,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
-    auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -643,24 +654,24 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredBiasTensor)
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         7);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
-        hipdnn_sdk::data_objects::DataType::UNSET,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_data_sdk::data_objects::DataType::UNSET,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
@@ -671,14 +682,14 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsForMissingRequiredBiasTensor)
     ASSERT_NE(activAttrs, nullptr);
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, AcceptsReluFwdActivation)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph(
-        false, false, hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD);
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        false, false, hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
