@@ -8,8 +8,8 @@
 #include <miopen/miopen.h>
 #include <unordered_map>
 
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenContainer.hpp"
 #include "MiopenUtils.hpp"

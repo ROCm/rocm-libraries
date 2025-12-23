@@ -13,8 +13,8 @@
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 
-#include <hipdnn_sdk/logging/CallbackTypes.h>
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_backend;
 
@@ -269,7 +269,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
             throw hipdnn_backend::HipdnnException(HIPDNN_STATUS_BAD_PARAM, "maxSize is 0");
         }
 
-        hipdnn_sdk::utilities::copyMaxSizeWithNullTerminator(
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             message, hipdnn_backend::LastErrorManager::getLastError(), maxSize);
 
         // Clear the error after retrieval
@@ -293,7 +293,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
         }
 
         // Get the error without clearing it (preserves pre-existing behavior)
-        hipdnn_sdk::utilities::copyMaxSizeWithNullTerminator(
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             message, hipdnn_backend::LastErrorManager::getLastError(), maxSize);
 
         LOG_API_SUCCESS(apiName, "set_error_message={:p}", static_cast<void*>(message));

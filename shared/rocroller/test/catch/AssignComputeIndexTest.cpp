@@ -58,40 +58,13 @@ TEST_CASE("AssignComputeIndex", "[kernel-graph]")
         std::make_shared<LowerTile>(params, context.get()),
         std::make_shared<AddComputeIndex>(),
         std::make_shared<UpdateWavefrontParameters>(params),
-        std::make_shared<AssignComputeIndex>(context.get()),
+        std::make_shared<AssignComputeIndex>(context.get(), example.getCommand()),
     };
 
     for(auto const& xform : transforms)
     {
         graph = graph.transform(xform);
     }
-
-    auto verifyAssignComputeIndex = [&graph](int tag) {
-        auto base = graph.mapper.get(
-            tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASE});
-        auto offset = graph.mapper.get(
-            tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::OFFSET});
-        auto stride = graph.mapper.get(
-            tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
-        auto opTag = tag;
-
-        if(base < 0 && offset > 0)
-        {
-            auto candidate = graph.control.getOutputNodeIndices<Sequence>(opTag).to<std::vector>();
-            opTag          = candidate[0];
-            AssertFatal(candidate.size() == 1);
-            auto dest = graph.mapper.get(candidate[0], NaryArgument::DEST);
-            CHECK(dest == offset);
-        }
-
-        if(stride > 0)
-        {
-            auto candidate = graph.control.getOutputNodeIndices<Sequence>(opTag).to<std::vector>();
-            AssertFatal(candidate.size() == 1);
-            auto dest = graph.mapper.get(candidate[0], NaryArgument::DEST);
-            CHECK(dest == stride);
-        }
-    };
 
     // search ComputeIndex operations
     auto isComputeIndexPredicate
@@ -100,9 +73,6 @@ TEST_CASE("AssignComputeIndex", "[kernel-graph]")
         = graph.control.findNodes(*graph.control.roots().begin(), isComputeIndexPredicate)
               .to<std::vector>();
 
-    // verify the assign operations connect to the correct offset/stride coordinate
-    for(const auto& tag : candidates)
-    {
-        verifyAssignComputeIndex(tag);
-    }
+    // no ComputeIndex operations should be left
+    CHECK(candidates.size() == 0);
 }
