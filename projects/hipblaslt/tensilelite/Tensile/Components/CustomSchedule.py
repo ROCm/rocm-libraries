@@ -2188,8 +2188,22 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
     elif isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Begininng of a iteration. Wait for prior local read.") ,
+            5,  SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for first two LRA0. Skip 2*LRA0 + 1*LRB0.") ,
+            17, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Before GRA and PackB0. Wait for all prior LRA0 for GRA and the first 2*LRB0 for PackB0. Skip 4*LRB0.") ,
+            17, SBarrier(comment="GRA") ,
+            32, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before GRB. Wait for all prior LRB0.") ,
+            32, SBarrier(comment="GRB") ,
+            35, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Before LRB3. Wait for GRB from previous iter. Skip 4*GRA + 2*GRB") ,
+            35, SBarrier(comment="LRB") ,
+            44, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Before PackB3. Wait for first two LRB3. Skip 4*LRA0.") ,
+            53, SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="Before LRA3. Wait for GRA from previous iter. Skip 4*GRA + 6*GRB") ,
+            53, SBarrier(comment="LRA") ,
+            63, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Before PackA3. Wait for first two LRA3. Skip 2*LRA3.") ,
+        ]
         optSchedule = {
-            'SYNC'  : [[-1, 5, 17, 17, 32, 32, 35, 35, 44, 53, 53, 63]],
+            'SYNC'  : [syncTable[::2]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
             'LRA0'  : [[0, 1, 2, 3]],
@@ -2209,22 +2223,8 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
             'LWSA'  : [[61]],
             'LWSB'  : [[62]],
             'LCC'   : [[71, 71]],
-            #'SNOP': [[-1, 0, 1, 2, 3, 17, 18, 19, 20, 21]],
         }
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0") ,
-            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
-            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
-            SBarrier(comment="") ,
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads") ,
-            SBarrier(comment="") ,
-            SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="") ,
-            SBarrier(comment="") ,
-            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
-            SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for previous set of global reads") ,
-            SBarrier(comment="") ,
-            SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads") ,
-        ]
+        syncCode = syncTable[1::2]
         nglshift = nllshift = 10
     elif isNT(kernel) and useLDSTr and TLDS==0:
         # TODO: Add NT schedule in upcoming PR
