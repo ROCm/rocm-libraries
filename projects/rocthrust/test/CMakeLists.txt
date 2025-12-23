@@ -358,32 +358,32 @@ rocm_install(
 )
 
 # Generate the resource spec file while building the tests
-if(USE_HIPCXX)
-    set_source_files_properties(${CMAKE_SOURCE_DIR}/test/enum_devices.cpp PROPERTIES LANGUAGE HIP)
-endif()
+#if(USE_HIPCXX)
+#    set_source_files_properties(${CMAKE_SOURCE_DIR}/test/enum_devices.cpp PROPERTIES LANGUAGE HIP)
+#endif()
 add_executable(enum_devices ${CMAKE_SOURCE_DIR}/test/enum_devices.cpp)
 target_link_libraries(enum_devices PRIVATE hip::host)
-if (WIN32 AND NOT DEFINED DLLS_COPIED)
-    set(DLLS_COPIED "YES")
-    set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
-    # for now adding in all .dll as dependency chain is not cmake based on win32
-    file( GLOB third_party_dlls
-    LIST_DIRECTORIES ON
-    CONFIGURE_DEPENDS
-    ${HIP_DIR}/bin/*.dll
-    ${CMAKE_SOURCE_DIR}/rtest.*
-    )
-    foreach( file_i ${third_party_dlls})
-      add_custom_command( TARGET enum_devices POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test )
-    endforeach( file_i )
-endif()
-add_custom_command(
-    TARGET enum_devices
-    POST_BUILD
-    COMMAND enum_devices resources.json
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "Generating resources.json file"
-)
+#if (WIN32 AND NOT DEFINED DLLS_COPIED)
+#    set(DLLS_COPIED "YES")
+#    set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
+#    # for now adding in all .dll as dependency chain is not cmake based on win32
+#    file( GLOB third_party_dlls
+#    LIST_DIRECTORIES ON
+#    CONFIGURE_DEPENDS
+#    ${HIP_DIR}/bin/*.dll
+#    ${CMAKE_SOURCE_DIR}/rtest.*
+#    )
+#    foreach( file_i ${third_party_dlls})
+#      add_custom_command( TARGET enum_devices POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test )
+#    endforeach( file_i )
+#endif()
+#add_custom_command(
+#    TARGET enum_devices
+#    POST_BUILD
+#    COMMAND enum_devices resources.json
+#    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+#    COMMENT "Generating resources.json file"
+#)
 
 # Generate the resource spec file at install time
 rocm_install(
