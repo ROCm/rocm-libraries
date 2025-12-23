@@ -352,11 +352,14 @@ namespace rocRoller
             {
             }
 
-            void commitForLoop(KernelGraph& graph, int forLoop, int numUnroll);
+            void commitForLoop(KernelGraph&                 graph,
+                               NaryArgumentColouring const& colouring,
+                               int                          forLoop,
+                               int                          numUnroll);
             void orderLoadsBeforeMultiplies(KernelGraph& graph, int forLoop, int numUnroll);
 
             void stage(KernelGraph const& graph);
-            void commit(KernelGraph&);
+            void commit(KernelGraph&, NaryArgumentColouring const&);
 
             std::unordered_set<int> storeLDSTileOperations() const;
 
@@ -442,6 +445,8 @@ namespace rocRoller
             removeRedundantBodyEdges(graph);
             removeRedundantNOPs(graph);
 
+            auto colouring = colourByNaryArgument(graph);
+
             std::unordered_set<int> storeHasBarrierAlready;
 
             if(m_params->prefetch)
@@ -449,7 +454,7 @@ namespace rocRoller
                 auto visitor = AddPrefetchVisitor(m_params, m_context);
                 AssertFatal(m_params->unrollK > 1, "KLoop must be unrolled when prefetching.");
                 visitor.stage(graph);
-                visitor.commit(graph);
+                visitor.commit(graph, colouring);
 
                 storeHasBarrierAlready = visitor.storeLDSTileOperations();
             }
@@ -499,13 +504,13 @@ namespace rocRoller
             return graph;
         }
 
-        void AddPrefetchVisitor::commit(KernelGraph& k)
+        void AddPrefetchVisitor::commit(KernelGraph& k, NaryArgumentColouring const& colouring)
         {
             Log::debug("KernelGraph::AddPrefetch()::commit()");
 
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                commitForLoop(k, forLoop, numUnroll);
+                commitForLoop(k, colouring, forLoop, numUnroll);
             }
 
             removeRedundantSequenceEdges(k);
@@ -627,7 +632,10 @@ namespace rocRoller
             }
         }
 
-        void AddPrefetchVisitor::commitForLoop(KernelGraph& graph, int forLoop, int numUnroll)
+        void AddPrefetchVisitor::commitForLoop(KernelGraph&                 graph,
+                                               NaryArgumentColouring const& colouring,
+                                               int                          forLoop,
+                                               int                          numUnroll)
         {
             auto logger = rocRoller::Log::getLogger();
             logger->debug("KernelGraph::AddPrefetch()::commitForLoop({})", forLoop);
@@ -636,6 +644,24 @@ namespace rocRoller
 
             auto forLoopCoord = getForLoopCoords(forLoop, graph).first;
             auto unrollCoord  = findUnrollNeighbour(graph, forLoopCoord).value();
+
+            std::vector<NaryArgument> argumentOrder = {NaryArgument::LHS,
+                                                       NaryArgument::LHS_SCALE,
+                                                       NaryArgument::RHS,
+                                                       NaryArgument::RHS_SCALE};
+
+            auto sortBy = [&](auto& container, auto const& order, auto getter) {
+                std::stable_sort(
+                    container.begin(), container.end(), [&](const auto& a, const auto& b) {
+                        auto itA = std::find(
+                            order.begin(), order.end(), colouring.coordinateColour.at(getter(a)));
+                        AssertFatal(itA != order.end(), ShowValue(getter(a)));
+                        auto itB = std::find(
+                            order.begin(), order.end(), colouring.coordinateColour.at(getter(b)));
+                        AssertFatal(itB != order.end(), ShowValue(getter(b)));
+                        return itA < itB;
+                    });
+            };
 
             //
             // Delete connecting edges
@@ -654,6 +680,7 @@ namespace rocRoller
             {
                 for(auto [target, info] : m_info[forLoop][u])
                     loadsByUnroll[u].push_back(info);
+                sortBy(loadsByUnroll[u], argumentOrder, [](const auto& info) { return info.user; });
             }
 
             AssertFatal(loadsByUnroll.size() == numUnroll);
