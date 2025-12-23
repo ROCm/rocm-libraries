@@ -9,16 +9,16 @@
 #include <random>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {

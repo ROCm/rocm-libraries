@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/CodeGen/Buffer.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
@@ -428,9 +429,67 @@ namespace rocRoller
             return assignTag;
         }
 
+        int makeBuffer(KernelGraph&        graph,
+                       ComputeIndex const& ci,
+                       const int           target,
+                       const int           buffer,
+                       const ContextPtr    context,
+                       const CommandPtr    command)
+        {
+            // Check if target has a User coordinate
+            auto user = graph.coordinates.get<User>(target);
+            if(!user)
+                return -1;
+
+            AssertFatal(user->size, "Invalid User dimension: missing size.", ShowValue(target));
+
+            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+
+                Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
+
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
+
+            auto bufferVarType = VariableType{DataType::None, PointerType::Buffer};
+            auto bufferRegType = Register::Type::Scalar;
+
+            // Create a buffer descriptor expression
+            Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
+            auto                      arg        = findArgumentByName(command, user->argumentName);
+            AssertFatal(arg,
+                        "Argument for buffer descriptor base pointer not found.",
+                        ShowValue(user->argumentName));
+            Expression::ExpressionPtr basePointer = arg->expression();
+
+            if(user->offset)
+                basePointer = basePointer + user->offset;
+
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
+            bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                      BufferDescriptor::GetDefaultOptions(context));
+            // TODO: Handle sizes larger than 32 bits
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
+
+            auto assignNode         = Assign{bufferRegType, bufferExpr};
+            assignNode.variableType = bufferVarType;
+            auto assignTag          = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, buffer, NaryArgument::DEST);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeBuffer: assign {} expression {} to buffer {}",
+                assignTag,
+                toString(assignNode.expression),
+                buffer);
+
+            return assignTag;
+        }
+
         KernelGraph AssignComputeIndex::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddComputeIndex");
+            TIMER(t, "KernelGraph::AssignComputeIndex");
             auto kgraph = original;
 
             auto isComputeIndexPredicate
@@ -441,7 +500,7 @@ namespace rocRoller
                 = kgraph.control.findNodes(*kgraph.control.roots().begin(), isComputeIndexPredicate)
                       .to<std::vector>();
 
-            std::vector<std::tuple<int, int, int>> ciAndAssign;
+            std::vector<std::tuple<int, int, int, int>> ciAndAssign;
 
             // commit changes
             for(const auto& tag : candidates)
@@ -550,7 +609,7 @@ namespace rocRoller
                     xform.setCoordinate(increment, L(0u));
                 }
 
-                auto assignStrideTag = -1, assignBaseTag = -1;
+                auto assignStrideTag = -1, assignBaseTag = -1, assignBufferTag = -1;
 
                 if(base < 0 && offset > 0)
                 {
@@ -579,19 +638,34 @@ namespace rocRoller
                                                        xform);
                 }
 
-                if(assignStrideTag != -1 || assignBaseTag != -1)
+                if(buffer > 0)
                 {
-                    ciAndAssign.push_back({tag, assignBaseTag, assignStrideTag});
+                    assignBufferTag = makeBuffer(kgraph, ci, target, buffer, m_context, m_command);
+                }
+
+                if(assignStrideTag != -1 || assignBaseTag != -1 || assignBufferTag != -1)
+                {
+                    ciAndAssign.push_back({tag, assignBaseTag, assignStrideTag, assignBufferTag});
                 }
             }
 
             for(auto const& tags : ciAndAssign)
             {
-                auto [ciTag, assignBaseTag, assignStrideTag] = tags;
+                auto [ciTag, assignBaseTag, assignStrideTag, assignBufferTag] = tags;
+                if(assignBufferTag != -1)
+                    insertAfter(kgraph, ciTag, assignBufferTag, assignBufferTag);
                 if(assignStrideTag != -1)
                     insertAfter(kgraph, ciTag, assignStrideTag, assignStrideTag);
                 if(assignBaseTag != -1)
                     insertAfter(kgraph, ciTag, assignBaseTag, assignBaseTag);
+            }
+
+            // Replace all ComputeIndex nodes with NOP nodes
+            for(const auto& tag : candidates)
+            {
+                auto nopTag = kgraph.control.addElement(NOP());
+                replaceWith(kgraph, tag, nopTag, false);
+                purgeNodes(kgraph, std::vector<int>{tag});
             }
 
             return kgraph;

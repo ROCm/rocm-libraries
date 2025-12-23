@@ -44,7 +44,7 @@ void copyWithCheck(const flatbuffers::Vector<int64_t>* src,
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& attributes,
     int groupCount)
 {
     createDescriptorInternal(spatialDimCount,
@@ -58,7 +58,7 @@ MiopenConvDescriptor::MiopenConvDescriptor(
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes,
+    const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes& attributes,
     int groupCount)
 {
     createDescriptorInternal(spatialDimCount,
@@ -72,7 +72,7 @@ MiopenConvDescriptor::MiopenConvDescriptor(
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+    const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
     int groupCount)
 {
     createDescriptorInternal(spatialDimCount,
@@ -124,7 +124,7 @@ void MiopenConvDescriptor::createDescriptorInternal(
     const flatbuffers::Vector<int64_t>* attrPostPadding,
     const flatbuffers::Vector<int64_t>* attrStride,
     const flatbuffers::Vector<int64_t>* attrDilation,
-    hipdnn_sdk::data_objects::ConvMode convMode,
+    hipdnn_data_sdk::data_objects::ConvMode convMode,
     int groupCount)
 {
     if(spatialDimCount > std::numeric_limits<int>::max())
@@ -134,7 +134,7 @@ void MiopenConvDescriptor::createDescriptorInternal(
             "MiopenConvDescriptor: spatialDimCount must be not greater than INT_MAX");
     }
 
-    if(convMode != hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION)
+    if(convMode != hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
