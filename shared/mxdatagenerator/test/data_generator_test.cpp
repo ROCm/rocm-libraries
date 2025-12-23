@@ -258,8 +258,7 @@ double getExcessKurtosis(const std::vector<double>& data)
         double z = (val - mean) / std_dev;
         sum_quad += z * z * z * z;
     }
-    
-    // Sample excess kurtosis
+
     const double n = static_cast<double>(data.size());
     const double term1 = n * (n + 1.0) / ((n - 1.0) * (n - 2.0) * (n - 3.0));
     const double term2 = 3.0 * (n - 1.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0));
@@ -273,50 +272,25 @@ double getExcessKurtosis(const std::vector<double>& data)
 bool testNormalityViaSkewnessKurtosis(const std::vector<double>& data, 
                                       double skewness_tolerance, 
                                       double excess_kurtosis_tolerance,
-                                      double& out_skewness,
-                                      double& out_excess_kurtosis)
+                                      double& skewness,
+                                      double& excess_kurtosis)
 {
-    out_skewness = getSkewness(data);
-    out_excess_kurtosis = getExcessKurtosis(data);
+    skewness = getSkewness(data);
+    excess_kurtosis = getExcessKurtosis(data);
     
-    if(std::isnan(out_skewness) || std::isnan(out_excess_kurtosis))
+    if(std::isnan(skewness) || std::isnan(excess_kurtosis))
     {
         return false;
     }
     
     // Check if skewness is within tolerance of 0
-    bool skewness_ok = std::abs(out_skewness) <= skewness_tolerance;
+    bool skewness_ok = std::abs(skewness) <= skewness_tolerance;
     
     // Check if excess kurtosis is within tolerance of 0
-    bool kurtosis_ok = std::abs(out_excess_kurtosis) <= excess_kurtosis_tolerance;
+    bool kurtosis_ok = std::abs(excess_kurtosis) <= excess_kurtosis_tolerance;
     
     return skewness_ok && kurtosis_ok;
 }
-
-// Compute the cumulative distribution function (CDF) for standard normal distribution
-double normalCDF(double x) {
-    return 0.5 * (1.0 + std::erf(x / std::sqrt(2.0)));
-}
-
-// Class to represent an Empirical Distribution Function (EDF) of some distribution
-class EDF{
-    private:
-        std::vector<double> dis;
-        double n;
-
-    public:
-        EDF(const std::vector<double> & x){
-            dis = x;
-            std::sort(dis.begin(), dis.end());
-            n = static_cast<double>(dis.size());
-        }
-
-        double operator()(double x) const{
-            auto it = std::upper_bound(dis.begin(), dis.end(), x);
-            double pos = static_cast<double>(it - dis.begin());
-            return pos / n;
-        }
-};
 
 template <typename DataType>
 class DataGeneratorBoundedTest : public ::TestWithParam<BoundedTupleType>
@@ -938,84 +912,6 @@ public:
             GTEST_SKIP() << "Skipping normal distribution test for ocp_e2m3_mxfp6";
         }
 
-        // Validate the skewness/kurtosis test implementation with hardcoded test cases
-        std::cout << "\n=== Validating Skewness/Kurtosis Test Implementation ===\n";
-        
-        int total_tests = 0;
-        int tests_meeting_expectations = 0;
-        
-        // Test case 1: Normal distribution data should pass normality test
-        {
-            std::mt19937 gen{42};  // Fixed seed for reproducibility
-            std::normal_distribution<> dist{0.0, 1.0};
-            
-            std::vector<double> normal_sample(10000);
-            for(int i = 0; i < 10000; i++) {
-                normal_sample[i] = dist(gen);
-            }
-            
-            double skewness, excess_kurtosis;
-            bool result = testNormalityViaSkewnessKurtosis(normal_sample, 0.5, 1.0, skewness, excess_kurtosis);
-            bool expected = true;
-            if (result == expected) tests_meeting_expectations++;
-            total_tests++;
-            std::cout << "Test 1 - Normal distribution data: " << (result ? "PASS" : "FAIL") 
-                      << " (Expected: PASS)"
-                      << " | Skewness: " << skewness << " | Excess Kurtosis: " << excess_kurtosis << "\n";
-        }
-        
-        // Test case 2: Uniform distribution should fail normality test
-        {
-            std::mt19937 gen{42};  // Fixed seed
-            std::uniform_real_distribution<> uniform_dist{-3.0, 3.0};
-            
-            std::vector<double> uniform_sample(10000);
-            for(int i = 0; i < 10000; i++) {
-                uniform_sample[i] = uniform_dist(gen);
-            }
-            
-            double skewness, excess_kurtosis;
-            bool result = testNormalityViaSkewnessKurtosis(uniform_sample, 0.5, 1.0, skewness, excess_kurtosis);
-            bool expected = false;  // Uniform has excess kurtosis ~ -1.2
-            if (result == expected) tests_meeting_expectations++;
-            total_tests++;
-            std::cout << "Test 2 - Uniform distribution: " 
-                      << (result ? "PASS" : "FAIL") << " (Expected: FAIL)"
-                      << " | Skewness: " << skewness << " | Excess Kurtosis: " << excess_kurtosis << "\n";
-        }
-        
-        // Test case 3: Exponential distribution should fail normality test
-        {
-            std::mt19937 gen{42};  // Fixed seed
-            std::exponential_distribution<> exp_dist{1.0};
-            
-            std::vector<double> exp_sample(10000);
-            for(int i = 0; i < 10000; i++) {
-                exp_sample[i] = exp_dist(gen);
-            }
-            
-            double skewness, excess_kurtosis;
-            bool result = testNormalityViaSkewnessKurtosis(exp_sample, 0.5, 1.0, skewness, excess_kurtosis);
-            bool expected = false;  // Exponential has skewness = 2, excess kurtosis = 6
-            if (result == expected) tests_meeting_expectations++;
-            total_tests++;
-            std::cout << "Test 3 - Exponential distribution: " 
-                      << (result ? "PASS" : "FAIL") << " (Expected: FAIL)"
-                      << " | Skewness: " << skewness << " | Excess Kurtosis: " << excess_kurtosis << "\n";
-        }
-        
-        // Summary statement
-        std::cout << "\nSummary: " << tests_meeting_expectations << "/" << total_tests 
-                  << " tests met expected results. ";
-        if (tests_meeting_expectations == total_tests) {
-            std::cout << "All test validations good!\n";
-        } else {
-            std::cout << "Some test validations did not meet expectations.\n";
-        }
-        
-        std::cout << "=== End of Skewness/Kurtosis Test Validation ===\n\n";
-        
-        // Original test code starts here
         DataGeneratorOptions opts;
         vector<index_t>      size, stride;
 
@@ -1042,50 +938,25 @@ public:
         EXPECT_LE(std::abs(getMean(data) - mean), 0.15);
         EXPECT_LE(std::abs(getStdDev(data) - std_dev), 0.15);
 
-        // Generate reference data
-        const auto bit_size = getDataSignBits<DataType>() + getDataExponentBits<DataType>()
-                              + getDataMantissaBits<DataType>();
-        const auto byte_size   = (bit_size + 7) / 8;
-        const auto buffer_size = byte_size * data.size();
-        // Vector for holding DataType data
-        std::vector<uint8_t> buffer;
-        buffer.resize(buffer_size, 0x00);
-        // Vector for holding reference data
-        std::vector<double>        ref_data(data.size(), 0);
-        std::random_device         rd{};
-        std::mt19937               gen{rd()};  // Standard mersenne_twister_engine seeded with rd()
-        std::normal_distribution<> ref_dist{mean, std_dev};
-        for(size_t i = 0; i < ref_data.size(); i++)
-        {
-            // Generate a float, convert it to a DataType, and then convert it into a double
-            const auto val = DGen::satConvertToType<DataType>(ref_dist(gen));
-            std::memcpy(&buffer[i * byte_size], &val, byte_size);
-            uint8_t tScale[] = {Constants::E8M0_1};
-            ref_data[i]      = toDouble<DataType>(tScale, buffer.data(), 0, i);
-        }
-
         // Use skewness and kurtosis to verify normal distribution
         const auto total_bits = getDataSignBits<DataType>() + getDataExponentBits<DataType>() 
                               + getDataMantissaBits<DataType>();
         
         double skewness_tolerance, excess_kurtosis_tolerance;
-        
-
 
         if (total_bits <= 6) {
-            // Extremely low precision (4 | 6 bits)
             skewness_tolerance = 0.1;
             excess_kurtosis_tolerance = 0.2;
-        } else if (total_bits <= 8) {
-            // Low precision (8 bits)
+        } 
+        else if (total_bits <= 8) {
             skewness_tolerance = 0.05;
             excess_kurtosis_tolerance = 0.1;
-        } else if (total_bits <= 16) {
-            // Medium precision (16 bits)
+        } 
+        else if (total_bits <= 16) {
             skewness_tolerance = 0.025;
             excess_kurtosis_tolerance = 0.05;
-        } else {
-            // High precision (32 bits)
+        } 
+        else {
             skewness_tolerance = 0.012;
             excess_kurtosis_tolerance = 0.025;
         }
