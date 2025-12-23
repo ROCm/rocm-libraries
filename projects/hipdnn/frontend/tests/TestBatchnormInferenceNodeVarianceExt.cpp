@@ -263,11 +263,12 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PackNode)
 
     builder.Finish(offset);
     auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Node>(bufferPointer);
+    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
 
     EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "BatchnormInferenceVarianceExt");
-    EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt);
+    EXPECT_EQ(
+        nodeFlatbuffer->attributes_type(),
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt);
 
     auto packedAttributes = nodeFlatbuffer->attributes_as_BatchnormInferenceAttributesVarianceExt();
     ASSERT_NE(packedAttributes, nullptr);

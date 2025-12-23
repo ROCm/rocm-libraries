@@ -4,7 +4,7 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <memory>
 #include <unordered_map>
 
@@ -125,13 +125,13 @@ public:
         return setOutput(OutputNames::Y, std::move(value));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto mean = get_mean();
         auto variance = get_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
+        return hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
             builder,
             get_x()->get_uid(),
             mean->get_uid(),
