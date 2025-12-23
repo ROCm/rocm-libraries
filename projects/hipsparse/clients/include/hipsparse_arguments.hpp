@@ -119,7 +119,7 @@ struct Arguments
     int timing;
     int iters;
 
-    char filename[192]; // nos2.bin, bmwcra_1.bin, etc
+    char filename[192]; // nos2.csr, bmwcra_1.csr, etc
     char function[64]; // axpby, spmv_csr, etc
     char category[32]; // quick, pre_checkin, etc
 

@@ -1229,7 +1229,7 @@ bool generate_csr_matrix(const std::string    filename,
         std::string full_filename_path = get_filename(filename);
         std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
 
-        if(extension == "bin")
+        if(extension == "csr")
         {
             if(read_bin_matrix(full_filename_path.c_str(),
                                nrow,
@@ -1314,7 +1314,7 @@ bool generate_coo_matrix(const std::string    filename,
         std::string full_filename_path = get_filename(filename);
         std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
 
-        if(extension == "bin")
+        if(extension == "csr")
         {
             std::vector<I> csr_row_ptr;
             if(read_bin_matrix(full_filename_path.c_str(),
