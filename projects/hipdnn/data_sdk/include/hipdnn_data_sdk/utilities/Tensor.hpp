@@ -465,9 +465,17 @@ public:
     void fillWithValue(T value) override
     {
         _memory.markHostModified();
-        iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-            this->setHostValue(value, indices);
-        });
+        if(isPacked())
+        {
+            auto data{_memory.hostData()};
+            std::fill(data, data + _elementCount, value);
+        }
+        else
+        {
+            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
+                this->setHostValue(value, indices);
+            });
+        }
     }
 
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
@@ -478,9 +486,21 @@ public:
                                                            static_cast<float>(max));
 
         _memory.markHostModified();
-        iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-            this->setHostValue(static_cast<T>(distribution(generator)), indices);
-        });
+
+        if(isPacked())
+        {
+            auto data{_memory.hostData()};
+            for(size_t i{0}; i < _elementCount; i++)
+            {
+                data[i] = static_cast<T>(distribution(generator));
+            }
+        }
+        else
+        {
+            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
+                this->setHostValue(static_cast<T>(distribution(generator)), indices);
+            });
+        }
     }
 
     bool isPacked() const override
