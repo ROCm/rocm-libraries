@@ -118,6 +118,16 @@ namespace hipsparse
             size = sizeof(hipDoubleComplex);
             return HIPSPARSE_STATUS_SUCCESS;
         }
+        case HIP_R_16F:
+        {
+            size = sizeof(_Float16);
+            return HIPSPARSE_STATUS_SUCCESS;
+        }
+        case HIP_R_16BF:
+        {
+            size = sizeof(rocsparse_bfloat16);
+            return HIPSPARSE_STATUS_SUCCESS;
+        }
         default:
         {
             size = 0;
@@ -415,6 +425,27 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
     hipComplex       host_cone = make_hipComplex(1.0f, 0.0f);
     hipDoubleComplex host_zone = make_hipDoubleComplex(1.0, 0.0);
 
+    // For Axpby with float16/bfloat16 data, rocsparse expects float32 scalars.
+    // So for HIP_R_16F and HIP_R_16BF, we use host_sone (float) as the "one" scalar.
+    // We also need to convert beta from float16/bfloat16 to float.
+    float       host_beta_f32  = 0.0f;
+    const void* beta_for_axpby = beta;
+
+    if(computeType == HIP_R_16F)
+    {
+        // Convert beta from float16 to float32
+        host_beta_f32  = static_cast<float>(*static_cast<const _Float16*>(beta));
+        beta_for_axpby = &host_beta_f32;
+    }
+    else if(computeType == HIP_R_16BF)
+    {
+        // Convert beta from bfloat16 to float32
+        uint16_t beta_bits     = *static_cast<const uint16_t*>(beta);
+        uint32_t beta_f32_bits = static_cast<uint32_t>(beta_bits) << 16;
+        memcpy(&host_beta_f32, &beta_f32_bits, sizeof(float));
+        beta_for_axpby = &host_beta_f32;
+    }
+
     void* one = nullptr;
     if(pointer_mode == HIPSPARSE_POINTER_MODE_HOST)
     {
@@ -426,6 +457,9 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
             one = &host_cone;
         if(computeType == HIP_C_64F)
             one = &host_zone;
+        // For float16 and bfloat16, use float32 scalar (rocsparse_axpby requirement)
+        if(computeType == HIP_R_16F || computeType == HIP_R_16BF)
+            one = &host_sone;
     }
     else
     {
@@ -452,6 +486,19 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
             RETURN_IF_HIP_ERROR(hipMemcpyAsync(
                 device_one, &host_zone, sizeof(hipDoubleComplex), hipMemcpyHostToDevice, stream));
             one = device_one;
+        }
+        // For float16 and bfloat16, use float32 scalar (rocsparse_axpby requirement)
+        if(computeType == HIP_R_16F || computeType == HIP_R_16BF)
+        {
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                device_one, &host_sone, sizeof(float), hipMemcpyHostToDevice, stream));
+            one = device_one;
+            // Also copy beta to device as float
+            // Note: For device mode, we need to copy host_beta_f32 to device
+            void* device_beta = static_cast<char*>(device_one) + sizeof(float);
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                device_beta, &host_beta_f32, sizeof(float), hipMemcpyHostToDevice, stream));
+            beta_for_axpby = device_beta;
         }
     }
 
@@ -505,7 +552,8 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
 
     // Axpby computes: Y = alpha * X + beta * Y
     // What we want to compute: csrValuesC = 1.0 * csrValuesCFromBuffer2 + beta * csrValuesC
-    RETURN_IF_HIPSPARSE_ERROR(hipsparseAxpby(handle, one, vecX, beta, vecY));
+    // Note: For float16/bfloat16, we use float32 scalars (rocsparse_axpby requirement)
+    RETURN_IF_HIPSPARSE_ERROR(hipsparseAxpby(handle, one, vecX, beta_for_axpby, vecY));
 
     RETURN_IF_HIPSPARSE_ERROR(hipsparseDestroySpVec(vecX));
     RETURN_IF_HIPSPARSE_ERROR(hipsparseDestroyDnVec(vecY));

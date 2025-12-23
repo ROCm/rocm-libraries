@@ -404,5 +404,9 @@ INSTANTIATE_MIXED(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 
 void testing_spmm_coo_extra(const Arguments& arg) {}

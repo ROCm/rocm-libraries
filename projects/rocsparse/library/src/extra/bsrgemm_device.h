@@ -190,7 +190,9 @@ namespace rocsparse
             if(temp == key)
             {
                 // Element already present, add value to exsiting entry
-                rocsparse::atomic_add(&data[BLOCKDIM * BLOCKDIM * hash + BLOCKDIM * row + col],
+                rocsparse::atomic_add(data,
+                                      BLOCKDIM * BLOCKDIM * hash + BLOCKDIM * row + col,
+                                      HASHSIZE * BLOCKDIM * BLOCKDIM,
                                       val);
                 break;
             }
@@ -200,7 +202,9 @@ namespace rocsparse
                 if(rocsparse::atomic_cas(&table[hash], empty, key) == empty)
                 {
                     // Add value
-                    rocsparse::atomic_add(&data[BLOCKDIM * BLOCKDIM * hash + BLOCKDIM * row + col],
+                    rocsparse::atomic_add(data,
+                                          BLOCKDIM * BLOCKDIM * hash + BLOCKDIM * row + col,
+                                          HASHSIZE * BLOCKDIM * BLOCKDIM,
                                           val);
                     break;
                 }
@@ -1333,10 +1337,12 @@ namespace rocsparse
                                         }
                                     }
 
-                                    rocsparse::atomic_add(
-                                        &data[BLOCKDIM * BLOCKDIM * (col_B - chunk_begin)
-                                              + BLOCKDIM * r + c],
-                                        alpha * val_AB);
+                                    rocsparse::atomic_add(data,
+                                                          BLOCKDIM * BLOCKDIM
+                                                                  * (col_B - chunk_begin)
+                                                              + BLOCKDIM * r + c,
+                                                          CHUNKSIZE * BLOCKDIM * BLOCKDIM,
+                                                          alpha * val_AB);
                                 }
                             }
                             else if(col_B >= chunk_end)
@@ -1394,8 +1400,10 @@ namespace rocsparse
                                         * bsr_val_D[block_dim * block_dim * j + block_dim * c + r];
                             }
 
-                            rocsparse::atomic_add(&data[BLOCKDIM * BLOCKDIM * (col_D - chunk_begin)
-                                                        + BLOCKDIM * r + c],
+                            rocsparse::atomic_add(data,
+                                                  BLOCKDIM * BLOCKDIM * (col_D - chunk_begin)
+                                                      + BLOCKDIM * r + c,
+                                                  CHUNKSIZE * BLOCKDIM * BLOCKDIM,
                                                   val_D);
                         }
                     }

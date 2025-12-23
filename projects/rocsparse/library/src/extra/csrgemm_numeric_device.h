@@ -120,7 +120,7 @@ namespace rocsparse
             if(temp == key)
             {
                 // Element already present, add value to exsiting entry
-                rocsparse::atomic_add(&data[hash], val);
+                rocsparse::atomic_add(data, hash, HASHSIZE, val);
                 break;
             }
             else if(temp == empty)
@@ -129,7 +129,7 @@ namespace rocsparse
                 if(rocsparse::atomic_cas(&table[hash], empty, key) == empty)
                 {
                     // Add value
-                    rocsparse::atomic_add(&data[hash], val);
+                    rocsparse::atomic_add(data, hash, HASHSIZE, val);
                     break;
                 }
             }
@@ -629,7 +629,8 @@ namespace rocsparse
                             table[col_B - chunk_begin] = 1;
 
                             // Atomically accumulate the intermediate products
-                            rocsparse::atomic_add(&data[col_B - chunk_begin], val_A * csr_val_B[k]);
+                            rocsparse::atomic_add(
+                                data, col_B - chunk_begin, CHUNKSIZE, val_A * csr_val_B[k]);
                         }
                         else if(col_B >= chunk_end)
                         {
@@ -673,7 +674,8 @@ namespace rocsparse
                         table[col_D - chunk_begin] = 1;
 
                         // Atomically accumulate the entry of D
-                        rocsparse::atomic_add(&data[col_D - chunk_begin], beta * csr_val_D[j]);
+                        rocsparse::atomic_add(
+                            data, col_D - chunk_begin, CHUNKSIZE, beta * csr_val_D[j]);
                     }
                     else if(col_D >= chunk_end)
                     {

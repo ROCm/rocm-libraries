@@ -159,6 +159,17 @@ namespace rocsparse
 
          COOMM_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+         COOMM_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+
+         COOMM_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
                       rocsparse_datatype_bf16_r,
                       rocsparse_datatype_bf16_r,
                       rocsparse_datatype_f32_r),
@@ -166,7 +177,18 @@ namespace rocsparse
                       rocsparse_indextype_i64,
                       rocsparse_datatype_bf16_r,
                       rocsparse_datatype_bf16_r,
-                      rocsparse_datatype_f32_r)}};
+                      rocsparse_datatype_f32_r),
+
+         COOMM_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r),
+         COOMM_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r)}};
 
     static rocsparse_status coomm_find(coomm_t*            function_,
                                        rocsparse_datatype  t_type_,

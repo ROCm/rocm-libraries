@@ -37,7 +37,9 @@ namespace rocsparse
     __launch_bounds__(WF_SIZE) __global__
         void coommnn_segmented_atomic(rocsparse_operation trans_B,
                                       int64_t             nnz,
+                                      I                   m,
                                       I                   n,
+                                      I                   nstart,
                                       int64_t             batch_stride_A,
                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                       const I* __restrict__ coo_row_ind,

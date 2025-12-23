@@ -841,8 +841,6 @@ try
     ROCSPARSE_CHECKARG_POINTER(7, mat_C);
     ROCSPARSE_CHECKARG(7, mat_C, mat_C->init == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_ENUM(8, compute_type);
-    ROCSPARSE_CHECKARG(
-        8, compute_type, (compute_type != mat_C->data_type), rocsparse_status_not_implemented);
 
     ROCSPARSE_CHECKARG_ENUM(9, alg);
     ROCSPARSE_CHECKARG_ENUM(10, stage);

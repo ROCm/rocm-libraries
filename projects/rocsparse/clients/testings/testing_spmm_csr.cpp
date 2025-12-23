@@ -24,6 +24,22 @@
 #include "testing.hpp"
 
 #include <tuple>
+#include <type_traits>
+
+// Helper to check if type is low-precision (bf16 or f16)
+template <typename T>
+inline constexpr bool is_low_precision_v
+    = std::is_same<T, rocsparse_bfloat16>{} || std::is_same<T, _Float16>{};
+
+// Set all entries in an array to 1.0f for numerical stability with low-precision types
+template <typename T>
+inline void set_array_to_ones(T* data, size_t size)
+{
+    for(size_t i = 0; i < size; ++i)
+    {
+        data[i] = static_cast<T>(1.0f);
+    }
+}
 
 template <typename I, typename J, typename A, typename B, typename C, typename T>
 void testing_spmm_csr_bad_arg(const Arguments& arg)
@@ -152,6 +168,12 @@ void testing_spmm_csr(const Arguments& arg)
     rocsparse_init_1d_array<A>(
         hcsr_val, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
+    // For low-precision types (f16/bf16), set values to 1.0f for numerical stability
+    if constexpr(is_low_precision_v<A>)
+    {
+        set_array_to_ones(hcsr_val.data(), nnz_A);
+    }
+
     // Some matrix properties
     J A_m = (trans_A == rocsparse_operation_none) ? M : K;
     J A_n = (trans_A == rocsparse_operation_none) ? K : M;
@@ -185,6 +207,16 @@ void testing_spmm_csr(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_init_1d_array<B>(hB, nnz_B, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
     rocsparse_init_1d_array<C>(hC_1, nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+
+    // For low-precision types (f16/bf16), set values to 1.0f for numerical stability
+    if constexpr(is_low_precision_v<B>)
+    {
+        set_array_to_ones(hB.data(), nnz_B);
+    }
+    if constexpr(is_low_precision_v<C>)
+    {
+        set_array_to_ones(hC_1.data(), nnz_C);
+    }
 
     hC_2    = hC_1;
     hC_gold = hC_1;
@@ -417,5 +449,14 @@ INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_MIXED(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_MIXED(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(
+    int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(
+    int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(
+    int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 
 void testing_spmm_csr_extra(const Arguments& arg) {}

@@ -227,7 +227,7 @@ Tests:
   category: quick
   function: sddmm
   indextype: *i32i32_i64i32_i64i64
-  precision: *float16_float16_float16_float32_abct_precision
+  precision: [*float16_float16_float16_float32_abct_precision, *bfloat16_bfloat16_bfloat16_float32_abct_precision]
   M: [434, 576]
   N: [487, 435]
   K: [1262, 776]

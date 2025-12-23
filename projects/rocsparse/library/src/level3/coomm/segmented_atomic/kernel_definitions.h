@@ -39,7 +39,9 @@ namespace rocsparse
     __launch_bounds__(WF_SIZE) __global__
         void coommnn_segmented_atomic(rocsparse_operation trans_B,
                                       int64_t             nnz,
+                                      I                   m,
                                       I                   n,
+                                      I                   nstart,
                                       int64_t             batch_stride_A,
                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                       const I* __restrict__ coo_row_ind,
@@ -60,7 +62,9 @@ namespace rocsparse
         {
             rocsparse::coommnn_segmented_atomic_device<WF_SIZE, LOOPS, COLS, NT>(trans_B,
                                                                                  nnz,
+                                                                                 m,
                                                                                  n,
+                                                                                 nstart,
                                                                                  batch_stride_A,
                                                                                  alpha,
                                                                                  coo_row_ind,
@@ -83,7 +87,9 @@ namespace rocsparse
         rocsparse::coommnn_segmented_atomic<WFSIZE, LOOPS, COLS, NT>(           \
             rocsparse_operation trans_B,                                        \
             int64_t             nnz,                                            \
+            I                   m,                                              \
             I                   n,                                              \
+            I                   nstart,                                         \
             int64_t             batch_stride_A,                                 \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                      \
             const I* __restrict__ coo_row_ind,                                  \
