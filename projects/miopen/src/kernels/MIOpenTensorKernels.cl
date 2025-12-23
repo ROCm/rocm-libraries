@@ -221,14 +221,14 @@ __kernel void OpTensorLeadingOnes(global MIOPEN_TYPE* a,
                                   const int c_nstride,
                                   const int c_cstride,
                                   const int work_per_wg,
-                                  const int num_wg,
-                                  const unsigned int bitmap,
                                   const MIOPEN_TYPE alpha0,
                                   const MIOPEN_TYPE alpha1,
                                   const MIOPEN_TYPE beta,
                                   const long Aoffset,
                                   const long Boffset,
-                                  const long Coffset)
+                                  const long Coffset,
+                                  const int num_wg,
+                                  const unsigned int bitmap)
 {
     /* Special case for leading ones where the total no. of threads is the
      * inner_product of the tensor dims.  Each thread just updates one value

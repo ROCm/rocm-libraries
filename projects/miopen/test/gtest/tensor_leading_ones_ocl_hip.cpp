@@ -109,8 +109,7 @@ struct OpTensorLeadingOnesTest
 protected:
     void SetUp() override
     {
-        data_type = miopen_type<T>{};
-
+        prng::reset_seed();
         std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
 
         // Generate elements in tensors
@@ -205,11 +204,9 @@ protected:
         vld = {local_threads, 1, 1};
         vgd = {global_threads, 1, 1};
 
+        data_type = miopen_type<T>{};
         network_config += std::to_string(data_type) + "-miopenTensorOpAdd-" +
                           std::to_string(global_threads) + "-" + std::to_string(local_threads);
-        std::cout << "MIOPEN_TYPE=" << miopen::GetDataType(data_type) << '\n';
-        std::cout << "work_per_wg=" << work_per_wg << "  num_wg=" << num_wg << "  bitmap=" << bitmap
-                  << '\n';
     }
 
     void runOCL() // run OCL kernel
@@ -237,15 +234,14 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
-            num_wg,
-            bitmap,
             alpha0,
             alpha1,
             beta,
-            0LL, // Aoffset
-            0LL, // Boffset
-            0LL  // Coffset
-        );
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
+            num_wg,
+            bitmap);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
         std::cout << "OCL:";
@@ -268,9 +264,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    0LL,
-                    0LL,
-                    0LL,
+                    0L,
+                    0L,
+                    0L,
                     num_wg,
                     bitmap);
 #endif
