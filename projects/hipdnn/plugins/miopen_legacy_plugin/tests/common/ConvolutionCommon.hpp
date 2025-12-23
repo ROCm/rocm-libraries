@@ -7,7 +7,7 @@
 #include <ostream>
 #include <vector>
 
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 namespace test_conv_common
@@ -88,7 +88,7 @@ struct ConvTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const ConvTestCase& tc)
     {
-        using namespace hipdnn_sdk::utilities;
+        using namespace hipdnn_data_sdk::utilities;
 
         ss << "(x:";
         vecToStream(ss, tc.xDims);

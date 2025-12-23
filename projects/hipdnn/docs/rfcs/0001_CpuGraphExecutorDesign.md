@@ -175,7 +175,7 @@ public:
 class MyOperationSignatureKey {
 public:
     MyOperationSignatureKey(DataType dataType1, DataType dataType2, /* ... */);
-    MyOperationSignatureKey(const Node& node, const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap);
+    MyOperationSignatureKey(const Node& node, const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap);
     size_t hashSelf() const;
     bool operator==(const MyOperationSignatureKey& other) const;
     static std::unordered_map<MyOperationSignatureKey,
