@@ -105,7 +105,7 @@ foreach(i RANGE 0 ${len1})
   list(GET sep_m 1 mat)
 
   # Download test matrices if not already downloaded
-  if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.bin")
+  if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr")
     if(NOT HIPSPARSE_MTX_DIR)
       # First try user specified mirror, if available
       if(DEFINED ENV{HIPSPARSE_TEST_MIRROR} AND NOT $ENV{HIPSPARSE_TEST_MIRROR} STREQUAL "")
@@ -164,7 +164,7 @@ foreach(i RANGE 0 ${len1})
     else()
       file(RENAME ${HIPSPARSE_MTX_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
     endif()
-    execute_process(COMMAND ${PROJECT_BINARY_DIR}/mtx2csr.exe ${mat}.mtx ${mat}.bin
+    execute_process(COMMAND ${PROJECT_BINARY_DIR}/mtx2csr.exe ${mat}.mtx ${mat}.csr
       RESULT_VARIABLE STATUS
       WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
     if(STATUS AND NOT STATUS EQUAL 0)

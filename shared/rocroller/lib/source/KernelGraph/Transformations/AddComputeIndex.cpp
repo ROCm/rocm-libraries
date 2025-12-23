@@ -92,7 +92,8 @@ namespace rocRoller::KernelGraph
         bool needsUpdate;
     };
 
-    using BufferMap = std::map<int, int>;
+    using BufferMap      = std::map<int, int>;
+    using BaseAddressMap = std::map<int, int>;
 
     /**
      * @brief Return existing Buffer for load/stores from/to `dst`.
@@ -109,10 +110,11 @@ namespace rocRoller::KernelGraph
                   BufferMap&   bufferMap,
                   bool         isStorePartOfDirect2LDSOp)
     {
-        auto op = graph.control.getElement(opTag);
-        if(not(isOperation<LoadTiled>(op) || isOperation<StoreTiled>(op)
-               || isOperation<LoadTileDirect2LDS>(op))
-           || isStorePartOfDirect2LDSOp)
+        auto op                 = graph.control.getElement(opTag);
+        const auto [_, macTile] = graph.getDimension<MacroTile>(opTag);
+        if(not(isOperation<LoadTiled>(op) or isOperation<StoreTiled>(op)
+               or isOperation<LoadTileDirect2LDS>(op))
+           or isStorePartOfDirect2LDSOp or macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
             return -1;
 
         if(!bufferMap.contains(dst))
@@ -122,6 +124,31 @@ namespace rocRoller::KernelGraph
         }
 
         return bufferMap[dst];
+    }
+
+    /**
+     * @brief Return existing BaseAddress for load/stores from/to `dst`.
+     *
+     * Returns -1 if the operation doesn't need a baseAddress.
+     *
+     * If a BaseAddress edge doesn't already exist, we create a new
+     * Workgroup coordinate and attach it with a BaseAddress edge to the
+     * `dst`.
+     */
+    int getBaseAddress(KernelGraph& graph, int opTag, int dst, BaseAddressMap& baseAddressMap)
+    {
+        auto op                 = graph.control.getElement(opTag);
+        const auto [_, macTile] = graph.getDimension<MacroTile>(opTag);
+        if(not(isOperation<LoadTiled>(op) and macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL))
+            return -1;
+
+        if(!baseAddressMap.contains(dst))
+        {
+            auto wg             = graph.coordinates.addElement(Workgroup());
+            baseAddressMap[dst] = graph.coordinates.addElement(BaseAddress(), {wg}, {dst});
+        }
+
+        return baseAddressMap[dst];
     }
 
     /**
@@ -146,6 +173,7 @@ namespace rocRoller::KernelGraph
                          int          offset,
                          int          stride,
                          int          buffer,
+                         int          baseAddress,
                          bool         forward,
                          DataType     valueType,
                          DataType     offsetType,
@@ -160,6 +188,8 @@ namespace rocRoller::KernelGraph
 
         if(base > 0)
             graph.mapper.connect(ci, base, CCI{CCA::BASE});
+        if(baseAddress > 0)
+            graph.mapper.connect(ci, baseAddress, CCI{CCA::BASEADDRESS});
         if(buffer > 0)
             graph.mapper.connect(ci, buffer, CCI{CCA::BUFFER});
         if(increment > 0)
@@ -172,14 +202,16 @@ namespace rocRoller::KernelGraph
             graph.mapper.connect(ci, target, CCI{CCA::TARGET});
 
         rocRoller::Log::getLogger()->debug(
-            "KernelGraph::makeComputeIndex: ci {} {}/{} {}; {}/{}/{}",
+            "KernelGraph::makeComputeIndex: ci {} {}/{} {}; {}/{}/{} {}/{}",
             ci,
             target,
             increment,
             forward,
             base,
             offset,
-            stride);
+            stride,
+            buffer,
+            baseAddress);
 
         return ci;
     }
@@ -330,7 +362,18 @@ namespace rocRoller::KernelGraph
         auto     l  = graph.control.get<LoadTiled>(op);
         auto     ll = graph.control.get<LoadLDSTile>(op);
         auto     sl = graph.control.get<StoreLDSTile>(op);
-        if(s || l || ll || sl || isStorePartOfGGlobalToLDSOp)
+
+        auto isGlobalLoad = false;
+        if(l)
+        {
+            auto [_, macTile] = graph.getDimension<MacroTile>(op);
+            if(macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
+            {
+                isGlobalLoad = true;
+            }
+        }
+
+        if(s || (l and not isGlobalLoad) || ll || sl || isStorePartOfGGlobalToLDSOp)
         {
             rv = DataType::UInt32;
         }
@@ -393,7 +436,8 @@ namespace rocRoller::KernelGraph
                                       int                                   op,
                                       ExpressionPtr                         step,
                                       ComputeIndexChainSpecification const& spec,
-                                      BufferMap&                            bufferMap)
+                                      BufferMap&                            bufferMap,
+                                      BaseAddressMap&                       baseAddressMap)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::genericComputeIndex(): op {} location {}",
@@ -417,7 +461,7 @@ namespace rocRoller::KernelGraph
                 op, locationForCoordInfo, graph, spec.isStorePartOfGlobalToLDSOp))
         {
             // Add ComputeIndex operation
-            int offset = -1, stride = -1, buffer = -1;
+            int offset = -1, stride = -1, buffer = -1, baseAddress = -1;
 
             {
                 auto inCoord  = target;
@@ -437,6 +481,7 @@ namespace rocRoller::KernelGraph
                     const bool isStorePartOfDirect2LDSOp
                         = (isDirect2LDS && spec.isStorePartOfGlobalToLDSOp);
                     buffer = getBuffer(graph, op, target, bufferMap, isStorePartOfDirect2LDSOp);
+                    baseAddress = getBaseAddress(graph, op, target, baseAddressMap);
                 }
             }
 
@@ -460,6 +505,7 @@ namespace rocRoller::KernelGraph
                                              offset,
                                              stride,
                                              buffer,
+                                             baseAddress,
                                              direction == Graph::Direction::Upstream,
                                              dtype,
                                              offsetDataType,
@@ -474,6 +520,8 @@ namespace rocRoller::KernelGraph
                 connections.push_back(DC<Stride>(stride, info.sdim));
             if(buffer != -1)
                 connections.push_back(DC<Buffer>(buffer));
+            if(baseAddress != -1)
+                connections.push_back(DC<BaseAddress>(baseAddress));
             if(base != -1)
                 connections.push_back(
                     makeConnection<Offset, Connections::BaseOffset>(base, info.sdim));
@@ -850,6 +898,7 @@ namespace rocRoller::KernelGraph
             std::map<int, int>
                       serializationPoints; // Maps location to last chain bottom for serialization
             BufferMap bufferMap;
+            BaseAddressMap baseAddressMap;
 
             // Build all chains and insert them into the graph
             for(auto const& [spec, candidates] : m_chains)
@@ -869,7 +918,8 @@ namespace rocRoller::KernelGraph
                     spec.isStorePartOfGlobalToLDSOp,
                     spec.location);
 
-                auto chain = addComputeIndex(kgraph, candidates[0], step, spec, bufferMap);
+                auto chain
+                    = addComputeIndex(kgraph, candidates[0], step, spec, bufferMap, baseAddressMap);
 
                 if(spec.direction == GD::Downstream)
                 {
