@@ -88,17 +88,18 @@ namespace rocRoller::KernelGraph
      */
     struct ChainNodeInfo
     {
-        int      nopTag     = -1; // Placeholder NOP node
-        int      target     = -1;
-        int      increment  = -1;
-        int      baseOffset = -1; // The base offset coordinate (not the offset of this node)
-        int      offset     = -1;
-        int      stride     = -1;
-        int      buffer     = -1;
-        bool     forward    = false;
-        DataType valueType  = DataType::Count;
-        DataType offsetType = DataType::Count;
-        DataType strideType = DataType::Count;
+        int      nopTag      = -1; // Placeholder NOP node
+        int      target      = -1;
+        int      increment   = -1;
+        int      baseOffset  = -1; // The base offset coordinate (not the offset of this node)
+        int      offset      = -1;
+        int      stride      = -1;
+        int      buffer      = -1;
+        int      baseAddress = -1;
+        bool     forward     = false;
+        DataType valueType   = DataType::Count;
+        DataType offsetType  = DataType::Count;
+        DataType strideType  = DataType::Count;
         bool     isStorePartOfGlobalToLDSOp = false;
     };
 
@@ -229,6 +230,7 @@ namespace rocRoller::KernelGraph
                              offset,
                              stride,
                              buffer,
+                             baseAddress,
                              forward,
                              valueType,
                              offsetType,
@@ -730,7 +732,8 @@ namespace rocRoller::KernelGraph
                 for(OpsAndTilesType& elem : opsAndTiles)
                 {
                     auto memType = std::get<1>(elem).second.memoryType;
-                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE)
+                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE
+                       || memType == MemoryType::WAVE_FROM_GLOBAL)
                     {
                         return elem;
                     }
@@ -763,7 +766,8 @@ namespace rocRoller::KernelGraph
                 elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
             }
             else if(macTile.memoryType == MemoryType::WAVE
-                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE)
+                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE
+                    || macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
             {
                 auto [vgprBlockNumberTag, vgprBlockNumber]
                     = graph.getDimension<VGPRBlockNumber>(opTag, 0);
@@ -828,9 +832,11 @@ namespace rocRoller::KernelGraph
                            IndexComputeParams const& params,
                            const int                 target,
                            const int                 offset,
+                           const int                 baseAddress,
                            const bool                maybeLDS,
                            const bool                isTransposed,
                            const ContextPtr          context,
+                           const CommandPtr          command,
                            Transformer&              coords)
         {
             auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
@@ -874,6 +880,23 @@ namespace rocRoller::KernelGraph
             if(params.isStorePartOfGlobalToLDS)
             {
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
+            }
+
+            if(baseAddress > 0)
+            {
+                namespace CG = KernelGraph::CoordinateGraph;
+                auto userTag = only(graph.coordinates.getNeighbours<Graph::Direction::Downstream>(
+                                        baseAddress))
+                                   .value();
+                AssertFatal(
+                    userTag > 0,
+                    fmt::format("Could not find User connected to BaseAddress({})", baseAddress));
+                auto user = graph.coordinates.getNode<CG::User>(userTag);
+
+                AssertFatal(
+                    command, "Expected command pointer but got nullptr", ShowValue(command));
+                auto userAsCmdArg = findArgumentByName(command, user.argumentName);
+                expr              = expr + convert(params.offsetType, userAsCmdArg->expression());
             }
 
             auto assignNode         = Assign{offsetRegisterType, convert(params.offsetType, expr)};
@@ -1365,7 +1388,8 @@ namespace rocRoller::KernelGraph
                            spec.isStorePartOfGlobalToLDSOp,
                            spec.location);
 
-                auto chain = createIndexChain(kgraph, candidates[0], step, spec, bufferMap, baseAddressMap)
+                auto chain = createIndexChain(
+                    kgraph, candidates[0], step, spec, bufferMap, baseAddressMap);
 
                 if(spec.direction == GD::Downstream)
                 {
@@ -1547,9 +1571,11 @@ namespace rocRoller::KernelGraph
                                                params,
                                                target,
                                                nodeInfo.offset,
+                                               nodeInfo.baseAddress,
                                                maybeLDS,
                                                isTransposed,
                                                context,
+                                               command,
                                                xform);
             }
 

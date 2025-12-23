@@ -79,11 +79,13 @@ namespace rocRoller::KernelGraph
          */
         int makeAssignBase(KernelGraph&                  graph,
                            IndexComputeParams const&     params,
-                           int                           target,
-                           int                           offset,
-                           bool                          maybeLDS,
-                           bool                          isTransposed,
-                           ContextPtr                    context,
+                           const int                     target,
+                           const int                     offset,
+                           const int                     baseAddress,
+                           const bool                    maybeLDS,
+                           const bool                    isTransposed,
+                           const ContextPtr              context,
+                           const CommandPtr              command,
                            CoordinateGraph::Transformer& coords);
 
         /**
