@@ -207,7 +207,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        "\(.*deps.*\)|\(.*tests.*\)|\(.*data_sdk/include/hipdnn_data_sdk/data_objects.*\)|\(.*data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities.*\)"
+        "\(.*deps.*\)|\(.*tests.*\)|\(.*data_sdk/include/hipdnn_data_sdk/data_objects.*\)"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -218,8 +218,6 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
-        -object
-        ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object
