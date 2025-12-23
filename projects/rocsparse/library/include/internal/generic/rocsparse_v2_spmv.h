@@ -194,6 +194,9 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  Only the stage \ref rocsparse_v2_spmv_stage_compute
 *  supports execution in a hipGraph context. The \ref rocsparse_v2_spmv_stage_analysis stage does not support hipGraph.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]
@@ -248,13 +251,13 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  appended to the spmv computation. The computation will be:
  *  \f$y = \alpha * op(A) * x + \beta * y + \sum_{i=1}^{n} \gamma_i z_i\f$
  *  where \f$n\f$ is the number of extra terms set by \p num_extras.
- * 
+ *
  *  This feature can be used to implement residual calculations of the form
  *  \f$r = b - A * x\f$ within the SpMV call by setting \f$\gamma = 1\f$ and \f$z = b\f$.
  *
  *  \par Datatype Requirements
  *  The following datatype requirements must be satisfied:
- *  - The \p gamma_vec datatype must match the scalar datatype set via 
+ *  - The \p gamma_vec datatype must match the scalar datatype set via
  *    \ref rocsparse_spmv_set_input with \p rocsparse_spmv_input_scalar_datatype
  *  - All \p z_vecs must have the same datatype as the compute datatype set via
  *    \ref rocsparse_spmv_set_input with \p rocsparse_spmv_input_compute_datatype
@@ -280,7 +283,7 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval rocsparse_status_invalid_pointer \p descr, \p gamma_vec, or \p z_vecs is invalid.
- *  \retval rocsparse_status_invalid_value invalid parameters, including datatype mismatches 
+ *  \retval rocsparse_status_invalid_value invalid parameters, including datatype mismatches
  *          or missing scalar/compute datatype configuration.
  *  \retval rocsparse_status_invalid_size size mismatches between \p gamma_vec and \p num_extras,
  *          or between \p z_vecs elements.

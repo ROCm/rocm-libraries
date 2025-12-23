@@ -40,6 +40,10 @@ extern "C" {
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
+*  \note
+*  This routine does not support batched computation.
+*
+*
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]
@@ -122,6 +126,9 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  Currently, only \p trans == \ref rocsparse_operation_none and \p trans == \ref rocsparse_operation_transpose is supported.
 *  Only the \ref rocsparse_sptrsv_stage_compute stage
 *  supports execution in a hipGraph context. The \ref rocsparse_sptrsv_stage_analysis stage does not support hipGraph.
+*
+*  \note
+*  This routine does not support batched computation.
 *
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
