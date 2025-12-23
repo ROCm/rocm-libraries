@@ -20,7 +20,9 @@ add_executable(
     TestBatchnormBackwardAttributes.cpp
     TestBatchnormBackwardNode.cpp
     TestBatchnormInferenceAttributes.cpp
+    TestBatchnormInferenceAttributesVarianceExt.cpp
     TestBatchnormInferenceNode.cpp
+    TestBatchnormInferenceNodeVarianceExt.cpp
     TestBatchnormNode.cpp
     TestConvolutionDgradAttributes.cpp
     TestConvolutionFwdAttributes.cpp
