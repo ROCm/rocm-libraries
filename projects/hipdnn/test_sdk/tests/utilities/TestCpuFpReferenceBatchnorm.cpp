@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
@@ -166,6 +167,19 @@ TEST(TestCpuFpReferenceBatchnormFp8, BatchnormFwdInferenceNchw)
 {
     Tensor<hip_fp8_e4m3> inputTensor({1, 3, 224, 224});
     Tensor<hip_fp8_e4m3> outputTensor({1, 3, 224, 224});
+    Tensor<float> biasTensor({1, 3});
+    Tensor<float> scaleTensor({1, 3});
+    Tensor<float> meanTensor({1, 3});
+    Tensor<float> varianceTensor({1, 3});
+
+    CpuFpReferenceBatchnorm::fwdInference(
+        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormBfp8, BatchnormFwdInferenceNchw)
+{
+    Tensor<hip_fp8_e5m2> inputTensor({1, 3, 224, 224});
+    Tensor<hip_fp8_e5m2> outputTensor({1, 3, 224, 224});
     Tensor<float> biasTensor({1, 3});
     Tensor<float> scaleTensor({1, 3});
     Tensor<float> meanTensor({1, 3});
@@ -426,6 +440,27 @@ TEST(TestCpuFpReferenceBatchnormFp8, BatchnormBackwardNchw)
     Tensor<hip_fp8_e4m3> xTensor({6, 3, 32, 32});
     Tensor<hip_fp8_e4m3> dyTensor({6, 3, 32, 32});
     Tensor<hip_fp8_e4m3> dxTensor({6, 3, 32, 32});
+    Tensor<float> scaleTensor({1, 3});
+    Tensor<float> meanTensor({1, 3});
+    Tensor<float> invVarianceTensor({1, 3});
+    Tensor<float> dscaleTensor({1, 3});
+    Tensor<float> dbiasTensor({1, 3});
+
+    CpuFpReferenceBatchnorm::backward(dyTensor,
+                                      xTensor,
+                                      meanTensor,
+                                      invVarianceTensor,
+                                      scaleTensor,
+                                      dxTensor,
+                                      dscaleTensor,
+                                      dbiasTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormBfp8, BatchnormBackwardNchw)
+{
+    Tensor<hip_fp8_e5m2> xTensor({6, 3, 32, 32});
+    Tensor<hip_fp8_e5m2> dyTensor({6, 3, 32, 32});
+    Tensor<hip_fp8_e5m2> dxTensor({6, 3, 32, 32});
     Tensor<float> scaleTensor({1, 3});
     Tensor<float> meanTensor({1, 3});
     Tensor<float> invVarianceTensor({1, 3});
@@ -1218,7 +1253,33 @@ TEST(TestCpuFpReferenceBatchnormFp8, BatchnormFwdTrainingNchw)
     Tensor<double> savedMean({1, 3});
     Tensor<double> savedInvVariance({1, 3});
 
-    inputTensor.fillWithValue(1);
+    inputTensor.fillWithValue(1.0_fp8);
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(1.0, 0, i);
+        biasTensor.setHostValue(0.0, 0, i);
+    }
+
+    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+                                         scaleTensor,
+                                         biasTensor,
+                                         outputTensor,
+                                         BATCHNORM_DEFAULT_EPSILON,
+                                         0.1,
+                                         &savedMean,
+                                         &savedInvVariance);
+}
+
+TEST(TestCpuFpReferenceBatchnormBfp8, BatchnormFwdTrainingNchw)
+{
+    Tensor<hip_fp8_e5m2> inputTensor({2, 3, 4, 4});
+    Tensor<hip_fp8_e5m2> outputTensor({2, 3, 4, 4});
+    Tensor<double> scaleTensor({1, 3});
+    Tensor<double> biasTensor({1, 3});
+    Tensor<double> savedMean({1, 3});
+    Tensor<double> savedInvVariance({1, 3});
+
+    inputTensor.fillWithValue(1.0_bfp8);
     for(int i = 0; i < 3; i++)
     {
         scaleTensor.setHostValue(1.0, 0, i);

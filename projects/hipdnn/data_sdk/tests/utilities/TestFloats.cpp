@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 
@@ -68,5 +69,29 @@ TEST(TestUtilsFp8, Max)
     EXPECT_EQ(std::max(b, a), 2.0_fp8);
     EXPECT_EQ(std::max(a, nan), 1.0_fp8);
     EXPECT_EQ(std::max(nan, b), 2.0_fp8);
+    EXPECT_EQ(std::max(nan, nan), nan);
+}
+
+TEST(TestUtilsBfp8, BasicUsage)
+{
+    hip_fp8_e5m2 bf = 1.0_bfp8;
+    EXPECT_EQ(bf, 1.0_bfp8);
+}
+
+TEST(TestUtilsBfp8, Fabs)
+{
+    EXPECT_EQ(std::fabs(-1.0_bfp8), 1.0_bfp8);
+    EXPECT_EQ(std::fabs(1.0_bfp8), 1.0_bfp8);
+}
+
+TEST(TestUtilsTestUtilsBfp8, Max)
+{
+    hip_fp8_e5m2 a = 1.0_bfp8;
+    hip_fp8_e5m2 b = 2.0_bfp8;
+    hip_fp8_e5m2 nan = hipdnn_sdk::utilities::bfp8::uchar_as_bfp8(0x7F);
+    EXPECT_EQ(std::max(a, b), 2.0_bfp8);
+    EXPECT_EQ(std::max(b, a), 2.0_bfp8);
+    EXPECT_EQ(std::max(a, nan), 1.0_bfp8);
+    EXPECT_EQ(std::max(nan, b), 2.0_bfp8);
     EXPECT_EQ(std::max(nan, nan), nan);
 }

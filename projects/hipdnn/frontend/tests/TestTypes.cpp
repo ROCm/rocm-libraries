@@ -17,6 +17,7 @@ TEST(TestTypes, ToSdkTypeDataTypes)
     EXPECT_EQ(toSdkType(DataType::INT32), hipdnn_data_sdk::data_objects::DataType::INT32);
     EXPECT_EQ(toSdkType(DataType::INT8), hipdnn_data_sdk::data_objects::DataType::INT8);
     EXPECT_EQ(toSdkType(DataType::FP8_E4M3), hipdnn_data_sdk::data_objects::DataType::FP8_E4M3);
+    EXPECT_EQ(toSdkType(DataType::FP8_E5M2), hipdnn_data_sdk::data_objects::DataType::FP8_E5M2);
     EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
 }
 
@@ -32,6 +33,7 @@ TEST(TestTypes, FromSdkTypeDataTypes)
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT32), DataType::INT32);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT8), DataType::INT8);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E4M3), DataType::FP8_E4M3);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E5M2), DataType::FP8_E5M2);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
@@ -76,6 +78,7 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<int32_t>(), DataType::INT32);
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
     EXPECT_EQ(getDataTypeEnumFromType<hip_fp8_e4m3>(), DataType::FP8_E4M3);
+    EXPECT_EQ(getDataTypeEnumFromType<hip_fp8_e5m2>(), DataType::FP8_E5M2);
 
     EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
     EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
@@ -93,6 +96,7 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::INT32), "int32");
     EXPECT_STREQ(to_string(DataType::INT8), "int8");
     EXPECT_STREQ(to_string(DataType::FP8_E4M3), "fp8_e4m3");
+    EXPECT_STREQ(to_string(DataType::FP8_E5M2), "fp8_e5m2");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
@@ -132,6 +136,10 @@ TEST(TestTypes, DataTypeStreamOperator)
 
     oss << DataType::FP8_E4M3;
     EXPECT_EQ(oss.str(), "fp8_e4m3");
+    oss.str("");
+
+    oss << DataType::FP8_E5M2;
+    EXPECT_EQ(oss.str(), "fp8_e5m2");
     oss.str("");
 
     oss << DataType::NOT_SET;

@@ -81,6 +81,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::INT32, "int32"},
                                  {DataType::INT8, "int8"},
                                  {DataType::FP8_E4M3, "fp8_e4m3"},
+                                 {DataType::FP8_E5M2, "fp8_e5m2"},
                              }
 
 )
