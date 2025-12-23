@@ -61,14 +61,13 @@ bool checkNotInList(const T& a, const std::vector<T> b)
     return std::find(b.begin(), b.end(), a) == b.end();
 }
 
-// Helper to get device properties from HIP runtime
-template <typename T, typename Func>
-inline T getDeviceProperty(int deviceId, Func propertyGetter, T defaultValue = T{})
+// Helper to get device attribute from HIP runtime
+inline int getDeviceAttribute(hipDeviceAttribute_t attr, int deviceId, int defaultValue = 0)
 {
-    hipDeviceProp_t prop;
-    if(hipGetDeviceProperties(&prop, deviceId) == hipSuccess)
+    int value = defaultValue;
+    if(hipDeviceGetAttribute(&value, attr, deviceId) == hipSuccess)
     {
-        return propertyGetter(prop);
+        return value;
     }
     return defaultValue;
 }
