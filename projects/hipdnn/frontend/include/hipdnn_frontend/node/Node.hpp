@@ -3,10 +3,10 @@
 #pragma once
 
 #include <functional>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -44,7 +44,7 @@ public:
     {
     }
 
-    virtual flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    virtual flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node([[maybe_unused]] flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         return {};

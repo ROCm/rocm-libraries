@@ -5,14 +5,14 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::helpers;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::helpers;
 
 template <typename T>
 void makeTensorsEqual(T& tensor1, T& tensor2)

@@ -10,7 +10,7 @@ namespace miopen_legacy_plugin
 {
 
 MiopenActivationDescriptor::MiopenActivationDescriptor(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttrs)
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttrs)
 {
     using namespace miopen_utils;
 

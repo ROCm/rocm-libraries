@@ -4,14 +4,14 @@
 #include <iostream>
 #include <miopen/miopen.h>
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "EngineManager.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
