@@ -2,17 +2,17 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceBasic)
 {

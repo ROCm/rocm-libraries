@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
 
 int main(int argc, char** argv)

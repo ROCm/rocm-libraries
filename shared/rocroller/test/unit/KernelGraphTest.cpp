@@ -1352,7 +1352,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 51);
+            EXPECT_EQ(deallocatedDims.size(), 55);
         }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
@@ -1380,7 +1380,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 293);
+            EXPECT_EQ(deallocatedDims.size(), 297);
         }
     }
 

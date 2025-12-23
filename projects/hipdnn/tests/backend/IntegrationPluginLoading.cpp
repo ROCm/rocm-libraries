@@ -9,9 +9,9 @@
 #include <HipdnnBackendAttributeType.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
@@ -21,7 +21,7 @@
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_tests::plugin_constants;
 namespace fs = std::filesystem;
 
@@ -180,7 +180,7 @@ TEST_F(IntegrationPluginLoading, DuplicateEngineIds)
 
 TEST_F(IntegrationPluginLoading, IncompleteAPI)
 {
-    using namespace hipdnn_sdk::utilities;
+    using namespace hipdnn_data_sdk::utilities;
     using namespace hipdnn_tests::plugin_constants;
 
     const std::array<const char*, 1> paths = {testIncompleteApiPluginPath().c_str()};
