@@ -260,6 +260,8 @@ void testing_csrcolor(const Arguments& argus)
         return;
     }
 
+    std::cout << "AAAA m: " << m << " k: " << k << " nnz: " << nnz << std::endl;
+
     hipsparseColorInfo_t colorInfo;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateColorInfo(&colorInfo));
 
@@ -276,11 +278,14 @@ void testing_csrcolor(const Arguments& argus)
     int* dcoloring   = (int*)dcoloring_managed.get();
     int* dreordering = (int*)dreordering_managed.get();
 
+    std::cout << "BBBB" << std::endl;
     // copy data from CPU to device
     CHECK_HIP_ERROR(
         hipMemcpy(drow_ptr, hrow_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcol_ind, hcol_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
+
+    std::cout << "CCCC" << std::endl;
 
     int ncolors;
 
@@ -298,6 +303,8 @@ void testing_csrcolor(const Arguments& argus)
                                              colorInfo));
     CHECK_HIP_ERROR(hipDeviceSynchronize());
 
+    std::cout << "ncolors: " << ncolors << std::endl;
+
     if(argus.unit_check)
     {
         std::vector<int> hcoloring(m);
@@ -307,6 +314,7 @@ void testing_csrcolor(const Arguments& argus)
         CHECK_HIP_ERROR(
             hipMemcpy(hreordering.data(), dreordering, sizeof(int) * m, hipMemcpyDeviceToHost));
 
+        std::cout << "DDDD" << std::endl;
         // Check that two adjacent nodes do not have the same color
         for(int row = 0; row < m; ++row)
         {
@@ -329,6 +337,8 @@ void testing_csrcolor(const Arguments& argus)
             }
         }
 
+        std::cout << "EEEE" << std::endl;
+
         // Check if colors are contiguous
         int max_value = 0;
         for(size_t i = 0; i < hcoloring.size(); ++i)
@@ -347,6 +357,8 @@ void testing_csrcolor(const Arguments& argus)
         }
         ++max_value;
 
+        std::cout << "max_value: " << max_value << std::endl;
+
 #ifdef __HIP_PLATFORM_AMD__
         std::vector<bool> marker(max_value, false);
         for(size_t i = 0; i < hcoloring.size(); ++i)
@@ -361,6 +373,8 @@ void testing_csrcolor(const Arguments& argus)
                                     HIPSPARSE_STATUS_SUCCESS);
         }
 #endif
+
+        std::cout << "FFFF" << std::endl;
     }
 
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyColorInfo(colorInfo));
