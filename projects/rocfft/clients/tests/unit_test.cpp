@@ -64,8 +64,6 @@ namespace scope = std::experimental;
 #include <boost/scope_exit.hpp>
 #endif
 
-
-
 #ifndef WIN32
 // get program_invocation_name
 #include <errno.h>
@@ -218,7 +216,6 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     ASSERT_EQ(rocfft_plan_description_destroy(desc), rocfft_status_success);
 }
 
-
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
@@ -234,16 +231,15 @@ TEST(rocfft_UnitTest, log_levels)
 #else
     BOOST_SCOPE_EXIT_ALL(=)
 #endif
-    {
-        rocfft_cleanup();
-        // re-init logs with default logging
-        rocfft_setup();
-        
-    }
+                            {
+                                rocfft_cleanup();
+                                // re-init logs with default logging
+                                rocfft_setup();
+                            }
 #ifdef HAVE_SCOPE_EXIT
-        )
+    )
 #endif
-    ;
+        ;
     rocfft_cleanup();
 
     // enumerate all known log levels and direct all of the logs to nowhere
@@ -251,7 +247,7 @@ TEST(rocfft_UnitTest, log_levels)
 #ifdef WIN32
     static const char* log_output = "NUL";
 #else
-    static const char* log_output   = "/dev/null";
+    static const char* log_output = "/dev/null";
 #endif
     EnvironmentSetTemp log_trace_path("ROCFFT_LOG_TRACE_PATH", log_output);
     EnvironmentSetTemp log_bench_path("ROCFFT_LOG_BENCH_PATH", log_output);
@@ -325,16 +321,16 @@ TEST(rocfft_UnitTest, log_multithreading)
     BOOST_SCOPE_EXIT_ALL(=)
 #endif
 
-    {
-        rocfft_cleanup();
-        remove(TRACE_FILE);
-        // re-init logs with default logging
-        rocfft_setup();
-    }
+                            {
+                                rocfft_cleanup();
+                                remove(TRACE_FILE);
+                                // re-init logs with default logging
+                                rocfft_setup();
+                            }
 #ifdef HAVE_SCOPE_EXIT
-        )
+    )
 #endif
-    ;
+        ;
 
     // ask for trace logging, since that's the easiest to trigger
     rocfft_cleanup();
@@ -528,22 +524,22 @@ void rtc_cache_main()
 #else
     BOOST_SCOPE_EXIT_ALL(=)
 #endif
-    {
-        // close log file handles
-        rocfft_cleanup();
-        remove(rtc_cache_path.c_str());
-        remove(rtc_log_path.c_str());
-        // re-init lib now that the env vars are gone
-        rocfft_setup();
-        if(empty_cache)
-            rocfft_cache_buffer_free(empty_cache);
-        if(onekernel_cache)
-            rocfft_cache_buffer_free(onekernel_cache);
-    }
+                            {
+                                // close log file handles
+                                rocfft_cleanup();
+                                remove(rtc_cache_path.c_str());
+                                remove(rtc_log_path.c_str());
+                                // re-init lib now that the env vars are gone
+                                rocfft_setup();
+                                if(empty_cache)
+                                    rocfft_cache_buffer_free(empty_cache);
+                                if(onekernel_cache)
+                                    rocfft_cache_buffer_free(onekernel_cache);
+                            }
 #ifdef HAVE_SCOPE_EXIT
-        )
+    )
 #endif
-    ;
+        ;
 
     rocfft_cleanup();
     EnvironmentSetTemp cache_env("ROCFFT_RTC_CACHE_PATH", rtc_cache_path.c_str());
@@ -789,16 +785,16 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     scope::scope_exit guard([]()
 #else
     BOOST_SCOPE_EXIT_ALL()
-#endif        
-    {
-        // reinit rocFFT so caching goes back to normal
-        rocfft_cleanup();
-        rocfft_setup();
-    }
-#ifdef HAVE_SCOPE_EXIT
-        )
 #endif
-    ;
+                            {
+                                // reinit rocFFT so caching goes back to normal
+                                rocfft_cleanup();
+                                rocfft_setup();
+                            }
+#ifdef HAVE_SCOPE_EXIT
+    )
+#endif
+        ;
 
     // extra scope to control lifetime of env vars
     {
