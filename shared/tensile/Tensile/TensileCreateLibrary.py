@@ -31,6 +31,7 @@ if __name__ == "__main__":
     exit(1)
 
 import collections
+import copy
 import itertools
 import os
 import re
@@ -48,6 +49,8 @@ from .Common import (
     HR,
     CHeader,
     CMakeHeader,
+    archAliases,
+    architectureMap,
     assignGlobalParameters,
     ensurePath,
     getArchitectureName,
@@ -629,9 +632,11 @@ def buildObjectFileNames(
     sourceArchs, _ = splitArchs()
 
     # Asm based kernels target the configured ISA
+    # Use RequestedArchName if set (for alias architectures), otherwise compute from ISA
     asmArchs = collections.defaultdict(list)
     for kernelName, kernel in zip(asmKernelNames, asmKernels):
-        asmArchs[kernelName].append(gfxName(kernel["ISA"]))
+        outputArch = kernel.get("RequestedArchName", gfxName(kernel["ISA"]))
+        asmArchs[kernelName].append(outputArch)
 
     # Build a list of source files
     if not globalParameters["MergeFiles"]:
@@ -997,19 +1002,27 @@ def makeSolutions(
     in the master solution libraries. If using separate architectures
     but not using lazy loading, lazyLibraries should be an empty dict.
 
+    Also propagates the library's requestedArchName to each solution.
+
     Args:
         masterLibraries: A dictionary containing the master solution libraries.
 
     Returns:
         Generator representing a sequence of library logic tuples.
     """
+    def tagSolution(sol, requestedArchName):
+        """Tag solution with the requested architecture name for output file naming."""
+        if requestedArchName is not None:
+            sol.originalSolution["RequestedArchName"] = requestedArchName
+        return sol.originalSolution
+
     gen1 = (
-        sol.originalSolution
+        tagSolution(sol, masterLibrary.requestedArchName)
         for masterLibrary in masterLibraries.values()
         for sol in masterLibrary.solutions.values()
     )
     gen2 = (
-        sol.originalSolution
+        tagSolution(sol, masterLibrary.requestedArchName)
         for masterLibrary in masterLibraries.values()
         for lib in masterLibrary.lazyLibraries.values()
         for sol in lib.solutions.values()
@@ -1385,6 +1398,11 @@ def TensileCreateLibrary():
         for arch in globalParameters["SupportedISA"]
         if globalParameters["AsmCaps"][arch]["SupportedISA"]
     ]
+    # Add alias names that resolve to supported architectures
+    for alias, base in archAliases.items():
+        if base in supportedArchs:
+            supportedArchs.append(alias)
+    print(f"DEBUG supportedArchs: {supportedArchs}")
 
     _, requestedArchs = splitArchs()
     # Resolve aliases before checking if architecture is supported
@@ -1437,6 +1455,72 @@ def TensileCreateLibrary():
     masterLibraries = generateLogicData(
         logicFiles, args["Version"], args["PrintLevel"], args["SeparateArchitectures"]
     )
+
+    def renameLazyLibraryKeys(lib, requestedArchName):
+        """Rename lazy library keys to use requestedArchName instead of original arch.
+
+        Lazy library names end with architecture (e.g., TensileLibrary_Type_..._gfx1100).
+        This function renames them to use the requested arch (e.g., gfx11-generic).
+        Also updates the codeObjectFile on each solution to match the new name.
+        """
+        if not requestedArchName or not lib.lazyLibraries:
+            return
+
+        # Get all known architecture names to check for suffix replacement
+        knownArchs = set(architectureMap.keys())
+
+        newLazyLibraries = {}
+        for name, lazyLib in lib.lazyLibraries.items():
+            newName = name
+            # Check if name ends with any known architecture
+            for arch in knownArchs:
+                if name.endswith("_" + arch):
+                    newName = name[:-len(arch)] + requestedArchName
+                    break
+            # Update codeObjectFile on solutions to match new name
+            for sol in lazyLib.solutions.values():
+                sol.originalSolution["codeObjectFile"] = newName
+            newLazyLibraries[newName] = lazyLib
+        lib.lazyLibraries = newLazyLibraries
+
+    # Rename masterLibraries keys from logic file arch names to requested arch names
+    # This is needed for alias architectures (e.g., gfx11-generic -> navi31 -> gfx11-generic)
+    # Also handles multiple requested names for same base arch (e.g., gfx1100;gfx11-generic)
+    if args["SeparateArchitectures"]:
+        requestedArchs = splitDelimitedString(args["Architecture"], {";", "_"})
+        # Build mapping: common name -> list of requested arch names
+        commonToRequested = collections.defaultdict(list)
+        for reqArch in requestedArchs:
+            commonName = getArchitectureName(reqArch)
+            if commonName:
+                commonToRequested[commonName].append(reqArch)
+
+        # Create library entries for each requested arch name
+        renamedLibraries = {}
+        for archName, lib in masterLibraries.items():
+            # Convert archName to common name for lookup (e.g., gfx1100 -> navi31)
+            # This is needed because masterLibraries keys may be gfx names (gfx1100)
+            # while commonToRequested is keyed by common names (navi31)
+            archCommonName = getArchitectureName(archName)
+            if archCommonName:
+                requestedNames = commonToRequested.get(archCommonName, [archName])
+            else:
+                requestedNames = [archName]
+            for reqName in requestedNames:
+                # Deep copy if multiple names map to same base arch OR if we'll merge
+                # (merging requires a copy to avoid "dict changed size during iteration")
+                needsCopy = len(requestedNames) > 1 or reqName in renamedLibraries
+                newLib = copy.deepcopy(lib) if needsCopy else lib
+                newLib.requestedArchName = reqName
+                renameLazyLibraryKeys(newLib, reqName)
+                if reqName in renamedLibraries:
+                    # Merge with existing library instead of overwriting
+                    renamedLibraries[reqName].merge(newLib)
+                else:
+                    renamedLibraries[reqName] = newLib
+        masterLibraries = renamedLibraries
+    print(f"DEBUG masterLibraries keys: {list(masterLibraries.keys())}")
+
     solutions = generateSolutions(masterLibraries, args["SeparateArchitectures"])
     if lazyLoading and args["WriteMasterSolutionIndex"]:
         writeMasterSolutionIndexCSV(outputPath, masterLibraries)
@@ -1508,6 +1592,7 @@ def TensileCreateLibrary():
     newLibraryDir.mkdir(exist_ok=True)
 
     masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
+    print(f"DEBUG masterFileList: {[name for name, lib in masterFileList]}")
 
     tPrint(1, f"# Writing {len(masterFileList)} solution selection catalog(s)")
     for name, lib in masterFileList:

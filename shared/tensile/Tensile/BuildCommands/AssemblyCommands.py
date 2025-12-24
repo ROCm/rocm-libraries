@@ -103,13 +103,15 @@ def buildAssemblyCodeObjectFiles(
     if len(assemblyKernels) == 0:
         return []
 
+    # Group kernels by requested architecture name (or computed gfx name if not set)
+    # This preserves alias names like gfx11-generic instead of converting to gfx1100
     archKernelMap = collections.defaultdict(list)
     for k in assemblyKernels:
-        archKernelMap[tuple(k["ISA"])].append(k)
+        archName = k.get("RequestedArchName", gfxName(tuple(k["ISA"])))
+        archKernelMap[archName].append(k)
 
     coFiles = []
-    for arch, archKernels in archKernelMap.items():
-        gfx = gfxName(arch)
+    for gfx, archKernels in archKernelMap.items():
         objectFiles = [
             str(asmDir / (writer.getKernelFileBase(k) + extObj))
             for k in archKernels

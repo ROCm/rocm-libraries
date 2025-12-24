@@ -247,7 +247,7 @@ class PredicateLibrary:
 
 
 class MasterSolutionLibrary:
-    StateKeys = ["solutions", "library"]
+    StateKeys = ["solutions", "library", "requestedArchName"]
     ArchitectureSet = set()
 
     @classmethod
@@ -482,11 +482,12 @@ class MasterSolutionLibrary:
 
         return cls(solutionMap, library)
 
-    def __init__(self, solutions, library, version=None):
+    def __init__(self, solutions, library, version=None, requestedArchName=None):
         self.lazyLibraries = {}
         self.solutions = solutions
         self.library = library
         self.version = version
+        self.requestedArchName = requestedArchName
 
     def state(self):
         rv = {
@@ -496,6 +497,8 @@ class MasterSolutionLibrary:
 
         if self.version is not None:
             rv["version"] = self.version
+        if self.requestedArchName is not None:
+            rv["requestedArchName"] = self.requestedArchName
         return rv
 
     def applyNaming(self, naming=None):
