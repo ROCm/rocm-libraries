@@ -91,25 +91,19 @@ _hipdnn_data_sdk_process_dependency(
     nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
 )
 
-if(WIN32)
-    # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
-    # when consuming the hipdnn_data_sdk.  We need to clear these options Refer to issue:
-    # https://github.com/ROCm/TheRock/issues/2003
-
-    # Can't do this to an alias
-    get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
-    message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
-
-    if(NOT aliased_target_name)
-        set_target_properties(spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS "")
-    endif()
-endif()
-
 add_library(hipdnn_data_sdk INTERFACE)
-target_link_libraries(
-    hipdnn_data_sdk INTERFACE flatbuffers::flatbuffers spdlog::spdlog_header_only
-                         nlohmann_json::nlohmann_json
-)
+
+# Extract and use include directories from dependency targets instead of linking
+# Remove this if TheRock 3rd Party deps get installed as clang + header only, and go back to target_link_libraries
+foreach(_dep_target flatbuffers::flatbuffers spdlog::spdlog_header_only nlohmann_json::nlohmann_json)
+    if(TARGET ${_dep_target})
+        get_target_property(_dep_includes ${_dep_target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_dep_includes)
+            message(STATUS "hipdnn_data_sdk adding includes from ${_dep_target}: ${_dep_includes}")
+            target_include_directories(hipdnn_data_sdk SYSTEM INTERFACE ${_dep_includes})
+        endif()
+    endif()
+endforeach()
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
@@ -164,6 +158,11 @@ endif()
 # This is required to use hip/hip_fp16.h and hip/hip_bfloat16.h in any code that includes the sdk By
 # doing this, we don't need to link to hip::device
 target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
+
+# If spdlog is not being exported locally, define SPDLOG_FMT_EXTERNAL to use the external fmt library
+if(NOT _hipdnn_data_sdk_local_export_includes)
+    target_compile_definitions(hipdnn_data_sdk INTERFACE SPDLOG_FMT_EXTERNAL FMT_HEADER_ONLY)
+endif()
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkTargets.cmake"
