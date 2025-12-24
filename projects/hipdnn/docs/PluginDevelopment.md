@@ -68,7 +68,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
 
 1. **Create Plugin Structure**
    - Create a new project/repository for your plugin
-   - Implement the plugin interface defined in [`sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h)
+   - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
    - See [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/) as a reference implementation (currently included but will become a separate project)
 
 2. **Implement Plugin API Functions**
@@ -118,7 +118,7 @@ In general, the **best practices** consist of:
 
 ### Key Files Reference
 
-- **Plugin API Interface**: [`sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h)
+- **Plugin API Interface**: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
 - **Example Plugin Implementation**: [`plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp`](../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp)
 - **Example Engine Manager**: [`plugins/miopen_legacy_plugin/EngineManager.hpp`](../plugins/miopen_legacy_plugin/EngineManager.hpp)
 - **Example Engine Implementation**: [`plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp`](../plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp)
@@ -163,7 +163,7 @@ When building an external plugin, the hipDNN SDK provides CMake variables to hel
   - Remains correct when setting the prefix during the CMake install command
 
 ```cmake
-find_package(hipdnn_sdk CONFIG REQUIRED) # or hipdnn_frontend which includes hipdnn_sdk
+find_package(hipdnn_data_sdk CONFIG REQUIRED) # or hipdnn_frontend which includes hipdnn_data_sdk
 
 # Example: Configure your plugin to install to the correct location
 install(

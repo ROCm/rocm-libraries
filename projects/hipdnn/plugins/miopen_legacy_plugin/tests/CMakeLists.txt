@@ -4,10 +4,10 @@
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
-enable_language(HIP)
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     find_package(hipdnn_test_sdk CONFIG REQUIRED)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
 
 add_executable(
@@ -43,7 +43,7 @@ target_compile_options(miopen_legacy_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPI
 
 target_link_libraries(
     miopen_legacy_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host
-                                      miopen_legacy_plugin_private hipdnn_test_sdk Threads::Threads
+                                      miopen_legacy_plugin_private hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
 
 # make it so tests inside folders can find the mocks folder without having to use a relative path.
