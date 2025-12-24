@@ -157,11 +157,11 @@ endif()
 
 # This is required to use hip/hip_fp16.h and hip/hip_bfloat16.h in any code that includes the sdk By
 # doing this, we don't need to link to hip::device
-target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
+target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__ FMT_HEADER_ONLY)
 
 # If spdlog is not being exported locally, define SPDLOG_FMT_EXTERNAL to use the external fmt library
 if(NOT _hipdnn_data_sdk_local_export_includes)
-    target_compile_definitions(hipdnn_data_sdk INTERFACE SPDLOG_FMT_EXTERNAL FMT_HEADER_ONLY)
+    target_compile_definitions(hipdnn_data_sdk INTERFACE SPDLOG_FMT_EXTERNAL)
 endif()
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
