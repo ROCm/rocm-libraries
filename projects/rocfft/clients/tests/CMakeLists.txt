@@ -240,6 +240,10 @@ endif()
 
 if(HAVE_SCOPE_HEADER OR HAVE_EXPERIMENTAL_SCOPE_HEADER )
   target_compile_definitions(rocfft-test PRIVATE HAVE_SCOPE_EXIT)
+else()
+  find_package( Boost REQUIRED )
+  set( Boost_DEBUG ON )
+  set( Boost_DETAILED_FAILURE_MSG ON )
 endif()
 
 

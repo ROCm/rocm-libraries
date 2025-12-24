@@ -60,6 +60,8 @@ namespace scope = std;
 #include <experimental/scope>
 namespace scope = std::experimental;
 #endif
+#else
+#include <boost/scope_exit.hpp>
 #endif
 
 
@@ -216,7 +218,7 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     ASSERT_EQ(rocfft_plan_description_destroy(desc), rocfft_status_success);
 }
 
-#ifdef HAVE_SCOPE_EXIT
+
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
@@ -227,13 +229,21 @@ TEST(rocfft_UnitTest, log_levels)
     }
 
     // clean up environment and temporary file when we exit
+#ifdef HAVE_SCOPE_EXIT
     scope::scope_exit guard([=]()
+#else
+    BOOST_SCOPE_EXIT_ALL(=)
+#endif
     {
         rocfft_cleanup();
         // re-init logs with default logging
         rocfft_setup();
         
-    });
+    }
+#ifdef HAVE_SCOPE_EXIT
+        )
+#endif
+    ;
     rocfft_cleanup();
 
     // enumerate all known log levels and direct all of the logs to nowhere
@@ -294,10 +304,8 @@ TEST(rocfft_UnitTest, log_levels)
         }
     }
 }
-#endif
 
 // Check whether logs can be emitted from multiple threads properly
-#ifdef HAVE_SCOPE_EXIT
 TEST(rocfft_UnitTest, log_multithreading)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -311,13 +319,22 @@ TEST(rocfft_UnitTest, log_multithreading)
     static const char* TRACE_FILE           = "trace.log";
 
     // clean up environment and temporary file when we exit
+#ifdef HAVE_SCOPE_EXIT
     scope::scope_exit guard([=]()
+#else
+    BOOST_SCOPE_EXIT_ALL(=)
+#endif
+
     {
         rocfft_cleanup();
         remove(TRACE_FILE);
         // re-init logs with default logging
         rocfft_setup();
-    });
+    }
+#ifdef HAVE_SCOPE_EXIT
+        )
+#endif
+    ;
 
     // ask for trace logging, since that's the easiest to trigger
     rocfft_cleanup();
@@ -483,7 +500,6 @@ TEST(rocfft_UnitTest, workmem_null)
 
 static const size_t RTC_PROBLEM_SIZE = 2304;
 // runtime compilation cache tests main loop
-#ifdef HAVE_SCOPE_EXIT
 void rtc_cache_main()
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -507,7 +523,11 @@ void rtc_cache_main()
     size_t onekernel_cache_bytes = 0;
 
     // cleanup
+#ifdef HAVE_SCOPE_EXIT
     scope::scope_exit guard([=]()
+#else
+    BOOST_SCOPE_EXIT_ALL(=)
+#endif
     {
         // close log file handles
         rocfft_cleanup();
@@ -519,7 +539,11 @@ void rtc_cache_main()
             rocfft_cache_buffer_free(empty_cache);
         if(onekernel_cache)
             rocfft_cache_buffer_free(onekernel_cache);
-    });
+    }
+#ifdef HAVE_SCOPE_EXIT
+        )
+#endif
+    ;
 
     rocfft_cleanup();
     EnvironmentSetTemp cache_env("ROCFFT_RTC_CACHE_PATH", rtc_cache_path.c_str());
@@ -648,7 +672,6 @@ TEST(rocfft_UnitTest, rtc_cache_iter_2)
 {
     rtc_cache_main();
 }
-#ifdef HAVE_SCOPE_EXIT
 
 // make sure cache API functions tolerate null pointers without crashing
 TEST(rocfft_UnitTest, rtc_cache_null)
@@ -740,7 +763,6 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
     plan = nullptr;
 }
 
-#ifdef HAVE_SCOPE_EXIT
 TEST(rocfft_UnitTest, rtc_test_harness)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -763,12 +785,20 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 
     rocfft_cleanup();
 
+#ifdef HAVE_SCOPE_EXIT
     scope::scope_exit guard([]()
+#else
+    BOOST_SCOPE_EXIT_ALL()
+#endif        
     {
         // reinit rocFFT so caching goes back to normal
         rocfft_cleanup();
         rocfft_setup();
-    });
+    }
+#ifdef HAVE_SCOPE_EXIT
+        )
+#endif
+    ;
 
     // extra scope to control lifetime of env vars
     {
