@@ -31,11 +31,14 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
-    const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
-    const std::vector<int64_t>& dims = {1, 3, 224, 224},
-    hipdnn_data_sdk::data_objects::DataType inputDataType = hipdnn_data_sdk::data_objects::DataType::FLOAT,
-    hipdnn_data_sdk::data_objects::DataType computeDataType = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+inline flatbuffers::FlatBufferBuilder
+    createValidBatchnormInferenceGraph(const std::vector<int64_t>& strides
+                                       = {150528, 50176, 224, 1},
+                                       const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                                       hipdnn_data_sdk::data_objects::DataType inputDataType
+                                       = hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                                       hipdnn_data_sdk::data_objects::DataType computeDataType
+                                       = hipdnn_data_sdk::data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
@@ -284,7 +287,8 @@ inline flatbuffers::FlatBufferBuilder
 inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
     const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
     const std::vector<int64_t>& dims = {1, 3, 224, 224},
-    hipdnn_data_sdk::data_objects::DataType inputDataType = hipdnn_data_sdk::data_objects::DataType::FLOAT,
+    hipdnn_data_sdk::data_objects::DataType inputDataType
+    = hipdnn_data_sdk::data_objects::DataType::FLOAT,
     hipdnn_data_sdk::data_objects::DataType intermediateDataType
     = hipdnn_data_sdk::data_objects::DataType::FLOAT)
 {
@@ -375,7 +379,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
     const std::vector<int64_t>& dims = {1, 3, 224, 224},
     bool hasOptionalAttributes = true,
-    hipdnn_data_sdk::data_objects::DataType inputDataType = hipdnn_data_sdk::data_objects::DataType::FLOAT,
+    hipdnn_data_sdk::data_objects::DataType inputDataType
+    = hipdnn_data_sdk::data_objects::DataType::FLOAT,
     hipdnn_data_sdk::data_objects::DataType intermediateDataType
     = hipdnn_data_sdk::data_objects::DataType::FLOAT)
 {
@@ -611,14 +616,13 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder
-    createValidBatchnormFwdTrainingActivGraph(bool withMeanVariance = true,
-                                              bool withRunningStats = false,
-                                              hipdnn_data_sdk::data_objects::PointwiseMode activMode
-                                              = hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
-                                              const std::vector<int64_t>& strides
-                                              = {588, 196, 14, 1},
-                                              const std::vector<int64_t>& dims = {1, 3, 14, 14})
+inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdTrainingActivGraph(
+    bool withMeanVariance = true,
+    bool withRunningStats = false,
+    hipdnn_data_sdk::data_objects::PointwiseMode activMode
+    = hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+    const std::vector<int64_t>& strides = {588, 196, 14, 1},
+    const std::vector<int64_t>& dims = {1, 3, 14, 14})
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>

@@ -4,9 +4,9 @@
 #include <numeric>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include "MiopenBatchnormApplicabilityChecks.hpp"
 #include "MiopenUtils.hpp"
@@ -19,16 +19,16 @@ namespace miopen_legacy_plugin
 // ============================================
 
 BatchnormTensorDescriptor::BatchnormTensorDescriptor(
-    const hipdnn_sdk::data_objects::TensorAttributes* attr)
+    const hipdnn_data_sdk::data_objects::TensorAttributes* attr)
     : dims(attr->dims()->begin(), attr->dims()->end())
     , strides(attr->strides()->begin(), attr->strides()->end())
-    , strideOrder(hipdnn_sdk::utilities::extractStrideOrder(strides))
+    , strideOrder(hipdnn_data_sdk::utilities::extractStrideOrder(strides))
 {
 }
 
 bool BatchnormTensorDescriptor::isPacked() const
 {
-    return hipdnn_sdk::utilities::isTensorPacked(dims, strides);
+    return hipdnn_data_sdk::utilities::isTensorPacked(dims, strides);
 }
 
 // ============================================
@@ -91,8 +91,8 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
 {
     if(numDims == 4)
     {
-        const auto layoutNchw = hipdnn_sdk::utilities::TensorLayout::NCHW;
-        const auto layoutNhwc = hipdnn_sdk::utilities::TensorLayout::NHWC;
+        const auto layoutNchw = hipdnn_data_sdk::utilities::TensorLayout::NCHW;
+        const auto layoutNhwc = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
 
         if(strideOrder != layoutNchw.strideOrder && strideOrder != layoutNhwc.strideOrder)
         {
@@ -103,8 +103,8 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
     }
     else // numDims == 5
     {
-        const auto layoutNcdhw = hipdnn_sdk::utilities::TensorLayout::NCDHW;
-        const auto layoutNdhwc = hipdnn_sdk::utilities::TensorLayout::NDHWC;
+        const auto layoutNcdhw = hipdnn_data_sdk::utilities::TensorLayout::NCDHW;
+        const auto layoutNdhwc = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
 
         if(strideOrder != layoutNcdhw.strideOrder && strideOrder != layoutNdhwc.strideOrder)
         {
@@ -185,8 +185,8 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
 // Data Type Validators
 
 void validateDataTypeIsSupported(
-    hipdnn_sdk::data_objects::DataType dataType,
-    const std::vector<hipdnn_sdk::data_objects::DataType>& allowedTypes,
+    hipdnn_data_sdk::data_objects::DataType dataType,
+    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& errorMessage)
 {
     for(const auto& allowedType : allowedTypes)
@@ -201,8 +201,9 @@ void validateDataTypeIsSupported(
 
 void validateConsistentDataTypes(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
-    const std::vector<hipdnn_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& typeErrorMessage,
     const std::string& consistencyErrorMessage)
 {
@@ -229,8 +230,9 @@ void validateConsistentDataTypes(
 
 void validateFixedDataType(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
-    hipdnn_sdk::data_objects::DataType expectedType,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    hipdnn_data_sdk::data_objects::DataType expectedType,
     const std::string& errorMessage)
 {
     for(const auto tensorId : tensorIds)
@@ -248,7 +250,8 @@ void validateFixedDataType(
 
 void validateConsistentShapes(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     const std::vector<int64_t>& referenceShape,
     const std::string& errorMessage)
 {
@@ -292,7 +295,8 @@ void validateSpatialDimensions(const std::vector<int64_t>& ioDims)
 // ============================================
 
 void checkTensorLayoutsAndDimsSupported(
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     // Convert Flatbuffer attributes to lightweight descriptors (single access per tensor)
     // Skip pass-by-value tensors (scalars like epsilon, momentum) since:
@@ -305,7 +309,7 @@ void checkTensorLayoutsAndDimsSupported(
     for(const auto& [id, attr] : tensorMap)
     {
         // Skip pass-by-value tensors (epsilon, momentum, etc.)
-        if(attr->value_type() != hipdnn_sdk::data_objects::TensorValue::NONE)
+        if(attr->value_type() != hipdnn_data_sdk::data_objects::TensorValue::NONE)
         {
             continue;
         }
@@ -322,9 +326,10 @@ void checkTensorDataTypesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
-    using DataType = hipdnn_sdk::data_objects::DataType;
+    using DataType = hipdnn_data_sdk::data_objects::DataType;
 
     // Validate IO tensors (FLOAT, HALF, or BFLOAT16 - all must match)
     validators::validateConsistentDataTypes(
@@ -354,7 +359,8 @@ void checkTensorShapesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     bool isTraining)
 {
     if(ioTensorIds.empty())
@@ -373,7 +379,7 @@ void checkTensorShapesSupported(
         ioTensorIds, tensorMap, ioDims, "All IO tensors for batchnorm must have the same shape.");
 
     // Validate derived shapes
-    const auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(ioDims);
+    const auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(ioDims);
     validators::validateConsistentShapes(affineTensorIds,
                                          tensorMap,
                                          derivedDims,
@@ -403,7 +409,8 @@ void checkBatchnormTensorConfigSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     bool isTraining)
 {
     checkTensorLayoutsAndDimsSupported(tensorMap);
@@ -414,8 +421,9 @@ void checkBatchnormTensorConfigSupported(
 } // namespace
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
     std::vector<int64_t> affineTensorIds
@@ -428,8 +436,9 @@ void checkBatchnormTensorConfigSupported(
 }
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
     std::vector<int64_t> affineTensorIds = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
@@ -448,8 +457,9 @@ void checkBatchnormTensorConfigSupported(
 }
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     std::vector<int64_t> ioTensorIds
         = {bnBwdAttr.x_tensor_uid(), bnBwdAttr.dy_tensor_uid(), bnBwdAttr.dx_tensor_uid()};
@@ -470,10 +480,11 @@ void checkBatchnormTensorConfigSupported(
 }
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
-    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     std::vector<int64_t> ioTensorIds = {bnBwdAttr.x_tensor_uid(),
                                         actAttr.in_1_tensor_uid().value(), // dy
@@ -504,20 +515,20 @@ namespace
 {
 
 void checkBatchnormActivationModeSupported(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
 {
     // MIOpen currently only supports miopenActivationPASTHRU, miopenActivationRELU,
     // miopenActivationCLIPPEDRELU and miopenActivationCLAMP for batchnorm fusions
 
-    if(activAttr.operation() == hipdnn_sdk::data_objects::PointwiseMode::IDENTITY)
+    if(activAttr.operation() == hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY)
     {
         // miopenActivationPASTHRU
         return;
     }
 
     if(activAttr.operation()
-       == (isBwd ? hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD
-                 : hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD))
+       == (isBwd ? hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD
+                 : hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD))
     {
         // miopenActivationRELU - Standard ReLU (no parameters)
         // miopenActivationCLIPPEDRELU - Clipped ReLU (relu_upper_clip only)
@@ -539,13 +550,13 @@ void checkBatchnormActivationModeSupported(
 } // namespace
 
 void checkBatchnormFwdActivationModeSupported(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr)
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr)
 {
     checkBatchnormActivationModeSupported(activAttr, false);
 }
 
 void checkBatchnormBwdActivationModeSupported(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr)
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr)
 {
     checkBatchnormActivationModeSupported(activAttr, true);
 }

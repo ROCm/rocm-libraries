@@ -7,11 +7,11 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_sdk/data_objects/batchnorm_backward_attributes_generated.h>
-#include <hipdnn_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace miopen_legacy_plugin
 {
@@ -26,7 +26,7 @@ struct BatchnormTensorDescriptor
     std::vector<int64_t> strides;
     std::vector<int64_t> strideOrder;
 
-    explicit BatchnormTensorDescriptor(const hipdnn_sdk::data_objects::TensorAttributes* attr);
+    explicit BatchnormTensorDescriptor(const hipdnn_data_sdk::data_objects::TensorAttributes* attr);
 
     size_t numDims() const
     {
@@ -55,27 +55,30 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
 
 // Data Type Validators
 void validateDataTypeIsSupported(
-    hipdnn_sdk::data_objects::DataType dataType,
-    const std::vector<hipdnn_sdk::data_objects::DataType>& allowedTypes,
+    hipdnn_data_sdk::data_objects::DataType dataType,
+    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& errorMessage);
 
 void validateConsistentDataTypes(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
-    const std::vector<hipdnn_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& typeErrorMessage,
     const std::string& consistencyErrorMessage);
 
 void validateFixedDataType(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
-    hipdnn_sdk::data_objects::DataType expectedType,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    hipdnn_data_sdk::data_objects::DataType expectedType,
     const std::string& errorMessage);
 
 // Shape Validators
 void validateConsistentShapes(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     const std::vector<int64_t>& referenceShape,
     const std::string& errorMessage);
 
@@ -88,21 +91,22 @@ void validateSpatialDimensions(const std::vector<int64_t>& ioDims);
 // ============================================================================
 
 void checkTensorLayoutsAndDimsSupported(
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 void checkTensorDataTypesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 void checkTensorShapesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     bool isTraining);
 
 // ============================================================================
@@ -110,31 +114,31 @@ void checkTensorShapesSupported(
 // ============================================================================
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 void checkBatchnormTensorConfigSupported(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
-    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 void checkBatchnormFwdActivationModeSupported(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr);
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
 
 void checkBatchnormBwdActivationModeSupported(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr);
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
 
 } // namespace miopen_legacy_plugin

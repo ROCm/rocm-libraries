@@ -354,15 +354,15 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         {
             switch(node.attributes_type())
             {
-            case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
                 checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormAttributes(),
                                                     opGraph.getTensorMap());
                 break;
-            case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
                 checkBatchnormTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
                 break;
-            case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
                 checkBatchnormTensorConfigSupported(
                     *node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap());
                 break;
@@ -407,7 +407,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         const auto& bnInfAttr
             = node0.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
-        const auto& actAttr = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+        const auto& actAttr
+            = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
         if(!batchnormFwdFusionCheckTensorsLogErrors(bnInfAttr, actAttr, opGraph.getTensorMap()))
         {
             return false;
