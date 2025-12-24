@@ -45,7 +45,47 @@
 
 namespace fs = std::filesystem;
 
-class GPU_HipGraphExist_NONE : public ::testing::Test
+namespace {
+
+struct HipGraphTestCase
+{
+    std::string driver_type;
+    std::string driver_args;
+    std::string test_name;
+    bool expect_graph; // true if we expect HIP graph to be created
+
+    friend std::ostream& operator<<(std::ostream& os, const HipGraphTestCase& tc)
+    {
+        return os << tc.driver_type << "_" << tc.test_name;
+    }
+};
+
+std::vector<HipGraphTestCase> GenSmokeTestCases()
+{
+    return {
+        {"conv",
+         "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
+         "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1",
+         "conv_hip_graph",
+         true},
+        {"activ",
+         "-n 100 -c 3 -H 32 -W 32 -m 3 -A 1 -B 1 -G 1 -F 0 -i 10 -V 1 -t 1",
+         "activ_hip_graph",
+         true},
+        {"bnorm",
+         "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1",
+         "bnorm_hip_graph",
+         true},
+        {"conv",
+         "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
+         "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --use_hip_graph 0",
+         "no_graph",
+         false}};
+}
+
+} // namespace
+
+class CPU_HipGraphExist_NONE : public ::testing::TestWithParam<HipGraphTestCase>
 {
 protected:
     std::string temp_dir;
@@ -162,7 +202,8 @@ protected:
 
     void RunHipGraphTest(const std::string& driver_type,
                          const std::string& driver_args,
-                         const std::string& test_name)
+                         const std::string& test_name,
+                         bool expect_graph)
     {
         // Skip test if rocprof is not available
         std::string rocprof_check = ExecuteCommand(rocprof_cmd + " --version 2>&1");
@@ -192,7 +233,13 @@ protected:
         // Run rocprof without --output-file (it will use default names: results.json, etc.)
         cmd << rocprof_cmd << " --hip-trace ";
         cmd << "\"" << fs::absolute(driver_path).string() << "\" " << driver_type << " ";
-        cmd << driver_args << " --use_hip_graph 1 ";
+        cmd << driver_args;
+        // Only add --use_hip_graph 1 if not already in driver_args and expect_graph is true
+        if(expect_graph && driver_args.find("--use_hip_graph") == std::string::npos)
+        {
+            cmd << " --use_hip_graph 1";
+        }
+        cmd << " ";
 #ifdef _WIN32
         cmd << "> \"" << driver_output << "\" 2>&1";
 #else
@@ -262,165 +309,88 @@ protected:
         std::cout << "hipGraphLaunch:        " << graph_launch_count << std::endl;
         std::cout << "hipGraphDestroy:       " << graph_destroy_count << std::endl;
 
-        // Verify HIP Graph was created via Stream Capture API
-        EXPECT_GT(stream_begin_capture_count, 0)
-            << "hipStreamBeginCapture not called - HIP Graph capture was not started";
-        EXPECT_GT(stream_end_capture_count, 0)
-            << "hipStreamEndCapture not called - HIP Graph was not created from stream";
-        EXPECT_GT(graph_instantiate_count, 0)
-            << "hipGraphInstantiate not called - HIP Graph was not instantiated";
-        EXPECT_GT(graph_launch_count, 0)
-            << "hipGraphLaunch not called - HIP Graph was not executed";
-
-        // Verify graph was reused (launched multiple times for iterations)
-        // The driver runs with -t 1 (timing enabled) which typically does multiple iterations
-        if(graph_launch_count > 1)
+        if(expect_graph)
         {
-            std::cout << "\n✓ Graph reused across " << graph_launch_count << " iterations"
-                      << std::endl;
-        }
-        else
-        {
-            std::cout << "\nNote: Graph launched only once (may be expected for single iteration)"
-                      << std::endl;
-        }
+            // Verify HIP Graph was created via Stream Capture API
+            EXPECT_GT(stream_begin_capture_count, 0)
+                << "hipStreamBeginCapture not called - HIP Graph capture was not started";
+            EXPECT_GT(stream_end_capture_count, 0)
+                << "hipStreamEndCapture not called - HIP Graph was not created from stream";
+            EXPECT_GT(graph_instantiate_count, 0)
+                << "hipGraphInstantiate not called - HIP Graph was not instantiated";
+            EXPECT_GT(graph_launch_count, 0)
+                << "hipGraphLaunch not called - HIP Graph was not executed";
 
-        // Overall success check
-        bool hip_graph_detected = (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
-                                   graph_instantiate_count > 0 && graph_launch_count > 0);
-
-        if(hip_graph_detected)
-        {
-            std::cout << "\n✓ SUCCESS: HIP Graph was created and executed" << std::endl;
-        }
-        else
-        {
-            std::cout << "\n✗ FAILED: HIP Graph operations not detected" << std::endl;
-            std::cout
-                << "Expected: hipStreamBeginCapture, hipStreamEndCapture, hipGraphInstantiate, "
-                   "hipGraphLaunch"
-                << std::endl;
-
-            // Print trace file content for debugging
-            std::cout << "\nTrace file content (first 50 lines):" << std::endl;
-            std::ifstream trace(trace_file);
-            std::string line;
-            int line_count = 0;
-            while(std::getline(trace, line) && line_count++ < 50)
+            // Verify graph was reused (launched multiple times for iterations)
+            // The driver runs with -t 1 (timing enabled) which typically does multiple iterations
+            if(graph_launch_count > 1)
             {
-                std::cout << line << std::endl;
+                std::cout << "\n✓ Graph reused across " << graph_launch_count << " iterations"
+                          << std::endl;
+            }
+            else
+            {
+                std::cout
+                    << "\nNote: Graph launched only once (may be expected for single iteration)"
+                    << std::endl;
+            }
+
+            // Overall success check
+            bool hip_graph_detected =
+                (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
+                 graph_instantiate_count > 0 && graph_launch_count > 0);
+
+            if(hip_graph_detected)
+            {
+                std::cout << "\n✓ SUCCESS: HIP Graph was created and executed" << std::endl;
+            }
+            else
+            {
+                std::cout << "\n✗ FAILED: HIP Graph operations not detected" << std::endl;
+                std::cout << "Expected: hipStreamBeginCapture, hipStreamEndCapture, "
+                             "hipGraphInstantiate, "
+                             "hipGraphLaunch"
+                          << std::endl;
+
+                // Print trace file content for debugging
+                std::cout << "\nTrace file content (first 50 lines):" << std::endl;
+                std::ifstream trace(trace_file);
+                std::string line;
+                int line_count = 0;
+                while(std::getline(trace, line) && line_count++ < 50)
+                {
+                    std::cout << line << std::endl;
+                }
+            }
+
+            ASSERT_TRUE(hip_graph_detected)
+                << "HIP Graph was not properly created/executed for " << driver_type;
+        }
+        else
+        {
+            // Verify HIP Graph was NOT created
+            EXPECT_EQ(stream_begin_capture_count, 0)
+                << "hipStreamBeginCapture was called even though HIP Graph should be disabled";
+            EXPECT_EQ(stream_end_capture_count, 0)
+                << "hipStreamEndCapture was called even though HIP Graph should be disabled";
+            EXPECT_EQ(graph_launch_count, 0)
+                << "hipGraphLaunch was called even though HIP Graph should be disabled";
+
+            if(stream_begin_capture_count == 0 && stream_end_capture_count == 0 &&
+               graph_launch_count == 0)
+            {
+                std::cout << "\n✓ SUCCESS: HIP Graph correctly NOT used when disabled"
+                          << std::endl;
             }
         }
-
-        ASSERT_TRUE(hip_graph_detected)
-            << "HIP Graph was not properly created/executed for " << driver_type;
     }
 };
 
-TEST_F(GPU_HipGraphExist_NONE, VerifyConvHipGraphCreationWithRocprof)
+TEST_P(CPU_HipGraphExist_NONE, Test)
 {
-    RunHipGraphTest("conv",
-                    "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
-                    "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1",
-                    "conv_hip_graph");
-}
-
-TEST_F(GPU_HipGraphExist_NONE, VerifyActivationHipGraphCreationWithRocprof)
-{
-    RunHipGraphTest("activ",
-                    "-n 100 -c 3 -H 32 -W 32 -m 3 -A 1 -B 1 -G 1 -F 0 -i 10 -V 1 -t 1",
-                    "activ_hip_graph");
-}
-
-TEST_F(GPU_HipGraphExist_NONE, VerifyBatchNormHipGraphCreationWithRocprof)
-{
+    const auto& test_case = GetParam();
     RunHipGraphTest(
-        "bnorm", "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1", "bnorm_hip_graph");
+        test_case.driver_type, test_case.driver_args, test_case.test_name, test_case.expect_graph);
 }
 
-TEST_F(GPU_HipGraphExist_NONE, VerifyHipGraphNotCreatedWithoutFlag)
-{
-    // This test verifies that HIP Graph is NOT created when the flag is disabled
-    // Skip test if rocprof is not available
-    std::string rocprof_check = ExecuteCommand(rocprof_cmd + " --version 2>&1");
-    if(rocprof_check.empty() || rocprof_check.find("rocprof") == std::string::npos)
-    {
-        GTEST_SKIP() << "rocprof not available, skipping test";
-    }
-
-    if(!fs::exists(driver_path))
-    {
-        GTEST_SKIP() << "MIOpenDriver not found at: " << driver_path;
-    }
-
-    std::string driver_output = temp_dir + PATH_SEPARATOR + "driver_no_graph_output.txt";
-
-    std::ostringstream cmd;
-
-    // Change to temp directory first, then run rocprof from there
-#ifdef _WIN32
-    cmd << "cd /d \"" << temp_dir << "\" && ";
-#else
-    cmd << "cd \"" << temp_dir << "\" && ";
-#endif
-
-    // Run rocprof without --output-file (it will use default names)
-    cmd << rocprof_cmd << " --hip-trace ";
-    cmd << "\"" << fs::absolute(driver_path).string() << "\" conv ";
-    cmd << "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 ";
-    cmd << "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 ";
-    cmd << "-m conv -g 1 -F 1 -t 1 --use_hip_graph 0 "; // HIP Graph DISABLED
-#ifdef _WIN32
-    cmd << "> \"" << driver_output << "\" 2>&1";
-#else
-    cmd << "2>&1 | tee \"" << driver_output << "\"";
-#endif
-
-    std::cout << "Executing command (without HIP Graph): " << cmd.str() << std::endl;
-
-    int ret = std::system(cmd.str().c_str());
-    std::cout << "Command return code: " << ret << std::endl;
-
-    // Find trace file (rocprof default output files)
-    std::vector<std::string> possible_trace_files = {
-        temp_dir + PATH_SEPARATOR + "results.json",
-        temp_dir + PATH_SEPARATOR + "results.hip_stats.csv",
-        temp_dir + PATH_SEPARATOR + "results.csv",
-        temp_dir + PATH_SEPARATOR + "hip_api_trace.txt"};
-
-    std::string trace_file;
-    for(const auto& file : possible_trace_files)
-    {
-        if(fs::exists(file) && fs::file_size(file) > 0)
-        {
-            trace_file = file;
-            break;
-        }
-    }
-
-    if(trace_file.empty())
-    {
-        GTEST_SKIP() << "rocprof did not generate trace file in " << temp_dir;
-    }
-
-    // Check that HIP Graph APIs are NOT present
-    int stream_begin_capture_count = CountOccurrences(trace_file, "hipStreamBeginCapture");
-    int stream_end_capture_count   = CountOccurrences(trace_file, "hipStreamEndCapture");
-    int graph_launch_count         = CountOccurrences(trace_file, "hipGraphLaunch");
-
-    std::cout << "\n=== Verification: HIP Graph should NOT be used ===" << std::endl;
-    std::cout << "hipStreamBeginCapture: " << stream_begin_capture_count << std::endl;
-    std::cout << "hipStreamEndCapture:   " << stream_end_capture_count << std::endl;
-    std::cout << "hipGraphLaunch:        " << graph_launch_count << std::endl;
-
-    EXPECT_EQ(stream_begin_capture_count, 0)
-        << "hipStreamBeginCapture was called even though --use_hip_graph 0";
-    EXPECT_EQ(stream_end_capture_count, 0)
-        << "hipStreamEndCapture was called even though --use_hip_graph 0";
-    EXPECT_EQ(graph_launch_count, 0) << "hipGraphLaunch was called even though --use_hip_graph 0";
-
-    if(stream_begin_capture_count == 0 && stream_end_capture_count == 0 && graph_launch_count == 0)
-    {
-        std::cout << "\n✓ SUCCESS: HIP Graph correctly NOT used when flag is disabled" << std::endl;
-    }
-}
+INSTANTIATE_TEST_SUITE_P(Smoke, CPU_HipGraphExist_NONE, testing::ValuesIn(GenSmokeTestCases()));
