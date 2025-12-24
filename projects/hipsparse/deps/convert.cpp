@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+
 #include <algorithm>
 #include <math.h>
 #include <sstream>
@@ -184,6 +185,7 @@ int read_mtx_matrix(const char*          filename,
     {
         perm[i] = i;
     }
+
     std::sort(perm.begin(), perm.end(), [&](const int& a, const int& b) {
         if(unsorted_row[a] < unsorted_row[b])
         {
@@ -240,6 +242,7 @@ int coo_to_csr(int m, int nnz, const int* src_row, std::vector<int>& dst_ptr)
     {
         ++dst_ptr[src_row[i] + 1];
     }
+
     // Exclusive scan
     for(int i = 0; i < m; ++i)
     {

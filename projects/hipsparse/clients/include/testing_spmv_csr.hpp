@@ -43,7 +43,7 @@ template <typename I, typename J, typename T>
 void testing_spmv_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              nnz       = 100;
@@ -60,7 +60,7 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
 #else
 #if(CUDART_VERSION >= 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_MV_ALG_DEFAULT;
 #endif
 #endif
@@ -176,7 +176,7 @@ template <typename I, typename J, typename T>
 void testing_spmv_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     J                    m        = argus.M;
     J                    n        = argus.N;
     T                    h_alpha  = make_DataType<T>(argus.alpha);
