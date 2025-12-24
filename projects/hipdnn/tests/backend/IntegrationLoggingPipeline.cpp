@@ -82,13 +82,13 @@ TEST_F(IntegrationGpuLoggingPipeline, DescriptorLogging)
     SKIP_IF_NO_DEVICES();
 
     // Test various descriptor types to exercise toString() implementations
-    std::vector<hipdnnBackendDescriptorType_t> descriptorTypes = {
-        HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR,
-        HIPDNN_BACKEND_ENGINE_DESCRIPTOR,
-        HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR,
-        HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR,
-        HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR,
-        HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR};
+    std::vector<hipdnnBackendDescriptorType_t> descriptorTypes
+        = {HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR,
+           HIPDNN_BACKEND_ENGINE_DESCRIPTOR,
+           HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR,
+           HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR,
+           HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR,
+           HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR};
 
     for(auto type : descriptorTypes)
     {
@@ -145,16 +145,24 @@ TEST_F(IntegrationGpuLoggingPipeline, EnumFormatting)
         descriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
-    // GetAttribute also logs these enums
+    // Note: GraphDescriptor::getAttribute is not supported - it returns NOT_SUPPORTED for all attributes.
+    // We exercise GetAttribute logging through EngineHeuristicDescriptor instead.
+    hipdnnBackendDescriptor_t heur = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &heur),
+              HIPDNN_STATUS_SUCCESS);
+
+    // GetAttribute logs these enums - querying an unset attribute
     int64_t elementCount = 0;
-    status = hipdnnBackendGetAttribute(descriptor,
-                                       HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
-                                       HIPDNN_TYPE_HANDLE,
+    status = hipdnnBackendGetAttribute(heur,
+                                       HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
                                        nullptr);
-    ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
+    // Returns BAD_PARAM_NOT_FINALIZED because the descriptor isn't finalized, but logs the enums
+    ASSERT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 
+    hipdnnBackendDestroyDescriptor(heur);
     hipdnnBackendDestroyDescriptor(descriptor);
     hipdnnDestroy(handle);
 }
@@ -178,11 +186,12 @@ TEST_F(IntegrationGpuLoggingPipeline, ErrorStatusLogging)
 }
 
 // Test full workflow with all logging points
+// This test focuses on exercising logging code paths without requiring valid plugins
 TEST_F(IntegrationGpuLoggingPipeline, FullWorkflowLogging)
 {
     SKIP_IF_NO_DEVICES();
 
-    // Create handle
+    // Create handle (triggers handle toString logging)
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
@@ -191,40 +200,48 @@ TEST_F(IntegrationGpuLoggingPipeline, FullWorkflowLogging)
     ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
     ASSERT_EQ(hipdnnSetStream(handle, stream), HIPDNN_STATUS_SUCCESS);
 
-    // Create and setup graph descriptor
+    // Create and setup graph descriptor (exercises GraphDescriptor::toString)
     hipdnnBackendDescriptor_t graph = nullptr;
     test_util::createTestGraph(&graph, handle);
     ASSERT_EQ(hipdnnBackendFinalize(graph), HIPDNN_STATUS_SUCCESS);
 
-    // Create engine descriptor
+    // Create engine heuristic descriptor to test more descriptor logging paths
+    hipdnnBackendDescriptor_t heur = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &heur),
+              HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(heur,
+                                        HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &graph),
+              HIPDNN_STATUS_SUCCESS);
+
+    auto mode = HIPDNN_HEUR_MODE_FALLBACK;
+    ASSERT_EQ(hipdnnBackendSetAttribute(
+                  heur, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, &mode),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(heur), HIPDNN_STATUS_SUCCESS);
+
+    // Query heuristic results (exercises GetAttribute logging)
+    int64_t count = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(heur,
+                                        HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        0,
+                                        &count,
+                                        nullptr),
+              HIPDNN_STATUS_SUCCESS);
+
+    // Create engine descriptor but don't finalize (no plugins loaded means finalize would fail)
     hipdnnBackendDescriptor_t engine = nullptr;
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, &engine),
               HIPDNN_STATUS_SUCCESS);
 
-    int64_t gidx = 0;
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  engine, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &graph),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  engine, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &gidx),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(hipdnnBackendFinalize(engine), HIPDNN_STATUS_SUCCESS);
-
-    // Create engine config descriptor
-    hipdnnBackendDescriptor_t engineConfig = nullptr;
-    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &engineConfig),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            engineConfig, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &engine),
-        HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(hipdnnBackendFinalize(engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    // Cleanup
-    hipdnnBackendDestroyDescriptor(engineConfig);
+    // Cleanup (exercises destroy logging)
     hipdnnBackendDestroyDescriptor(engine);
+    hipdnnBackendDestroyDescriptor(heur);
     hipdnnBackendDestroyDescriptor(graph);
     hipdnnDestroy(handle);
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
 }
-
