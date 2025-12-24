@@ -99,7 +99,7 @@ inline std::string get_filename(const std::string& matrix_filename)
     size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
     if(last_dot_pos == std::string::npos || last_dot_pos == 0)
     {
-        matrix_filename_with_ext += ".csr";
+        matrix_filename_with_ext += ".bin";
     }
 
     const char* matrices_dir = get_hipsparse_clients_matrices_dir();
@@ -161,8 +161,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
@@ -1119,40 +1119,6 @@ int read_bin_matrix(const char*          filename,
 
     int err;
 
-    // Read rocALUTION header string
-    const char expected_header[] = "#rocALUTION binary csr file";
-    char       header[sizeof(expected_header)];
-    err = fread(header, sizeof(char), sizeof(expected_header) - 1, f);
-    if(!err)
-    {
-        fclose(f);
-        return -1;
-    }
-    header[sizeof(expected_header) - 1] = '\0';
-    if(strcmp(header, expected_header) != 0)
-    {
-        fclose(f);
-        return -1;
-    }
-
-    // Skip newline character written by std::endl
-    char newline;
-    err = fread(&newline, sizeof(char), 1, f);
-    if(!err)
-    {
-        fclose(f);
-        return -1;
-    }
-
-    // Read version number
-    int version;
-    err = fread(&version, sizeof(int), 1, f);
-    if(!err)
-    {
-        fclose(f);
-        return -1;
-    }
-
     int nrowf = 0;
     int ncolf = 0;
     int nnzf  = 0;
@@ -1265,7 +1231,7 @@ bool generate_csr_matrix(const std::string    filename,
         std::string full_filename_path = get_filename(filename);
         std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
 
-        if(extension == "csr")
+        if(extension == "bin")
         {
             if(read_bin_matrix(full_filename_path.c_str(),
                                nrow,
@@ -1350,7 +1316,7 @@ bool generate_coo_matrix(const std::string    filename,
         std::string full_filename_path = get_filename(filename);
         std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
 
-        if(extension == "csr")
+        if(extension == "bin")
         {
             std::vector<I> csr_row_ptr;
             if(read_bin_matrix(full_filename_path.c_str(),

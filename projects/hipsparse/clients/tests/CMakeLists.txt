@@ -52,7 +52,7 @@ else()
     file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
   
     if(STATUS AND NOT STATUS EQUAL 0)
-      message(FATAL_ERROR "Failed to copy matrix .csr files, aborting.")
+      message(FATAL_ERROR "Failed to copy matrix .bin files, aborting.")
     endif()
   endif()
 

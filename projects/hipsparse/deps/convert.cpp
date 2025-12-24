@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,92 +21,89 @@
  *
  * ************************************************************************ */
 #include <algorithm>
-#include <cmath>
-#include <complex>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <iostream>
+#include <math.h>
 #include <sstream>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <vector>
 
-struct mtx_header
+int read_mtx_matrix(const char*          filename,
+                    int&                 nrow,
+                    int&                 ncol,
+                    int&                 nnz,
+                    std::vector<int>&    row,
+                    std::vector<int>&    col,
+                    std::vector<double>& val)
 {
-    char banner[16];
-    char array[16];
-    char coord[16];
-    char data[16];
-    char type[16];
-    int  symmetric;
-};
+    FILE* f = fopen(filename, "r");
+    if(!f)
+    {
+        return -1;
+    }
 
-bool read_mtx_header(FILE* f, int& nrow, int& ncol, int& nnz, mtx_header& header)
-{
     char line[1024];
 
     // Check for banner
     if(!fgets(line, 1024, f))
     {
-        return false;
+        return -1;
     }
 
+    char banner[16];
+    char array[16];
+    char coord[16];
+    char data[16];
+    char type[16];
+
     // Extract banner
-    if(sscanf(line,
-              "%s %s %s %s %s",
-              header.banner,
-              header.array,
-              header.coord,
-              header.data,
-              header.type)
-       != 5)
+    if(sscanf(line, "%s %s %s %s %s", banner, array, coord, data, type) != 5)
     {
-        return false;
+        return -1;
     }
 
     // Convert to lower case
-    for(char* p = header.array; *p != '\0'; *p = tolower(*p), p++)
+    for(char* p = array; *p != '\0'; *p = tolower(*p), p++)
         ;
-    for(char* p = header.coord; *p != '\0'; *p = tolower(*p), p++)
+    for(char* p = coord; *p != '\0'; *p = tolower(*p), p++)
         ;
-    for(char* p = header.data; *p != '\0'; *p = tolower(*p), p++)
+    for(char* p = data; *p != '\0'; *p = tolower(*p), p++)
         ;
-    for(char* p = header.type; *p != '\0'; *p = tolower(*p), p++)
+    for(char* p = type; *p != '\0'; *p = tolower(*p), p++)
         ;
 
     // Check banner
-    if(strncmp(line, "%%MatrixMarket", 14))
+    if(strncmp(line, "%%MatrixMarket", 14) != 0)
     {
-        return false;
+        return -1;
     }
 
     // Check array type
-    if(strcmp(header.array, "matrix"))
+    if(strcmp(array, "matrix") != 0)
     {
-        return false;
+        return -1;
     }
 
     // Check coord
-    if(strcmp(header.coord, "coordinate"))
+    if(strcmp(coord, "coordinate") != 0)
     {
-        return false;
+        return -1;
     }
 
     // Check data
-    if(strcmp(header.data, "real") && strcmp(header.data, "complex")
-       && strcmp(header.data, "integer") && strcmp(header.data, "pattern"))
+    if(strcmp(data, "real") != 0 && strcmp(data, "integer") != 0 && strcmp(data, "pattern") != 0)
     {
-        return false;
+        return -1;
     }
 
     // Check type
-    if(strcmp(header.type, "general") && strcmp(header.type, "symmetric")
-       && strcmp(header.type, "hermitian"))
+    if(strcmp(type, "general") != 0 && strcmp(type, "symmetric") != 0)
     {
-        return false;
+        return -1;
     }
 
     // Symmetric flag
-    header.symmetric = !strcmp(header.type, "symmetric") || !strcmp(header.type, "hermitian");
+    int symm = !strcmp(type, "symmetric");
 
     // Skip comments
     while(fgets(line, 1024, f))
@@ -118,95 +115,68 @@ bool read_mtx_header(FILE* f, int& nrow, int& ncol, int& nnz, mtx_header& header
     }
 
     // Read dimensions
-    sscanf(line, "%d %d %d", &nrow, &ncol, &nnz);
+    int snnz;
 
-    return true;
-}
+    sscanf(line, "%d %d %d", &nrow, &ncol, &snnz);
+    nnz = symm ? (snnz - nrow) * 2 + nrow : snnz;
 
-void set_value(double& dst, double rsrc, double isrc)
-{
-    dst = rsrc;
-}
-
-void set_value(std::complex<double>& dst, double rsrc, double isrc)
-{
-    dst = std::complex<double>(rsrc, isrc);
-}
-
-template <typename T>
-bool read_mtx_matrix(FILE*             f,
-                     const mtx_header& header,
-                     int               nrow,
-                     int               ncol,
-                     int&              nnz,
-                     std::vector<int>& row_ind,
-                     std::vector<int>& col_ind,
-                     std::vector<T>&   val)
-{
-    // Cache for line
-    char line[1024];
-
-    // Read unsorted data
-    std::vector<int> unsorted_row(header.symmetric ? 2 * nnz : nnz);
-    std::vector<int> unsorted_col(header.symmetric ? 2 * nnz : nnz);
-    std::vector<T>   unsorted_val(header.symmetric ? 2 * nnz : nnz);
+    std::vector<int>    unsorted_row(nnz);
+    std::vector<int>    unsorted_col(nnz);
+    std::vector<double> unsorted_val(nnz);
 
     // Read entries
     int idx = 0;
     while(fgets(line, 1024, f))
     {
-        if(idx >= (header.symmetric ? 2 * nnz : nnz))
+        if(idx >= nnz)
         {
-            return false;
+            return -1;
         }
 
         int    irow;
         int    icol;
-        double rval;
         double ival;
 
-        if(!strcmp(header.data, "pattern"))
+        if(!strcmp(data, "pattern"))
         {
             sscanf(line, "%d %d", &irow, &icol);
-            rval = 1.0;
+            ival = 1.0;
         }
         else
         {
-            if(!strcmp(header.data, "complex"))
-            {
-                sscanf(line, "%d %d %lg %lg", &irow, &icol, &rval, &ival);
-            }
-            else
-            {
-                sscanf(line, "%d %d %lg", &irow, &icol, &rval);
-            }
+            sscanf(line, "%d %d %lg", &irow, &icol, &ival);
         }
 
         --irow;
         --icol;
 
+        // Take absolute matrix value to avoid rounding issues when testing
+        ival = std::abs(ival);
+
         unsorted_row[idx] = irow;
         unsorted_col[idx] = icol;
-        set_value(unsorted_val[idx], rval, ival);
+        unsorted_val[idx] = ival;
 
         ++idx;
 
-        if(header.symmetric && irow != icol)
+        if(symm && irow != icol)
         {
-            if(idx >= (header.symmetric ? 2 * nnz : nnz))
+            if(idx >= nnz)
             {
-                return false;
+                return -1;
             }
 
             unsorted_row[idx] = icol;
             unsorted_col[idx] = irow;
-            set_value(unsorted_val[idx], rval, ival);
+            unsorted_val[idx] = ival;
             ++idx;
         }
     }
+    fclose(f);
 
-    // Store "real" number of non-zero entries
-    nnz = idx;
+    row.resize(nnz);
+    col.resize(nnz);
+    val.resize(nnz);
 
     // Sort by row and column index
     std::vector<int> perm(nnz);
@@ -214,7 +184,6 @@ bool read_mtx_matrix(FILE*             f,
     {
         perm[i] = i;
     }
-
     std::sort(perm.begin(), perm.end(), [&](const int& a, const int& b) {
         if(unsorted_row[a] < unsorted_row[b])
         {
@@ -230,53 +199,39 @@ bool read_mtx_matrix(FILE*             f,
         }
     });
 
-    // Resize arrays
-    row_ind.resize(nnz);
-    col_ind.resize(nnz);
-    val.resize(nnz);
-
     for(int i = 0; i < nnz; ++i)
     {
-        row_ind[i] = unsorted_row[perm[i]];
-        col_ind[i] = unsorted_col[perm[i]];
-        val[i]     = unsorted_val[perm[i]];
+        row[i] = unsorted_row[perm[i]];
+        col[i] = unsorted_col[perm[i]];
+        val[i] = unsorted_val[perm[i]];
     }
 
-    return true;
+    return 0;
 }
 
-template <typename T>
-bool write_bin_matrix(
-    const char* filename, int m, int n, int nnz, const int* ptr, const int* col, const T* val)
+int write_bin_matrix(
+    const char* filename, int m, int n, int nnz, const int* ptr, const int* col, const double* val)
 {
-    std::ofstream out(filename, std::ios::out | std::ios::binary);
-
-    if(!out.is_open())
+    FILE* f = fopen(filename, "wb");
+    if(!f)
     {
-        return false;
+        return -1;
     }
 
-    // Header
-    out << "#rocALUTION binary csr file" << std::endl;
+    int err;
+    err = fwrite(&m, sizeof(int), 1, f);
+    err |= fwrite(&n, sizeof(int), 1, f);
+    err |= fwrite(&nnz, sizeof(int), 1, f);
+    err |= fwrite(ptr, sizeof(int), m + 1, f);
+    err |= fwrite(col, sizeof(int), nnz, f);
+    err |= fwrite(val, sizeof(double), nnz, f);
 
-    // rocALUTION version
-    int version = 10602;
-    out.write((char*)&version, sizeof(int));
+    fclose(f);
 
-    // Data
-    out.write((char*)&m, sizeof(int));
-    out.write((char*)&n, sizeof(int));
-    out.write((char*)&nnz, sizeof(int));
-    out.write((char*)ptr, (m + 1) * sizeof(int));
-    out.write((char*)col, nnz * sizeof(int));
-    out.write((char*)val, nnz * sizeof(T));
-
-    out.close();
-
-    return true;
+    return 0;
 }
 
-bool coo_to_csr(int m, int nnz, const int* src_row, std::vector<int>& dst_ptr)
+int coo_to_csr(int m, int nnz, const int* src_row, std::vector<int>& dst_ptr)
 {
     dst_ptr.resize(m + 1, 0);
 
@@ -285,89 +240,41 @@ bool coo_to_csr(int m, int nnz, const int* src_row, std::vector<int>& dst_ptr)
     {
         ++dst_ptr[src_row[i] + 1];
     }
-
     // Exclusive scan
     for(int i = 0; i < m; ++i)
     {
         dst_ptr[i + 1] += dst_ptr[i];
     }
 
-    return true;
+    return 0;
 }
 
 int main(int argc, char* argv[])
 {
-    if(argc < 3)
-    {
-        std::cerr << argv[0] << " <matrix.mtx> <matrix.csr>" << std::endl;
-        return -1;
-    }
-
-    // Matrix dimensions
     int m;
     int n;
     int nnz;
 
-    // Matrix mtx header
-    mtx_header header;
+    std::vector<int>    ptr;
+    std::vector<int>    row;
+    std::vector<int>    col;
+    std::vector<double> val;
 
-    // Open file for reading
-    FILE* f = fopen(argv[1], "r");
-    if(!f)
+    if(read_mtx_matrix(argv[1], m, n, nnz, row, col, val) != 0)
     {
-        std::cerr << "Cannot open [read] .mtx file " << argv[1] << std::endl;
+        fprintf(stderr, "Cannot open [read] %s.\n", argv[1]);
         return -1;
     }
 
-    if(!read_mtx_header(f, m, n, nnz, header))
+    if(coo_to_csr(m, nnz, row.data(), ptr) != 0)
     {
-        std::cerr << "Cannot read .mtx header from " << argv[1] << std::endl;
+        fprintf(stderr, "Cannot convert %s from COO to CSR.\n", argv[1]);
         return -1;
     }
 
-    std::vector<int>                  row_ptr;
-    std::vector<int>                  row_ind;
-    std::vector<int>                  col_ind;
-    std::vector<double>               rval;
-    std::vector<std::complex<double>> cval;
-
-    bool status;
-    if(!strcmp(header.data, "complex"))
+    if(write_bin_matrix(argv[2], m, n, nnz, ptr.data(), col.data(), val.data()) != 0)
     {
-        status = read_mtx_matrix(f, header, m, n, nnz, row_ind, col_ind, cval);
-    }
-    else
-    {
-        status = read_mtx_matrix(f, header, m, n, nnz, row_ind, col_ind, rval);
-    }
-
-    if(!status)
-    {
-        std::cerr << "Cannot read .mtx data from " << argv[1] << std::endl;
-        return -1;
-    }
-
-    // Close file
-    fclose(f);
-
-    if(!coo_to_csr(m, nnz, row_ind.data(), row_ptr))
-    {
-        std::cerr << "Cannot convert " << argv[1] << " from COO to CSR." << std::endl;
-        return -1;
-    }
-
-    if(!strcmp(header.data, "complex"))
-    {
-        status = write_bin_matrix(argv[2], m, n, nnz, row_ptr.data(), col_ind.data(), cval.data());
-    }
-    else
-    {
-        status = write_bin_matrix(argv[2], m, n, nnz, row_ptr.data(), col_ind.data(), rval.data());
-    }
-
-    if(!status)
-    {
-        std::cerr << "Cannot open [write] " << argv[2] << std::endl;
+        fprintf(stderr, "Cannot open [write] %s.\n", argv[2]);
         return -1;
     }
 
