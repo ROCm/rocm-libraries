@@ -62,25 +62,24 @@ struct HipGraphTestCase
 
 std::vector<HipGraphTestCase> GenSmokeTestCases()
 {
-    return {
-        {"conv",
-         "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
-         "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1",
-         "conv_hip_graph",
-         true},
-        {"activ",
-         "-n 100 -c 3 -H 32 -W 32 -m 3 -A 1 -B 1 -G 1 -F 0 -i 10 -V 1 -t 1",
-         "activ_hip_graph",
-         true},
-        {"bnorm",
-         "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1",
-         "bnorm_hip_graph",
-         true},
-        {"conv",
-         "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
-         "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --use_hip_graph 0",
-         "no_graph",
-         false}};
+    return {{"conv",
+             "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
+             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1",
+             "conv_hip_graph",
+             true},
+            {"activ",
+             "-n 100 -c 3 -H 32 -W 32 -m 3 -A 1 -B 1 -G 1 -F 0 -i 10 -V 1 -t 1",
+             "activ_hip_graph",
+             true},
+            {"bnorm",
+             "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1",
+             "bnorm_hip_graph",
+             true},
+            {"conv",
+             "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
+             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --use_hip_graph 0",
+             "no_graph",
+             false}};
 }
 
 } // namespace
@@ -379,8 +378,7 @@ protected:
             if(stream_begin_capture_count == 0 && stream_end_capture_count == 0 &&
                graph_launch_count == 0)
             {
-                std::cout << "\n✓ SUCCESS: HIP Graph correctly NOT used when disabled"
-                          << std::endl;
+                std::cout << "\n✓ SUCCESS: HIP Graph correctly NOT used when disabled" << std::endl;
             }
         }
     }
