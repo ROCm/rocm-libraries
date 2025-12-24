@@ -364,7 +364,7 @@ add_custom_command(
     TARGET enum_devices
     POST_BUILD
     COMMAND enum_devices "${CMAKE_BINARY_DIR}/resources.json"
-    VERBATIM
+    VERBATIM USES_TERMINAL
 )
 
 # Generate the resource spec file at install time
