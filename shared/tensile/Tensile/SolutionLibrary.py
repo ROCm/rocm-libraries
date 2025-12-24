@@ -306,15 +306,18 @@ class MasterSolutionLibrary:
 
         # functions for creating each "level" of the library
         def hardware(d, problemType, solutions, library, placeholderName):
-            devicePart = d["ArchitectureName"]
+            # Use original ArchitectureName for ISA/capability lookup
+            archName = d["ArchitectureName"]
+            # Use OutputArchName for file naming (supports alias architectures like gfx11-generic)
+            outputArchName = d.get("OutputArchName", archName)
             cuCount = d["CUCount"]
             isAPU = d["IsAPU"]
 
             newLib = PredicateLibrary(tag="Hardware")
-            if devicePart == "fallback":
+            if archName == "fallback":
                 pred = Hardware.HardwarePredicate("TruePred")
             else:
-                pred = Hardware.HardwarePredicate.FromHardware(Common.gfxArch(devicePart), cuCount, isAPU)
+                pred = Hardware.HardwarePredicate.FromHardware(Common.gfxArch(archName), cuCount, isAPU)
 
             newLib.rows.append({"predicate": pred, "library": library})
 
@@ -323,7 +326,7 @@ class MasterSolutionLibrary:
                     placeholderName += "_CU" + str(cuCount)
                 if isAPU is not None:
                     placeholderName += "_APU" if isAPU == 1 else "_XPU"
-                placeholderName += "_" + str(devicePart)
+                placeholderName += "_" + str(outputArchName)
 
             return newLib, placeholderName
 

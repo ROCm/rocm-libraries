@@ -168,13 +168,28 @@ class LibraryLogic(NamedTuple):
     library: SolutionLibrary.MasterSolutionLibrary
 
 
-def parseLibraryLogicFile(filename):
-    """Wrapper function to read and parse a library logic file."""
-    return parseLibraryLogicData(readYAML(filename), filename)
+def parseLibraryLogicFile(filename, outputArchName=None):
+    """Wrapper function to read and parse a library logic file.
+
+    Args:
+        filename: Path to the library logic file.
+        outputArchName: Optional override for output architecture name. If provided,
+            this name will be used for all output file naming (lazy libraries, code objects)
+            while the original ArchitectureName is still used for ISA capabilities.
+    """
+    return parseLibraryLogicData(readYAML(filename), filename, outputArchName)
 
 
-def parseLibraryLogicData(data, srcFile="?"):
-    """Parses the data of a library logic file."""
+def parseLibraryLogicData(data, srcFile="?", outputArchName=None):
+    """Parses the data of a library logic file.
+
+    Args:
+        data: Parsed YAML data from the library logic file.
+        srcFile: Path to the source file (for error messages).
+        outputArchName: Optional override for output architecture name. If provided,
+            this name will be used for all output file naming (lazy libraries, code objects)
+            while the original ArchitectureName is still used for ISA capabilities.
+    """
     if type(data) is list:
         data = parseLibraryLogicList(data, srcFile)
 
@@ -196,6 +211,13 @@ def parseLibraryLogicData(data, srcFile="?"):
     elif data["ArchitectureName"] not in architectureMap:
         raise ValueError(f"{data['ArchitectureName']} is not a supported architecture." \
             f" Review the library logic file {srcFile}.")
+
+    # Set output architecture name for file naming
+    # Use provided override if given, otherwise fall back to logic file's arch
+    if outputArchName:
+        data["OutputArchName"] = outputArchName
+    else:
+        data["OutputArchName"] = data["ArchitectureName"]
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
         printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
@@ -225,7 +247,10 @@ def parseLibraryLogicData(data, srcFile="?"):
 
     newLibrary = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(data, solutions)
 
-    return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
+    # Return with OUTPUT arch name as the architecture identifier
+    # This ensures masterLibraries is keyed by the requested arch (e.g., gfx11-generic)
+    # rather than the logic file's arch (e.g., gfx1100)
+    return LibraryLogic(data["ScheduleName"], data["OutputArchName"], problemType, solutions, \
             data.get("ExactLogic"), newLibrary)
 
 

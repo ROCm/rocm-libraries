@@ -50,7 +50,6 @@ from .Common import (
     CHeader,
     CMakeHeader,
     archAliases,
-    architectureMap,
     assignGlobalParameters,
     ensurePath,
     getArchitectureName,
@@ -968,10 +967,17 @@ def addFallback(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
             value.insert(masterLibraries["fallback"])
 
     for archName in archs:
-        archName = archName.split("-", 1)[0]
-        if archName not in masterLibraries:
-            tPrint(1, "Using fallback for arch: " + archName)
-            masterLibraries[archName] = masterLibraries["fallback"]
+        lookupName = archName
+        # Don't truncate generic architecture names (e.g., gfx11-generic)
+        # TODO: Review with maintainers - what was the original intent of splitting
+        # on '-' for architectures like gfx90a-xnack+? The split adds the base name
+        # (gfx90a) to masterLibraries, but this seems incorrect if the user requested
+        # gfx90a-xnack+ specifically.
+        if "generic" not in archName:
+            lookupName = archName.split("-", 1)[0]
+        if lookupName not in masterLibraries:
+            tPrint(1, "Using fallback for arch: " + lookupName)
+            masterLibraries[lookupName] = masterLibraries["fallback"]
 
     masterLibraries.pop("fallback")
 
@@ -1030,26 +1036,66 @@ def makeSolutions(
     return itertools.chain(gen1, gen2)
 
 
-def parseLibraryLogicFiles(logicFiles: List[str]) -> List[LibraryIO.LibraryLogic]:
+def parseLibraryLogicFiles(
+    logicFiles: List[str],
+    scheduleToRequestedArchs: Optional[Dict[str, List[str]]] = None
+) -> List[LibraryIO.LibraryLogic]:
     """Load and parse logic (yaml) files.
 
     Given a list of paths to yaml files containing library logic, load the files
-    into memory and parse the data into a named tuple (i.e. LibraryLogic). This
-    operation is parallelized over N processes.
+    into memory and parse the data into a named tuple (i.e. LibraryLogic).
+
+    If scheduleToRequestedArchs maps a schedule to multiple archs (e.g., navi31 -> [gfx1100, gfx11-generic]),
+    the logic file is parsed multiple times, once per arch, producing separate libraries.
+    This supports cases like --architecture=gfx1100;gfx11-generic where both outputs are needed.
 
     Args:
         logicFiles: List of paths to logic files.
+        scheduleToRequestedArchs: Optional mapping from schedule name to list of requested arch names.
 
     Returns:
         List of library logic tuples.
     """
-    return Common.ParallelMap(
-        LibraryIO.parseLibraryLogicFile, logicFiles, "Reading logic files", multiArg=False
-    )
+    if not scheduleToRequestedArchs:
+        # No override - use original parallel parsing
+        return Common.ParallelMap(
+            LibraryIO.parseLibraryLogicFile, logicFiles, "Reading logic files", multiArg=False
+        )
+
+    # When we have arch overrides, parse each file once per requested arch
+    results = []
+    for path in logicFiles:
+        # Load YAML once
+        rawData = LibraryIO.readYAML(path)
+
+        # Get schedule name from raw data
+        if isinstance(rawData, list):
+            scheduleName = rawData[1] if len(rawData) > 1 else None
+        else:
+            scheduleName = rawData.get("ScheduleName")
+
+        # Get list of requested archs for this schedule
+        requestedArchs = scheduleToRequestedArchs.get(scheduleName) if scheduleName else None
+
+        if not requestedArchs:
+            # No override - parse with original arch name
+            result = LibraryIO.parseLibraryLogicData(rawData, path, outputArchName=None)
+            results.append(result)
+        else:
+            # Parse once per requested arch
+            for reqArch in requestedArchs:
+                result = LibraryIO.parseLibraryLogicData(rawData, path, outputArchName=reqArch)
+                results.append(result)
+
+    return results
 
 
 def generateLogicData(
-    logicFiles: List[str], version: str, printLevel: int, separate: bool
+    logicFiles: List[str],
+    version: str,
+    printLevel: int,
+    separate: bool,
+    scheduleToRequestedArchs: Optional[Dict[str, List[str]]] = None
 ) -> Dict[str, MasterSolutionLibrary]:
     """Generates a dictionary of master solution libraries.
 
@@ -1058,13 +1104,16 @@ def generateLogicData(
         version: User provided version for the library.
         printLevel: Level of debug printing requested.
         separate: Separate libraries by architecture.
+        scheduleToRequestedArchs: Optional mapping from schedule name to list of requested arch names.
+            When provided, logic files are parsed once per requested arch, producing separate libraries
+            with the correct output names (e.g., gfx11-generic instead of gfx1100).
 
     Returns:
         For separate architectures, a dictionary of architecture
         separated master solution libraries; otherwise, a single
         master solution library for all architectures.
     """
-    libraries = parseLibraryLogicFiles(logicFiles)
+    libraries = parseLibraryLogicFiles(logicFiles, scheduleToRequestedArchs)
     logicList = libraries if not printLevel else Utils.tqdm(libraries, desc="Processing logic data")
     masterLibraries = makeMasterLibraries(logicList, separate)
     if separate and "fallback" in masterLibraries:
@@ -1402,7 +1451,6 @@ def TensileCreateLibrary():
     for alias, base in archAliases.items():
         if base in supportedArchs:
             supportedArchs.append(alias)
-    print(f"DEBUG supportedArchs: {supportedArchs}")
 
     _, requestedArchs = splitArchs()
     # Resolve aliases before checking if architecture is supported
@@ -1452,74 +1500,22 @@ def TensileCreateLibrary():
     tPrint(1, "#      set --verbose=2 to view all files")
     tPrint(2, "#   " + "\n#   ".join(logicFiles))
 
-    masterLibraries = generateLogicData(
-        logicFiles, args["Version"], args["PrintLevel"], args["SeparateArchitectures"]
-    )
-
-    def renameLazyLibraryKeys(lib, requestedArchName):
-        """Rename lazy library keys to use requestedArchName instead of original arch.
-
-        Lazy library names end with architecture (e.g., TensileLibrary_Type_..._gfx1100).
-        This function renames them to use the requested arch (e.g., gfx11-generic).
-        Also updates the codeObjectFile on each solution to match the new name.
-        """
-        if not requestedArchName or not lib.lazyLibraries:
-            return
-
-        # Get all known architecture names to check for suffix replacement
-        knownArchs = set(architectureMap.keys())
-
-        newLazyLibraries = {}
-        for name, lazyLib in lib.lazyLibraries.items():
-            newName = name
-            # Check if name ends with any known architecture
-            for arch in knownArchs:
-                if name.endswith("_" + arch):
-                    newName = name[:-len(arch)] + requestedArchName
-                    break
-            # Update codeObjectFile on solutions to match new name
-            for sol in lazyLib.solutions.values():
-                sol.originalSolution["codeObjectFile"] = newName
-            newLazyLibraries[newName] = lazyLib
-        lib.lazyLibraries = newLazyLibraries
-
-    # Rename masterLibraries keys from logic file arch names to requested arch names
-    # This is needed for alias architectures (e.g., gfx11-generic -> navi31 -> gfx11-generic)
-    # Also handles multiple requested names for same base arch (e.g., gfx1100;gfx11-generic)
+    # Build mapping from schedule name to list of requested arch names
+    # This supports cases like --architecture=gfx1100;gfx11-generic where both outputs are needed
+    # For each logic file (keyed by schedule), we parse once per requested arch
+    scheduleToRequestedArchs = None
     if args["SeparateArchitectures"]:
         requestedArchs = splitDelimitedString(args["Architecture"], {";", "_"})
-        # Build mapping: common name -> list of requested arch names
-        commonToRequested = collections.defaultdict(list)
+        scheduleToRequestedArchs = collections.defaultdict(list)
         for reqArch in requestedArchs:
-            commonName = getArchitectureName(reqArch)
-            if commonName:
-                commonToRequested[commonName].append(reqArch)
+            scheduleName = getArchitectureName(reqArch)
+            if scheduleName:
+                scheduleToRequestedArchs[scheduleName].append(reqArch)
 
-        # Create library entries for each requested arch name
-        renamedLibraries = {}
-        for archName, lib in masterLibraries.items():
-            # Convert archName to common name for lookup (e.g., gfx1100 -> navi31)
-            # This is needed because masterLibraries keys may be gfx names (gfx1100)
-            # while commonToRequested is keyed by common names (navi31)
-            archCommonName = getArchitectureName(archName)
-            if archCommonName:
-                requestedNames = commonToRequested.get(archCommonName, [archName])
-            else:
-                requestedNames = [archName]
-            for reqName in requestedNames:
-                # Deep copy if multiple names map to same base arch OR if we'll merge
-                # (merging requires a copy to avoid "dict changed size during iteration")
-                needsCopy = len(requestedNames) > 1 or reqName in renamedLibraries
-                newLib = copy.deepcopy(lib) if needsCopy else lib
-                newLib.requestedArchName = reqName
-                renameLazyLibraryKeys(newLib, reqName)
-                if reqName in renamedLibraries:
-                    # Merge with existing library instead of overwriting
-                    renamedLibraries[reqName].merge(newLib)
-                else:
-                    renamedLibraries[reqName] = newLib
-        masterLibraries = renamedLibraries
-    print(f"DEBUG masterLibraries keys: {list(masterLibraries.keys())}")
+    masterLibraries = generateLogicData(
+        logicFiles, args["Version"], args["PrintLevel"], args["SeparateArchitectures"],
+        scheduleToRequestedArchs
+    )
 
     solutions = generateSolutions(masterLibraries, args["SeparateArchitectures"])
     if lazyLoading and args["WriteMasterSolutionIndex"]:
@@ -1592,7 +1588,6 @@ def TensileCreateLibrary():
     newLibraryDir.mkdir(exist_ok=True)
 
     masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
-    print(f"DEBUG masterFileList: {[name for name, lib in masterFileList]}")
 
     tPrint(1, f"# Writing {len(masterFileList)} solution selection catalog(s)")
     for name, lib in masterFileList:
