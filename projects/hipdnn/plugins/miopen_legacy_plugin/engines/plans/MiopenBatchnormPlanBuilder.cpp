@@ -371,7 +371,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                                                                "Unexpected node attribute type");
             }
         }
-        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        catch(const std::exception& e)
         {
             HIPDNN_LOG_INFO(e.what());
             return false;
@@ -421,7 +421,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             checkBatchnormTensorConfigSupported(bnInfAttr, opGraph.getTensorMap());
             checkBatchnormFwdActivationModeSupported(actAttr);
         }
-        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        catch(const std::exception& e)
         {
             HIPDNN_LOG_INFO(e.what());
             return false;
@@ -464,7 +464,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                                                 opGraph.getTensorMap());
             checkBatchnormBwdActivationModeSupported(std::get<1>(nodeAttrs.value()));
         }
-        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        catch(const std::exception& e)
         {
             HIPDNN_LOG_INFO(e.what());
             return false;
