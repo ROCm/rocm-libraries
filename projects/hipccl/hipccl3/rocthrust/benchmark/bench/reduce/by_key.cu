@@ -124,53 +124,62 @@ void run_benchmark(
   state.counters["gpu_noise"] = gpu_cv;
 }
 
-#define CREATE_BENCHMARK(KeyT, ValueT, Elements, MaxSegmentSize)                                            \
-  benchmark::RegisterBenchmark(                                                                             \
-    bench_utils::bench_naming::format_name(                                                                 \
-      "{algo:reduce,subalgo:" + name + ",key_type:" #KeyT + ",value_type:" #ValueT + ",elements:" #Elements \
-      + ",max_segment_size:" #MaxSegmentSize)                                                               \
-      .c_str(),                                                                                             \
-    run_benchmark<Benchmark, KeyT, ValueT>,                                                                 \
-    Elements,                                                                                               \
-    seed_type,                                                                                              \
+#define CREATE_BENCHMARK(KeyT, ValueT, Elements, MaxSegmentSize)                                  \
+  benchmark::RegisterBenchmark(                                                                   \
+    bench_utils::bench_naming::format_name(                                                       \
+      "{algo:reduce,subalgo:" + name + ",key_type:" #KeyT + ",value_type:" #ValueT                \
+      + ",elements:" + bench_utils::format_pow2(Elements) + ",max_segment_size:" #MaxSegmentSize) \
+      .c_str(),                                                                                   \
+    run_benchmark<Benchmark, KeyT, ValueT>,                                                       \
+    Elements,                                                                                     \
+    seed_type,                                                                                    \
     MaxSegmentSize)
 
-#define BENCHMARK_ELEMENTS(key_type, value_type, elements)                                                  \
-  CREATE_BENCHMARK(key_type, value_type, elements, 1), CREATE_BENCHMARK(key_type, value_type, elements, 4), \
-    CREATE_BENCHMARK(key_type, value_type, elements, 8)
+#define BENCHMARK_ELEMENTS(key_type, value_type, elements)           \
+  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, 1)); \
+  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, 4)); \
+  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, 8));
 
-#define BENCHMARK_VALUE_TYPE(key_type, value_type)                                                      \
-  BENCHMARK_ELEMENTS(key_type, value_type, 1 << 16), BENCHMARK_ELEMENTS(key_type, value_type, 1 << 20), \
-    BENCHMARK_ELEMENTS(key_type, value_type, 1 << 24), BENCHMARK_ELEMENTS(key_type, value_type, 1 << 28)
+#define BENCHMARK_VALUE_TYPE(key_type, value_type)                                                           \
+  for (size_t size : bench_utils::sizes)                                                                     \
+  {                                                                                                          \
+    if ((sizeof(key_type) * size + sizeof(value_type) * size) <= bench_utils::system.devProp.totalGlobalMem) \
+      BENCHMARK_ELEMENTS(key_type, value_type, size)                                                         \
+  }
 
 #if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-#  define BENCHMARK_KEY_TYPE(key_type)                                                  \
-    BENCHMARK_VALUE_TYPE(key_type, int8_t), BENCHMARK_VALUE_TYPE(key_type, int16_t),    \
-      BENCHMARK_VALUE_TYPE(key_type, int32_t), BENCHMARK_VALUE_TYPE(key_type, int64_t), \
-      BENCHMARK_VALUE_TYPE(key_type, int128_t), BENCHMARK_VALUE_TYPE(key_type, float),  \
-      BENCHMARK_VALUE_TYPE(key_type, double)
+#  define BENCHMARK_KEY_TYPE(key_type)       \
+    BENCHMARK_VALUE_TYPE(key_type, int8_t)   \
+    BENCHMARK_VALUE_TYPE(key_type, int16_t)  \
+    BENCHMARK_VALUE_TYPE(key_type, int32_t)  \
+    BENCHMARK_VALUE_TYPE(key_type, int64_t)  \
+    BENCHMARK_VALUE_TYPE(key_type, int128_t) \
+    BENCHMARK_VALUE_TYPE(key_type, float)    \
+    BENCHMARK_VALUE_TYPE(key_type, double)
 #else
-#  define BENCHMARK_KEY_TYPE(key_type)                                                  \
-    BENCHMARK_VALUE_TYPE(key_type, int8_t), BENCHMARK_VALUE_TYPE(key_type, int16_t),    \
-      BENCHMARK_VALUE_TYPE(key_type, int32_t), BENCHMARK_VALUE_TYPE(key_type, int64_t), \
-      BENCHMARK_VALUE_TYPE(key_type, float), BENCHMARK_VALUE_TYPE(key_type, double)
+#  define BENCHMARK_KEY_TYPE(key_type)      \
+    BENCHMARK_VALUE_TYPE(key_type, int8_t)  \
+    BENCHMARK_VALUE_TYPE(key_type, int16_t) \
+    BENCHMARK_VALUE_TYPE(key_type, int32_t) \
+    BENCHMARK_VALUE_TYPE(key_type, int64_t) \
+    BENCHMARK_VALUE_TYPE(key_type, float)   \
+    BENCHMARK_VALUE_TYPE(key_type, double)
 #endif
 
 template <class Benchmark>
 void add_benchmarks(
   const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs = {
-    BENCHMARK_KEY_TYPE(int8_t),
-    BENCHMARK_KEY_TYPE(int16_t),
-    BENCHMARK_KEY_TYPE(int32_t),
-    BENCHMARK_KEY_TYPE(int64_t),
+  std::vector<benchmark::internal::Benchmark*> bs;
+  BENCHMARK_KEY_TYPE(int8_t)
+  BENCHMARK_KEY_TYPE(int16_t)
+  BENCHMARK_KEY_TYPE(int32_t)
+  BENCHMARK_KEY_TYPE(int64_t)
 #if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-    BENCHMARK_KEY_TYPE(int128_t),
+  BENCHMARK_KEY_TYPE(int128_t)
 #endif
-    BENCHMARK_KEY_TYPE(float32_t),
-    BENCHMARK_KEY_TYPE(float64_t)
-  };
+  BENCHMARK_KEY_TYPE(float32_t)
+  BENCHMARK_KEY_TYPE(float64_t)
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
