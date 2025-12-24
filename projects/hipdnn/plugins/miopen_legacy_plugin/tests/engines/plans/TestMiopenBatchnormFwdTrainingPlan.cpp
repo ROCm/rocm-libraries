@@ -3,7 +3,7 @@
 
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace miopen_legacy_plugin;
@@ -77,7 +77,8 @@ TEST(TestBatchnormFwdTrainingParams, ThrowsWhenRunningStatsProvided)
 {
     // Create graph with running stats (should be rejected by defensive check)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
 
     std::vector<int64_t> strides = {1, 3, 14, 14};
     std::vector<int64_t> dims = {1, 3, 14, 14};
@@ -85,61 +86,61 @@ TEST(TestBatchnormFwdTrainingParams, ThrowsWhenRunningStatsProvided)
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     // Required tensors
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_sdk::data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
 
     // Epsilon
-    hipdnn_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributes(
+    hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
         builder.CreateString("epsilon"),
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         0,
         0,
         false,
-        hipdnn_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
     // Running stats tensor
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
         8,
         "prev_running_mean",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         &derivedStrides,
         &derivedDims));
 
     // Momentum
-    hipdnn_sdk::data_objects::Float32Value momentumVal(0.1f);
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributes(
+    hipdnn_data_sdk::data_objects::Float32Value momentumVal(0.1f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributes(
         builder,
         12,
         builder.CreateString("momentum"),
-        hipdnn_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         0,
         0,
         false,
-        hipdnn_sdk::data_objects::TensorValue::Float32Value,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(momentumVal).Union()));
 
-    auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormAttributes(
+    auto bnormAttributes = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(
         builder,
         1, // x_tensor_uid
         3, // scale_tensor_uid
@@ -156,23 +157,23 @@ TEST(TestBatchnormFwdTrainingParams, ThrowsWhenRunningStatsProvided)
         flatbuffers::nullopt // next_running_variance_tensor_uid
     );
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_training",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graphOffset);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());

@@ -139,7 +139,7 @@ namespace rocsparse
                     if(col != row)
                     {
                         const A val = rocsparse::conj_val(csr_val[j], conj);
-                        rocsparse::atomic_add(&y[col], row_val * val);
+                        rocsparse::atomic_add(y, col, m, row_val * val);
                     }
                 }
             }
@@ -157,7 +157,7 @@ namespace rocsparse
                     const J col = csr_col_ind[j] - idx_base;
 
                     const A val = rocsparse::conj_val(csr_val[j], conj);
-                    rocsparse::atomic_add(&y[col], row_val * val);
+                    rocsparse::atomic_add(y, col, m, row_val * val);
                 }
             }
         }
@@ -223,6 +223,7 @@ namespace rocsparse
               typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_adaptive_device(bool                 conj,
+                                                     J                    m,
                                                      I                    nnz,
                                                      const I*             row_blocks,
                                                      uint32_t*            wg_flags,
@@ -606,7 +607,7 @@ namespace rocsparse
                     wg_flags[gid] ^= 1U;
                 }
 
-                rocsparse::atomic_add(y + row, partialSums[0]);
+                rocsparse::atomic_add(y, row, m, partialSums[0]);
             }
         }
     }
@@ -1093,6 +1094,7 @@ namespace rocsparse
               typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_lrb_long_rows_device(bool                 conj,
+                                                          J                    m,
                                                           I                    nnz,
                                                           uint32_t*            wg_flags,
                                                           const J*             rows_bins,
@@ -1231,7 +1233,7 @@ namespace rocsparse
                 }
             }
 
-            rocsparse::atomic_add((y + row), extra_sum);
+            rocsparse::atomic_add(y, row, m, extra_sum);
         }
     }
 }

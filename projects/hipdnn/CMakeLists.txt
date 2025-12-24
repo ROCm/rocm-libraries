@@ -32,12 +32,15 @@ if(NOT WIN32)
     endif()
 endif()
 
-if(NOT WIN32)
-    # Only set if not already specified by user
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
-        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-    endif()
-    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+# Only set if not already specified by user
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_PATH: ${CMAKE_INSTALL_PREFIX}")
+elseif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_CMAKE_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_CMAKE_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_CMAKE_PATH: ${CMAKE_INSTALL_PREFIX}")
+else()
+    message(STATUS "CMAKE_INSTALL_PREFIX set to default: ${CMAKE_INSTALL_PREFIX}")
 endif()
 
 include(GNUInstallDirs)
@@ -164,7 +167,7 @@ list(
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
-add_subdirectory(sdk)
+add_subdirectory(data_sdk)
 
 if(HIP_DNN_BUILD_BACKEND)
     add_subdirectory(backend)
@@ -176,7 +179,6 @@ endif()
 
 add_subdirectory(test_sdk)
 add_subdirectory(plugin_sdk)
-add_subdirectory(data_sdk)
 
 add_subdirectory(tests)
 
@@ -205,7 +207,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)"
+        "\(.*deps.*\)|\(.*tests.*\)|\(.*data_sdk/include/hipdnn_data_sdk/data_objects.*\)"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -216,8 +218,6 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
-        -object
-        ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object

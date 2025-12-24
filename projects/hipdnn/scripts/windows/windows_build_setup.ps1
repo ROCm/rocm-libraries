@@ -54,7 +54,7 @@ Write-Host "===================================================`n" -ForegroundCo
 # Section 1: Install Prerequisites
 if (-not $SkipPrerequisites) {
     Write-Host "`n=== Section 1: Installing Prerequisites ===" -ForegroundColor Yellow
-    
+
     # Install Chocolatey if not present
     if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
         Write-Status "Installing Chocolatey..."
@@ -75,7 +75,7 @@ if (-not $SkipPrerequisites) {
     $vsParams += "--add Microsoft.VisualStudio.Component.VC.CMake.Project "
     $vsParams += "--add Microsoft.VisualStudio.Component.VC.ATL "
     $vsParams += "--add Microsoft.VisualStudio.Component.Windows11SDK.22621"
-    
+
     choco install visualstudio2022buildtools -y --params "`"$vsParams`"" 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 3010) {
         Write-Success "Visual Studio Build Tools installed/updated"
@@ -108,7 +108,7 @@ if (-not $SkipPrerequisites) {
 # Section 2: Configure Windows Settings
 if (-not $SkipWindowsConfig) {
     Write-Host "`n=== Section 2: Configuring Windows Settings ===" -ForegroundColor Yellow
-    
+
     # Enable Long Paths
     Write-Status "Enabling Windows Long Path Support..."
     try {
@@ -145,33 +145,33 @@ if (-not $SkipWindowsConfig) {
 # Section 3: Download and Install Toolchains
 if (-not $SkipToolchainDownload) {
     Write-Host "`n=== Section 3: Installing Toolchains ===" -ForegroundColor Yellow
-    
+
     # Download and install Clang
     Write-Status "Setting up Clang toolchain..."
     if (-not (Test-Path "$ClangPath\bin\clang.exe")) {
         Write-Status "Downloading Clang $CLANG_VERSION..."
-        
+
         # Create directory
         New-Item -ItemType Directory -Path $ClangPath -Force | Out-Null
-        
+
         $clangUrl = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$CLANG_VERSION/clang+llvm-$CLANG_VERSION-x86_64-pc-windows-msvc.tar.xz"
         $clangArchive = "$env:TEMP\clang.tar.xz"
-        
+
         try {
             Invoke-WebRequest -Uri $clangUrl -OutFile $clangArchive -UseBasicParsing
             Write-Success "Clang downloaded"
-            
+
             Write-Status "Extracting Clang (this may take a few minutes)..."
             # Using tar (comes with Windows 10+)
             tar -xf $clangArchive -C $env:TEMP
-            
+
             # Find extracted folder and move contents
             $extractedFolder = Get-ChildItem -Path $env:TEMP -Filter "clang+llvm*" -Directory | Select-Object -First 1
             if ($extractedFolder) {
                 Move-Item -Path "$($extractedFolder.FullName)\*" -Destination $ClangPath -Force
                 Remove-Item -Path $extractedFolder.FullName -Force -Recurse
             }
-            
+
             Remove-Item -Path $clangArchive -Force
             Write-Success "Clang installed to $ClangPath"
         } catch {
@@ -204,7 +204,7 @@ if (-not $SkipToolchainDownload) {
     Write-Status "Setting up TheRock ROCm SDK..."
     if (-not (Test-Path "$TheRockPath\bin\hipconfig.exe")) {
         Write-Status "Downloading TheRock for $GpuTarget..."
-        
+
         # Determine GFX family
         $gfxFamily = switch -Regex ($GpuTarget) {
             "gfx110[0-9]" { "gfx110X-all" }
@@ -215,38 +215,38 @@ if (-not $SkipToolchainDownload) {
                 "gfx110X-all"
             }
         }
-        
+
         Write-Status "Using GFX Family: $gfxFamily"
-        
+
         # Create directory
         New-Item -ItemType Directory -Path $TheRockPath -Force | Out-Null
-        
+
         # Find latest nightly build
         $baseUrl = "https://therock-nightly-tarball.s3.amazonaws.com"
         $indexUrl = "$baseUrl/index.html"
-        
+
         try {
             Write-Status "Checking for latest TheRock build..."
             $indexContent = Invoke-WebRequest -Uri $indexUrl -UseBasicParsing
-            
+
             # Parse for Windows builds matching our GFX family
             $pattern = "therock-dist-windows-$gfxFamily-.*?\.tar\.gz"
             $matches = [regex]::Matches($indexContent.Content, $pattern)
-            
+
             if ($matches.Count -gt 0) {
                 # Get the most recent (last in list usually)
                 $latestFile = $matches[$matches.Count - 1].Value
                 $theRockUrl = "$baseUrl/$latestFile"
-                
+
                 Write-Status "Downloading $latestFile..."
                 $theRockArchive = "$env:TEMP\therock.tar.gz"
-                
+
                 Invoke-WebRequest -Uri $theRockUrl -OutFile $theRockArchive -UseBasicParsing
                 Write-Success "TheRock downloaded"
-                
+
                 Write-Status "Extracting TheRock (this may take several minutes)..."
                 tar -xzf $theRockArchive -C $TheRockPath
-                
+
                 Remove-Item -Path $theRockArchive -Force
                 Write-Success "TheRock installed to $TheRockPath"
             } else {
@@ -267,9 +267,9 @@ if (-not $SkipToolchainDownload) {
 # Section 4: Set System Environment Variables
 if (-not $SkipEnvironmentVariables) {
     Write-Host "`n=== Section 4: Setting System Environment Variables ===" -ForegroundColor Yellow
-    
+
     Write-Status "Setting system environment variables..."
-    
+
     # Add TheRock bin to system PATH if not already present
     try {
         $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -284,7 +284,7 @@ if (-not $SkipEnvironmentVariables) {
     } catch {
         Write-Warning "Could not modify system PATH: $_"
     }
-    
+
     # Set HIP_PLATFORM
     try {
         Write-Status "Setting HIP_PLATFORM..."
@@ -293,7 +293,7 @@ if (-not $SkipEnvironmentVariables) {
     } catch {
         Write-Warning "Could not set HIP_PLATFORM: $_"
     }
-    
+
     # Set CMAKE_GENERATOR
     try {
         Write-Status "Setting CMAKE_GENERATOR..."
@@ -302,7 +302,7 @@ if (-not $SkipEnvironmentVariables) {
     } catch {
         Write-Warning "Could not set CMAKE_GENERATOR: $_"
     }
-    
+
     Write-Success "System environment variables configured"
     Write-Warning "You may need to restart your terminal or system for changes to take effect"
 }
