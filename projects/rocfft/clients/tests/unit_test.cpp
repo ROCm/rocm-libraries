@@ -52,12 +52,14 @@ namespace std
 #endif
 namespace fs = std::filesystem;
 
+#ifdef HAVE_SCOPE_EXIT
 #if __has_include(<scope>)
 #include <scope>
 namespace scope = std;
 #else
 #include <experimental/scope>
 namespace scope = std::experimental;
+#endif
 #endif
 
 
@@ -214,6 +216,7 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     ASSERT_EQ(rocfft_plan_description_destroy(desc), rocfft_status_success);
 }
 
+#ifdef HAVE_SCOPE_EXIT
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
@@ -291,8 +294,10 @@ TEST(rocfft_UnitTest, log_levels)
         }
     }
 }
+#endif
 
 // Check whether logs can be emitted from multiple threads properly
+#ifdef HAVE_SCOPE_EXIT
 TEST(rocfft_UnitTest, log_multithreading)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -355,6 +360,7 @@ TEST(rocfft_UnitTest, log_multithreading)
         ASSERT_TRUE(res) << "line contains invalid content: " << line;
     }
 }
+#endif
 
 // a function that accepts a plan's requested size on input, and
 // returns the size to actually allocate for the test
@@ -477,6 +483,7 @@ TEST(rocfft_UnitTest, workmem_null)
 
 static const size_t RTC_PROBLEM_SIZE = 2304;
 // runtime compilation cache tests main loop
+#ifdef HAVE_SCOPE_EXIT
 void rtc_cache_main()
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -630,6 +637,7 @@ void rtc_cache_main()
     rocfft_cleanup();
     ASSERT_TRUE(fft_kernel_was_compiled());
 }
+#endif
 
 // run the main body of rtc cache tests twice to uncover potential
 // problems with thread reuse between iterations
@@ -733,6 +741,7 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
     plan = nullptr;
 }
 
+#ifdef HAVE_SCOPE_EXIT
 TEST(rocfft_UnitTest, rtc_test_harness)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -885,3 +894,4 @@ TEST(rocfft_UnitTest, rtc_test_harness)
         }
     }
 }
+#endif

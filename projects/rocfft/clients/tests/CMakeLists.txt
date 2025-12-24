@@ -46,6 +46,10 @@ project( rocfft-clients-tests LANGUAGES CXX )
 
 set(CMAKE_CXX_STANDARD 20)
 
+include(CheckIncludeFileCXX)
+check_include_file_cxx("scope" HAVE_SCOPE_HEADER)
+check_include_file_cxx("experimental/scope" HAVE_EXPERIMENTAL_SCOPE_HEADER)
+
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -233,6 +237,11 @@ if( BUILD_FFTW OR NOT FFTW_FOUND )
 else()
   include_directories(${FFTW_INCLUDE_DIRS})
 endif()
+
+if(HAVE_SCOPE_HEADER OR HAVE_EXPERIMENTAL_SCOPE_HEADER )
+  target_compile_definitions(rocfft-test PRIVATE HAVE_SCOPE_EXIT)
+endif()
+
 
 set( rocfft-test_include_dirs
   $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
