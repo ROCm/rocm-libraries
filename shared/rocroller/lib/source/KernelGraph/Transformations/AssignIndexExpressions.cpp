@@ -124,6 +124,17 @@ namespace rocRoller::KernelGraph
     using BaseAddressMap = std::map<int, int>;
 
     /**
+     * @brief Describes where and how to place an index chain.
+     */
+    struct ChainPlacement
+    {
+        int              location; // Where to insert the chain
+        Graph::Direction direction; // Upstream or Downstream of location
+        int              forLoop          = -1; // ForLoop to attach increment to (-1 if none)
+        bool             replaceWithScope = true; // Whether to wrap in a Scope
+    };
+
+    /**
      * @brief Return existing Buffer for load/stores from/to `dst`.
      *
      * Returns -1 if the operation doesn't need a buffer descriptor.
@@ -270,11 +281,70 @@ namespace rocRoller::KernelGraph
     }
 
     /**
-     * @brief Get list of required coordinates, and how they relate to
-     * each other.
+     * @brief Collect ForLoop coordinate if location is a ForLoop.
+     */
+    std::optional<int> getForLoopCoordinate(int                            location,
+                                            Graph::Direction               direction,
+                                            std::unordered_set<int> const& path,
+                                            KernelGraph const&             graph)
+    {
+        if(location == -1)
+            return std::nullopt;
+
+        auto maybeForLoop = graph.control.get<ForLoopOp>(location);
+        if(!maybeForLoop)
+            return std::nullopt;
+
+        auto forLoopCoord = followIdentify(graph.mapper.get<ForLoop>(location), graph);
+        auto coord        = getNeighbourNodeInPath(forLoopCoord, direction, path, graph);
+
+        return (coord != -1) ? std::make_optional(coord) : std::nullopt;
+    }
+
+    /**
+     * @brief Collect Unroll coordinates that are in the transform path.
+     */
+    template <typename RequiredType, typename ForLoopSetType>
+    std::vector<int> getUnrollCoordinates(RequiredType const&            required,
+                                          ForLoopSetType const&          forLoopCoords,
+                                          std::vector<int> const&        codegen,
+                                          Graph::Direction               direction,
+                                          std::unordered_set<int> const& path,
+                                          KernelGraph const&             graph)
+    {
+        std::vector<int> result;
+        auto             unrolls = filterCoordinates<Unroll>(required, graph);
+
+        for(auto unroll : unrolls)
+        {
+            // In StreamK, Unroll coordinates are connected via Identify edges.
+            // followIdentify resolves these chains (or returns the original if none).
+            auto unrollTarget = followIdentify(unroll, graph);
+            // Find a neighbour of unrollTarget that's actually in the path
+            auto coord = getNeighbourNodeInPath(unrollTarget, direction, path, graph);
+
+            // Skip if it's a ForLoop coord, already added, or a codegen coord
+            if(coord == -1 || forLoopCoords.contains(coord))
+                continue;
+            if(std::find(codegen.begin(), codegen.end(), coord) != codegen.end())
+                continue;
+            if(std::find(result.begin(), result.end(), coord) != result.end())
+                continue;
+
+            result.push_back(coord);
+        }
+
+        return result;
+    }
+
+    /**
+     * @brief Get list of required coordinates, and how they relate to each other.
      *
-     * Builds a list of coordinates, slow-to-fast, that need
-     * offset/strides for operation `op`.
+     * Builds a list of coordinates, slow-to-fast, that need offset/strides
+     * for operation `op`. The ordering is:
+     * 1. ForLoop coordinate (slowest, if present)
+     * 2. Unroll coordinates
+     * 3. Code-gen coordinates (fastest)
      */
     std::vector<RequiredCoordinateInfo> getRequiredCoordinatesInfo(int                op,
                                                                    int                location,
@@ -285,92 +355,61 @@ namespace rocRoller::KernelGraph
         auto [required, path]    = findRequiredCoordinates(target, direction, graph);
         auto codegen = getCodeGeneratorCoordinates(graph, op, isStorePartOfGlobalToLDSOp);
 
-        std::set<int>    isForLoop, isUnroll;
+        // Build ordered list: ForLoop -> Unroll -> CodeGen (slow to fast)
         std::vector<int> ordered;
+        std::set<int>    forLoopCoords;
+        std::set<int>    unrollCoords;
 
-        // If location is a ForLoop, its coordinate is the slowest.
-        if(location != -1)
+        // 1. ForLoop coordinate (slowest)
+        if(auto coord = getForLoopCoordinate(location, direction, path, graph))
         {
-            auto maybeForLoop = graph.control.get<ForLoopOp>(location);
-            if(maybeForLoop)
-            {
-                auto forLoopCoord = graph.mapper.get<ForLoop>(location);
-                forLoopCoord      = followIdentify(forLoopCoord, graph);
-
-                auto coord = getNeighbourNodeInPath(forLoopCoord, direction, path, graph);
-                if(coord != -1)
-                {
-                    ordered.push_back(coord);
-                    isForLoop.insert(coord);
-                }
-            }
+            ordered.push_back(*coord);
+            forLoopCoords.insert(*coord);
         }
 
-        // Next, consider Unroll coordinates.
-        auto unrolls = filterCoordinates<Unroll>(required, graph);
-
-        for(auto unroll : unrolls)
+        // 2. Unroll coordinates
+        for(auto coord :
+            getUnrollCoordinates(required, forLoopCoords, codegen, direction, path, graph))
         {
-            // In StreamK, Unroll coordinates are connected via Identify edges.
-            // followIdentify resolves these chains (or returns the original if none).
-            auto unrollTarget = followIdentify(unroll, graph);
-
-            // Find a neighbour of unrollTarget that's actually in the path
-            auto coord = getNeighbourNodeInPath(unrollTarget, direction, path, graph);
-            if(coord != -1 && !isForLoop.contains(coord))
-            {
-                auto it = std::find(codegen.cbegin(), codegen.cend(), coord);
-                if(it == codegen.cend())
-                {
-                    // Check if this coordinate is already in ordered
-                    if(std::find(ordered.begin(), ordered.end(), coord) == ordered.end())
-                    {
-                        ordered.push_back(coord);
-                    }
-                    isUnroll.insert(coord);
-                }
-            }
+            ordered.push_back(coord);
+            unrollCoords.insert(coord);
         }
 
-        // Finally, the code-gen coordinates are the fastest moving.
-        for(auto x : codegen)
-            ordered.push_back(x);
+        // 3. Code-gen coordinates (fastest)
+        for(auto coord : codegen)
+            ordered.push_back(coord);
 
-        // Now build list... the slowest dimension doesn't have a
-        // "base"; subsequent dimensions use the previous one as their
-        // base.
-        std::vector<RequiredCoordinateInfo> rv;
+        // Build result with base pointers (each dimension references the previous)
+        std::vector<RequiredCoordinateInfo> result;
+        int                                 base = -1;
 
-        int base = -1;
         for(auto coord : ordered)
         {
-            // Compute the sub-dimension for code-gen coordinates.
-            // TODO Slow to fast; lift this from Tensor directly
-            int sdim = -1;
+            // Compute sub-dimension index for code-gen coordinates
+            // TODO: Slow to fast; lift this from Tensor directly
+            int  sdim = -1;
+            auto it   = std::find(codegen.begin(), codegen.end(), coord);
+            if(it != codegen.end())
             {
-                auto it = std::find(codegen.cbegin(), codegen.cend(), coord);
-                if(it != codegen.cend())
-                    sdim = std::distance(codegen.cbegin(), it);
+                sdim = std::distance(codegen.begin(), it);
+                if(isStorePartOfGlobalToLDSOp)
+                    sdim += static_cast<int>(ordered.size());
             }
 
-            if(isStorePartOfGlobalToLDSOp)
+            if(unrollCoords.contains(coord))
             {
-                sdim += ordered.size();
-            }
-
-            if(!isUnroll.contains(coord))
-            {
-                auto needsUpdate = isForLoop.contains(coord) && uniformForLoop(location, graph);
-                rv.push_back({coord, base, sdim, false, needsUpdate});
-                base = coord;
+                // Unroll dimensions don't chain to previous dimensions
+                result.push_back({coord, -1, -1, true, false});
             }
             else
             {
-                rv.push_back({coord, -1, -1, true, false});
+                bool needsUpdate = forLoopCoords.contains(coord) && uniformForLoop(location, graph);
+                result.push_back({coord, base, sdim, false, needsUpdate});
+                base = coord;
             }
         }
 
-        return rv;
+        return result;
     }
 
     /**
@@ -452,6 +491,75 @@ namespace rocRoller::KernelGraph
     }
 
     /**
+     * @brief Create coordinate edges (Offset/Stride/Buffer) for a single dimension.
+     */
+    struct CoordinateEdges
+    {
+        int offset      = -1;
+        int stride      = -1;
+        int buffer      = -1;
+        int baseAddress = -1;
+    };
+
+    CoordinateEdges createCoordinateEdges(KernelGraph&     graph,
+                                          int              op,
+                                          int              target,
+                                          int              coord,
+                                          bool             isBase,
+                                          bool             isUnroll,
+                                          Graph::Direction direction,
+                                          bool             isStorePartOfGlobalToLDSOp,
+                                          BufferMap&       bufferMap,
+                                          BaseAddressMap&  baseAddressMap)
+    {
+        CoordinateEdges edges;
+
+        auto inCoord  = target;
+        auto outCoord = coord;
+        if(direction == Graph::Direction::Upstream)
+            std::swap(inCoord, outCoord);
+
+        // Unroll dimensions don't need offset edges
+        if(!isUnroll)
+            edges.offset = graph.coordinates.addElement(Offset(), {inCoord}, {outCoord});
+
+        edges.stride = graph.coordinates.addElement(Stride(), {inCoord}, {outCoord});
+
+        // Only the base dimension (slowest moving) gets buffer/baseAddress
+        if(isBase && edges.offset != -1)
+        {
+            bool isDirect2LDS = isOperation<LoadTileDirect2LDS>(graph.control.getElement(op));
+            bool isStorePartOfDirect2LDSOp = (isDirect2LDS && isStorePartOfGlobalToLDSOp);
+
+            edges.buffer      = getBuffer(graph, op, target, bufferMap, isStorePartOfDirect2LDSOp);
+            edges.baseAddress = getBaseAddress(graph, op, target, baseAddressMap);
+        }
+
+        return edges;
+    }
+
+    /**
+     * @brief Create the update (increment) operation for a ForLoop.
+     */
+    int createUpdateOperation(
+        KernelGraph& graph, int offset, int stride, DataType offsetDataType, ExpressionPtr step)
+    {
+        auto offsetExpr = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{offset, Register::Type::Vector, offsetDataType});
+        auto strideExpr = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
+
+        auto incrementExpr
+            = (step == nullptr) ? offsetExpr + strideExpr : offsetExpr + step * strideExpr;
+
+        auto update = graph.control.addElement(
+            Assign{Register::Type::Vector, convert(offsetDataType, incrementExpr)});
+        graph.mapper.connect(update, offset, NaryArgument::DEST);
+
+        return update;
+    }
+
+    /**
      * @brief Create an index assignment chain for `op`.
      */
     IndexChain createIndexChain(KernelGraph&          graph,
@@ -461,11 +569,11 @@ namespace rocRoller::KernelGraph
                                 BufferMap&            bufferMap,
                                 BaseAddressMap&       baseAddressMap)
     {
-        rocRoller::Log::getLogger()->debug(
-            "KernelGraph::AssignIndexExpressions(): op {} location {}", op, spec.location);
+        Log::debug("KernelGraph::AssignIndexExpressions::createIndexChain(): op {} location {}",
+                   op,
+                   spec.location);
 
-        auto dtype = getDataType(graph.control.getNode(op));
-
+        auto dtype               = getDataType(graph.control.getNode(op));
         auto [target, direction] = getOperationTarget(op, graph, spec.isStorePartOfGlobalToLDSOp);
 
         int                             update = -1;
@@ -475,59 +583,48 @@ namespace rocRoller::KernelGraph
         std::map<int, int>              offsetOfCoord;
         std::vector<int>                strideCoords;
 
-        // Use spec.forLoop as the location if it exists (for hoisted chains),
-        // otherwise use spec.location
-        int locationForCoordInfo = (spec.forLoop > 0) ? spec.forLoop : spec.location;
-        for(auto info : getRequiredCoordinatesInfo(
-                op, locationForCoordInfo, graph, spec.isStorePartOfGlobalToLDSOp))
+        int  locationForCoordInfo = (spec.forLoop > 0) ? spec.forLoop : spec.location;
+        auto requiredCoords       = getRequiredCoordinatesInfo(
+            op, locationForCoordInfo, graph, spec.isStorePartOfGlobalToLDSOp);
+
+        for(auto const& info : requiredCoords)
         {
-            // Add coordinate nodes for Offset/Stride/Buffer
-            int offset = -1, stride = -1, buffer = -1, baseAddress = -1;
+            // Create coordinate edges for this dimension
+            // I have no base above me, therefore I'm the base
+            bool isBase = (info.base == -1);
+            auto edges  = createCoordinateEdges(graph,
+                                               op,
+                                               target,
+                                               info.coord,
+                                               isBase,
+                                               info.isUnroll,
+                                               direction,
+                                               spec.isStorePartOfGlobalToLDSOp,
+                                               bufferMap,
+                                               baseAddressMap);
 
-            {
-                auto inCoord  = target;
-                auto outCoord = info.coord;
-                if(direction == Graph::Direction::Upstream)
-                {
-                    std::swap(inCoord, outCoord);
-                }
-
-                if(!info.isUnroll)
-                    offset = graph.coordinates.addElement(Offset(), {inCoord}, {outCoord});
-                stride = graph.coordinates.addElement(Stride(), {inCoord}, {outCoord});
-                if(info.base == -1 && offset != -1)
-                {
-                    const bool isDirect2LDS
-                        = isOperation<LoadTileDirect2LDS>(graph.control.getElement(op));
-                    const bool isStorePartOfDirect2LDSOp
-                        = (isDirect2LDS && spec.isStorePartOfGlobalToLDSOp);
-                    buffer = getBuffer(graph, op, target, bufferMap, isStorePartOfDirect2LDSOp);
-                    baseAddress = getBaseAddress(graph, op, target, baseAddressMap);
-                }
-            }
-
-            offsetOfCoord[info.coord] = offset;
-
-            int base = (info.base == -1) ? -1 : offsetOfCoord.at(info.base);
+            offsetOfCoord[info.coord] = edges.offset;
+            int base                  = isBase ? -1 : offsetOfCoord.at(info.base);
 
             // For future: choose type based on buffer or non-buffer
+            // Determine data types
             auto offsetDataType = getOffsetDataType(op, graph, spec.isStorePartOfGlobalToLDSOp);
             auto strideDataType = DataType::UInt64;
-
             if(info.isUnroll)
             {
                 offsetDataType = DataType::Int64;
                 strideDataType = DataType::Int64;
             }
-            // Create placeholder NOP and store info for later Assign creation
+
+            // Create placeholder NOP for later Assign creation
             auto nodeInfo = makeIndexPlaceholder(graph,
                                                  target,
                                                  info.coord,
                                                  base,
-                                                 offset,
-                                                 stride,
-                                                 buffer,
-                                                 baseAddress,
+                                                 edges.offset,
+                                                 edges.stride,
+                                                 edges.buffer,
+                                                 edges.baseAddress,
                                                  direction == Graph::Direction::Upstream,
                                                  dtype,
                                                  offsetDataType,
@@ -536,61 +633,43 @@ namespace rocRoller::KernelGraph
             chain.push_back(nodeInfo.nopTag);
             nodeInfos.push_back(nodeInfo);
 
-            // Add connections for register allocate, and so tracer
-            // can determine correct lifetimes
-            if(offset != -1)
-                connections.push_back(DC<Offset>(offset, info.sdim));
-            if(stride != -1)
-                connections.push_back(DC<Stride>(stride, info.sdim));
-            if(buffer != -1)
-                connections.push_back(DC<Buffer>(buffer));
-            if(baseAddress != -1)
-                connections.push_back(DC<BaseAddress>(baseAddress));
+            // Register connections for allocation and lifetime tracking
+            if(edges.offset != -1)
+                connections.push_back(DC<Offset>(edges.offset, info.sdim));
+            if(edges.stride != -1)
+                connections.push_back(DC<Stride>(edges.stride, info.sdim));
+            if(edges.buffer != -1)
+                connections.push_back(DC<Buffer>(edges.buffer));
+            if(edges.baseAddress != -1)
+                connections.push_back(DC<BaseAddress>(edges.baseAddress));
             if(base != -1)
                 connections.push_back(
                     makeConnection<Offset, Connections::BaseOffset>(base, info.sdim));
 
-            // save all stride coordinates for the memory operation
-            // then select the unroll stride and add it to connection
-            if(stride != -1)
-                strideCoords.push_back(stride);
+            if(edges.stride != -1)
+                strideCoords.push_back(edges.stride);
 
+            // Create update operation if this dimension needs loop increment
             if(info.needsUpdate)
-            {
-                auto offsetExpr = std::make_shared<Expression::Expression>(
-                    Expression::DataFlowTag{offset, Register::Type::Vector, offsetDataType});
-                auto strideExpr = std::make_shared<Expression::Expression>(
-                    Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
-
-                if(step == nullptr)
-                    update = graph.control.addElement(Assign{
-                        Register::Type::Vector, convert(offsetDataType, offsetExpr + strideExpr)});
-                else
-                    update = graph.control.addElement(
-                        Assign{Register::Type::Vector,
-                               convert(offsetDataType, offsetExpr + step * strideExpr)});
-                graph.mapper.connect(update, offset, NaryArgument::DEST);
-            }
+                update = createUpdateOperation(
+                    graph, edges.offset, edges.stride, offsetDataType, step);
         }
 
         addUnrollStrideConnection(
             graph, op, spec.isStorePartOfGlobalToLDSOp, strideCoords, connections);
 
-        for(int i = 1; i < chain.size(); ++i)
+        // Link chain nodes with Sequence edges
+        for(size_t i = 1; i < chain.size(); ++i)
             graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
 
         return {chain.front(), chain.back(), nodeInfos, connections, update};
     }
 
-    namespace
+    namespace AssignIndexExpressionsDetail
     {
-        /**
-         * @brief Find the corresponding KLoopTail for a given KLoop.
-         *
-         * @param kgraph
-         * @param kLoop The KLoop tag
-         * @return The corresponding KLoopTail tag, or std::nullopt if none exists
-         */
+        using namespace CoordinateGraph;
+        using namespace ControlGraph;
+
         std::optional<int> FindCorrespondingKLoopTail(KernelGraph const& kgraph, int kLoop)
         {
             // Strategy 1: Search downstream via Sequence edges (UnrollLoops case)
@@ -623,21 +702,11 @@ namespace rocRoller::KernelGraph
             return std::nullopt;
         }
 
-        /**
-         * @brief Find the closest common ancestor Scope between two nodes.
-         *
-         * @param kgraph
-         * @param nodeA
-         * @param nodeB
-         * @return The tag of the common ancestor Scope, or std::nullopt if none exists
-         */
         std::optional<int> FindCommonAncestorScope(KernelGraph const& kgraph, int nodeA, int nodeB)
         {
-            // Collect all ancestors of nodeA
             auto ancestorsA = kgraph.control.breadthFirstVisit(nodeA, Graph::Direction::Upstream)
                                   .to<std::set>();
 
-            // Traverse from nodeB and find first common ancestor that is a Scope
             for(auto node : kgraph.control.breadthFirstVisit(nodeB, Graph::Direction::Upstream))
             {
                 if(ancestorsA.contains(node) && kgraph.control.get<Scope>(node))
@@ -647,15 +716,8 @@ namespace rocRoller::KernelGraph
             return std::nullopt;
         }
 
-    } // anonymous namespace
-
-    namespace AssignIndexExpressionsDetail
-    {
-        using namespace CoordinateGraph;
-        using namespace ControlGraph;
-
         std::pair<uint, uint>
-            getElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
+            GetElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
         {
             namespace CT            = rocRoller::KernelGraph::CoordinateGraph;
             uint elementBlockNumber = 0;
@@ -828,60 +890,48 @@ namespace rocRoller::KernelGraph
             return {elementBlockNumber, elementBlockIndex};
         }
 
-        int makeAssignBase(KernelGraph&              graph,
+        int MakeAssignBase(KernelGraph&              graph,
                            IndexComputeParams const& params,
-                           const int                 target,
-                           const int                 offset,
-                           const int                 baseAddress,
-                           const bool                maybeLDS,
-                           const bool                isTransposed,
-                           const ContextPtr          context,
-                           const CommandPtr          command,
+                           int                       target,
+                           int                       offset,
+                           int                       baseAddress,
+                           bool                      isLDS,
+                           bool                      isTransposed,
+                           ContextPtr                context,
+                           CommandPtr                command,
                            Transformer&              coords)
         {
-            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
-                uint numBits = DataTypeInfo::Get(params.valueType).elementBits;
-
-                // TODO: This would be a good place to add a GPU
-                // assert.  If numBits is not a multiple of 8, assert
-                // that (expr * numBits) is a multiple of 8.
-                Log::debug("  toBytes: {}: numBits {}", toString(params.valueType), numBits);
-
-                if(numBits % 8u == 0)
-                    return expr * L(numBits / 8u);
-                return (expr * L(numBits)) / L(8u);
-            };
-
-            auto offsetRegisterType = Register::Type::Vector;
-            if(params.isStorePartOfGlobalToLDS)
-                offsetRegisterType = Register::Type::Scalar;
-
+            // Compute the base index expression
             auto indexExpr
                 = params.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
 
-            auto const& typeInfo = DataTypeInfo::Get(params.valueType);
-            auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
-
-            auto const& arch = context->targetArchitecture();
-            const auto  needsPadding
-                = numBits == 6 && isTransposed
-                  && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
-
-            Expression::ExpressionPtr paddingBytes{L(0u)};
-            if(needsPadding && maybeLDS)
+            // Compute LDS padding for transposed FP6 loads
+            Expression::ExpressionPtr paddingBytes = L(0u);
             {
-                uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
-                auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
-                paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
+                auto const& typeInfo = DataTypeInfo::Get(params.valueType);
+                auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
+                auto const& arch     = context->targetArchitecture();
+
+                bool needsPadding
+                    = (numBits == 6) && isTransposed && isLDS
+                      && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+
+                if(needsPadding)
+                {
+                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
+                    paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
+                }
             }
 
-            auto expr = toBytes(indexExpr) + paddingBytes;
+            // Build the offset expression: bytes + padding
+            auto expr = ToBytes(indexExpr, params.valueType) + paddingBytes;
 
+            // For Direct2LDS stores, convert to scalar
             if(params.isStorePartOfGlobalToLDS)
-            {
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
-            }
 
+            // Add base address offset for WAVE_FROM_GLOBAL operations
             if(baseAddress > 0)
             {
                 namespace CG = KernelGraph::CoordinateGraph;
@@ -893,113 +943,102 @@ namespace rocRoller::KernelGraph
                     fmt::format("Could not find User connected to BaseAddress({})", baseAddress));
                 auto user = graph.coordinates.getNode<CG::User>(userTag);
 
-                AssertFatal(
-                    command, "Expected command pointer but got nullptr", ShowValue(command));
+                AssertFatal(command, "Expected command pointer but got nullptr");
                 auto userAsCmdArg = findArgumentByName(command, user.argumentName);
-                expr              = expr + convert(params.offsetType, userAsCmdArg->expression());
+                AssertFatal(userAsCmdArg,
+                            "Argument for base address not found.",
+                            ShowValue(user.argumentName));
+                expr = expr + convert(params.offsetType, userAsCmdArg->expression());
             }
 
+            // Create the Assign node
+            auto offsetRegisterType
+                = params.isStorePartOfGlobalToLDS ? Register::Type::Scalar : Register::Type::Vector;
             auto assignNode         = Assign{offsetRegisterType, convert(params.offsetType, expr)};
             assignNode.variableType = params.offsetType;
             auto assignTag          = graph.control.addElement(assignNode);
             graph.mapper.connect(assignTag, offset, NaryArgument::DEST);
 
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::makeAssignBase: assign {} expression {} to offset {}",
-                assignTag,
-                toString(assignNode.expression),
-                offset);
+            Log::debug("KernelGraph::makeAssignBase: assign {} expression {} to offset {}",
+                       assignTag,
+                       toString(assignNode.expression),
+                       offset);
 
             return assignTag;
         }
 
-        int makeAssignStride(KernelGraph&              graph,
+        int MakeAssignStride(KernelGraph&              graph,
                              IndexComputeParams const& params,
-                             const int                 target,
-                             const int                 stride,
-                             const int                 increment,
-                             bool                      maybeLDS,
-                             const bool                isTransposed,
-                             const ContextPtr          context,
+                             int                       target,
+                             int                       stride,
+                             int                       increment,
+                             bool                      isLDS,
+                             bool                      isTransposed,
+                             ContextPtr                context,
                              Transformer&              coords)
         {
-            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
-                uint numBits = DataTypeInfo::Get(params.valueType).elementBits;
-
-                // TODO: This would be a good place to add a GPU
-                // assert.  If numBits is not a multiple of 8, assert
-                // that (expr * numBits) is a multiple of 8.
-                Log::debug("  toBytes: {}: numBits {}", toString(params.valueType), numBits);
-
-                if(numBits % 8u == 0)
-                    return expr * L(numBits / 8u);
-                return (expr * L(numBits)) / L(8u);
-            };
-
+            // Compute the stride expression for one element
             auto indexExpr = params.forward ? coords.forwardStride(increment, L(1), {target})[0]
                                             : coords.reverseStride(increment, L(1), {target})[0];
 
-            // We have to manually invoke m_fastArith here since it can't traverse into the
-            // RegisterTagManager.
-            // TODO: Revisit storing expressions in the RegisterTagManager.
+            // Check if this is a unit stride (stride of 1)
             bool unitStride = false;
             if(Expression::evaluationTimes(indexExpr)[Expression::EvaluationTime::Translate])
-            {
-                if(getUnsignedInt(evaluate(indexExpr)) == 1u)
-                    unitStride = true;
-            }
+                unitStride = (getUnsignedInt(evaluate(indexExpr)) == 1u);
 
-            uint                      elementBlockSize = 0;
-            Expression::ExpressionPtr elementBlockStride;
-            Expression::ExpressionPtr trLoadPairStride;
-            Expression::ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
-            Expression::ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
-            Expression::ExpressionPtr indexExprPaddingBytes{L(0u)};
-
+            // Get type info for padding calculations
             auto const& typeInfo = DataTypeInfo::Get(params.valueType);
             auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
+            auto const& arch     = context->targetArchitecture();
 
-            if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
+            // Initialize stride attributes for sub-dword types
+            uint                      elementBlockSize               = 0;
+            Expression::ExpressionPtr elementBlockStride             = nullptr;
+            Expression::ExpressionPtr trLoadPairStride               = nullptr;
+            Expression::ExpressionPtr elementBlockStridePaddingBytes = L(0u);
+            Expression::ExpressionPtr trLoadPairStridePaddingBytes   = L(0u);
+            Expression::ExpressionPtr indexExprPaddingBytes          = L(0u);
+
+            // Sub-dword types (FP16, FP8, FP6, FP4) need special stride handling
+            bool isSubDwordType = (numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4);
+            if(isSubDwordType)
             {
                 auto [elementBlockNumber, elementBlockIndex]
-                    = getElementBlockValues(graph, target, isTransposed);
-
+                    = GetElementBlockValues(graph, target, isTransposed);
                 elementBlockSize = elementBlockIndex;
 
-                auto const& arch = context->targetArchitecture();
+                // Adjust block size for transposed loads
                 if(isTransposed)
                 {
                     // See addLoadWaveTileCTF8F6F4 in LowerTile.cpp
-                    const auto wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+                    uint const wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
                     uint const numVBlocks
-                        = wfs == 64 ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
+                        = (wfs == 64) ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
                     elementBlockSize = (elementBlockNumber / numVBlocks) * elementBlockSize;
                 }
                 AssertFatal(elementBlockSize > 0, "Invalid elementBlockSize: ", elementBlockSize);
 
-                const auto needsPadding
-                    = numBits == 6 && isTransposed
+                // FP6 transposed loads need padding after every 16 elements
+                bool needsPadding
+                    = (numBits == 6) && isTransposed
                       && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
 
-                // Padding is added after every 16 elements, thus for F6 datatypes that will
-                // be transpose loaded from LDS elementBlockSize is set to 16 instead of 32.
                 if(needsPadding)
-                {
                     elementBlockSize = 16;
-                }
 
+                // Compute strides for element blocks
                 elementBlockStride
                     = params.forward
                           ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
                           : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
 
-                uint elementsPerTrLoad = elementBlockIndex;
                 trLoadPairStride
                     = params.forward
-                          ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
-                          : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
+                          ? coords.forwardStride(increment, L(elementBlockIndex), {target})[0]
+                          : coords.reverseStride(increment, L(elementBlockIndex), {target})[0];
 
-                if(needsPadding && maybeLDS)
+                // Add padding bytes for LDS operations
+                if(needsPadding && isLDS)
                 {
                     uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
                     auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
@@ -1011,32 +1050,33 @@ namespace rocRoller::KernelGraph
                 }
             }
 
-            auto assignNode
-                = Assign{Register::Type::Vector, toBytes(indexExpr) + indexExprPaddingBytes};
+            // Create the Assign node with stride attributes
+            auto assignNode         = Assign{Register::Type::Vector,
+                                     ToBytes(indexExpr, params.valueType) + indexExprPaddingBytes};
             assignNode.variableType = params.strideType;
             assignNode.strideExpressionAttributes
                 = {params.strideType,
                    unitStride,
                    elementBlockSize,
-                   toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
-                   toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes};
+                   ToBytes(elementBlockStride, params.valueType) + elementBlockStridePaddingBytes,
+                   ToBytes(trLoadPairStride, params.valueType) + trLoadPairStridePaddingBytes};
+
             auto assignTag = graph.control.addElement(assignNode);
             graph.mapper.connect(assignTag, stride, NaryArgument::DEST);
 
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::makeAssignStride: assign {} expression {} to stride {}",
-                assignTag,
-                toString(assignNode.expression),
-                stride);
+            Log::debug("KernelGraph::makeAssignStride: assign {} expression {} to stride {}",
+                       assignTag,
+                       toString(assignNode.expression),
+                       stride);
             return assignTag;
         }
 
-        int makeBuffer(KernelGraph&              graph,
+        int MakeBuffer(KernelGraph&              graph,
                        IndexComputeParams const& params,
-                       const int                 target,
-                       const int                 buffer,
-                       const ContextPtr          context,
-                       const CommandPtr          command)
+                       int                       target,
+                       int                       buffer,
+                       ContextPtr                context,
+                       CommandPtr                command)
         {
             // Check if target has a User coordinate
             auto user = graph.coordinates.get<User>(target);
@@ -1045,43 +1085,34 @@ namespace rocRoller::KernelGraph
 
             AssertFatal(user->size, "Invalid User dimension: missing size.", ShowValue(target));
 
-            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
-                uint numBits = DataTypeInfo::Get(params.valueType).elementBits;
-
-                Log::debug("  toBytes: {}: numBits {}", toString(params.valueType), numBits);
-
-                if(numBits % 8u == 0)
-                    return expr * L(numBits / 8u);
-                return (expr * L(numBits)) / L(8u);
-            };
-
-            auto bufferVarType = VariableType{DataType::None, PointerType::Buffer};
-            auto bufferRegType = Register::Type::Scalar;
-
-            // Create a buffer descriptor expression
-            Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
-            Expression::ExpressionPtr basePointer
-                = findArgumentByName(command, user->argumentName)->expression();
-
+            // Get the base pointer from command arguments
+            auto arg = findArgumentByName(command, user->argumentName);
+            AssertFatal(arg,
+                        "Argument for buffer descriptor base pointer not found.",
+                        ShowValue(user->argumentName));
+            Expression::ExpressionPtr basePointer = arg->expression();
             if(user->offset)
                 basePointer = basePointer + user->offset;
 
+            // Build the buffer descriptor
+            Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
             bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
             bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
                                                       BufferDescriptor::GetDefaultOptions(context));
-            // TODO: Handle sizes larger than 32 bits
-            bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
+            bufferExpr
+                = BufferDescriptor::SetSize(bufferExpr, ToBytes(user->size, params.valueType));
 
-            auto assignNode         = Assign{bufferRegType, bufferExpr};
+            // Create the Assign node
+            auto bufferVarType      = VariableType{DataType::None, PointerType::Buffer};
+            auto assignNode         = Assign{Register::Type::Scalar, bufferExpr};
             assignNode.variableType = bufferVarType;
             auto assignTag          = graph.control.addElement(assignNode);
             graph.mapper.connect(assignTag, buffer, NaryArgument::DEST);
 
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::makeBuffer: assign {} expression {} to buffer {}",
-                assignTag,
-                toString(assignNode.expression),
-                buffer);
+            Log::debug("KernelGraph::makeBuffer: assign {} expression {} to buffer {}",
+                       assignTag,
+                       toString(assignNode.expression),
+                       buffer);
 
             return assignTag;
         }
@@ -1092,56 +1123,29 @@ namespace rocRoller::KernelGraph
     using namespace AssignIndexExpressionsDetail;
 
     /**
-     * @brief Add index assignment operations.
+     * @brief Orchestrates adding index assignment operations to the control graph.
      *
-     * Adding index assignment operations to the control graph is done in
-     * two phases: staging and committing.
+     * This class implements a two-phase approach:
      *
-     * During the staging phase, we look at all load/store operations
-     * in the control graph and "stage" the addition of index assignment
-     * operations.  During the staging phase, we are able to detect
-     * when two or more load/store operations would result in the same
-     * chain of index assignments, and eliminate any redundancies.
+     * **Staging Phase** (`stage()`):
+     * - Analyzes each load/store operation to determine where its index chain should be placed
+     *   - Usually index assignment operations come in groups of two or more operations called "index chains"
+     * - Groups operations that would use identical chains (deduplication)
+     * - Placement is determined by ForLoop/Unroll coordinate requirements
      *
-     * Usually index assignment operations come in sequential groups of
-     * two or more operations, and hence we call them "index chains".
+     * **Commit Phase** (`commit()`):
+     * - Creates actual Assign nodes for offset/stride/buffer computations
+     * - Inserts chains into the control graph at their determined locations
+     * - Connects operations to shared coordinate edges
      *
-     * During the commit stage, we add Assign operations to the
-     * graphs, and add connections for load/store operations to the
-     * newly created Base, Offset, and Stride elements of the
-     * coordinate graph.
-     *
-     * For each candidate load/store operation:
-     *
-     * 1. The type of index chain is determined.
-     *
-     * 2. The required location of the index chain is determined.
-     *
-     * 3. The chain is staged.
-     *
-     * To determined where the chain should be placed:
-     *
-     * 1. Find all required coordinates by querying the Coordinate
-     *    Transform graph.
-     *
-     * 2. If one-or-more Unroll dimension(s) are required:
-     *
-     *    a. Find SetCoordinate operations above the candidate and
-     *       record the values of required Unroll dimensions.
-     *
-     *    b. Find the earliest matching set of SetCoordinate
-     *       operations that are identical (ie, Unroll dimension and
-     *       value) to the required Unroll dimensions.
-     *
-     *    c. The chain is added below the SetCoordinate operation from
-     *       (b).
-     *
-     * 3. If a ForLoop dimension is required, find the containing
-     *    ForLoop operation.  The chain is added above the ForLoop
-     *    operation.
-     *
-     * 4. If both ForLoop and Unroll dimensions are required, the
-     *    chain is added above the containing ForLoop.
+     * **Placement Rules** (in priority order):
+     * 1. KLoop with KLoopTail: Hoist to common ancestor scope
+     * 2. Receive tile loop: Place at top of containing ForLoop
+     * 3. Uniform ForLoop: Place above the ForLoop with increment attached
+     * 4. Prefetch context: Place in containing scope
+     * 5. Non-uniform loop with Unroll: Place at top of ForLoop
+     * 6. Unroll only: Place in Initialize block
+     * 7. Default: Immediate placement above operation
      */
     struct AssignIndexer
     {
@@ -1151,6 +1155,11 @@ namespace rocRoller::KernelGraph
         {
         }
 
+        /**
+         * @brief Stage an index chain for later creation.
+         *
+         * Chains with identical specs are grouped so they can share computation.
+         */
         void stageChain(KernelGraph const& graph,
                         int                target,
                         int                candidate,
@@ -1160,8 +1169,9 @@ namespace rocRoller::KernelGraph
                         int                forLoop          = -1,
                         bool               replaceWithScope = true)
         {
+            // Build coordinate list for deduplication key
             std::vector<int> specCoords;
-            for(auto info :
+            for(auto const& info :
                 getRequiredCoordinatesInfo(candidate, location, graph, isStorePartOfGlobalToLDSOp))
             {
                 specCoords.push_back(info.coord);
@@ -1177,109 +1187,53 @@ namespace rocRoller::KernelGraph
             m_chains[spec].push_back(candidate);
         }
 
-        void stage(KernelGraph const& kgraph, int candidate, bool isStorePartOfGlobalToLDSOp)
+        /**
+         * @brief Determine placement for a KLoop with a corresponding KLoopTail.
+         *
+         * When both KLoop and KLoopTail exist, we hoist the chain to their
+         * common ancestor so both loops can share the same index computation.
+         */
+        std::optional<ChainPlacement> tryPlaceKLoopWithTail(KernelGraph const& kgraph,
+                                                            int                candidate,
+                                                            std::optional<int> maybeForLoop,
+                                                            bool               hasForLoop,
+                                                            bool               isUniformLoop) const
         {
-            auto log = rocRoller::Log::getLogger();
+            if(!(maybeForLoop && hasForLoop && isUniformLoop))
+                return std::nullopt;
 
-            auto node = kgraph.control.getNode<Operation>(candidate);
-            log->debug(
-                "AssignIndexExpressions: processing candidate({}): {}", candidate, toString(node));
+            auto maybeForLoopOp = kgraph.control.get<ForLoopOp>(*maybeForLoop);
+            if(!maybeForLoopOp || maybeForLoopOp->loopName != rocRoller::KLOOP)
+                return std::nullopt;
 
-            auto [target, direction]
-                = getOperationTarget(candidate, kgraph, isStorePartOfGlobalToLDSOp);
-            auto [required, path]   = findRequiredCoordinates(target, direction, kgraph);
-            auto forLoopCoordinates = filterCoordinates<ForLoop>(required, kgraph);
-            auto unrollCoordinates  = filterCoordinates<Unroll>(required, kgraph);
+            auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, *maybeForLoop);
+            if(!maybeKLoopTail)
+                return std::nullopt;
 
-            log->debug("  target: {}", target);
-            for(auto r : required)
-            {
-                log->debug("  required: {}: {}", r, toString(kgraph.coordinates.getNode(r)));
-            }
+            auto maybeCommonAncestor
+                = FindCommonAncestorScope(kgraph, *maybeForLoop, *maybeKLoopTail);
+            if(!maybeCommonAncestor)
+                return std::nullopt;
 
-            auto maybeForLoop  = findContainingOperation<ForLoopOp>(candidate, kgraph);
-            auto maybeScope    = findContainingOperation<Scope>(candidate, kgraph);
-            auto hasForLoop    = !forLoopCoordinates.empty();
-            auto hasUnroll     = !unrollCoordinates.empty();
-            auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
+            Log::debug("  staged as: KLoop with KLoopTail, hoisting to common ancestor {} "
+                       "(KLoop={}, KLoopTail={})",
+                       *maybeCommonAncestor,
+                       *maybeForLoop,
+                       *maybeKLoopTail);
 
-            // Check if this is a KLoop with a corresponding KLoopTail - if so, hoist to common ancestor
-            if(maybeForLoop && hasForLoop && isUniformLoop)
-            {
-                auto maybeForLoopOp = kgraph.control.get<ForLoopOp>(*maybeForLoop);
-                if(maybeForLoopOp && maybeForLoopOp->loopName == rocRoller::KLOOP)
-                {
-                    auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, *maybeForLoop);
-                    if(maybeKLoopTail)
-                    {
-                        auto maybeCommonAncestor
-                            = FindCommonAncestorScope(kgraph, *maybeForLoop, *maybeKLoopTail);
-                        if(maybeCommonAncestor)
-                        {
-                            log->debug(
-                                "  staged as: KLoop with KLoopTail, hoisting to common ancestor {} "
-                                "(KLoop={}, KLoopTail={})",
-                                *maybeCommonAncestor,
-                                *maybeForLoop,
-                                *maybeKLoopTail);
-                            // Stage the hoisted version at common ancestor; skip original KLoop location
-                            stageChain(kgraph,
-                                       target,
-                                       candidate,
-                                       *maybeCommonAncestor,
-                                       GD::Upstream,
-                                       isStorePartOfGlobalToLDSOp,
-                                       *maybeForLoop, // Preserve forLoop for increment attachment
-                                       true); // replaceWithScope shares scope at common ancestor
-                            return;
-                        }
-                    }
-                }
-            }
+            return ChainPlacement{*maybeCommonAncestor, GD::Upstream, *maybeForLoop, true};
+        }
 
-            auto isReceiveTileLoop = false;
-            if(maybeForLoop)
-            {
-                if(getForLoopName(kgraph, maybeForLoop.value()) == rocRoller::RECEIVE)
-                    isReceiveTileLoop = true;
-            }
-
-            if(isReceiveTileLoop)
-            {
-                auto maybeTopOfLoop = findTopOfContainingOperation<ForLoopOp>(candidate, kgraph);
-                log->debug("  staged as: isReceiveTileLoop, location {}, {}",
-                           *maybeForLoop,
-                           *maybeTopOfLoop);
-
-                stageChain(kgraph,
-                           target,
-                           candidate,
-                           *maybeTopOfLoop,
-                           GD::Upstream,
-                           isStorePartOfGlobalToLDSOp,
-                           -1,
-                           false);
-                return;
-            }
-
-            if(hasForLoop && isUniformLoop)
-            {
-                log->debug("  staged as: hasForLoop and isUniformLoop, location {} forLoopOp {}",
-                           *maybeForLoop,
-                           *maybeForLoop);
-                stageChain(kgraph,
-                           target,
-                           candidate,
-                           *maybeForLoop,
-                           GD::Upstream,
-                           isStorePartOfGlobalToLDSOp,
-                           *maybeForLoop);
-                return;
-            }
-
-            // Prefetching
-            // Find all children ForLoopOps. If any forLoopCoordinates are associated with the
-            // children ForLoopOps, this is a prefetch.
+        /**
+         * @brief Check if candidate is in a prefetch context.
+         *
+         * A prefetch occurs when the operation requires ForLoop coordinates
+         * that belong to a downstream ForLoop (not the containing one).
+         */
+        bool isPrefetchContext(KernelGraph const&             kgraph,
+                               int                            candidate,
+                               std::unordered_set<int> const& forLoopCoordinates) const
+        {
             auto allChildForLoops
                 = kgraph.control
                       .findNodes(
@@ -1290,31 +1244,58 @@ namespace rocRoller::KernelGraph
                           GD::Downstream)
                       .to<std::vector>();
 
-            if(hasForLoop
-               && std::any_of(allChildForLoops.begin(), allChildForLoops.end(), [&](auto tag) {
-                      return forLoopCoordinates.count(kgraph.mapper.get<ForLoop>(tag)) > 0;
-                  }))
+            return std::any_of(allChildForLoops.begin(), allChildForLoops.end(), [&](auto tag) {
+                return forLoopCoordinates.count(kgraph.mapper.get<ForLoop>(tag)) > 0;
+            });
+        }
+
+        void stage(KernelGraph const& kgraph, int candidate, bool isStorePartOfGlobalToLDSOp)
+        {
+            auto node = kgraph.control.getNode<Operation>(candidate);
+            Log::debug("KernelGraph::AssignIndexExpressions::stage(): processing candidate({}): {}",
+                       candidate,
+                       toString(node));
+
+            // Gather coordinate information
+            auto [target, direction]
+                = getOperationTarget(candidate, kgraph, isStorePartOfGlobalToLDSOp);
+            auto [required, path]   = findRequiredCoordinates(target, direction, kgraph);
+            auto forLoopCoordinates = filterCoordinates<ForLoop>(required, kgraph);
+            auto unrollCoordinates  = filterCoordinates<Unroll>(required, kgraph);
+
+            Log::debug("  target: {}", target);
+            for(auto r : required)
+                Log::debug("  required: {}: {}", r, toString(kgraph.coordinates.getNode(r)));
+
+            // Gather loop context information
+            auto maybeForLoop  = findContainingOperation<ForLoopOp>(candidate, kgraph);
+            auto maybeScope    = findContainingOperation<Scope>(candidate, kgraph);
+            bool hasForLoop    = !forLoopCoordinates.empty();
+            bool hasUnroll     = !unrollCoordinates.empty();
+            bool isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
+
+            // Try KLoop with KLoopTail placement (hoists to common ancestor)
+            if(auto placement
+               = tryPlaceKLoopWithTail(kgraph, candidate, maybeForLoop, hasForLoop, isUniformLoop))
             {
-                log->debug("  staged as: hasForLoop and requiresDownstreamForLoop, location {} "
-                           "forLoopOp {}",
-                           *maybeForLoop,
-                           *maybeForLoop);
                 stageChain(kgraph,
                            target,
                            candidate,
-                           *maybeScope,
-                           GD::Upstream,
+                           placement->location,
+                           placement->direction,
                            isStorePartOfGlobalToLDSOp,
-                           -1);
+                           placement->forLoop,
+                           placement->replaceWithScope);
                 return;
             }
 
-            if(maybeForLoop && !isUniformLoop && hasUnroll)
+            // Receive tile loop: place at top of containing ForLoop
+            if(maybeForLoop && getForLoopName(kgraph, *maybeForLoop) == rocRoller::RECEIVE)
             {
                 auto maybeTopOfLoop = findTopOfContainingOperation<ForLoopOp>(candidate, kgraph);
-                log->debug("  staged as: hasForLoop and not isUniformLoop, location {}, {}",
-                           *maybeForLoop,
-                           *maybeTopOfLoop);
+                AssertFatal(maybeTopOfLoop.has_value(),
+                            "Expected to find top of ForLoop for ReceiveTileLoop placement");
+                Log::debug("  staged as: ReceiveTileLoop, location {}", *maybeTopOfLoop);
                 stageChain(kgraph,
                            target,
                            candidate,
@@ -1326,11 +1307,62 @@ namespace rocRoller::KernelGraph
                 return;
             }
 
+            // Uniform ForLoop with ForLoop coordinates: place above the ForLoop
+            if(hasForLoop && isUniformLoop)
+            {
+                Log::debug("  staged as: UniformForLoop, location {}", *maybeForLoop);
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           *maybeForLoop,
+                           GD::Upstream,
+                           isStorePartOfGlobalToLDSOp,
+                           *maybeForLoop);
+                return;
+            }
+
+            // Prefetch: place in containing scope (before the downstream ForLoop)
+            if(hasForLoop && isPrefetchContext(kgraph, candidate, forLoopCoordinates))
+            {
+                AssertFatal(maybeScope.has_value(),
+                            "Expected containing Scope for prefetch placement");
+                Log::debug("  staged as: Prefetch, location {}", *maybeScope);
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           *maybeScope,
+                           GD::Upstream,
+                           isStorePartOfGlobalToLDSOp,
+                           -1);
+                return;
+            }
+
+            // Non-uniform loop with Unroll: place at top of ForLoop
+            if(maybeForLoop && !isUniformLoop && hasUnroll)
+            {
+                auto maybeTopOfLoop = findTopOfContainingOperation<ForLoopOp>(candidate, kgraph);
+                AssertFatal(
+                    maybeTopOfLoop.has_value(),
+                    "Expected to find top of ForLoop for NonUniformLoopWithUnroll placement");
+                Log::debug("  staged as: NonUniformLoopWithUnroll, location {}", *maybeTopOfLoop);
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           *maybeTopOfLoop,
+                           GD::Upstream,
+                           isStorePartOfGlobalToLDSOp,
+                           -1,
+                           false);
+                return;
+            }
+
+            // Unroll only (no ForLoop): place in Initialize block below kernel root
             if(hasUnroll)
             {
-                log->debug("  staged as: hasUnroll");
-
-                auto kernel = *kgraph.control.roots().begin();
+                auto roots = kgraph.control.roots();
+                AssertFatal(!roots.empty(), "Expected at least one root in control graph");
+                auto kernel = *roots.begin();
+                Log::debug("  staged as: UnrollOnly, location {}", kernel);
                 stageChain(kgraph,
                            target,
                            candidate,
@@ -1341,38 +1373,110 @@ namespace rocRoller::KernelGraph
                 return;
             }
 
+            // Uniform loop without ForLoop coordinates: place above the ForLoop
             if(isUniformLoop)
             {
-                auto forLoop = *maybeForLoop;
-                log->debug("  staged as: uniformForLoop, forLoopOp {}", forLoop);
-
+                Log::debug("  staged as: UniformLoopNoCoord, location {}", *maybeForLoop);
                 stageChain(kgraph,
                            target,
                            candidate,
-                           forLoop,
+                           *maybeForLoop,
                            GD::Upstream,
                            isStorePartOfGlobalToLDSOp,
-                           forLoop);
+                           *maybeForLoop);
                 return;
             }
 
-            log->debug("  staged as: immediate");
+            // Default: immediate placement above the operation
+            Log::debug("  staged as: Immediate, location {}", candidate);
             stageChain(
                 kgraph, target, candidate, candidate, GD::Upstream, isStorePartOfGlobalToLDSOp);
         }
 
+        /**
+         * @brief Insert chain into graph for downstream placement.
+         */
+        static void insertChainDownstream(KernelGraph&          kgraph,
+                                          IndexChainSpec const& spec,
+                                          IndexChain const&     chain)
+        {
+            kgraph.control.addElement(Initialize(), {spec.location}, {chain.top});
+        }
+
+        /**
+         * @brief Insert chain into graph for upstream placement with scope wrapping.
+         */
+        void insertChainUpstreamWithScope(KernelGraph&          kgraph,
+                                          IndexChainSpec const& spec,
+                                          IndexChain const&     chain,
+                                          std::map<int, int>&   scopes,
+                                          std::map<int, int>&   serializationPoints) const
+        {
+            // Create scope if needed
+            if(!scopes.contains(spec.location))
+            {
+                auto newScope         = kgraph.control.addElement(Scope());
+                scopes[spec.location] = replaceWith(kgraph, spec.location, newScope, false);
+                serializationPoints[spec.location] = scopes[spec.location];
+            }
+
+            auto scope = scopes[spec.location];
+
+            if(m_serializeAssigns)
+            {
+                // Chain after previous chain (or scope if first)
+                auto insertionPoint = serializationPoints[spec.location];
+                bool isScope        = kgraph.control.get<Scope>(insertionPoint).has_value();
+                kgraph.control.addElement(isScope ? ControlEdge(Body()) : ControlEdge(Sequence()),
+                                          {insertionPoint},
+                                          {chain.top});
+                kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                serializationPoints[spec.location] = chain.bottom;
+            }
+            else
+            {
+                // All chains parallel under scope
+                kgraph.control.addElement(Body(), {scope}, {chain.top});
+                kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+            }
+        }
+
+        /**
+         * @brief Insert chain into graph for upstream placement without scope replacement.
+         */
+        static void insertChainUpstreamNoReplace(KernelGraph&          kgraph,
+                                                 IndexChainSpec const& spec,
+                                                 IndexChain const&     chain,
+                                                 std::map<int, int>&   scopes)
+        {
+            if(!scopes.contains(spec.location))
+            {
+                scopes[spec.location] = kgraph.control.addElement(Scope());
+                insertWithBody(kgraph, spec.location, scopes[spec.location]);
+            }
+            insertBefore(kgraph, spec.location, chain.top, chain.bottom);
+        }
+
+        /**
+         * @brief Commit all staged chains to the graph.
+         *
+         * Creates index chains for all staged operations and inserts them
+         * into the control graph at their determined locations.
+         */
         KernelGraph commit(KernelGraph const& original) const
         {
-            auto               kgraph = original;
-            std::map<int, int> scopes; // Maps location to actual scope node
-            std::map<int, int>
-                      serializationPoints; // Maps location to last chain bottom for serialization
-            BufferMap bufferMap;
-            BaseAddressMap baseAddressMap;
+            auto kgraph = original;
+            // Maps location to actual scope node
+            std::map<int, int> scopes;
+            // Maps location to last chain bottom for serialization
+            std::map<int, int> serializationPoints;
+            BufferMap          bufferMap;
+            BaseAddressMap     baseAddressMap;
 
             // Build all chains and insert them into the graph
             for(auto const& [spec, candidates] : m_chains)
             {
+                // Compute loop step for increment operations
                 ExpressionPtr step = Expression::literal(1u);
                 if(spec.forLoop > 0)
                 {
@@ -1380,96 +1484,62 @@ namespace rocRoller::KernelGraph
                     step            = simplify(rhs);
                 }
 
-                // Use first candidate to compute indexes
-                Log::debug("KernelGraph::AssignIndexExpressions()::commit({}) "
-                           "isStorePartOfGlobalToLDSOp({}) "
-                           "location={}",
+                Log::debug("KernelGraph::AssignIndexExpressions::commit(): candidate={} "
+                           "isStorePartOfGlobalToLDSOp={} location={}",
                            candidates[0],
                            spec.isStorePartOfGlobalToLDSOp,
                            spec.location);
 
+                // Create the index chain
                 auto chain = createIndexChain(
                     kgraph, candidates[0], step, spec, bufferMap, baseAddressMap);
 
+                // Insert chain into control graph
                 if(spec.direction == GD::Downstream)
                 {
                     // Add index assigns to an Initialize block below target
-                    kgraph.control.addElement(Initialize(), {spec.location}, {chain.top});
+                    insertChainDownstream(kgraph, spec, chain);
+                }
+                else if(spec.replaceWithScope)
+                {
+                    // Add index assigns in a Scope above target. Only the location
+                    // is within the scope.
+                    insertChainUpstreamWithScope(kgraph, spec, chain, scopes, serializationPoints);
                 }
                 else
                 {
-                    if(spec.replaceWithScope)
-                    {
-                        // Add index assigns in a Scope above target. Only the location
-                        // is within the scope.
-                        if(!scopes.contains(spec.location))
-                        {
-                            auto newScope = kgraph.control.addElement(Scope());
-                            scopes[spec.location]
-                                = replaceWith(kgraph, spec.location, newScope, false);
-                            serializationPoints[spec.location] = scopes[spec.location];
-                        }
+                    // Add index assigns in a Scope above target. Everything underneath
+                    // the location is within the scope.
+                    insertChainUpstreamNoReplace(kgraph, spec, chain, scopes);
+                }
 
-                        auto scope = scopes[spec.location];
-                        if(m_serializeAssigns)
-                        {
-                            auto insertionPoint = serializationPoints[spec.location];
-                            auto isScope = kgraph.control.get<Scope>(insertionPoint).has_value();
-                            kgraph.control.addElement(isScope ? ControlEdge(Body())
-                                                              : ControlEdge(Sequence()),
-                                                      {insertionPoint},
-                                                      {chain.top});
-                            kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
-                            serializationPoints[spec.location] = chain.bottom;
-                        }
-                        else
-                        {
-                            kgraph.control.addElement(Body(), {scope}, {chain.top});
-                            kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
-                        }
+                // Handle update operation for ForLoops
+                if(chain.update > 0)
+                {
+                    if(spec.forLoop < 0)
+                    {
+                        // Prefetch case: remove orphan update
+                        kgraph.control.deleteElement(chain.update);
+                        kgraph.mapper.purge(chain.update);
                     }
                     else
                     {
-                        // Add index assigns in a Scope above target. Everything underneath
-                        // the location is within the scope.
-                        if(!scopes.contains(spec.location))
-                        {
-                            scopes[spec.location] = kgraph.control.addElement(Scope());
-                            insertWithBody(kgraph, spec.location, scopes[spec.location]);
-                        }
-                        insertBefore(kgraph, spec.location, chain.top, chain.bottom);
+                        // Attach increment to ForLoop
+                        kgraph.control.addElement(
+                            ForLoopIncrement(), {spec.forLoop}, {chain.update});
                     }
                 }
 
-                // If the chain has an update but no containing
-                // ForLoopOp, it is from a pre-fetch
-                if(chain.update > 0 && spec.forLoop < 0)
-                {
-                    kgraph.control.deleteElement(chain.update);
-                    kgraph.mapper.purge(chain.update);
-                    chain.update = -1;
-                }
-
-                // Attach increment to associate ForLoop
-                if(chain.update > 0)
-                {
-                    kgraph.control.addElement(ForLoopIncrement(), {spec.forLoop}, {chain.update});
-                }
-
-                // Add deferred connections
+                // Connect all candidates to the shared coordinate edges
                 for(auto candidate : candidates)
                 {
                     for(auto const& dc : chain.connections)
-                    {
                         kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
-                    }
                 }
 
-                // Now create Assign nodes for each placeholder in the chain
+                // Create Assign nodes for each placeholder
                 for(auto const& nodeInfo : chain.nodeInfos)
-                {
                     createAssignsForPlaceholder(kgraph, nodeInfo, m_context, m_command);
-                }
             }
 
             return kgraph;
@@ -1567,7 +1637,7 @@ namespace rocRoller::KernelGraph
 
             if(nodeInfo.baseOffset < 0 && nodeInfo.offset > 0)
             {
-                assignBaseTag = makeAssignBase(kgraph,
+                assignBaseTag = MakeAssignBase(kgraph,
                                                params,
                                                target,
                                                nodeInfo.offset,
@@ -1581,7 +1651,7 @@ namespace rocRoller::KernelGraph
 
             if(nodeInfo.stride > 0)
             {
-                assignStrideTag = makeAssignStride(kgraph,
+                assignStrideTag = MakeAssignStride(kgraph,
                                                    params,
                                                    target,
                                                    nodeInfo.stride,
@@ -1595,7 +1665,7 @@ namespace rocRoller::KernelGraph
             if(nodeInfo.buffer > 0)
             {
                 assignBufferTag
-                    = makeBuffer(kgraph, params, target, nodeInfo.buffer, context, command);
+                    = MakeBuffer(kgraph, params, target, nodeInfo.buffer, context, command);
             }
 
             // Insert Assign nodes after the NOP placeholder
