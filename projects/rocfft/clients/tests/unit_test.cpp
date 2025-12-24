@@ -373,7 +373,6 @@ TEST(rocfft_UnitTest, log_multithreading)
         ASSERT_TRUE(res) << "line contains invalid content: " << line;
     }
 }
-#endif
 
 // a function that accepts a plan's requested size on input, and
 // returns the size to actually allocate for the test
@@ -919,4 +918,3 @@ TEST(rocfft_UnitTest, rtc_test_harness)
         }
     }
 }
-#endif
