@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -16,11 +15,6 @@
 #include "gtest_common.hpp"
 #include "../network_data.hpp"
 #include "../pooling_common.hpp"
-
-// Temporary: Enable configuration logging for comparison with ctest
-// Set to 1 to generate a file with all test configurations
-// This should be reverted after reviewer verification
-#define ENABLE_CONFIG_LOGGING 1
 
 // Configuration define matching the original ctest behavior
 // These can be overridden at compile time via -D flags
@@ -129,6 +123,8 @@ bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
     }
 
     // Check 4: Skip uint8/uint16 max pooling with wsidx=1 in 2D
+    // The original ctest skips these when full_set is true (with --all flag)
+    // because uint8/uint16 index range is insufficient for output spatial dimensions
     if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1 &&
        (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
     {
@@ -144,7 +140,7 @@ bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case)
         return false;
     }
 
-    // Check 5: Index range validation for max pooling
+    // Check 6: Index range validation for max pooling
     if(test_case.mode == miopenPoolingMax)
     {
         size_t index_max = GetIndexMax(test_case.index_type);
@@ -194,39 +190,42 @@ struct IndexTypeCounters
         switch(index_type)
         {
         case miopenIndexUint16:
-            // Only test 5 uint16 cases total
-            if(num_uint16_case >= 5)
+            // Only test 5 uint16 cases total (but ctest uses > 5, allowing 6 cases)
+            // Match ctest behavior exactly: if(num_uint16_case > 5) return false;
+            if(num_uint16_case > 5)
                 return false;
             ++num_uint16_case;
             return true;
         case miopenIndexUint32:
-            // Only test 5 uint32 cases for each wsidx mode
+            // Only test 5 uint32 cases for each wsidx mode (but ctest uses > 5, allowing 6)
+            // Match ctest behavior exactly
             if(wsidx == 0)
             {
-                if(num_uint32_case >= 5)
+                if(num_uint32_case > 5)
                     return false;
                 ++num_uint32_case;
             }
             else
             {
-                if(num_uint32_case_imgidx >= 5)
+                if(num_uint32_case_imgidx > 5)
                     return false;
                 ++num_uint32_case_imgidx;
             }
             return true;
         case miopenIndexUint64:
-            // Only test 5 uint64 cases for wsidx=0
+            // Only test 5 uint64 cases for wsidx=0 (but ctest uses > 5, allowing 6)
             // For wsidx=1, limit to 5 cases for 2D (spt_dim == 2)
+            // Match ctest behavior exactly
             if(wsidx == 0)
             {
-                if(num_uint64_case >= 5)
+                if(num_uint64_case > 5)
                     return false;
                 ++num_uint64_case;
             }
             else
             {
-                // For 2D pooling (spt_dim == 2), limit to 5 cases
-                if(num_uint64_case_imgidx >= 5)
+                // For 2D pooling (spt_dim == 2), limit to 5 cases (but ctest uses > 5)
+                if(num_uint64_case_imgidx > 5)
                     return false;
                 ++num_uint64_case_imgidx;
             }
@@ -300,16 +299,26 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     dataset0_inputs.assign(in_dim_set.begin(), in_dim_set.end());
 #else
     // When TEST_GET_INPUT_TENSOR = 0, use predefined shapes
-    // Limited to 9 input shapes (matching generate_multi_data_limited with limit_multiplier=9)
-    dataset0_inputs = {{1, 19, 1024, 2048},
-                       {10, 3, 32, 32},
-                       {5, 32, 8, 8},
-                       {2, 1024, 12, 12},
-                       {4, 3, 231, 231},
-                       {8, 3, 227, 227},
-                       {1, 384, 13, 13},
-                       {1, 96, 27, 27},
-                       {2, 160, 7, 7}}; // First 9 from the original 18
+    // Use all 18 input shapes to match ctest with --all (limit_set=2, limit_multiplier=9 -> 2*9=18)
+    // This matches the maximum number of test cases when running: test_pooling2d --all
+    dataset0_inputs = {{1, 19, 1024, 2048},   // Shape 1
+                       {10, 3, 32, 32},        // Shape 2
+                       {5, 32, 8, 8},          // Shape 3
+                       {2, 1024, 12, 12},      // Shape 4
+                       {4, 3, 231, 231},       // Shape 5
+                       {8, 3, 227, 227},       // Shape 6
+                       {1, 384, 13, 13},       // Shape 7
+                       {1, 96, 27, 27},        // Shape 8
+                       {2, 160, 7, 7},         // Shape 9
+                       {1, 192, 256, 512},     // Shape 10
+                       {2, 192, 28, 28},       // Shape 11
+                       {1, 832, 64, 128},      // Shape 12
+                       {1, 256, 56, 56},       // Shape 13
+                       {4, 3, 224, 224},       // Shape 14
+                       {2, 64, 112, 112},      // Shape 15
+                       {2, 608, 4, 4},         // Shape 16
+                       {1, 2048, 11, 11},      // Shape 17
+                       {1, 16, 4096, 4096}};   // Shape 18
 #endif
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
@@ -339,28 +348,6 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     // Note: Dataset 1 (asymmetric) and Dataset 2 (wide window) are tested separately
     // via pooling2d_asymmetric.cpp and pooling2d_wide.cpp to maintain the same
     // structure as the original ctest implementation.
-
-#if ENABLE_CONFIG_LOGGING
-    // Temporary: Log all test configurations to a file for comparison with ctest
-    // Format: input_dims[4] lens[2] pads[2] strides[2] index_type mode wsidx
-    std::ofstream log_file("pooling2d_gtest_configs.txt");
-    if(log_file.is_open())
-    {
-        log_file << "# Total test cases: " << test_cases.size() << "\n";
-        log_file << "# Format: input_dims[4] lens[2] pads[2] strides[2] index_type mode wsidx\n";
-        for(const auto& tc : test_cases)
-        {
-            log_file << tc.input_dims[0] << " " << tc.input_dims[1] << " " << tc.input_dims[2]
-                     << " " << tc.input_dims[3] << " ";
-            log_file << tc.lens[0] << " " << tc.lens[1] << " ";
-            log_file << tc.pads[0] << " " << tc.pads[1] << " ";
-            log_file << tc.strides[0] << " " << tc.strides[1] << " ";
-            log_file << static_cast<int>(tc.index_type) << " " << static_cast<int>(tc.mode) << " "
-                     << tc.wsidx << "\n";
-        }
-        log_file.close();
-    }
-#endif
 
     return test_cases;
 }
