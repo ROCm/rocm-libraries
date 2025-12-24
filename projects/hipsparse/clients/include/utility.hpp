@@ -1155,7 +1155,7 @@ int read_bin_matrix(const char*          filename,
 
     int nrowf = 0;
     int ncolf = 0;
-    int nnzf = 0;
+    int nnzf  = 0;
 
     err = fread(&nrowf, sizeof(int), 1, f);
     err |= fread(&ncolf, sizeof(int), 1, f);
