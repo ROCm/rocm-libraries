@@ -702,9 +702,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {1, 3, 14, 14};
+    std::vector<int64_t> strides = {588, 196, 14, 1};
     std::vector<int64_t> dims = {1, 3, 14, 14};
-    std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
+    std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
@@ -787,9 +787,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {1, 3, 14, 14};
+    std::vector<int64_t> strides = {588, 196, 14, 1};
     std::vector<int64_t> dims = {1, 3, 14, 14};
-    std::vector<int64_t> wrongStrides = {1, 5, 1, 1}; // Wrong channel count
+    std::vector<int64_t> wrongStrides = {5, 1, 1, 1}; // Wrong channel count
     std::vector<int64_t> wrongDims = {1, 5, 1, 1};
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
@@ -958,9 +958,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {1, 3}; // Only N and C dimensions
+    std::vector<int64_t> strides = {3, 1}; // Only N and C dimensions
     std::vector<int64_t> dims = {1, 3};
-    std::vector<int64_t> derivedStrides = {1, 3};
+    std::vector<int64_t> derivedStrides = {3, 1};
     std::vector<int64_t> derivedDims = {1, 3};
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
@@ -1043,7 +1043,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> stridesNCHW = {1, 3, 14, 14}; // NCHW
+    std::vector<int64_t> stridesNCHW = {588, 196, 14, 1}; // NCHW
     std::vector<int64_t> dimsNCHW = {1, 3, 14, 14};
     std::vector<int64_t> stridesNHWC = {3, 14 * 14 * 3, 14 * 3, 3}; // NHWC
     std::vector<int64_t> dimsNHWC = {1, 3, 14, 14};

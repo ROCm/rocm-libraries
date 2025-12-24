@@ -136,48 +136,28 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
     // regardless of the actual intended layout.
     // Note: Tensor order is unpredictable (from unordered_map iteration), so we
     // search for ANY non-degenerate tensor - they all must have the same layout anyway.
-    size_t referenceIndex = 0;
+    int64_t referenceIndex = -1;
     for(size_t i = 0; i < tensors.size(); ++i)
     {
-        if(!isDegenerate(tensors[i]))
-        {
-            referenceIndex = i;
-            break;
-        }
-    }
-
-    // If all tensors are degenerate, no layout validation is needed
-    if(isDegenerate(tensors[referenceIndex]))
-    {
-        return;
-    }
-
-    const auto& referenceStrideOrder = tensors[referenceIndex].strideOrder;
-    const size_t numDims = tensors[referenceIndex].numDims();
-
-    // Validate reference tensor's layout is supported
-    validateSupportedLayout(referenceStrideOrder, numDims);
-
-    // Validate all other non-degenerate tensors match the reference layout
-    for(size_t i = 0; i < tensors.size(); ++i)
-    {
-        if(i == referenceIndex)
-        {
-            continue; // Skip the reference tensor itself
-        }
-
-        // Degenerate tensors are layout-agnostic, skip validation
         if(isDegenerate(tensors[i]))
         {
             continue;
         }
 
-        // Non-degenerate tensors must have the same layout as reference
-        if(tensors[i].strideOrder != referenceStrideOrder)
+        if(referenceIndex == -1)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "All tensors for batchnorm must have the same layout.");
+            referenceIndex = static_cast<int64_t>(i);
+            validateSupportedLayout(tensors[static_cast<size_t>(referenceIndex)].strideOrder,
+                                    tensors[static_cast<size_t>(referenceIndex)].numDims());
+        }
+        else
+        {
+            if(tensors[i].strideOrder != tensors[static_cast<size_t>(referenceIndex)].strideOrder)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "All tensors for batchnorm must have the same layout.");
+            }
         }
     }
 }
