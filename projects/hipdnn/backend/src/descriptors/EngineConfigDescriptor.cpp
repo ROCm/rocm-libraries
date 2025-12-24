@@ -224,9 +224,9 @@ hipdnnPluginConstData_t EngineConfigDescriptor::getSerializedEngineConfig() cons
 
 std::string EngineConfigDescriptor::toString() const
 {
-    std::string str = "EngineConfigDescriptor: [engineId=";
+    std::string str = "EngineConfigDescriptor: {engineId=";
     str += _engine ? std::to_string(_engine->getEngineId()) : "null";
-    str += ", maxWorkspaceSize=" + std::to_string(_maxWorkspaceSize) + "]";
+    str += ", maxWorkspaceSize=" + std::to_string(_maxWorkspaceSize) + "}";
     return str;
 }
 

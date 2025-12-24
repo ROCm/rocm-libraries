@@ -245,11 +245,11 @@ hipdnnBackendDescriptorType_t ExecutionPlanDescriptor::getStaticType()
 
 std::string ExecutionPlanDescriptor::toString() const
 {
-    std::string str = "ExecutionPlanDescriptor: [workspaceSize=" + std::to_string(_workspaceSize);
+    std::string str = "ExecutionPlanDescriptor: {workspaceSize=" + std::to_string(_workspaceSize);
     str += _engineConfig ? ", engineConfig="
                                + fmt::format("{:p}", static_cast<const void*>(_engineConfig.get()))
                          : ", engineConfig=null";
-    str += "]";
+    str += "}";
     return str;
 }
 

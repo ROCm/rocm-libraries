@@ -17,7 +17,7 @@ std::string logPtr(T* ptr)
     // This function is not invoked if the macro is a no-op.
     if(ptr == nullptr)
     {
-        return fmt::format("{:p}", static_cast<void*>(ptr));
+        return "nullptr";
     }
 
     try

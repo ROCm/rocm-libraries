@@ -123,11 +123,11 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
 
 std::string GraphDescriptor::toString() const
 {
-    std::string str = "GraphDescriptor: [handle=";
+    std::string str = "GraphDescriptor: {handle=";
     str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
     str += ", serializedGraphSize="
            + std::to_string(_graphSerializedBuffer.size() > 0 ? _graphSerializedBuffer.size() : 0);
-    str += "]";
+    str += "}";
     return str;
 }
 
