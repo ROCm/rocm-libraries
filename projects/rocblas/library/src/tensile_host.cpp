@@ -76,6 +76,25 @@
 #define ROCBLAS_LIB_PATH "/opt/rocm/lib"
 #endif
 
+#include <unordered_map>
+
+namespace
+{
+    // Maps specific architectures to their generic fallback.
+    // When exact-match libraries don't exist, try the generic variant.
+    // Add new mappings as needed.
+    static const std::unordered_map<std::string, std::string> archFallbackMap = {
+        {"gfx1032", "gfx10-3-generic"},
+        {"gfx90c", "gfx9-generic"},
+    };
+
+    static std::string getArchFallback(const std::string& arch)
+    {
+        auto it = archFallbackMap.find(arch);
+        return (it != archFallbackMap.end()) ? it->second : "";
+    }
+}
+
 // cppcheck-suppress preprocessorErrorDirective
 #if __has_include(<filesystem>)
 #include <filesystem>
@@ -810,6 +829,11 @@ namespace
             if(TestPath(path + "/" + processor))
                 path += "/" + processor;
 
+            // Try to find the Tensile library, with fallback to generic architecture
+            std::string fallbackArch   = getArchFallback(processor);
+            std::string effectiveArch  = processor;
+            bool        usingFallback  = false;
+
 #ifdef TENSILE_YAML
             tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".yaml";
 #else
@@ -817,14 +841,60 @@ namespace
 #endif
             if(!TestPath(tensileLibraryPath))
             {
-
+                // Try fallback architecture for lazy library
+                if(!fallbackArch.empty())
+                {
+                    std::string fallbackPath = base_path;
+                    if(TestPath(fallbackPath + "/" + fallbackArch))
+                        fallbackPath += "/" + fallbackArch;
 #ifdef TENSILE_YAML
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".yaml";
+                    std::string fallbackLibPath = fallbackPath + "/TensileLibrary_lazy_" + fallbackArch + ".yaml";
 #else
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".dat";
+                    std::string fallbackLibPath = fallbackPath + "/TensileLibrary_lazy_" + fallbackArch + ".dat";
+#endif
+                    if(TestPath(fallbackLibPath))
+                    {
+                        tensileLibraryPath = fallbackLibPath;
+                        path               = fallbackPath;
+                        effectiveArch      = fallbackArch;
+                        usingFallback      = true;
+                    }
+                }
+            }
+
+            if(!TestPath(tensileLibraryPath))
+            {
+#ifdef TENSILE_YAML
+                tensileLibraryPath = path + "/TensileLibrary_" + effectiveArch + ".yaml";
+#else
+                tensileLibraryPath = path + "/TensileLibrary_" + effectiveArch + ".dat";
 #endif
                 if(!TestPath(tensileLibraryPath))
                 {
+                    // Try fallback for non-lazy library if not already using fallback
+                    if(!usingFallback && !fallbackArch.empty())
+                    {
+                        std::string fallbackPath = base_path;
+                        if(TestPath(fallbackPath + "/" + fallbackArch))
+                            fallbackPath += "/" + fallbackArch;
+#ifdef TENSILE_YAML
+                        std::string fallbackLibPath = fallbackPath + "/TensileLibrary_" + fallbackArch + ".yaml";
+#else
+                        std::string fallbackLibPath = fallbackPath + "/TensileLibrary_" + fallbackArch + ".dat";
+#endif
+                        if(TestPath(fallbackLibPath))
+                        {
+                            tensileLibraryPath = fallbackLibPath;
+                            path               = fallbackPath;
+                            effectiveArch      = fallbackArch;
+                            usingFallback      = true;
+                        }
+                    }
+                }
+            }
+
+            if(!TestPath(tensileLibraryPath))
+            {
 #ifdef TENSILE_YAML
                     tensileLibraryPath = path + "/TensileLibrary.yaml";
 #else
@@ -855,10 +925,14 @@ namespace
 #endif
                         rocblas_abort();
                     }
-                }
             }
-            else
+
+            if(tensileLibraryPath.find("_lazy_") != std::string::npos && TestPath(tensileLibraryPath))
                 tensile_lazy_load_enabled = true;
+
+            // Update processor to effectiveArch for code object loading
+            if(usingFallback)
+                processor = effectiveArch;
 
             //Supports multi architecture configuration in lazy library loading mode
             static int initialize_once = [&] {

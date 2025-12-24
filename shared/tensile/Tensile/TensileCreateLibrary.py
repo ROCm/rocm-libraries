@@ -55,6 +55,7 @@ from .Common import (
     globalParameters,
     printExit,
     printWarning,
+    resolveArchAlias,
     splitArchs,
     tPrint,
 )
@@ -1386,7 +1387,8 @@ def TensileCreateLibrary():
     ]
 
     _, requestedArchs = splitArchs()
-    if all(a.split(":")[0] not in supportedArchs for a in requestedArchs):
+    # Resolve aliases before checking if architecture is supported
+    if all(resolveArchAlias(a).split(":")[0] not in supportedArchs for a in requestedArchs):
         printExit(
             f"No requested architecture is supported by ROCm {globalParameters['HipClangVersion']}\n  Requested {', '.join(requestedArchs)}\n  Supported {', '.join(supportedArchs)}"
         )

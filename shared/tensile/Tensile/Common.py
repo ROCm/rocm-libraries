@@ -328,8 +328,36 @@ architectureMap = {
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
   'gfx1200':'gfx1200',
-  'gfx1201':'gfx1201'
+  'gfx1201':'gfx1201',
+  # Aliases for generic architectures
+  'gfx10-3-generic':'navi21', 'gfx9-generic':'vega10',
+  'gfx11-generic': 'navi31',
 }
+
+# Architecture aliases: maps alias names to base architecture for configuration lookup.
+# The alias name is used for --offload-arch, the base arch for capabilities/logic files.
+# Add new aliases here as needed.
+archAliases = {
+    'gfx10-3-generic': 'gfx1030',
+    'gfx9-generic': 'gfx900',
+    'gfx11-generic': 'gfx1100',
+}
+
+def resolveArchAlias(archName: str) -> str:
+    """Resolve alias to base architecture for configuration lookup.
+
+    Preserves xnack/other suffixes (e.g., 'gfx10-3-generic:xnack+' -> 'gfx1030:xnack+').
+
+    Args:
+        archName: Architecture name, possibly an alias with optional suffix.
+
+    Returns:
+        The resolved base architecture name with suffix preserved.
+    """
+    baseName = archName.split(':')[0]
+    suffix = archName[len(baseName):]
+    resolved = archAliases.get(baseName, baseName)
+    return resolved + suffix
 
 def getArchitectureName(gfxName: str) -> Optional[str]:
   """Maps the provided Gfx architecture to its common name using the **architectureMap**.
@@ -2192,6 +2220,8 @@ def tryAssembler(isaVersion, asmString, debug=False, *options):
 
 def gfxArch(name: str) -> Optional[IsaVersion]:
     import re
+    # Resolve alias to base arch for capability lookup
+    name = resolveArchAlias(name)
     match = re.search(r'gfx([0-9a-fA-F]{3,})', name)
     if not match: return None
 

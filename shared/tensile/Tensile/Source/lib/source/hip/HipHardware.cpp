@@ -71,7 +71,6 @@ namespace Tensile
                                           deviceId));
             }
 #endif
-
             return GetDevice(prop);
         }
 
