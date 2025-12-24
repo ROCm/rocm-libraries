@@ -4,7 +4,7 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace hipdnn_backend
 {

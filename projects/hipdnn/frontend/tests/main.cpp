@@ -4,8 +4,10 @@ SPDX-License-Identifier: MIT
 */
 
 #include <gtest/gtest.h>
+#include <spdlog/spdlog.h>
+
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/LoggingUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
 
 int main(int argc, char** argv)
 {
@@ -13,5 +15,7 @@ int main(int argc, char** argv)
 
     hipdnn_frontend::initializeFrontendLogging();
 
-    return RUN_ALL_TESTS();
+    auto result = RUN_ALL_TESTS();
+    spdlog::shutdown();
+    return result;
 }

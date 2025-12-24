@@ -79,14 +79,7 @@ namespace rocRoller
                 cpy.lhs             = std::make_shared<Expression>(call(expr.lhs));
                 cpy.rhs             = std::make_shared<Expression>(call(expr.rhs));
 
-                auto result = evaluate(lowerBitfieldCombine(std::make_shared<Expression>(cpy)));
-
-                auto resultType = resultVariableType(result);
-                auto cpyType    = resultVariableType(cpy);
-                if(resultType != cpyType)
-                    return reinterpret(result, cpyType.dataType);
-
-                return result;
+                return evaluate(lowerBitfieldCombine(std::make_shared<Expression>(cpy)));
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)

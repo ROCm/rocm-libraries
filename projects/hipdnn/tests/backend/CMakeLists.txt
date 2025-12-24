@@ -5,8 +5,10 @@ include(GoogleTest)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+# Main integration test executable WITH HipErrorHandler
 add_executable(
     public_hipdnn_backend_tests
+    main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
     IntegrationEngineApi.cpp
@@ -27,7 +29,8 @@ target_link_libraries(
     GTest::gtest
     GTest::gtest_main
     Threads::Threads
-    hipdnn_sdk
+    hipdnn_test_sdk
+    hipdnn_plugin_sdk
     hipdnn_backend
     hip::host
 )

@@ -4,26 +4,23 @@
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenUtils.hpp"
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace miopen_legacy_plugin
 {
 
 MiopenActivationDescriptor::MiopenActivationDescriptor(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttrs)
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttrs)
 {
-    const auto params = miopen_utils::mapPointwiseModeToMiopenActivation(pointwiseAttrs);
-    if(!params.has_value())
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Unsupported pointwise mode for activation descriptor: "
-                + std::to_string(static_cast<int>(pointwiseAttrs.operation())));
-    }
+    using namespace miopen_utils;
+
+    ActivationParams params;
+    HIPDNN_PREPEND_MESSAGE_ON_THROW(params = mapPointwiseModeToMiopenActivation(pointwiseAttrs),
+                                    "MiopenActivationDescriptor: ");
 
     THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor(&_descriptor));
     THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(
-        _descriptor, params->mode, params->alpha, params->beta, params->gamma));
+        _descriptor, params.mode, params.alpha, params.beta, params.gamma));
 }
 
 MiopenActivationDescriptor::MiopenActivationDescriptor(MiopenActivationDescriptor&& other) noexcept
