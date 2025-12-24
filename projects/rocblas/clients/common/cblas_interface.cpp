@@ -2309,6 +2309,56 @@ INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_bfloat16, float, float)
 INSTANTIATE_SYRK_EX_TEMPLATE(float, float, double)
 INSTANTIATE_SYRK_EX_TEMPLATE(float, double, double)
 
+// herk_ex
+template <typename T, typename U, typename Tc>
+void ref_herk_ex(rocblas_fill      uplo,
+                 rocblas_operation transA,
+                 int64_t           n,
+                 int64_t           k,
+                 Tc                alpha,
+                 const T*          A,
+                 int64_t           lda,
+                 Tc                beta,
+                 U*                C,
+                 int64_t           ldc)
+{
+    double alpha_double = alpha;
+    double beta_double  = beta;
+
+    host_vector<rocblas_double_complex> A_double, C_double;
+
+    cast_to_buffer(transA, n, k, lda, A, A_double);
+    cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_double);
+
+    ref_herk(uplo,
+             transA,
+             n,
+             k,
+             alpha_double,
+             (const rocblas_double_complex*)A_double.data(),
+             lda,
+             beta_double,
+             C_double.data(),
+             ldc);
+
+    cast_from_buffer(n, n, ldc, C_double, C);
+}
+
+#define INSTANTIATE_HERK_EX_TEMPLATE(T_, U_, Tc_)                    \
+    template void ref_herk_ex<T_, U_, Tc_>(rocblas_fill      uplo,   \
+                                           rocblas_operation transA, \
+                                           int64_t           n,      \
+                                           int64_t           k,      \
+                                           Tc_               alpha,  \
+                                           const T_*         A,      \
+                                           int64_t           lda,    \
+                                           Tc_               beta,   \
+                                           U_*               C,      \
+                                           int64_t           ldc);
+
+INSTANTIATE_HERK_EX_TEMPLATE(rocblas_float_complex, rocblas_float_complex, double)
+INSTANTIATE_HERK_EX_TEMPLATE(rocblas_float_complex, rocblas_double_complex, double)
+
 // syr2k
 
 template <>

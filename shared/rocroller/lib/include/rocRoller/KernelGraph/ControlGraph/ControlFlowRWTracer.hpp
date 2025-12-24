@@ -133,6 +133,7 @@ namespace rocRoller::KernelGraph
         void trackRegister(int control, int coordinate, ReadWrite rw);
         void trackConnections(int control, std::unordered_set<int> const& exclude, ReadWrite rw);
         void trackOffsetAndStride(int control, ReadWrite rw);
+        void trackBuffer(int control, ReadWrite rw);
 
         bool hasGeneratedInputs(int const& tag);
         void generate(std::set<int> candidates);
