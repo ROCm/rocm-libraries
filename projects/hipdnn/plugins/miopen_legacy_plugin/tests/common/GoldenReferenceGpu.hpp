@@ -11,7 +11,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
-#include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_data_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
@@ -21,10 +21,10 @@ namespace test_helpers
 class TestGoldenReferenceGpu : public testing::TestWithParam<std::filesystem::path>
 {
 protected:
-    hipdnn_sdk::utilities::GraphAndTensorMap _graphAndTensors;
+    hipdnn_data_sdk::utilities::GraphAndTensorMap _graphAndTensors;
     hipdnnEnginePluginHandle_t _handle;
     flatbuffers::DetachedBuffer _engineConfigBuffer;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>>
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
         _referenceOutputTensors;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -87,8 +87,8 @@ auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(
         hipdnn_test_sdk::utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
-            hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
-                / subDirectory,
+            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+                / "../lib/hipdnn_reference_data" / subDirectory,
             ".json"));
 }
 

@@ -108,6 +108,7 @@ set(rocblas_no_tensile_test_source
     blas_ex/gemmt_gtest.cpp
     blas_ex/geam_ex_gtest.cpp
     blas_ex/syrk_ex_gtest.cpp
+    blas_ex/herk_ex_gtest.cpp
   )
 
 # Keep ${rocblas_tensile_test_source} first, so that multiheaded tests are the

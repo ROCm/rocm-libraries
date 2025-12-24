@@ -4,9 +4,9 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <algorithm>
 #include <iostream>
@@ -15,7 +15,7 @@
 #include <random>
 #include <vector>
 
-using hipdnn_sdk::utilities::TensorLayout;
+using hipdnn_data_sdk::utilities::TensorLayout;
 
 #define HIP_CHECK(status)                                                                      \
     do                                                                                         \
@@ -124,7 +124,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
 {
     auto tensor = std::make_shared<hipdnn_frontend::graph::Tensor_attributes>();
     tensor->set_dim(dims).set_data_type(dataType);
-    tensor->set_stride(hipdnn_sdk::utilities::generateStrides(dims, layout.strideOrder));
+    tensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder));
 
     return tensor;
 }

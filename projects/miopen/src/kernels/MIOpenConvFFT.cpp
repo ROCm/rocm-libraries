@@ -1,5 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+#include "miopen_cstdint.hpp"
 
 constexpr float C3QA = 0.50000000000000000000000000000000f;
 constexpr float C3QB = 0.86602540378443864676372317075294f;
@@ -3257,12 +3258,12 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
     /* other non-unrolled summation indices (all start at zero) */
 
     /* where will this thread read from global memory */
-    A += GLOBAL_A(static_cast<unsigned long>(aL),
-                  static_cast<unsigned long>(a0I) + g0I * MT_0I,
-                  static_cast<unsigned long>(gK));
-    B += GLOBAL_B(static_cast<unsigned long>(bL),
-                  static_cast<unsigned long>(b1J) + g1J * MT_1J,
-                  static_cast<unsigned long>(gK));
+    A += GLOBAL_A(static_cast<uint64_t>(aL),
+                  static_cast<uint64_t>(a0I) + g0I * MT_0I,
+                  static_cast<uint64_t>(gK));
+    B += GLOBAL_B(static_cast<uint64_t>(bL),
+                  static_cast<uint64_t>(b1J) + g1J * MT_1J,
+                  static_cast<uint64_t>(gK));
 
     /* where will this thread write to local memory */
     TYPE_A* lA = localA + a0I + aL * (MT_0I + PAD);
@@ -3342,8 +3343,8 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
         MICRO_TILE
         MICRO_TILE
 
-        A += static_cast<unsigned long>(strideAL) * UNROLL;
-        B += static_cast<unsigned long>(strideBL) * UNROLL;
+        A += static_cast<uint64_t>(strideAL) * UNROLL;
+        B += static_cast<uint64_t>(strideBL) * UNROLL;
     } while(--sumIterL > 0);
 
     /* which global Cij index */
@@ -3356,108 +3357,108 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[0][0];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 0 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 0 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[0][0];
         }
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[0][1];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 0 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 1 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[0][1];
         }
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[0][2];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 0 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 2 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[0][2];
         }
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[0][3];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 0 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 3 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[0][3];
         }
     }
     if(globalC0I + 1 * WG_0I < size0I)
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[1][0];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 1 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 0 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[1][0];
         }
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[1][1];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 1 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 1 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[1][1];
         }
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[1][2];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 1 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 2 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[1][2];
         }
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[1][3];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 1 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 3 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[1][3];
         }
     }
     if(globalC0I + 2 * WG_0I < size0I)
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[2][0];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 2 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 0 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[2][0];
         }
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[2][1];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 2 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 1 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[2][1];
         }
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[2][2];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 2 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 2 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[2][2];
         }
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[2][3];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 2 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 3 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[2][3];
         }
     }
     if(globalC0I + 3 * WG_0I < size0I)
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[3][0];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 3 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 0 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[3][0];
         }
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[3][1];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 3 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 1 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[3][1];
         }
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[3][2];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 3 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 2 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[3][2];
         }
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                       static_cast<unsigned long>(globalCK))] = rC[3][3];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I) + 3 * WG_0I,
+                       static_cast<uint64_t>(globalC1J) + 3 * WG_1J,
+                       static_cast<uint64_t>(globalCK))] = rC[3][3];
         }
     }
 }
@@ -3687,23 +3688,23 @@ extern "C" __global__
         (globalReadOffsetB1J_3 > (size1J - 1)) ? (size1J - 1) : globalReadOffsetB1J_3;
 
     /* global read: final offsets a */
-    unsigned long globalReadOffsetA_0_0 =
+    uint64_t globalReadOffsetA_0_0 =
         GLOBAL_OFFSET_A(globalReadOffsetAL_0, globalReadOffsetA0I_0, wgK);
-    unsigned long globalReadOffsetA_0_1 =
+    uint64_t globalReadOffsetA_0_1 =
         GLOBAL_OFFSET_A(globalReadOffsetAL_0, globalReadOffsetA0I_1, wgK);
-    unsigned long globalReadOffsetA_0_2 =
+    uint64_t globalReadOffsetA_0_2 =
         GLOBAL_OFFSET_A(globalReadOffsetAL_0, globalReadOffsetA0I_2, wgK);
-    unsigned long globalReadOffsetA_0_3 =
+    uint64_t globalReadOffsetA_0_3 =
         GLOBAL_OFFSET_A(globalReadOffsetAL_0, globalReadOffsetA0I_3, wgK);
 
     /* global read: final offsets b */
-    unsigned long globalReadOffsetB_0_0 =
+    uint64_t globalReadOffsetB_0_0 =
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_0, wgK);
-    unsigned long globalReadOffsetB_0_1 =
+    uint64_t globalReadOffsetB_0_1 =
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_1, wgK);
-    unsigned long globalReadOffsetB_0_2 =
+    uint64_t globalReadOffsetB_0_2 =
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_2, wgK);
-    unsigned long globalReadOffsetB_0_3 =
+    uint64_t globalReadOffsetB_0_3 =
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_3, wgK);
 
     /* global read: addresses a */
@@ -3812,28 +3813,28 @@ extern "C" __global__
         /* increment global read addresses */
         globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_0) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_1) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadA_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_2) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadA_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_3) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_0) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
         globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_1) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
         globalReadB_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_2) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
         globalReadB_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_3) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
     }
 
     /***************************************/
@@ -3876,28 +3877,28 @@ extern "C" __global__
         /* increment global read addresses */
         globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_0) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_1) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadA_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_2) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadA_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadA_0_3) +
-            static_cast<unsigned long>(strideAL) * DEPTHU);
+            static_cast<uint64_t>(strideAL) * DEPTHU);
         globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_0) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
         globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_1) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
         globalReadB_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_2) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
         globalReadB_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
             reinterpret_cast<DATA_TYPE const*>(globalReadB_0_3) +
-            static_cast<unsigned long>(strideBL) * DEPTHU);
+            static_cast<uint64_t>(strideBL) * DEPTHU);
     }
 
     /***************************************/
@@ -3991,27 +3992,27 @@ extern "C" __global__
     {
         if(globalC1J + 0 * CPS < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                       static_cast<unsigned long>(globalC1J) + 0 * CPS,
-                       static_cast<unsigned long>(globalCK))] = rC[0];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I),
+                       static_cast<uint64_t>(globalC1J) + 0 * CPS,
+                       static_cast<uint64_t>(globalCK))] = rC[0];
         }
         if(globalC1J + 1 * CPS < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                       static_cast<unsigned long>(globalC1J) + 1 * CPS,
-                       static_cast<unsigned long>(globalCK))] = rC[1];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I),
+                       static_cast<uint64_t>(globalC1J) + 1 * CPS,
+                       static_cast<uint64_t>(globalCK))] = rC[1];
         }
         if(globalC1J + 2 * CPS < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                       static_cast<unsigned long>(globalC1J) + 2 * CPS,
-                       static_cast<unsigned long>(globalCK))] = rC[2];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I),
+                       static_cast<uint64_t>(globalC1J) + 2 * CPS,
+                       static_cast<uint64_t>(globalCK))] = rC[2];
         }
         if(globalC1J + 3 * CPS < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                       static_cast<unsigned long>(globalC1J) + 3 * CPS,
-                       static_cast<unsigned long>(globalCK))] = rC[3];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I),
+                       static_cast<uint64_t>(globalC1J) + 3 * CPS,
+                       static_cast<uint64_t>(globalCK))] = rC[3];
         }
     }
 }
@@ -4218,15 +4219,15 @@ extern "C" __global__
         (globalReadOffsetB1J_1 > (size1J - 1)) ? (size1J - 1) : globalReadOffsetB1J_1;
 
     /* global read addresses: final offsets a */
-    unsigned long globalReadOffsetA_0_0 =
+    uint64_t globalReadOffsetA_0_0 =
         GLOBAL_OFFSET_A(globalReadOffsetAL_0, globalReadOffsetA0I_0, wgK);
-    unsigned long globalReadOffsetA_0_1 =
+    uint64_t globalReadOffsetA_0_1 =
         GLOBAL_OFFSET_A(globalReadOffsetAL_0, globalReadOffsetA0I_1, wgK);
 
     /* global read addresses: final offsets b */
-    unsigned long globalReadOffsetB_0_0 =
+    uint64_t globalReadOffsetB_0_0 =
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_0, wgK);
-    unsigned long globalReadOffsetB_0_1 =
+    uint64_t globalReadOffsetB_0_1 =
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_1, wgK);
 
     /* global read addresses: addresses a */
@@ -4238,10 +4239,10 @@ extern "C" __global__
     auto globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_1);
 
     /* global read addresses: increments a */
-    unsigned long globalReadIncAL = static_cast<unsigned long>(strideAL) * DEPTHU / VECTOR_WIDTH;
+    uint64_t globalReadIncAL = static_cast<uint64_t>(strideAL) * DEPTHU / VECTOR_WIDTH;
 
     /* global read addresses: increments b */
-    unsigned long globalReadIncBL = static_cast<unsigned long>(strideBL) * DEPTHU / VECTOR_WIDTH;
+    uint64_t globalReadIncBL = static_cast<uint64_t>(strideBL) * DEPTHU / VECTOR_WIDTH;
 
     /******************************************/
     /* Local Write Addresses                  */
@@ -4503,9 +4504,9 @@ extern "C" __global__
     {
         if(globalC1J + 0 * CPS < size1J)
         {
-            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                       static_cast<unsigned long>(globalC1J) + 0 * CPS,
-                       static_cast<unsigned long>(globalCK))] = rC[0];
+            C[GLOBAL_C(static_cast<uint64_t>(globalC0I),
+                       static_cast<uint64_t>(globalC1J) + 0 * CPS,
+                       static_cast<uint64_t>(globalCK))] = rC[0];
         }
     }
 }

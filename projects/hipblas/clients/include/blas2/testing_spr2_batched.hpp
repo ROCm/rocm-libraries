@@ -232,7 +232,7 @@ void testing_spr2_batched(const Arguments& arg)
         return;
     }
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Naming: `h` is in CPU (host) memory(eg hAp), `d` is in GPU (device) memory (eg dAp).
     host_batch_matrix<T> hA(N, N, N, batch_count);

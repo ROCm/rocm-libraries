@@ -178,6 +178,11 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return checkResult;
     }
 
+    if(!handle->getDevice().matrixCoreSupport(descCompute))
+    {
+        return HIPTENSOR_STATUS_ARCH_MISMATCH;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     int                  nModeA = descA->mLengths.size();

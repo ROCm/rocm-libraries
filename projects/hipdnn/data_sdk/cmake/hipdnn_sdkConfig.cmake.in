@@ -1,0 +1,25 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+
+# Backwards compatibility config for hipdnn_sdk
+# hipdnn_sdk is a thin wrapper that links to hipdnn_data_sdk
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find the actual hipdnn_data_sdk package (hipdnn_sdk depends on it)
+find_dependency(hipdnn_data_sdk CONFIG REQUIRED)
+
+# Subdirectory path for hipDNN engine plugins (relative to lib)
+set(HIPDNN_PLUGIN_ENGINE_SUBDIR "@HIPDNN_PLUGIN_ENGINE_SUBDIR@")
+
+# Install path for engine plugins
+set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR@")
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR@")
+
+# Include the targets file
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_sdkTargets.cmake")
+
+message(STATUS "hipDNN SDK (backwards compatibility): Using hipdnn_data_sdk")

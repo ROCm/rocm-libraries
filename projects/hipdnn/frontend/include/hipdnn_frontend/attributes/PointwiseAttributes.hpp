@@ -4,8 +4,8 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -201,7 +201,7 @@ public:
     std::optional<float> softplus_beta = std::nullopt;
     // NOLINTEND(readability-identifier-naming)
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::PointwiseAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::PointwiseAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto in0 = get_input_0();
@@ -209,7 +209,7 @@ public:
         auto in2 = get_input_2();
         auto ot0 = get_output_0();
 
-        return hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+        return hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
             builder,
             toSdkType(mode),
             relu_lower_clip,
