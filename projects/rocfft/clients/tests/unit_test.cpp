@@ -637,8 +637,6 @@ void rtc_cache_main()
     rocfft_cleanup();
     ASSERT_TRUE(fft_kernel_was_compiled());
 }
-#endif
-
 // run the main body of rtc cache tests twice to uncover potential
 // problems with thread reuse between iterations
 TEST(rocfft_UnitTest, rtc_cache_iter_1)
@@ -650,6 +648,7 @@ TEST(rocfft_UnitTest, rtc_cache_iter_2)
 {
     rtc_cache_main();
 }
+#ifdef HAVE_SCOPE_EXIT
 
 // make sure cache API functions tolerate null pointers without crashing
 TEST(rocfft_UnitTest, rtc_cache_null)
