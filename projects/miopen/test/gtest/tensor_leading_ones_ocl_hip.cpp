@@ -234,12 +234,12 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
-            alpha0,
-            alpha1,
-            beta,
-            0LL, // Aoffset
-            0LL, // Boffset
-            0LL, // Coffset
+            (T)alpha0,
+            (T)alpha1,
+            (T)beta,
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
             num_wg,
             bitmap);
 
@@ -258,12 +258,12 @@ protected:
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     work_per_wg,
-                    alpha0,
-                    alpha1,
-                    beta,
-                    0LL,
-                    0LL,
-                    0LL,
+                    (T)alpha0,
+                    (T)alpha1,
+                    (T)beta,
+                    0L,
+                    0L,
+                    0L,
                     num_wg,
                     bitmap);
 #endif
@@ -294,9 +294,9 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
-            alpha0,
-            alpha1,
-            beta,
+            (T)alpha0,
+            (T)alpha1,
+            (T)beta,
             uint64_t(0), // Aoffset
             uint64_t(0), // Boffset
             uint64_t(0), // Coffset
@@ -318,9 +318,9 @@ protected:
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     work_per_wg,
-                    alpha0,
-                    alpha1,
-                    beta,
+                    (T)alpha0,
+                    (T)alpha1,
+                    (T)beta,
                     uint64_t(0),
                     uint64_t(0),
                     uint64_t(0),
@@ -384,7 +384,7 @@ protected:
     miopen::Allocator::ManageDataPtr tensC_dev;
 
     TensorsConfig tensorsConfig;
-    T alpha0, alpha1, beta;
+    double alpha0, alpha1, beta;
 
 #if PERF_ENABLE
     PerfHelper ph;
