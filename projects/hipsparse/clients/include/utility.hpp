@@ -1119,7 +1119,43 @@ int read_bin_matrix(const char*          filename,
 
     int err;
 
-    int nrowf, ncolf, nnzf;
+    // Read rocALUTION header string
+    const char expected_header[] = "#rocALUTION binary csr file";
+    char       header[sizeof(expected_header)];
+    err = fread(header, sizeof(char), sizeof(expected_header) - 1, f);
+    if(!err)
+    {
+        fclose(f);
+        return -1;
+    }
+    header[sizeof(expected_header) - 1] = '\0';
+    if(strcmp(header, expected_header) != 0)
+    {
+        fclose(f);
+        return -1;
+    }
+
+    // Skip newline character written by std::endl
+    char newline;
+    err = fread(&newline, sizeof(char), 1, f);
+    if(!err)
+    {
+        fclose(f);
+        return -1;
+    }
+
+    // Read version number
+    int version;
+    err = fread(&version, sizeof(int), 1, f);
+    if(!err)
+    {
+        fclose(f);
+        return -1;
+    }
+
+    int nrowf = 0;
+    int ncolf = 0;
+    int nnzf = 0;
 
     err = fread(&nrowf, sizeof(int), 1, f);
     err |= fread(&ncolf, sizeof(int), 1, f);
