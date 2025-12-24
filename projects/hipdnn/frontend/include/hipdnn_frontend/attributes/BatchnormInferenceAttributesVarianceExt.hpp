@@ -188,5 +188,5 @@ private:
         return *this;
     }
 };
-typedef BatchnormInferenceAttributesVarianceExt Batchnorm_inference_variance_ext_attributes;
+typedef BatchnormInferenceAttributesVarianceExt Batchnorm_inference_attributes_variance_ext;
 } // namespace hipdnn_frontend::graph
