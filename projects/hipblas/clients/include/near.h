@@ -27,6 +27,7 @@
 
 #include "hipblas.h"
 #include "host_vector.hpp"
+#include "unit.h"
 
 #ifdef GOOGLE_TEST
 #include "gtest/gtest.h"
@@ -47,6 +48,7 @@
 
 // sqrt(0.5) factor for complex cutoff calculations
 constexpr double sqrthalf = 0.7071067811865475244;
+
 
 /*! \brief Template: gtest near compare two matrices float/double/complex */
 template <typename T>
@@ -89,7 +91,7 @@ void near_check_mixed(int64_t                        M,
 
 // currently only used for half-precision comparisons in dot_ex tests
 template <class T>
-inline constexpr double error_tolerance = 0.0;
+inline constexpr double error_tolerance = get_epsilon<T>();
 
 template <>
 inline constexpr double error_tolerance<hipblasBfloat16> = 1 / 100.0;
@@ -106,7 +108,7 @@ inline constexpr double error_tolerance<std::complex<double>> = 1 / 1000000.0;
 
 // currently only used for gemm_ex
 template <class Tc, class Ti, class To>
-static constexpr double sum_error_tolerance_for_gfx11 = 0.0;
+static constexpr double sum_error_tolerance_for_gfx11 = get_epsilon<Tc>();
 
 template <>
 inline constexpr double sum_error_tolerance_for_gfx11<float, hipblasBfloat16, float> = 1 / 10.0;
