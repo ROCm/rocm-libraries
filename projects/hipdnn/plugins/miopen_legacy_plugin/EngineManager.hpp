@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineConfigWrapper.hpp>
 
 #include "engines/EngineInterface.hpp"
 

@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
@@ -20,10 +20,11 @@ namespace miopen_legacy_plugin
 {
 
 ConvFwdBiasActivParams::ConvFwdBiasActivParams(
-    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
@@ -35,9 +36,9 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     const auto& attrX = findTensorAttributes(tensorMap, _x.uid());
     const auto& attrW = findTensorAttributes(tensorMap, _w.uid());
 
-    const auto xDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
-    const auto wDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
-    const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(xDims, wDims);
+    const auto xDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+    const auto wDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+    const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(xDims, wDims);
 
     _conv = MiopenConvDescriptor(_spatialDimCount, convAttr, static_cast<int>(groupCount));
 
@@ -120,7 +121,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(
         &fusePlanDesc, miopenVerticalFusion, _params.x().tensorDescriptor()));
-    _fusePlanDesc = hipdnn_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t>(
+    _fusePlanDesc = hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t>(
         fusePlanDesc, [](miopenFusionPlanDescriptor_t desc) {
             auto status = miopenDestroyFusionPlan(desc);
             if(status != miopenStatusSuccess)
@@ -204,7 +205,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
 {
     miopenOperatorArgs_t fusionArgs;
     THROW_ON_MIOPEN_FAILURE(miopenCreateOperatorArgs(&fusionArgs));
-    auto fusionArgsRes = hipdnn_sdk::utilities::ScopedResource<miopenOperatorArgs_t>(
+    auto fusionArgsRes = hipdnn_data_sdk::utilities::ScopedResource<miopenOperatorArgs_t>(
         fusionArgs, [](miopenOperatorArgs_t args) {
             auto status = miopenDestroyOperatorArgs(args);
             if(status != miopenStatusSuccess)
