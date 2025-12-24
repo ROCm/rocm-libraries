@@ -301,24 +301,24 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
     // When TEST_GET_INPUT_TENSOR = 0, use predefined shapes
     // Use all 18 input shapes to match ctest with --all (limit_set=2, limit_multiplier=9 -> 2*9=18)
     // This matches the maximum number of test cases when running: test_pooling2d --all
-    dataset0_inputs = {{1, 19, 1024, 2048},   // Shape 1
-                       {10, 3, 32, 32},        // Shape 2
-                       {5, 32, 8, 8},          // Shape 3
-                       {2, 1024, 12, 12},      // Shape 4
-                       {4, 3, 231, 231},       // Shape 5
-                       {8, 3, 227, 227},       // Shape 6
-                       {1, 384, 13, 13},       // Shape 7
-                       {1, 96, 27, 27},        // Shape 8
-                       {2, 160, 7, 7},         // Shape 9
-                       {1, 192, 256, 512},     // Shape 10
-                       {2, 192, 28, 28},       // Shape 11
-                       {1, 832, 64, 128},      // Shape 12
-                       {1, 256, 56, 56},       // Shape 13
-                       {4, 3, 224, 224},       // Shape 14
-                       {2, 64, 112, 112},      // Shape 15
-                       {2, 608, 4, 4},         // Shape 16
-                       {1, 2048, 11, 11},      // Shape 17
-                       {1, 16, 4096, 4096}};   // Shape 18
+    dataset0_inputs = {{1, 19, 1024, 2048},  // Shape 1
+                       {10, 3, 32, 32},      // Shape 2
+                       {5, 32, 8, 8},        // Shape 3
+                       {2, 1024, 12, 12},    // Shape 4
+                       {4, 3, 231, 231},     // Shape 5
+                       {8, 3, 227, 227},     // Shape 6
+                       {1, 384, 13, 13},     // Shape 7
+                       {1, 96, 27, 27},      // Shape 8
+                       {2, 160, 7, 7},       // Shape 9
+                       {1, 192, 256, 512},   // Shape 10
+                       {2, 192, 28, 28},     // Shape 11
+                       {1, 832, 64, 128},    // Shape 12
+                       {1, 256, 56, 56},     // Shape 13
+                       {4, 3, 224, 224},     // Shape 14
+                       {2, 64, 112, 112},    // Shape 15
+                       {2, 608, 4, 4},       // Shape 16
+                       {1, 2048, 11, 11},    // Shape 17
+                       {1, 16, 4096, 4096}}; // Shape 18
 #endif
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
