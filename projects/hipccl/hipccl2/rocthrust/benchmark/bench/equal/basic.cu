@@ -76,34 +76,40 @@ void run_benchmark(benchmark::State& state,
   state.counters["gpu_noise"] = gpu_cv;
 }
 
-#define CREATE_BENCHMARK(T, Elements, CommonPrefixRatio)                                                              \
-  benchmark::RegisterBenchmark(                                                                                       \
-    bench_utils::bench_naming::format_name("{algo:equal,subalgo:" + name + ",input_type:" #T + ",elements:" #Elements \
-                                           + ", common_prefix_ratio:" #CommonPrefixRatio)                             \
-      .c_str(),                                                                                                       \
-    run_benchmark<Benchmark, T>,                                                                                      \
-    Elements,                                                                                                         \
-    seed_type,                                                                                                        \
+#define CREATE_BENCHMARK(T, Elements, CommonPrefixRatio)                                                    \
+  benchmark::RegisterBenchmark(                                                                             \
+    bench_utils::bench_naming::format_name(                                                                 \
+      "{algo:equal,subalgo:" + name + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements) \
+      + ", common_prefix_ratio:" #CommonPrefixRatio)                                                        \
+      .c_str(),                                                                                             \
+    run_benchmark<Benchmark, T>,                                                                            \
+    Elements,                                                                                               \
+    seed_type,                                                                                              \
     CommonPrefixRatio)
 
-#define BENCHMARK_ELEMENTS(type, elements) \
-  CREATE_BENCHMARK(type, elements, 1.0), CREATE_BENCHMARK(type, elements, 0.5), CREATE_BENCHMARK(type, elements, 0.0)
+#define BENCHMARK_ELEMENTS(type, elements)             \
+  bs.push_back(CREATE_BENCHMARK(type, elements, 1.0)); \
+  bs.push_back(CREATE_BENCHMARK(type, elements, 0.5)); \
+  bs.push_back(CREATE_BENCHMARK(type, elements, 0.0));
 
-#define BENCHMARK_TYPE(type)                                                                               \
-  BENCHMARK_ELEMENTS(type, 1 << 16), BENCHMARK_ELEMENTS(type, 1 << 20), BENCHMARK_ELEMENTS(type, 1 << 24), \
-    BENCHMARK_ELEMENTS(type, 1 << 28)
+#define BENCHMARK_TYPE(type)                                               \
+  for (size_t size : bench_utils::sizes)                                   \
+  {                                                                        \
+    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
+      BENCHMARK_ELEMENTS(type, size)                                       \
+  }
 
 template <class Benchmark>
 void add_benchmarks(
   const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs = {
-    BENCHMARK_TYPE(int8_t),
-    BENCHMARK_TYPE(int16_t),
-    BENCHMARK_TYPE(int32_t),
-    BENCHMARK_TYPE(uint32_t),
-    BENCHMARK_TYPE(int64_t),
-    BENCHMARK_TYPE(uint64_t)};
+  std::vector<benchmark::internal::Benchmark*> bs;
+  BENCHMARK_TYPE(int8_t)
+  BENCHMARK_TYPE(int16_t)
+  BENCHMARK_TYPE(int32_t)
+  BENCHMARK_TYPE(uint32_t)
+  BENCHMARK_TYPE(int64_t)
+  BENCHMARK_TYPE(uint64_t)
 
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
