@@ -1274,6 +1274,8 @@ namespace KernelGraphTest
         auto removeDuplicatesTransform = std::make_shared<RemoveDuplicates>();
 
         auto cleanLoopsTransform = std::make_shared<CleanLoops>();
+        auto updateWavefrontParametersTransform
+            = std::make_shared<UpdateWavefrontParameters>(params);
         auto assignIndexExprsTransform
             = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
 
@@ -1333,10 +1335,10 @@ namespace KernelGraphTest
         EXPECT_EQ(unrolledStoreLDS.size(), kloops.size());
 
         // Verify number of Assigns: A loads; A LDS loads; B loads; C load; D
-        // store: 3 + (2+2) + 3 + 3 + 3 = 12
+        kgraph1           = kgraph1.transform(updateWavefrontParametersTransform);
         kgraph1           = kgraph1.transform(assignIndexExprsTransform);
         auto indexAssigns = kgraph1.control.getNodes<Assign>().to<std::vector>();
-        EXPECT_EQ(indexAssigns.size(), 16);
+        EXPECT_EQ(indexAssigns.size(), 44);
 
         // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         auto addDeallocate = std::make_shared<AddDeallocateDataFlow>();
@@ -1353,7 +1355,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 55);
+            EXPECT_EQ(deallocatedDims.size(), 61);
         }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
@@ -1363,9 +1365,10 @@ namespace KernelGraphTest
         EXPECT_EQ(fusedStoreLDS.size(), 1);
 
         // Verify number of Assigns after unroll/fuse/lds
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(updateWavefrontParametersTransform);
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(assignIndexExprsTransform);
         indexAssigns        = unrolled_kgraph_lds.control.getNodes<Assign>().to<std::vector>();
-        EXPECT_EQ(indexAssigns.size(), 112);
+        EXPECT_EQ(indexAssigns.size(), 248);
 
         // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
@@ -1381,7 +1384,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 297);
+            EXPECT_EQ(deallocatedDims.size(), 303);
         }
     }
 
@@ -1404,6 +1407,8 @@ namespace KernelGraphTest
             = std::make_shared<LowerTensorContraction>(params, m_context);
         auto unrollLoopsTransform = std::make_shared<UnrollLoops>(params, m_context);
         auto cleanLoopsTransform  = std::make_shared<CleanLoops>();
+        auto updateWavefrontParametersTransform
+            = std::make_shared<UpdateWavefrontParameters>(params);
         auto assignIndexExprsTransform
             = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
         auto inlineInrecrementsTransform = std::make_shared<InlineIncrements>();
@@ -1416,6 +1421,7 @@ namespace KernelGraphTest
 
         // Usual lowering, should be able to inline everything.
         auto kgraph1 = kgraph.transform(unrollLoopsTransform);
+        kgraph1      = kgraph1.transform(updateWavefrontParametersTransform);
         kgraph1      = kgraph1.transform(cleanLoopsTransform);
         kgraph1      = kgraph1.transform(assignIndexExprsTransform);
 
