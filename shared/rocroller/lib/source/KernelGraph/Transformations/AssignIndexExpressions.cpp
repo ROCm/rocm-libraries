@@ -993,8 +993,8 @@ namespace rocRoller::KernelGraph
 
             // Initialize stride attributes for sub-dword types
             uint                      elementBlockSize               = 0;
-            Expression::ExpressionPtr elementBlockStride             = nullptr;
-            Expression::ExpressionPtr trLoadPairStride               = nullptr;
+            Expression::ExpressionPtr elementBlockStride             = L(0u);
+            Expression::ExpressionPtr trLoadPairStride               = L(0u);
             Expression::ExpressionPtr elementBlockStridePaddingBytes = L(0u);
             Expression::ExpressionPtr trLoadPairStridePaddingBytes   = L(0u);
             Expression::ExpressionPtr indexExprPaddingBytes          = L(0u);
