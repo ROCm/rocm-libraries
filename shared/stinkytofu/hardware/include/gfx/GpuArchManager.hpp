@@ -48,6 +48,8 @@ namespace stinkytofu
 
         void addArch(const std::string&            arch,
                      std::function<void(GpuArch&)> defineInsts,
+                     std::function<void(GpuArch&)> setRocisaSimpleMap,
+                     std::function<void(GpuArch&)> setRocisaConversionMap,
                      const std::string&            hardwareDir);
 
         void enumAllOpcodes();
@@ -93,9 +95,5 @@ namespace stinkytofu
 
         static bool initAllArchs(GpuArchManager& manager, const std::string& hardwareDir);
     };
-
-    void defineGfx942Insts(GpuArch& registry);
-    void defineGfx950Insts(GpuArch& registry);
-    void defineGfx1250Insts(GpuArch& registry);
 
 } // namespace stinkytofu

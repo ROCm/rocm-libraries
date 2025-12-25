@@ -30,12 +30,28 @@
 
 namespace stinkytofu
 {
+// declare all define##archName##Insts functions
+#define STINKYTOFU_ARCH(archName) void define##archName##Insts(GpuArch& registry);
+#include "Config/Archs.def"
+
+// declare all set##archName##RocisaSimpleMap functions
+#define STINKYTOFU_ARCH(archName) void set##archName##RocisaSimpleMap(GpuArch& registry);
+#include "Config/Archs.def"
+
+// declare all set##archName##ConversionMap functions
+#define STINKYTOFU_ARCH(archName) void set##archName##ConversionMap(GpuArch& registry);
+#include "Config/Archs.def"
+
     void GpuArchManager::addArch(const std::string&            arch,
                                  std::function<void(GpuArch&)> defineInsts,
+                                 std::function<void(GpuArch&)> setRocisaSimpleMap,
+                                 std::function<void(GpuArch&)> setRocisaConversionMap,
                                  const std::string&            hardwareDir)
     {
         instructionsByArch.push_back(std::make_unique<GpuArch>(arch));
         defineInsts(*instructionsByArch.back());
+        setRocisaSimpleMap(*instructionsByArch.back());
+        setRocisaConversionMap(*instructionsByArch.back());
         instructionsByArch.back()->loadHardwareDataFromYaml(hardwareDir + "/data/" + arch
                                                             + ".yaml");
         instructionsByArch.back()->finalize();
@@ -89,9 +105,13 @@ namespace stinkytofu
 
     bool GpuArchManager::initAllArchs(GpuArchManager& manager, const std::string& hardwareDir)
     {
-        manager.addArch("gfx942", defineGfx942Insts, hardwareDir);
-        manager.addArch("gfx950", defineGfx950Insts, hardwareDir);
-        manager.addArch("gfx1250", defineGfx1250Insts, hardwareDir);
+#define STINKYTOFU_ARCH(archName)                   \
+    manager.addArch(#archName,                      \
+                    define##archName##Insts,        \
+                    set##archName##RocisaSimpleMap, \
+                    set##archName##ConversionMap,   \
+                    hardwareDir);
+#include "Config/Archs.def"
 
         manager.enumAllOpcodes();
 

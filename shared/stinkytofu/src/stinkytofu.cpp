@@ -31,6 +31,7 @@
 #include "ir/asm/IRParser.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
+#include "isa/ArchHelper.hpp"
 #include "isa/gfx/GfxIsa.hpp"
 #include "stinkytofu.hpp"
 

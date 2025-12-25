@@ -178,8 +178,8 @@ namespace
            << " " << std::left << std::setw(maxMnemonicLen + 3)
            << mnemonic
            // flags
-           << "makeFlagSet({" << inst.getFlagsStr() << "}) },"
-           << " // " << inst.definedFile << ":" << inst.definedLine << "\n";
+           << "makeFlagSet({" << inst.getFlagsStr() << "}) }," << " // " << inst.definedFile << ":"
+           << inst.definedLine << "\n";
         return ss.str();
     }
 

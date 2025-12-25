@@ -582,7 +582,8 @@ namespace
         }
 
         const Token& regTypeTok = consume();
-        std::string  regType(regTypeTok.text);
+        std::string  regTypeStr(regTypeTok.text);
+        RegType      regType = stringToRegType(regTypeStr);
 
         // Check for format: v12 (no brackets)
         if(peek().kind == TokenKind::IntegerLiteral)
@@ -596,7 +597,7 @@ namespace
         if(peek().kind != TokenKind::LeftBracket)
         {
             // Not a register, might be a plain identifier
-            return StinkyRegister(regType); // Store as string
+            return StinkyRegister(regTypeStr); // Store as string literal
         }
 
         consume(); // consume '['

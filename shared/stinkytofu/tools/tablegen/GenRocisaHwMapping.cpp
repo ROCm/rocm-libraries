@@ -33,7 +33,7 @@ using namespace stinkytofu;
 
 namespace
 {
-#include "ir/rocisa/tblgen/RocisaHwInstMappings.hpp"
+    using Map = std::unordered_map<std::string, std::string>;
 
     bool genSimpleOneToOneMapping(const GpuArch& arch,
                                   const Map&     rocisaToHwInstMap,
@@ -145,14 +145,16 @@ namespace stinkytofu
     bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir)
     {
         bool success = true;
-        success &= genRocisaMappings(
-            manager, "gfx942", outdir, getGfx942RocisaSimpleMappings(), getGfx942Conversion());
 
-        success &= genRocisaMappings(
-            manager, "gfx950", outdir, getGfx950RocisaSimpleMappings(), getGfx950Conversion());
-
-        success &= genRocisaMappings(
-            manager, "gfx1250", outdir, getGfx1250RocisaSimpleMappings(), getGfx1250Conversion());
+        for(auto archName : manager.getRegisteredArchNames())
+        {
+            const GpuArch* arch = manager.getArch(archName);
+            success &= genRocisaMappings(manager,
+                                         archName,
+                                         outdir,
+                                         arch->getRocisaSimpleMap(),
+                                         arch->getRocisaConversionMap());
+        }
 
         return success;
     }

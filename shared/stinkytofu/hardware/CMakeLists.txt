@@ -2,12 +2,15 @@
 # SPDX-License-Identifier:  MIT
 
 set(GFX_SOURCES
-    Gfx942.cpp
-    Gfx950.cpp
-    Gfx1250.cpp
     GpuArchManager.cpp
     InstDefDSL.cpp
+    LatencyHelper.cpp
 )
+
+# Add all STINKYTOFU_ARCHS cpp files to GFX_SOURCES
+foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
+    list(APPEND GFX_SOURCES "${arch}.cpp")
+endforeach()
 
 list(TRANSFORM GFX_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/gfx/")
 
@@ -18,6 +21,7 @@ add_library(gfxisa STATIC
 target_include_directories(gfxisa PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include> # For generated files
 )
 
 target_link_libraries(gfxisa PRIVATE yaml-cpp)

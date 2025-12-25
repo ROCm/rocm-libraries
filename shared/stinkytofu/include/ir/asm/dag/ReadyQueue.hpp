@@ -24,7 +24,6 @@
 
 #include <cmath>
 #include <iostream> // TODO: don't use iostream.
-#include <map> // FIXME: Use unordered_map if StinkyRegister::regType is not std::string
 #include <queue>
 
 #include "ir/asm/StinkyAsmIR.hpp"
@@ -50,9 +49,9 @@ namespace
     {
         struct RegisterKey
         {
-            std::string_view type;
-            unsigned         regIdx;
-            bool             operator==(const RegisterKey& o) const noexcept
+            RegType  type;
+            unsigned regIdx;
+            bool     operator==(const RegisterKey& o) const noexcept
             {
                 return regIdx == o.regIdx && type == o.type;
             }
@@ -62,7 +61,7 @@ namespace
         {
             size_t operator()(const RegisterKey& k) const noexcept
             {
-                size_t h1 = std::hash<std::string_view>{}(k.type);
+                size_t h1 = std::hash<int>{}(static_cast<int>(k.type));
                 size_t h2 = std::hash<unsigned>{}(k.regIdx);
                 return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
             }
@@ -83,14 +82,13 @@ namespace
                     if(!reg.isRegister())
                         continue;
 
-                    const std::string_view t = reg.regType;
-
                     // TODO: Currently we assume regNum <= 4 (DWords) consecutive registers.
                     //       So it is acceptable to iterate over them.
                     //       If regNum > 4, maybe we want to use a different approach.
-                    for(int off = 0; off < reg.regNum; ++off)
+                    for(int off = 0; off < reg.reg.num; ++off)
                     {
-                        auto itDef = lastDef.find(RegisterKey{t, reg.regIdx + off});
+                        auto itDef
+                            = lastDef.find(RegisterKey{reg.reg.type, reg.reg.idx + off});
                         if(itDef != lastDef.end())
                         {
                             StinkyInstruction* def = itDef->second;
@@ -107,11 +105,10 @@ namespace
             // Record current def (destination) as the latest writer for its lanes.
             for(StinkyRegister& reg : inst.destRegs)
             {
-                const std::string_view t = reg.regType;
-                for(int off = 0; off < reg.regNum; ++off)
+                for(int off = 0; off < reg.reg.num; ++off)
                 {
                     // Update the last definition for this register.
-                    lastDef[RegisterKey{t, reg.regIdx + off}] = &inst;
+                    lastDef[RegisterKey{reg.reg.type, reg.reg.idx + off}] = &inst;
                 }
             }
         }

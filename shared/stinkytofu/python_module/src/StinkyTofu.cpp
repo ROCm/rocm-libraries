@@ -29,6 +29,7 @@
 #include "ir/asm/StinkyMacro.hpp"
 #include "ir/asm/StinkyModifiers.hpp"
 #include "ir/asm/StinkySignature.hpp"
+#include "isa/ArchHelper.hpp"
 #include "isa/gfx/GfxIsa.hpp"
 
 #include <sstream>
@@ -239,17 +240,17 @@ namespace stinkytofu
 
     StinkyRegister vgpr(uint32_t idx, uint32_t count)
     {
-        return StinkyRegister("v", idx, count);
+        return StinkyRegister(RegType::V, idx, count);
     }
 
     StinkyRegister sgpr(uint32_t idx, uint32_t count)
     {
-        return StinkyRegister("s", idx, count);
+        return StinkyRegister(RegType::S, idx, count);
     }
 
     StinkyRegister acc(uint32_t idx, uint32_t count)
     {
-        return StinkyRegister("a", idx, count);
+        return StinkyRegister(RegType::A, idx, count);
     }
 
     // ========================================================================
@@ -279,7 +280,7 @@ namespace stinkytofu
             = std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
 
         // Check if this is MFMA (gfx9xx) or WMMA (gfx12xx) architecture
-        bool is_mfma = (pImpl->archID == GfxArchID::gfx942 || pImpl->archID == GfxArchID::gfx950);
+        bool is_mfma = (pImpl->archID == GfxArchID::Gfx942 || pImpl->archID == GfxArchID::Gfx950);
 
         // gfx942/gfx950 support explicit _Nb_ notation for blocks > 1 (HasMFMA_explicitB)
         bool hasExplicitB = is_mfma;
@@ -410,7 +411,7 @@ namespace stinkytofu
         result.reserve(1);
 
         // Build instruction string based on rocisa's SMFMAInstruction::preStr() logic
-        bool is_smfma = (pImpl->archID == GfxArchID::gfx942 || pImpl->archID == GfxArchID::gfx950);
+        bool is_smfma = (pImpl->archID == GfxArchID::Gfx942 || pImpl->archID == GfxArchID::Gfx950);
         std::string instructionName = is_smfma ? "smfmac" : "swmmac";
         std::string variantStr
             = std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
@@ -3218,9 +3219,9 @@ namespace stinkytofu
             // This is a simplified example showing the pattern.
 
             // First lane: dst[0] = src0[0] + src1[0]
-            StinkyRegister dst1(dst.regType, dst.regIdx, 1);
-            StinkyRegister src0_1(src0.regType, src0.regIdx, 1);
-            StinkyRegister src1_1(src1.regType, src1.regIdx, 1);
+            StinkyRegister dst1(dst.reg.type, dst.reg.idx, 1);
+            StinkyRegister src0_1(src0.reg.type, src0.reg.idx, 1);
+            StinkyRegister src1_1(src1.reg.type, src1.reg.idx, 1);
 
             StinkyInstruction* inst1 = pImpl->createInstruction(GFX::v_add_f32, "V_ADD_F32");
             inst1->destRegs.push_back(dst1);
@@ -3233,9 +3234,9 @@ namespace stinkytofu
             result.push_back(inst1);
 
             // Second lane: dst[1] = src0[1] + src1[1]
-            StinkyRegister dst2(dst.regType, dst.regIdx + 1, 1);
-            StinkyRegister src0_2(src0.regType, src0.regIdx + 1, 1);
-            StinkyRegister src1_2(src1.regType, src1.regIdx + 1, 1);
+            StinkyRegister dst2(dst.reg.type, dst.reg.idx + 1, 1);
+            StinkyRegister src0_2(src0.reg.type, src0.reg.idx + 1, 1);
+            StinkyRegister src1_2(src1.reg.type, src1.reg.idx + 1, 1);
 
             StinkyInstruction* inst2 = pImpl->createInstruction(GFX::v_add_f32, "V_ADD_F32");
             inst2->destRegs.push_back(dst2);
@@ -3282,9 +3283,9 @@ namespace stinkytofu
 
             // Mul low half
             StinkyInstruction* inst1 = pImpl->createInstruction(GFX::v_mul_f32, "V_MUL_F32");
-            inst1->destRegs.push_back(StinkyRegister(dst.regType, dst.regIdx, 1));
-            inst1->srcRegs.push_back(StinkyRegister(src0.regType, src0.regIdx, 1));
-            inst1->srcRegs.push_back(StinkyRegister(src1.regType, src1.regIdx, 1));
+            inst1->destRegs.push_back(StinkyRegister(dst.reg.type, dst.reg.idx, 1));
+            inst1->srcRegs.push_back(StinkyRegister(src0.reg.type, src0.reg.idx, 1));
+            inst1->srcRegs.push_back(StinkyRegister(src1.reg.type, src1.reg.idx, 1));
             if(!comment.empty())
             {
                 inst1->addModifier(CommentData(comment + " (low)"));
@@ -3293,9 +3294,12 @@ namespace stinkytofu
 
             // Mul high half
             StinkyInstruction* inst2 = pImpl->createInstruction(GFX::v_mul_f32, "V_MUL_F32");
-            inst2->destRegs.push_back(StinkyRegister(dst.regType, dst.regIdx + 1, 1));
-            inst2->srcRegs.push_back(StinkyRegister(src0.regType, src0.regIdx + 1, 1));
-            inst2->srcRegs.push_back(StinkyRegister(src1.regType, src1.regIdx + 1, 1));
+            inst2->destRegs.push_back(
+                StinkyRegister(dst.reg.type, dst.reg.idx + 1, 1));
+            inst2->srcRegs.push_back(
+                StinkyRegister(src0.reg.type, src0.reg.idx + 1, 1));
+            inst2->srcRegs.push_back(
+                StinkyRegister(src1.reg.type, src1.reg.idx + 1, 1));
             if(!comment.empty())
             {
                 inst2->addModifier(CommentData(comment + " (high)"));
@@ -3335,8 +3339,8 @@ namespace stinkytofu
 
             // Move low half
             StinkyInstruction* inst1 = pImpl->createInstruction(GFX::v_mov_b32, "V_MOV_B32");
-            inst1->destRegs.push_back(StinkyRegister(dst.regType, dst.regIdx, 1));
-            inst1->srcRegs.push_back(StinkyRegister(src.regType, src.regIdx, 1));
+            inst1->destRegs.push_back(StinkyRegister(dst.reg.type, dst.reg.idx, 1));
+            inst1->srcRegs.push_back(StinkyRegister(src.reg.type, src.reg.idx, 1));
             if(!comment.empty())
             {
                 inst1->addModifier(CommentData(comment + " (low)"));
@@ -3345,8 +3349,8 @@ namespace stinkytofu
 
             // Move high half
             StinkyInstruction* inst2 = pImpl->createInstruction(GFX::v_mov_b32, "V_MOV_B32");
-            inst2->destRegs.push_back(StinkyRegister(dst.regType, dst.regIdx + 1, 1));
-            inst2->srcRegs.push_back(StinkyRegister(src.regType, src.regIdx + 1, 1));
+            inst2->destRegs.push_back(StinkyRegister(dst.reg.type, dst.reg.idx + 1, 1));
+            inst2->srcRegs.push_back(StinkyRegister(src.reg.type, src.reg.idx + 1, 1));
             if(!comment.empty())
             {
                 inst2->addModifier(CommentData(comment + " (high)"));

@@ -6,12 +6,14 @@
  * Allows configuring what to wait for at barriers and dependencies
  * ************************************************************************ */
 
-#include "ir/asm/StinkyConfigurableWaitCntPass.hpp"
-#include "ir/asm/StinkyAsmIR.hpp"
 #include <algorithm>
 #include <map>
-#include <set>
 #include <vector>
+
+#include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/StinkyConfigurableWaitCntPass.hpp"
+#include "support/CFGTraversal.hpp"
+#include "isa/ArchHelper.hpp"
 
 namespace
 {
@@ -693,18 +695,17 @@ namespace
                                           passCtx.getKernelInfo().arch[2]);
 
             // Process each BasicBlock
-            for(BasicBlock& bb : func)
-            {
-                IRList& insts = bb.getIR();
+            traverseCFGInRPO(func, [&](BasicBlock* bb) {
+                IRList& insts = bb->getIR();
 
                 if(insts.empty())
-                    continue;
+                    return;
 
                 auto irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
 
                 ConfigurableWaitCntInserter inserter(insts, irBuilder, arch, config_);
                 inserter.insertWaitCounts();
-            }
+            });
         }
 
         // Allow configuration to be changed

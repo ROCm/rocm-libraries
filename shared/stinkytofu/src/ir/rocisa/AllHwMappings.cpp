@@ -35,8 +35,10 @@
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/rocisa/AllHwMappings.hpp"
 
-namespace stinkytofu
+namespace
 {
+    using namespace stinkytofu;
+
     std::vector<StinkyInstruction*>
         lowerRocisaSMFMA(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
     {
@@ -129,6 +131,13 @@ namespace stinkytofu
         return {stinkyInst};
     }
 
+}; // anonymous namespace
+
+// Include all Rocisa hardware mapping tables
+#include "RocisaArchInfo.hpp"
+
+namespace stinkytofu
+{
     struct HwInstDescConversionMapping
     {
         const std::unordered_map<std::type_index, ConvertHwInstToRocisaFunc>* convHwInstToRocisaFMap
@@ -137,83 +146,14 @@ namespace stinkytofu
 
     const std::unordered_map<std::type_index, uint16_t>* getRocisaToHwInstMap(GfxArchID arch)
     {
-        switch(arch)
-        {
-        case GfxArchID::gfx942:
-        {
-#define GET_ROCISA_HW_MAPPING_TABLE
-#include "ir/rocisa/Rocisagfx942Mappings.inc"
-            return &rocisaToHwInstMap;
-        }
-        case GfxArchID::gfx950:
-        {
-#define GET_ROCISA_HW_MAPPING_TABLE
-#include "ir/rocisa/Rocisagfx950Mappings.inc"
-            return &rocisaToHwInstMap;
-        }
-        case GfxArchID::gfx1250:
-        {
-#define GET_ROCISA_HW_MAPPING_TABLE
-#include "ir/rocisa/Rocisagfx1250Mappings.inc"
-            return &rocisaToHwInstMap;
-        }
-        default:
-            assert(false && "Internal error: Unsupported architecture");
-            return nullptr;
-        }
+        return vecRocisaToHwInstMap[static_cast<size_t>(arch)]();
     }
 
     const std::unordered_map<std::type_index, ConvertRocisaToHwInstFunc>*
         getConvRocisaToHwInstFMap(GfxArchID arch)
     {
-        switch(arch)
-        {
-        case GfxArchID::gfx942:
-        {
-#define GET_ROCISA_TO_HW_CONVERSION_TABLE
-#include "ir/rocisa/Rocisagfx942Mappings.inc"
-            return &convertRocisaToHwInstFunc;
-        }
-        case GfxArchID::gfx950:
-        {
-#define GET_ROCISA_TO_HW_CONVERSION_TABLE
-#include "ir/rocisa/Rocisagfx950Mappings.inc"
-            return &convertRocisaToHwInstFunc;
-        }
-        case GfxArchID::gfx1250:
-        {
-#define GET_ROCISA_TO_HW_CONVERSION_TABLE
-#include "ir/rocisa/Rocisagfx1250Mappings.inc"
-            return &convertRocisaToHwInstFunc;
-        }
-        default:
-            assert(false && "Internal error: Unsupported architecture");
-            return nullptr;
-        }
+        return vecRocisaToHwInstLoweringMap[static_cast<size_t>(arch)]();
     }
-
-    //     const std::unordered_map<std::type_index, ConvertHwInstToRocisaFunc>*
-    //         getConvHwInstToRocisaFMap(GfxArchID arch)
-    //     {
-    //         switch(arch)
-    //         {
-    //         case GfxArchID::gfx942:
-    //         {
-    // #define GET_HW_TO_ROCISA_CONVERSION_TABLE
-    // #include "ir/rocisa/Rocisagfx942Mappings.inc"
-    //             return &convertHwInstToRocisaFunc;
-    //         }
-    //         case GfxArchID::gfx950:
-    //         {
-    // #define GET_HW_TO_ROCISA_CONVERSION_TABLE
-    // #include "ir/rocisa/Rocisagfx950Mappings.inc"
-    //             return &convertHwInstToRocisaFunc;
-    //         }
-    //         default:
-    //             assert(false && "Internal error: Unsupported architecture");
-    //             return nullptr;
-    //         }
-    //     }
 
     const HwInstDesc* getRocisaToMCID(std::type_index type, GfxArchID arch)
     {
@@ -254,29 +194,4 @@ namespace stinkytofu
         return convFn;
     }
 
-    // ConvertHwInstToRocisaFunc getConvertHwInstToRocisaFunc(std::type_index type, GfxArchID arch)
-    // {
-    //     auto convMap = getConvHwInstToRocisaFMap(arch);
-    //     auto it      = convMap->find(type);
-
-    //     if(it == convMap->end())
-    //     {
-    //         std::cerr << "Error: No conversion entry for hw instruction " << type.name()
-    //                   << " in arch gfx" << std::to_string((int)arch) << "\n";
-
-    //         return nullptr;
-    //     }
-
-    //     ConvertHwInstToRocisaFunc convFn = it->second;
-
-    //     if(convFn == nullptr)
-    //     {
-    //         std::cerr << "Error (TODO): conversion for hw instruction " << type.name()
-    //                   << " in arch gfx" << std::to_string((int)arch) << " is not implemented yet\n";
-
-    //         return nullptr;
-    //     }
-
-    //     return convFn;
-    // }
 } // namespace stinkytofu

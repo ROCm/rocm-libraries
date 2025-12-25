@@ -36,6 +36,38 @@ namespace stinkytofu
 #define GET_ISAINFO_UNIFIED_OPCODES
 #include "hardware/gfxIsa.inc"
 
+    // Register type enumeration for different register classes
+    enum class RegType
+    {
+#define REGISTER_TYPE(ENUM, STR, DESC) ENUM,
+#include "ir/asm/RegisterType.def"
+    };
+
+    // Helper function to convert string to RegType
+    inline RegType stringToRegType(const std::string& str)
+    {
+#define REGISTER_TYPE(ENUM, STR, DESC) \
+    if(str == STR)                     \
+        return RegType::ENUM;
+#include "ir/asm/RegisterType.def"
+        assert(false && "Invalid register type");
+        return RegType::UNKNOWN;
+    }
+
+    // Helper function to convert RegType to string
+    inline std::string regTypeToString(RegType type)
+    {
+        switch(type)
+        {
+#define REGISTER_TYPE(ENUM, STR, DESC) \
+    case RegType::ENUM:                \
+        return STR;
+#include "ir/asm/RegisterType.def"
+        }
+        assert(false && "Invalid register type");
+        return "UNKNOWN";
+    }
+
     // Represents a register or a literal value in the StinkyTofu IR.
     struct StinkyRegister
     {
@@ -50,75 +82,94 @@ namespace stinkytofu
 
         Type dataType;
 
-        std::string regType;
-        unsigned    regIdx;
-        unsigned    regNum;
+        // Unnamed union to save memory - different data types use different fields
+        union
+        {
+            // For Register type
+            struct
+            {
+                RegType  type;
+                unsigned idx;
+                unsigned num;
+            } reg;
+
+            // For LiteralInt type
+            int literalInt;
+
+            // For LiteralDouble type
+            double literalDouble;
+        };
+
+        // For LiteralString type - kept separate as std::string is non-trivial
+        std::string literalValue;
 
         // define ordering for std::map key
         bool operator<(const StinkyRegister& other) const noexcept
         {
             if(dataType != other.dataType)
                 return dataType < other.dataType;
-            if(regType != other.regType)
-                return regType < other.regType;
-            if(regIdx != other.regIdx)
-                return regIdx < other.regIdx;
-            return regNum < other.regNum;
+            if(reg.type != other.reg.type)
+                return reg.type < other.reg.type;
+            if(reg.idx != other.reg.idx)
+                return reg.idx < other.reg.idx;
+            return reg.num < other.reg.num;
         }
 
-        StinkyRegister(const std::string& type, int regIdx, int regNum)
+        StinkyRegister(RegType type, int regIdx, int regNum)
             : dataType(Type::Register)
-            , regType(type)
-            , regIdx(regIdx)
-            , regNum(regNum)
+            , reg{type, static_cast<unsigned>(regIdx), static_cast<unsigned>(regNum)}
+        {
+        }
+
+        // Constructor accepting string for backward compatibility
+        StinkyRegister(const std::string& typeStr, int regIdx, int regNum)
+            : dataType(Type::Register)
+            , reg{stringToRegType(typeStr),
+                  static_cast<unsigned>(regIdx),
+                  static_cast<unsigned>(regNum)}
         {
         }
 
         StinkyRegister(const std::string& str)
             : dataType(Type::LiteralString)
-            , regType(str)
+            , literalValue(str)
         {
         }
 
         StinkyRegister(int literalInt)
             : dataType(Type::LiteralInt)
-            , regIdx(literalInt)
+            , literalInt(literalInt)
         {
         }
 
         StinkyRegister(double literalDouble)
             : dataType(Type::LiteralDouble)
-
+            , literalDouble(literalDouble)
         {
-            // Store the binary of double input of lower 32 bits in regIdx and upper 32 bits in regNum
-            uint64_t doubleBits = *reinterpret_cast<uint64_t*>(&literalDouble);
-            regIdx              = static_cast<int>(doubleBits & 0xFFFFFFFF);
-            regNum              = static_cast<int>((doubleBits >> 32) & 0xFFFFFFFF);
         }
 
         StinkyRegister()
             : dataType(Type::Invalid)
+            , reg{RegType::UNKNOWN, 0, 0}
         {
         }
 
         int getLiteralInt() const
         {
             assert(dataType == Type::LiteralInt);
-            return regIdx;
+            return literalInt;
         }
 
         double getLiteralDouble() const
         {
             assert(dataType == Type::LiteralDouble);
-            uint64_t doubleBits = (static_cast<uint64_t>(regNum) << 32)
-                                  | (static_cast<uint64_t>(regIdx) & 0xFFFFFFFF);
-            return *reinterpret_cast<double*>(&doubleBits);
+            return literalDouble;
         }
 
         std::string getLiteralString() const
         {
             assert(dataType == Type::LiteralString);
-            return regType;
+            return literalValue;
         }
 
         bool isValid() const
@@ -135,9 +186,9 @@ namespace stinkytofu
         {
             if(dataType != Type::Register || other.dataType != Type::Register)
                 return false;
-            if(regType != other.regType)
+            if(reg.type != other.reg.type)
                 return false;
-            if(regIdx + regNum <= other.regIdx || other.regIdx + other.regNum <= regIdx)
+            if(reg.idx + reg.num <= other.reg.idx || other.reg.idx + other.reg.num <= reg.idx)
                 return false;
             return true;
         }
@@ -147,25 +198,25 @@ namespace stinkytofu
         static StinkyRegister getSCCRegister()
         {
             // SCC register is a special register, it is not a physical register.
-            return StinkyRegister("SCC", 0, 1);
+            return StinkyRegister(RegType::SCC, 0, 1);
         }
 
         static StinkyRegister getBarrierRegister()
         {
             // Barrier register is a special register, it is not a physical register.
-            return StinkyRegister("BARRIER", 0, 1);
+            return StinkyRegister(RegType::BARRIER, 0, 1);
         }
 
         static StinkyRegister getDSWriteRegister()
         {
             // DS write register is a special register, it is not a physical register.
-            return StinkyRegister("DS_WRITE", 0, 1);
+            return StinkyRegister(RegType::DS_WRITE, 0, 1);
         }
 
         static StinkyRegister getTensorLoadRegister()
         {
             // Tensor load register is a special register, it is not a physical register.
-            return StinkyRegister("TENSOR_LOAD", 0, 1);
+            return StinkyRegister(RegType::TENSOR_LOAD, 0, 1);
         }
     };
 
@@ -453,7 +504,7 @@ namespace stinkytofu
         assert(targetReg.dataType == StinkyRegister::Type::LiteralString
                && "Branch target must be a LiteralString");
 
-        return targetReg.regType;
+        return targetReg.getLiteralString();
     }
 
     inline bool isWaitCnt(const StinkyInstruction& inst)

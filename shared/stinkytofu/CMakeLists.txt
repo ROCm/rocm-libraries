@@ -8,12 +8,49 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Enable assertions even in Release builds
+# Remove NDEBUG from Release build types
+foreach(flag_var
+    CMAKE_CXX_FLAGS_RELEASE
+    CMAKE_CXX_FLAGS_RELWITHDEBINFO
+    CMAKE_C_FLAGS_RELEASE
+    CMAKE_C_FLAGS_RELWITHDEBINFO)
+    string(REGEX REPLACE "(^| )-DNDEBUG($| )" " " ${flag_var} "${${flag_var}}")
+    string(STRIP "${${flag_var}}" ${flag_var})
+endforeach()
+
 add_compile_options(-fno-rtti -fno-exceptions)
 
 # Only set PARENT_SCOPE variables if we have a parent scope
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(STINKYTOFU_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include" PARENT_SCOPE)
 endif()
+
+##===----------------------------------------------------------------------===##
+# Architectures
+##===----------------------------------------------------------------------===##
+include(cmake/StinkytofuArchList.cmake)
+
+set(STINKYTOFU_ARCHS_TO_BUILD "all"
+    CACHE STRING "Semicolon-separated list of backends to build, or \"all\".")
+
+if (STINKYTOFU_ARCHS_TO_BUILD STREQUAL "all" )
+    set(STINKYTOFU_ARCHS_TO_BUILD ${STINKYTOFU_ALL_ARCHS})
+endif()
+
+foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
+    list(APPEND STINKYTOFU_ARCHS "${arch}")
+    set(STINKYTOFU_ENUM_ARCHS "${STINKYTOFU_ENUM_ARCHS}STINKYTOFU_ARCH(${arch})\n")
+
+    # Set architecture variable for #cmakedefine
+    string(TOUPPER "${arch}" ARCH_UPPER)
+    set(STINKYTOFU_ARCH_${ARCH_UPPER} 1)
+endforeach(arch)
+
+message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
+
+configure_file(hardware/include/Config/Archs.def.in include/Config/Archs.def @ONLY)
+configure_file(include/Config.h.in include/Config/Config.h)
 
 # Note: Stinkytofu library should be built with:
 # (1) No RTTI
@@ -34,6 +71,7 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/StinkySignature.cpp
     ir/asm/IRLexer.cpp
     ir/asm/IRParser.cpp
+    hardware/ArchHelper.cpp
 )
 
 list(TRANSFORM STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/")
@@ -76,14 +114,15 @@ endif()
 
 # Now create stinkytofu library which depends on tablegen_generated
 add_library(stinkytofu SHARED "${STINKYTOFU_SOURCE_FILES}")
-target_include_directories(stinkytofu PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
-
-    # Make the generated files' directories available to the library
-    # This allows source files to #include the generated .inc files
-    "${TABLEGEN_OUTPUT_DIR}"
-
-    "${CMAKE_CURRENT_SOURCE_DIR}/hardware/include"
+target_include_directories(stinkytofu
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include> # For generated files
+    PRIVATE
+        # Make the generated files' directories available to the library
+        # This allows source files to #include the generated .inc files
+        "${TABLEGEN_OUTPUT_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hardware/include"
 )
 
 # Make stinkytofu depend on the generated ISA definition files from tablegen

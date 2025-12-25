@@ -33,6 +33,7 @@
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/rocisa/AllHwMappings.hpp"
 #include "ir/rocisa/ToStinkyAsm.hpp"
+#include "isa/ArchHelper.hpp"
 
 namespace stinkytofu
 {
@@ -82,7 +83,9 @@ namespace
     {
         if(const RegisterContainer* regCont = dynamic_cast<const RegisterContainer*>(container))
         {
-            return StinkyRegister{regCont->regType, regCont->regIdx, regCont->regNum};
+            // Convert string regType to RegType enum
+            RegType regType = stringToRegType(regCont->regType);
+            return StinkyRegister{regType, regCont->regIdx, regCont->regNum};
         }
         return StinkyRegister{};
     }
@@ -93,8 +96,9 @@ namespace
         {
             if(auto regContainer = std::dynamic_pointer_cast<RegisterContainer>(*pptr))
             {
-                return StinkyRegister{
-                    regContainer->regType, regContainer->regIdx, regContainer->regNum};
+                // Convert string regType to RegType enum
+                RegType regType = stringToRegType(regContainer->regType);
+                return StinkyRegister{regType, regContainer->regIdx, regContainer->regNum};
             }
         }
         else if(const int* literalInt = std::get_if<int>(&input))
@@ -187,8 +191,7 @@ namespace
             func.setEntryBlock(bb);
             IRList& insts = bb->getIR();
 
-            auto irBuilder
-                = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
+            auto irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
 
             assert(insts.empty() && "Instruction list must be empty before populating");
 
