@@ -62,9 +62,9 @@ struct Pooling2dTestCase
 
 // Helper function to calculate output spatial dimensions for 2D pooling
 inline std::array<int, 4> CalculateOutputDims(const std::array<int, 4>& input_dims,
-                                               const std::array<int, 2>& lens,
-                                               const std::array<int, 2>& strides,
-                                               const std::array<int, 2>& pads)
+                                              const std::array<int, 2>& lens,
+                                              const std::array<int, 2>& strides,
+                                              const std::array<int, 2>& pads)
 {
     // input_dims is [N, C, H, W]
     // Returns [N, C, H_out, W_out]
@@ -251,15 +251,15 @@ struct IndexTypeCounters
 
 // Helper function to generate test cases for a single input configuration
 inline void AddTestCasesForInput(const std::vector<int>& input_dims,
-                                  const std::vector<std::vector<int>>& lens_list,
-                                  const std::vector<std::vector<int>>& strides_list,
-                                  const std::vector<std::vector<int>>& pads_list,
-                                  const std::vector<miopenIndexType_t>& index_types,
-                                  const std::vector<miopenPoolingMode_t>& modes,
-                                  const std::vector<int>& wsidx_values,
-                                  IndexTypeCounters& counters,
-                                  std::vector<Pooling2dTestCase>& test_cases,
-                                  bool skip_wide_check = false)
+                                 const std::vector<std::vector<int>>& lens_list,
+                                 const std::vector<std::vector<int>>& strides_list,
+                                 const std::vector<std::vector<int>>& pads_list,
+                                 const std::vector<miopenIndexType_t>& index_types,
+                                 const std::vector<miopenPoolingMode_t>& modes,
+                                 const std::vector<int>& wsidx_values,
+                                 IndexTypeCounters& counters,
+                                 std::vector<Pooling2dTestCase>& test_cases,
+                                 bool skip_wide_check = false)
 {
     for(const auto& lens : lens_list)
     {
@@ -452,7 +452,7 @@ template <typename T>
 struct Pooling2dCommon : public testing::TestWithParam<Pooling2dTestCase>
 {
     void SetUp() override { prng::reset_seed(); }
-    
+
 protected:
     // Common test execution method for all pooling2d tests
     void RunTest() { RunPooling2dTest<T>(this->GetParam()); }
@@ -461,4 +461,3 @@ protected:
 } // namespace pooling2d_gtest
 
 #endif // GUARD_MIOPEN_TEST_GTEST_POOLING2D_COMMON_HPP
-

@@ -17,16 +17,16 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
     // Input: {{1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}}
     std::vector<std::vector<int>> dataset2_inputs = {
         {1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
-    
+
     // Lens: {{35, 35}, {100, 100}, {255, 255}, {410, 400}} - wide window kernel sizes
     std::vector<std::vector<int>> dataset2_lens = {{35, 35}, {100, 100}, {255, 255}, {410, 400}};
-    
+
     // Strides: {{1, 1}} - only stride 1 for wide windows
     std::vector<std::vector<int>> dataset2_strides = {{1, 1}};
-    
+
     // Pads: {{0, 0}} - no padding for wide windows
     std::vector<std::vector<int>> dataset2_pads = {{0, 0}};
-    
+
     std::vector<miopenIndexType_t> dataset2_index_types = {
         miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
     std::vector<miopenPoolingMode_t> modes = {

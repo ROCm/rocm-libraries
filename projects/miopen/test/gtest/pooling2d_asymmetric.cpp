@@ -16,20 +16,20 @@ std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
     // Dataset 1: Asymmetric configurations
     // Input: {{1, 4, 4, 4}} - minimal input for asymmetric testing
     std::vector<std::vector<int>> dataset1_inputs = {{1, 4, 4, 4}};
-    
+
     // Lens: {{2, 2}, {1, 2}, {2, 1}} - asymmetric kernel sizes
     std::vector<std::vector<int>> dataset1_lens = {{2, 2}, {1, 2}, {2, 1}};
-    
+
     // Strides: {{1, 1}, {2, 1}, {1, 2}, {2, 2}} - asymmetric strides
     std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
-    
+
     // Pads: controlled by WORKAROUND_ISSUE_1670 (matching original ctest behavior)
 #if WORKAROUND_ISSUE_1670
     std::vector<std::vector<int>> dataset1_pads = {{0, 0}};
 #else
     std::vector<std::vector<int>> dataset1_pads = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
 #endif
-    
+
     std::vector<miopenIndexType_t> dataset1_index_types = {
         miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
     std::vector<miopenPoolingMode_t> modes = {
