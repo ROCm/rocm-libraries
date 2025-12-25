@@ -26,35 +26,36 @@ inline __HOST_DEVICE__ hip_fp8_e4m3 operator-(hip_fp8_e4m3 a)
 
 inline __HOST_DEVICE__ bool operator==(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
-    return a.__x == b.__x;
+    return float(a) == float(b);
 }
 
 inline __HOST_DEVICE__ bool operator!=(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
-    return a.__x != b.__x;
+    return float(a) != float(b);
 }
 
 inline __HOST_DEVICE__ bool operator>(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
-    return a.__x > b.__x;
+    return float(a) > float(b);
+    ;
 }
 
 inline __HOST_DEVICE__ bool operator>=(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
-    return a.__x >= b.__x;
+    return float(a) >= float(b);
 }
 
 inline __HOST_DEVICE__ bool operator<(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
-    return a.__x < b.__x;
+    return float(a) < float(b);
 }
 
 inline __HOST_DEVICE__ bool operator<=(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
-    return a.__x <= b.__x;
+    return float(a) <= float(b);
 }
 
-namespace hipdnn_sdk::utilities::fp8
+namespace hipdnn_data_sdk::utilities::fp8
 {
 inline __HOST_DEVICE__ hip_fp8_e4m3 uchar_as_fp8(const unsigned char a)
 {
@@ -93,24 +94,24 @@ inline __HOST_DEVICE__ hip_fp8_e4m3 fp8max(const hip_fp8_e4m3 a, const hip_fp8_e
     return a >= b ? a : b;
 }
 
-} // namespace hipdnn_sdk::utilities::fp8
+} // namespace hipdnn_data_sdk::utilities::fp8
 
 namespace std
 {
 
 inline __HOST_DEVICE__ hip_fp8_e4m3 fabs(hip_fp8_e4m3 num)
 {
-    return hipdnn_sdk::utilities::fp8::fp8abs(num);
+    return hipdnn_data_sdk::utilities::fp8::fp8abs(num);
 }
 
 inline __HOST_DEVICE__ hip_fp8_e4m3 abs(hip_fp8_e4m3 num)
 {
-    return hipdnn_sdk::utilities::fp8::fp8abs(num);
+    return hipdnn_data_sdk::utilities::fp8::fp8abs(num);
 }
 
 inline __HOST_DEVICE__ hip_fp8_e4m3 max(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
-    return hipdnn_sdk::utilities::fp8::fp8max(a, b);
+    return hipdnn_data_sdk::utilities::fp8::fp8max(a, b);
 }
 
 } // namespace std

@@ -23,32 +23,34 @@ inline __HOST_DEVICE__ half operator-(half a)
 
 inline __HOST_DEVICE__ bool operator==(half a, half b)
 {
-    return static_cast<__half_raw>(a).x == static_cast<__half_raw>(b).x;
+    return static_cast<float>(a) == static_cast<float>(b);
 }
 
 inline __HOST_DEVICE__ bool operator!=(half a, half b)
 {
-    return static_cast<__half_raw>(a).x != static_cast<__half_raw>(b).x;
+    return static_cast<float>(a) != static_cast<float>(b);
 }
 
 inline __HOST_DEVICE__ bool operator<(half a, half b)
 {
-    return static_cast<__half_raw>(a).x < static_cast<__half_raw>(b).x;
+    return static_cast<float>(a) < static_cast<float>(b);
 }
 
 inline __HOST_DEVICE__ bool operator>(half a, half b)
 {
-    return static_cast<__half_raw>(a).x > static_cast<__half_raw>(b).x;
+    return static_cast<float>(a) > static_cast<float>(b);
 }
 
 inline __HOST_DEVICE__ bool operator<=(half a, half b)
 {
-    return static_cast<__half_raw>(a).x <= static_cast<__half_raw>(b).x;
+    return static_cast<float>(a) <= static_cast<float>(b);
+    ;
 }
 
 inline __HOST_DEVICE__ bool operator>=(half a, half b)
 {
-    return static_cast<__half_raw>(a).x >= static_cast<__half_raw>(b).x;
+    return static_cast<float>(a) >= static_cast<float>(b);
+    ;
 }
 
 namespace hipdnn_data_sdk::utilities::fp16
@@ -76,23 +78,20 @@ inline __HOST_DEVICE__ bool hisnan(__half x)
 
 inline __HOST_DEVICE__ half hmax(const half a, const half b)
 {
-    if(hisnan(a) && !hisnan(b))
+    auto aNan = hisnan(a);
+    auto bNan = hisnan(b);
+
+    if(aNan || bNan)
     {
-        return b;
+        if(aNan && bNan)
+        {
+            return HIPDNN_NAN_FP16; // return canonical NaN
+        }
+
+        return aNan ? b : a;
     }
-    if(!hisnan(a) && hisnan(b))
-    {
-        return a;
-    }
-    if(hisnan(a) && hisnan(b))
-    {
-        return HIPDNN_NAN_FP16;
-    }
-    if(static_cast<__half_raw>(a).x > static_cast<__half_raw>(b).x)
-    {
-        return __half_raw{static_cast<__half_raw>(a).x};
-    }
-    return __half_raw{static_cast<__half_raw>(b).x};
+
+    return a > b ? a : b;
 }
 
 } // namespace hipdnn_data_sdk::utilities::fp16
