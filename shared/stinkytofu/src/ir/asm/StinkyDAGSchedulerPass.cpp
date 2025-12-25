@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "ir/asm/dag/CDNA3.hpp"
 #include "ir/asm/dag/CDNA5.hpp"
+#include "support/CFGTraversal.hpp"
 
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
 
@@ -92,9 +93,9 @@ namespace
                 if(!srcReg.isRegister())
                     continue;
 
-                for(unsigned off = 0; off < srcReg.regNum; ++off)
+                for(unsigned off = 0; off < srcReg.reg.num; ++off)
                 {
-                    StinkyRegister reg(srcReg.regType, srcReg.regIdx + off, 1);
+                    StinkyRegister reg(srcReg.reg.type, srcReg.reg.idx + off, 1);
                     auto           itLastWrite = lastWrite.find(reg);
                     // Only add edge if the last writer is in the region.
                     if(itLastWrite != lastWrite.end())
@@ -113,9 +114,9 @@ namespace
                 if(!dstReg.isRegister())
                     continue;
 
-                for(unsigned off = 0; off < dstReg.regNum; ++off)
+                for(unsigned off = 0; off < dstReg.reg.num; ++off)
                 {
-                    StinkyRegister reg(dstReg.regType, dstReg.regIdx + off, 1);
+                    StinkyRegister reg(dstReg.reg.type, dstReg.reg.idx + off, 1);
 
                     // WAW: previous writer of reg must come before this writer
                     auto itLastWrite = lastWrite.find(reg);
@@ -306,11 +307,11 @@ namespace
 
         void run(Function& func, PassContext& passCtx) override
         {
-            for(BasicBlock& bb : func)
-            {
-                if(passCtx.shouldProcessBasicBlock(bb))
-                    runOnBasicBlock(bb, passCtx);
-            }
+            // Traverse BasicBlocks in control flow order (reverse post-order)
+            traverseCFGInRPO(func, [&](BasicBlock* bb) {
+                if(passCtx.shouldProcessBasicBlock(*bb))
+                    runOnBasicBlock(*bb, passCtx);
+            });
         }
     };
 

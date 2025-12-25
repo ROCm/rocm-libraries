@@ -317,18 +317,22 @@ NB_MODULE(stinkytofu, m)
              nb::arg("regIdx"),
              nb::arg("regNum") = 1,
              "Create a register with the given type, index, and count")
-        .def_ro("regType", &StinkyRegister::regType, "Register type (e.g., 'v', 's', 'a')")
-        .def_ro("regIdx", &StinkyRegister::regIdx, "Register index")
-        .def_ro("regNum", &StinkyRegister::regNum, "Number of consecutive registers")
+        .def_prop_ro("regType",
+                     [](const StinkyRegister& r) { return regTypeToString(r.reg.type); },
+                     "Register type (e.g., 'v', 's', 'a')")
+        .def_prop_ro("regIdx", [](const StinkyRegister& r) { return r.reg.idx; },
+                     "Register index")
+        .def_prop_ro("regNum", [](const StinkyRegister& r) { return r.reg.num; },
+                     "Number of consecutive registers")
         .def("__repr__", [](const StinkyRegister& r) {
-            if(r.regNum == 1)
+            if(r.reg.num == 1)
             {
-                return r.regType + std::to_string(r.regIdx);
+                return regTypeToString(r.reg.type) + std::to_string(r.reg.idx);
             }
             else
             {
-                return r.regType + "[" + std::to_string(r.regIdx) + ":"
-                       + std::to_string(r.regIdx + r.regNum - 1) + "]";
+                return regTypeToString(r.reg.type) + "[" + std::to_string(r.reg.idx)
+                       + ":" + std::to_string(r.reg.idx + r.reg.num - 1) + "]";
             }
         });
 

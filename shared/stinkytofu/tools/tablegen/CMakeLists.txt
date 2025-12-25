@@ -21,20 +21,17 @@ target_include_directories(tablegen PRIVATE
 get_filename_component(TABLEGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/../.." ABSOLUTE)
 
 # Define the list of generated files
-set(TABLEGEN_GENERATED_FILES
-    "${TABLEGEN_OUTPUT_DIR}/hardware/gfx942Isa.inc"
-    "${TABLEGEN_OUTPUT_DIR}/hardware/gfx950Isa.inc"
-    "${TABLEGEN_OUTPUT_DIR}/hardware/gfx1250Isa.inc"
-    "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisagfx942Mappings.inc"
-    "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisagfx950Mappings.inc"
-    "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisagfx1250Mappings.inc"
-)
+set(TABLEGEN_GENERATED_FILES "")
 
-set(HARDWARE_YAML_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/gfx942.yaml"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/gfx950.yaml"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/gfx1250.yaml"
-)
+# Define the list of hardware YAML files as dependencies
+set(HARDWARE_YAML_FILES "")
+
+foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
+    list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/${arch}Isa.inc")
+    list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisa${arch}Mappings.inc")
+
+    list(APPEND HARDWARE_YAML_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/${arch}.yaml")
+endforeach()
 
 # Custom command to run tablegen and generate .inc files
 # Using $<TARGET_FILE:tablegen> allows CMake to:

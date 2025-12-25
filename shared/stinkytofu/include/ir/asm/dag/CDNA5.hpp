@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include <map>
 
 #include "ir/asm/dag/ReadyQueue.hpp"
 
@@ -85,9 +86,9 @@ namespace
             if(!dstReg.isRegister())
                 continue;
 
-            for(unsigned off = 0; off < dstReg.regNum; ++off)
+            for(unsigned off = 0; off < dstReg.reg.num; ++off)
             {
-                auto it = wmmaRegisterLatencyCounters.find(dstReg.regIdx + off);
+                auto it = wmmaRegisterLatencyCounters.find(dstReg.reg.idx + off);
                 if(it != wmmaRegisterLatencyCounters.end() && it->second > 0)
                 {
                     return false;
@@ -188,9 +189,9 @@ namespace
                     if(!dstReg.isRegister())
                         continue;
 
-                    for(unsigned off = 0; off < dstReg.regNum; ++off)
+                    for(unsigned off = 0; off < dstReg.reg.num; ++off)
                     {
-                        wmmaRegisterLatencyCounters[dstReg.regIdx + off]
+                        wmmaRegisterLatencyCounters[dstReg.reg.idx + off]
                             = node->inst->latencyCycles;
                     }
                 }

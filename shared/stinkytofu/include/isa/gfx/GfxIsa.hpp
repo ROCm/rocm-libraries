@@ -30,38 +30,9 @@ namespace stinkytofu
 {
     enum class GfxArchID : uint32_t
     {
-        gfx942  = 942,
-        gfx950  = 950,
-        gfx1250 = 1250,
+#define STINKYTOFU_ARCH(archName) archName,
+#include "Config/Archs.def"
     };
-
-    inline GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping)
-    {
-        uint32_t arch = major * 100 + minor * 10 + stepping;
-        assert(arch == 942 || arch == 950 || arch == 1250 && "Unsupported GfxArchID");
-        return static_cast<GfxArchID>(arch);
-    }
-
-    inline uint32_t getWaveFrontSize(GfxArchID archID)
-    {
-        switch(archID)
-        {
-        case GfxArchID::gfx942:
-            return 64;
-        case GfxArchID::gfx950:
-            return 64;
-        case GfxArchID::gfx1250:
-            return 32;
-        default:
-            assert(false && "Unsupported GfxArchID");
-            return 64; // Default fallback
-        }
-    }
-
-    inline uint32_t getWaveFrontSize(uint32_t major, uint32_t minor, uint32_t stepping)
-    {
-        return getWaveFrontSize(getGfxArchID(major, minor, stepping));
-    }
 
     enum InstFlag : uint8_t
     {

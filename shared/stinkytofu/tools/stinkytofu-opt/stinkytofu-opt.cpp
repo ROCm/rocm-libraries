@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu-opt.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "isa/ArchHelper.hpp"
 
 #include <fstream>
 #include <iostream>

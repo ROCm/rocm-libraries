@@ -23,6 +23,7 @@
 
 #pragma once
 #include "InstDefDSL.hpp"
+#include <gfx/LatencyHelper.hpp>
 
 namespace stinkytofu
 {
@@ -284,11 +285,15 @@ namespace stinkytofu
     {
     };
 
-    // MFMA/SMFMAC latency formula
-    uint16_t computeCdna3MfmaLatency(const MFMA& a);
+    // fp8/bf8 scale-variants (pk/sr)
+    struct VCvtScale : VCvt
+    {
+    };
 
-    // WMMA/SWMMA latency formula
-    uint16_t computeCdna5WmmaLatency(const WMMA& a);
+    // vector dot ops
+    struct VDot : VALU
+    {
+    };
 
     // MFMA/SMFMAC generation helper
     // Generate MFMA or SMFMAC instruction with proper file/line tracking

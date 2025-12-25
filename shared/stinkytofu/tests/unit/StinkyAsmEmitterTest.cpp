@@ -27,6 +27,7 @@
 
 #include "ir/asm/StinkyAsmEmitter.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "isa/ArchHelper.hpp"
 #include "stinkytofu.hpp"
 
 using namespace stinkytofu;

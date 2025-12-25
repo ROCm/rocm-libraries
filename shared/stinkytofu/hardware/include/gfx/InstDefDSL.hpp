@@ -130,6 +130,10 @@ namespace stinkytofu
 
         GfxInstDef* getInst(const std::string& name);
 
+        // mapping from rocisa instruction name to hardware instruction name
+        std::unordered_map<std::string, std::string> rocisaSimpleMap;
+        std::unordered_map<std::string, std::string> rocisaConversionMap;
+
     public:
         GpuArch(const std::string& name)
             : name(name)
@@ -189,6 +193,26 @@ namespace stinkytofu
         bool hasError() const
         {
             return error;
+        }
+
+        void setRocisaSimpleMap(const std::unordered_map<std::string, std::string>&& map)
+        {
+            rocisaSimpleMap = std::move(map);
+        }
+
+        const std::unordered_map<std::string, std::string>& getRocisaSimpleMap() const
+        {
+            return rocisaSimpleMap;
+        }
+
+        void setRocisaConversionMap(const std::unordered_map<std::string, std::string>&& map)
+        {
+            rocisaConversionMap = std::move(map);
+        }
+
+        const std::unordered_map<std::string, std::string>& getRocisaConversionMap() const
+        {
+            return rocisaConversionMap;
         }
     };
 

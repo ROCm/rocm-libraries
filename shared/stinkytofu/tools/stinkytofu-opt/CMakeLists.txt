@@ -7,7 +7,6 @@ add_executable(stinkytofu-opt
 )
 
 target_include_directories(stinkytofu-opt PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
     "${TABLEGEN_OUTPUT_DIR}"
 )
 

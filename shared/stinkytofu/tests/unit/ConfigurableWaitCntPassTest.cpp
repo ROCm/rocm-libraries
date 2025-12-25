@@ -27,6 +27,7 @@
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
 #include "ir/asm/StinkyConfigurableWaitCntPass.hpp"
+#include "isa/ArchHelper.hpp"
 #include "stinkytofu.hpp"
 
 using namespace stinkytofu;

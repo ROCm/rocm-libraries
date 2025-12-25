@@ -37,19 +37,20 @@ namespace stinkytofu
         case StinkyRegister::Type::Register:
         {
             // Print register with optional prefix for AGPR (shown as "acc")
-            std::string prefix = reg.regType;
-            if(reg.regType == "AGPR")
+            std::string prefix = regTypeToString(reg.reg.type);
+            if(reg.reg.type == RegType::AGPR)
                 prefix = "acc";
 
             // Single register without brackets (e.g., v12, BARRIER0)
             // Range with brackets (e.g., v[10:13])
-            if(reg.regNum == 1)
+            if(reg.reg.num == 1)
             {
-                os << prefix << reg.regIdx;
+                os << prefix << reg.reg.idx;
             }
             else
             {
-                os << prefix << "[" << reg.regIdx << ":" << (reg.regIdx + reg.regNum - 1) << "]";
+                os << prefix << "[" << reg.reg.idx << ":"
+                   << (reg.reg.idx + reg.reg.num - 1) << "]";
             }
             break;
         }

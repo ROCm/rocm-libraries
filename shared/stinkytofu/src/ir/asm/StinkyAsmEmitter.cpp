@@ -33,40 +33,36 @@ namespace stinkytofu
         {
         case StinkyRegister::Type::Register:
             // Emit register: v[0], v[0:3], s1, acc[0:15], etc.
-            os << reg.regType;
-            if(reg.regNum > 1)
+            os << regTypeToString(reg.reg.type);
+            if(reg.reg.num > 1)
             {
                 // Register range: v[0:3]
-                os << "[" << reg.regIdx << ":" << (reg.regIdx + reg.regNum - 1) << "]";
+                os << "[" << reg.reg.idx << ":" << (reg.reg.idx + reg.reg.num - 1)
+                   << "]";
             }
-            else if(reg.regType == "v" || reg.regType == "acc" || reg.regType == "a")
+            else if(reg.reg.type == RegType::V || reg.reg.type == RegType::ACC
+                    || reg.reg.type == RegType::A)
             {
                 // Vector/accumulator registers always use brackets: v[0], acc[0]
-                os << "[" << reg.regIdx << "]";
+                os << "[" << reg.reg.idx << "]";
             }
             else
             {
                 // Scalar registers: s1, vcc, etc.
-                os << reg.regIdx;
+                os << reg.reg.idx;
             }
             break;
 
         case StinkyRegister::Type::LiteralInt:
-            os << reg.regIdx;
+            os << reg.literalInt;
             break;
 
         case StinkyRegister::Type::LiteralDouble:
-        {
-            // Reconstruct double from regIdx and regNum
-            uint64_t doubleBits
-                = (static_cast<uint64_t>(reg.regNum) << 32) | (reg.regIdx & 0xFFFFFFFF);
-            double value = *reinterpret_cast<double*>(&doubleBits);
-            os << value;
+            os << reg.literalDouble;
             break;
-        }
 
         case StinkyRegister::Type::LiteralString:
-            os << reg.regType;
+            os << reg.getLiteralString();
             break;
 
         case StinkyRegister::Type::Invalid:

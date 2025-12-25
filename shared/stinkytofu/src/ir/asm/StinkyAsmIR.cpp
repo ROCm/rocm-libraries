@@ -28,6 +28,7 @@
 
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
+#include "isa/ArchHelper.hpp"
 
 namespace stinkytofu
 {
@@ -81,68 +82,20 @@ namespace stinkytofu
         delete stinkyInst;
     }
 
-#define GET_ISAINFO_UOP_MAPPINGS
-#include "hardware/gfx942Isa.inc"
-
-#define GET_ISAINFO_UOP_MAPPINGS
-#include "hardware/gfx950Isa.inc"
-
-#define GET_ISAINFO_UOP_MAPPINGS
-#include "hardware/gfx1250Isa.inc"
-
     static const HwInstDesc* getMCIDTable(GfxArchID arch)
     {
-        switch(arch)
-        {
-        case GfxArchID::gfx942:
-        {
-#define GET_ISAINFO_HWINSTDESC_TABLE
-#include "hardware/gfx942Isa.inc"
-            return MCIDTable;
-        }
-        case GfxArchID::gfx950:
-        {
-#define GET_ISAINFO_HWINSTDESC_TABLE
-#include "hardware/gfx950Isa.inc"
-            return MCIDTable;
-        }
-        case GfxArchID::gfx1250:
-        {
-#define GET_ISAINFO_HWINSTDESC_TABLE
-#include "hardware/gfx1250Isa.inc"
-            return MCIDTable;
-        }
-        default:
-            assert(false && "Internal error: Unsupported architecture");
-            return nullptr;
-        }
+        const auto* archInfo
+            = ArchHelper::getInstance().getArchInfo(arch); // Ensure ArchHelper is initialized
+        return archInfo->getMCIDTable(); // Call the virtual method to ensure proper initialization
     }
 
     const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch)
     {
         IsaOpcode isaOpcode = GFX::INVALID;
 
-        switch(arch)
-        {
-        case GfxArchID::gfx942:
-        {
-            isaOpcode = getgfx942Opcode(unifiedOpcode);
-            break;
-        }
-        case GfxArchID::gfx950:
-        {
-            isaOpcode = getgfx950Opcode(unifiedOpcode);
-            break;
-        }
-        case GfxArchID::gfx1250:
-        {
-            isaOpcode = getgfx1250Opcode(unifiedOpcode);
-            break;
-        }
-        default:
-            assert(false && "Internal error: Unsupported architecture");
-            return nullptr;
-        }
+        const auto* archInfo
+            = ArchHelper::getInstance().getArchInfo(arch); // Ensure ArchHelper is initialized
+        isaOpcode = archInfo->getIsaOpcode(unifiedOpcode);
 
         if(isaOpcode == GFX::INVALID)
         {
@@ -173,30 +126,9 @@ namespace stinkytofu
             return it->second;
         };
 
-        switch(arch)
-        {
-        case GfxArchID::gfx942:
-        {
-#define GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS
-#include "hardware/gfx942Isa.inc"
-            return get(MnemonicToIsaOpcodeMap, mnemonic);
-        }
-        case GfxArchID::gfx950:
-        {
-#define GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS
-#include "hardware/gfx950Isa.inc"
-            return get(MnemonicToIsaOpcodeMap, mnemonic);
-        }
-        case GfxArchID::gfx1250:
-        {
-#define GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS
-#include "hardware/gfx1250Isa.inc"
-            return get(MnemonicToIsaOpcodeMap, mnemonic);
-        }
-        default:
-            assert(false && "Internal error: Unsupported architecture");
-            return GFX::INVALID;
-        }
+        const auto* archInfo
+            = ArchHelper::getInstance().getArchInfo(arch); // Ensure ArchHelper is initialized
+        return get(archInfo->getMnemonicToIsaOpcodeMap(), mnemonic);
     }
 
     //----------------------------------------------------------------------
