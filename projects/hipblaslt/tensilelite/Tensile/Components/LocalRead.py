@@ -428,7 +428,8 @@ class LocalReadMFMA(LocalRead):
                                     packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
 
                                     if kernel["UseDot2F32XEmulation"]:
-                                        packCodeT.add(SNop(waitState=0, comment=""))
+                                        packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
+                                        packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
 
                                     for val in tmpvgpr:
                                         writer.vgprPool.checkIn(val)
