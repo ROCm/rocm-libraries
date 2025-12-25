@@ -4,7 +4,7 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
@@ -223,26 +223,6 @@ public:
             swish_beta,
             elu_alpha,
             softplus_beta);
-    }
-
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
-    {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
     }
 };
 typedef PointwiseAttributes Pointwise_attributes;
