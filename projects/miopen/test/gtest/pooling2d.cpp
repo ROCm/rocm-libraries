@@ -10,7 +10,8 @@
 // Configuration define matching the original ctest behavior
 // These can be overridden at compile time via -D flags
 // TEST_GET_INPUT_TENSOR: When 0, uses all 18 predefined input shapes (matching ctest with --all).
-//                        When 1, uses get_inputs() function to generate input shapes from network_data.
+//                        When 1, uses get_inputs() function to generate input shapes from
+//                        network_data.
 #ifndef TEST_GET_INPUT_TENSOR
 #define TEST_GET_INPUT_TENSOR 0
 #endif
