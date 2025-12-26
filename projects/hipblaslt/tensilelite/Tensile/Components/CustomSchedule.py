@@ -2269,8 +2269,40 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isNN(kernel) and not useLDSTr and TLDS==1:
-        # TODO: Add NN schedule in upcoming PR
-        return False, None
+        kernel["UsePLRPack"] = True
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0") ,
+             3, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write") ,
+            17, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+            35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="") ,
+            35, SBarrier(comment="") ,
+            35, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+            53, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for previous set of global reads") ,
+            53, SBarrier(comment="") ,
+            53, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+        ]
+        optSchedule = {
+            'SYNC'  : [syncTable[::2]],
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+            'LRA0'  : [[0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]],
+            'LRB0'  : [[8, 9, 10, 11, 12, 13]],
+            'PackA0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]],
+            'PackB0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]],
+            'GRA'   : [[35, 35, 35, 35, 35, 35, 35, 35]],
+            'GRB'   : [[35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35]],
+            'PackA1': [[17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]],
+            'PackB1': [[17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21]],
+            'LRA3'  : [[54, 54, 55, 55, 56, 56, 57, 57, 59, 59, 60, 60, 61, 61, 62, 62]],
+            'LRB3'  : [[58, 58, 63, 64, 65, 66]],
+            'LRSA'  : [[16]],
+            'LRSB'  : [[16]],
+            'LWSA'  : [[52]],
+            'LWSB'  : [[52]],
+            'LCC'   : [[71, 71]],
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 10
     elif isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         syncTable = [
