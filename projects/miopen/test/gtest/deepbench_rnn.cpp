@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <miopen/miopen.h>
 #include <gtest/gtest.h>
-#include "../rnn_vanilla.hpp"
+// #include "../rnn_vanilla.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 
@@ -59,10 +59,13 @@ void Run2dDriverFloat(void)
             return str.data();
         });
 
-        testing::internal::CaptureStderr();
-        test_drive<rnn_vanilla_driver>(ptrs.size(), ptrs.data(), "deepbench_rnn");
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
+        // This part is commented out because rnn_vanilla_driver does not exist after porting
+        // rnn_vanilla.hpp to gtest implementation. However, this doesn't change anything because
+        // this test is already skipped before because it uses test_driver in gtest
+        // testing::internal::CaptureStderr();
+        // test_drive<rnn_vanilla_driver>(ptrs.size(), ptrs.data(), "deepbench_rnn");
+        // auto capture = testing::internal::GetCapturedStderr();
+        // std::cout << capture;
     }
 };
 

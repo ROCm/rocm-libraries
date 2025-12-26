@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-
 #pragma once
 
-#include "driver.hpp"
+#include "gtest_common.hpp"
+#include "compare_helper.hpp"
 #include "dropout_util.hpp"
 #include "get_handle.hpp"
 
@@ -47,6 +47,330 @@
 #include "rnn_util.hpp"
 #include "cpu_rnn.hpp"
 ///
+
+namespace {
+
+using RNNSeqApiParam = std::tuple<int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  std::vector<int>,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool>;
+
+auto RNNSeqGenCases(bool full_test = false)
+{
+    std::vector<int> modes(2, 0);
+    modes[1] = 1;
+
+    std::vector<int> inVecLen_vec   = full_test ? std::vector<int>{1, 7} : std::vector<int>{7};
+    std::vector<int> hiddenSize_vec = full_test ? std::vector<int>{7, 1, 13} : std::vector<int>{13};
+    std::vector<int> useDropout_vec = std::vector<int>{0, 1};
+    std::vector<int> numLayers_vec  = full_test ? std::vector<int>{1, 3} : std::vector<int>{3};
+    std::vector<int> inputMode_vec  = std::vector<int>{0, 1};
+    std::vector<int> biasMode_vec   = std::vector<int>{1};
+    std::vector<int> dirMode_vec    = std::vector<int>{0, 1};
+    std::vector<int> rnnMode_vec    = full_test ? std::vector<int>{2, 1, 3} : std::vector<int>{2};
+    std::vector<int> algoMode_vec   = full_test ? std::vector<int>{0, 2} : std::vector<int>{2};
+    std::vector<int> io_layout_vec  = full_test ? std::vector<int>{2, 1, 3} : std::vector<int>{3};
+    std::vector<int> batchSize_vec  = full_test ? std::vector<int>{1, 4, 6} : std::vector<int>{6};
+    std::vector<int> seqLength_vec  = full_test ? std::vector<int>{1, 4, 15} : std::vector<int>{15};
+
+    std::vector<std::vector<int>> seqLenArray_vec = {std::vector<int>{1, 15, 14, 15, 14, 1},
+                                                     std::vector<int>{1, 0, 3, 4, 2, 0},
+                                                     std::vector<int>{1, 2, 3, 4},
+                                                     std::vector<int>{4, 3, 2, 1},
+                                                     std::vector<int>{4, 4, 4, 4},
+                                                     std::vector<int>{1}};
+
+    std::vector<bool> nohx_vec                          = std::vector<bool>{false};
+    std::vector<bool> nocx_vec                          = std::vector<bool>{false, true};
+    std::vector<bool> nohy_vec                          = std::vector<bool>{false};
+    std::vector<bool> nocy_vec                          = std::vector<bool>{false, true};
+    std::vector<bool> pytorchTensorDescriptorFormat_vec = std::vector<bool>{false, true};
+    std::vector<bool> skip_backward_data_vec            = std::vector<bool>{false};
+    std::vector<bool> skip_backward_weights_vec         = std::vector<bool>{false};
+
+    std::vector<RNNSeqApiParam> cases;
+
+    // clang-format off
+    for(auto& inVecLen : inVecLen_vec)
+    {
+      for(auto& hiddenSize : hiddenSize_vec)
+      {
+        for(auto& useDropout : useDropout_vec)
+        {
+          for(auto& numLayers : numLayers_vec)
+          {
+            for(auto& inputMode : inputMode_vec)
+            {
+              if(inputMode == 1 && hiddenSize != inVecLen)
+                continue;
+              for(auto& biasMode : biasMode_vec)
+              {
+                for(auto& dirMode : dirMode_vec)
+                {
+                  for(auto& rnnMode : rnnMode_vec)
+                  {
+                    for(auto& algoMode : algoMode_vec)
+                    {
+                      if(algoMode == 2 && !(dirMode == 0 && rnnMode == miopenLSTM &&
+                          useDropout == 0 && inputMode == miopenRNNlinear))
+                          continue;
+                      for(auto& io_layout : io_layout_vec)
+                      {
+                        for(auto& batchSize : batchSize_vec)
+                        {
+                          if(useDropout == 1 && (hiddenSize == 1 || batchSize == 1))
+                              continue;
+                          for(auto& seqLength : seqLength_vec)
+                          {
+                            for(auto& seqLenArray : seqLenArray_vec)
+                            {
+                              if(seqLenArray.size() > batchSize)
+                                  continue;
+                                
+                              if(!seqLenArray.empty())
+                              {
+                                if(seqLength < *std::max_element(seqLenArray.begin(), 
+                                    seqLenArray.end()))
+                                {
+                                  continue;
+                                }
+
+                                if(io_layout == 1 && !std::is_sorted(seqLenArray.begin(),
+                                    seqLenArray.end(), std::greater<int>()))
+                                {
+                                  continue;
+                                }
+
+                                if(seqLenArray.size() != batchSize)
+                                  continue;
+
+                                bool is_seqLength_is_max_seq = seqLength ==
+                                                                *std::max_element(
+                                                                    seqLenArray.begin(),
+                                                                    seqLenArray.end());
+
+                                if(!is_seqLength_is_max_seq)
+                                  continue;
+                              }
+                                for(auto&& nohx : nohx_vec)
+                                {
+                                  if(biasMode == 1 && nohx)
+                                    continue;
+                                for(auto&& nocx : nocx_vec)
+                                {
+                                  for(auto&& nohy : nohy_vec)
+                                  {
+                                    for(auto&& nocy : nocy_vec)
+                                    {
+                                      if((rnnMode != 2) && (!nocx || !nocy))
+                                        continue;
+                                      for(auto&& pytorchTensorDescriptorFormat :
+                                                    pytorchTensorDescriptorFormat_vec)
+                                      {
+                                        for(auto&& skip_backward_data : skip_backward_data_vec)
+                                        {
+                                          for(auto&& skip_backward_weights : 
+                                                        skip_backward_weights_vec)
+                                          {
+                                            cases.push_back(make_tuple(inVecLen,
+                                                                     hiddenSize,
+                                                                     useDropout,
+                                                                     numLayers,
+                                                                     inputMode,
+                                                                     biasMode,
+                                                                     dirMode,
+                                                                     rnnMode,
+                                                                     algoMode,
+                                                                     io_layout,
+                                                                     batchSize,
+                                                                     seqLength,
+                                                                     seqLenArray,
+                                                                     nohx,
+                                                                     nocx,
+                                                                     nohy,
+                                                                     nocy,
+                                                                     pytorchTensorDescriptorFormat,
+                                                                     skip_backward_data,
+                                                                     skip_backward_weights));
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // clang-format on
+    return cases;
+}
+
+auto GetValidRNNSeqCases(bool full_test = false)
+{
+    const auto cases = RNNSeqGenCases(full_test);
+    return ::testing::ValuesIn(cases);
+}
+
+template <typename T>
+auto LstmMSGenCases(bool full_test = false)
+{
+    std::vector<int> modes(2, 0);
+    modes[1] = 1;
+
+    std::vector<int> inVecLen_vec   = full_test ? std::vector<int>{1, 7} : std::vector<int>{7};
+    std::vector<int> hiddenSize_vec = full_test ? std::vector<int>{13, 1} : std::vector<int>{13};
+    std::vector<int> useDropout_vec = std::vector<int>{0};
+    std::vector<int> numLayers_vec  = std::vector<int>{3};
+    std::vector<int> inputMode_vec  = std::vector<int>{0};
+    std::vector<int> biasMode_vec   = std::vector<int>{0, 1};
+    std::vector<int> dirMode_vec    = std::vector<int>{0};
+    std::vector<int> rnnMode_vec    = std::vector<int>{2};
+    std::vector<int> algoMode_vec   = std::vector<int>{0};
+    std::vector<int> io_layout_vec  = std::vector<int>{2};
+    std::vector<int> batchSize_vec  = full_test ? std::vector<int>{1, 6} : std::vector<int>{6};
+    std::vector<int> seqLength_vec  = std::vector<int>{38};
+
+    std::vector<std::vector<int>> seqLenArray_vec = {
+        std::vector<int>{34, 3, 2, 1}, std::vector<int>{1, 15, 34, 15, 34, 1}, std::vector<int>{}};
+
+    std::vector<bool> nohx_vec                          = std::vector<bool>{false, true};
+    std::vector<bool> nocx_vec                          = std::vector<bool>{false, true};
+    std::vector<bool> nohy_vec                          = std::vector<bool>{false, true};
+    std::vector<bool> nocy_vec                          = std::vector<bool>{false, true};
+    std::vector<bool> pytorchTensorDescriptorFormat_vec = std::vector<bool>{false, true};
+    std::vector<bool> skip_backward_data_vec            = std::vector<bool>{false};
+    std::vector<bool> skip_backward_weights_vec         = std::vector<bool>{false};
+
+    std::vector<RNNSeqApiParam> cases;
+
+    // clang-format off
+    for(auto& inVecLen : inVecLen_vec)
+    {
+      for(auto& hiddenSize : hiddenSize_vec)
+      {
+        for(auto& useDropout : useDropout_vec)
+        {
+          for(auto& numLayers : numLayers_vec)
+          {
+            for(auto& inputMode : inputMode_vec)
+            {
+              for(auto& biasMode : biasMode_vec)
+              {
+                for(auto& dirMode : dirMode_vec)
+                {
+                  for(auto& rnnMode : rnnMode_vec)
+                  {
+                    for(auto& algoMode : algoMode_vec)
+                    {
+                      for(auto& io_layout : io_layout_vec)
+                      {
+                        for(auto& batchSize : batchSize_vec)
+                        {
+                          for(auto& seqLength : seqLength_vec)
+                          {
+                            for(auto& seqLenArray : seqLenArray_vec)
+                            {
+                              for(auto&& nohx : nohx_vec)
+                              {
+                                if(nohx && biasMode == 1)
+                                {
+                                  continue;
+                                }
+                                for(auto&& nocx : nocx_vec)
+                                {
+                                  for(auto&& nohy : nohy_vec)
+                                  {
+                                    for(auto&& nocy : nocy_vec)
+                                    {
+                                      if(miopen_type<T>{} == miopenHalf && nohy && nocy)
+                                      {
+                                        continue;
+                                      }
+                                      for(auto&& pytorchTensorDescriptorFormat :
+                                                  pytorchTensorDescriptorFormat_vec)
+                                      {
+                                        for(auto&& skip_backward_data : skip_backward_data_vec)
+                                        {
+                                          for(auto&& skip_backward_weights : 
+                                                      skip_backward_weights_vec)
+                                          {
+                                              cases.push_back(make_tuple(inVecLen,
+                                                                          hiddenSize,
+                                                                          useDropout,
+                                                                          numLayers,
+                                                                          inputMode,
+                                                                          biasMode,
+                                                                          dirMode,
+                                                                          rnnMode,
+                                                                          algoMode,
+                                                                          io_layout,
+                                                                          batchSize,
+                                                                          seqLength,
+                                                                          seqLenArray,
+                                                                          nohx,
+                                                                          nocx,
+                                                                          nohy,
+                                                                          nocy,
+                                                                          pytorchTensorDescriptorFormat,
+                                                                          skip_backward_data,
+                                                                          skip_backward_weights));
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // clang-format on
+    return cases;
+}
+
+template <typename T>
+auto GetValidLstmMSCases(bool full_test = false)
+{
+    const auto cases = LstmMSGenCases<T>(full_test);
+    return ::testing::ValuesIn(cases);
+}
 
 template <class TensorT>
 miopen::Allocator::ManageDataPtr
@@ -144,82 +468,52 @@ struct verify_rnn_api_base
     size_t workspace_GPU_mem_size() {}
     size_t reservspace_GPU_mem_size() {}
 
-    void fail(int badtensor) const
+    void fail(/*int badtensor*/) const
     {
-        std::cout << "./bin/MIOpenDriver rnn_seq ";
+        std::stringstream ss{};
+        ss << "./bin/MIOpenDriver rnn_seq ";
 
-        std::cout << " -F 0 "
-                  << " -m ";
+        ss << " -F 0 " << " -m ";
 
         switch(rnnDesc.rnnMode)
         {
-        case miopenRNNTANH: std::cout << " tanh "; break;
-        case miopenRNNRELU: std::cout << " relu "; break;
-        case miopenLSTM: std::cout << " lstm "; break;
-        case miopenGRU: std::cout << " gru "; break;
+        case miopenRNNTANH: ss << " tanh "; break;
+        case miopenRNNRELU: ss << " relu "; break;
+        case miopenLSTM: ss << " lstm "; break;
+        case miopenGRU: ss << " gru "; break;
         default: break;
         }
 
         auto& inLens = input.desc.GetLengths();
         auto& hLens  = xHiddenState.desc.GetLengths();
 
-        std::cout << " --batch_size " << inLens[0] << " --seq_len " << inLens[1] << " --in_vec "
-                  << inLens[2] << " --hid_h " << hLens[2] << " --num_layer " << rnnDesc.nLayers
-                  << " -r " << rnnDesc.dirMode << " -b " << rnnDesc.biasMode << " -p "
-                  << rnnDesc.inputMode << " -a " << rnnDesc.algoMode;
+        ss << " --batch_size " << inLens[0] << " --seq_len " << inLens[1] << " --in_vec "
+           << inLens[2] << " --hid_h " << hLens[2] << " --num_layer " << rnnDesc.nLayers << " -r "
+           << rnnDesc.dirMode << " -b " << rnnDesc.biasMode << " -p " << rnnDesc.inputMode << " -a "
+           << rnnDesc.algoMode;
 
         bool useDropout = !miopen::float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0);
 
-        std::cout << " --io_layout "
-                  << miopen::RNNDescriptor::getBaseLayoutFromDataTensor(input.desc)
-                  << " --use_dropout " << useDropout;
+        ss << " --io_layout " << miopen::RNNDescriptor::getBaseLayoutFromDataTensor(input.desc)
+           << " --use_dropout " << useDropout;
         if(useDropout)
-            std::cout << " --dropout " << miopen::deref(rnnDesc.dropoutDesc).dropout;
+            ss << " --dropout " << miopen::deref(rnnDesc.dropoutDesc).dropout;
 
         auto& samplesLen = input.desc.GetSequenceLengthsVector();
-        std::cout << " --seq_len_array ";
+        ss << " --seq_len_array ";
         for(int i = 0; i < inLens[0]; i++)
         {
             if(i < inLens[0] - 1)
             {
-                std::cout << samplesLen.at(i) << ",";
+                ss << samplesLen.at(i) << ",";
             }
             else
             {
-                std::cout << samplesLen.at(i);
+                ss << samplesLen.at(i);
             }
         }
-        std::cout << std::endl;
-
-        if(badtensor >= 0)
-        {
-            if(badtensor < 3)
-            {
-                std::cout << "FWD Train LSTM: " << std::endl;
-                switch(badtensor)
-                {
-                case(0): std::cout << "Output tensor report." << std::endl; break;
-                case(1): std::cout << "Hidden state tensor report." << std::endl; break;
-                case(2): std::cout << "Cell state tensor report." << std::endl; break;
-                default: break;
-                }
-            }
-            else if(badtensor < 6)
-            {
-                std::cout << "BWD Train LSTM: " << std::endl;
-                switch(badtensor)
-                {
-                case(3): std::cout << "Output tensor output report." << std::endl; break;
-                case(4): std::cout << "Hidden state tensor report." << std::endl; break;
-                case(5): std::cout << "Cell state tensor report." << std::endl; break;
-                default: break;
-                }
-            }
-            else if(badtensor == 6)
-            {
-                std::cout << "WRW Train LSTM " << std::endl;
-            }
-        }
+        ss << std::endl;
+        GTEST_FAIL() << ss.str();
     }
 };
 
@@ -313,7 +607,7 @@ struct rnn_ref
                           std::vector<T>& workSpace,
                           bool nohx) const = 0;
 
-    virtual ~rnn_ref(){};
+    virtual ~rnn_ref() {};
 };
 
 template <class T>
@@ -1133,7 +1427,8 @@ struct verify_train_rnn : verify_rnn_api_base<T>
         // if(is_padded_verification)
         //{
         //    std::fill(output_seq.begin(), output_seq.end(), padding_symbol);
-        //    ChangeDataPadding(*packed_output, output_seq, batch_seq, batch_seq[0], out_vec, true);
+        //    ChangeDataPadding(*packed_output, output_seq, batch_seq, batch_seq[0], out_vec,
+        //    true);
         //}
 
         return result_tuple(std::move(fwd_y),
@@ -1190,10 +1485,10 @@ struct verify_train_rnn : verify_rnn_api_base<T>
         size_t reserveSpace_TCnt = (reserveSpaceByteSize + sizeof(T) - 1) / sizeof(T);
 
         std::vector<T> reserveSpace_fwd_out(reserveSpace_TCnt);
-        handle.ReadTo(
-            reserveSpace_fwd_out.data(),
-            reserveSpace_dev,
-            reserveSpaceByteSize); // std::copy(reserveSpace.begin(), reserveSpace.end(), RSVgpu);
+        handle.ReadTo(reserveSpace_fwd_out.data(),
+                      reserveSpace_dev,
+                      reserveSpaceByteSize); // std::copy(reserveSpace.begin(),
+                                             // reserveSpace.end(), RSVgpu);
 
         const auto fwd_y  = handle.Read<T>(y_dev, output.GetSize());
         const auto fwd_hy = readTFromGPUOrEmpty(handle, hy_dev, xHiddenState, nohy);
@@ -1406,37 +1701,35 @@ inline size_t get_RNN_params_byteSize(miopen::Handle& handle,
     return wei_bytes;
 }
 
-template <class T>
-struct rnn_seq_api_test_driver : test_driver
+template <typename T>
+struct RNNSeqApiCommon : public ::testing::TestWithParam<RNNSeqApiParam>
 {
-    std::vector<int> seqLenArray;
-    int seqLength{};
-    int inVecLen{};
-    int hiddenSize{};
-    int numLayers{};
-    int inputMode{};
-    int biasMode{};
-    int dirMode{};
-    int rnnMode{};
-    int algoMode{};
-    int batchSize{};
-    int useDropout{};
-    int io_layout{};
+protected:
+    void SetUp() override
+    {
+        std::tie(inVecLen,
+                 hiddenSize,
+                 useDropout,
+                 numLayers,
+                 inputMode,
+                 biasMode,
+                 dirMode,
+                 rnnMode,
+                 algoMode,
+                 io_layout,
+                 batchSize,
+                 seqLength,
+                 seqLenArray,
+                 nohx,
+                 nocx,
+                 nohy,
+                 nocy,
+                 pytorchTensorDescriptorFormat,
+                 skip_backward_data,
+                 skip_backward_weights) = GetParam();
+    }
 
-    // Null pointer input
-    bool nohx{};
-    bool nocx{};
-    bool nohy{};
-    bool nocy{};
-
-    bool pytorchTensorDescriptorFormat{};
-
-    bool skip_backward_data{false};
-    bool skip_backward_weights{false};
-
-    rnn_seq_api_test_driver() {}
-
-    bool check_GPU_mem_limit(miopen::Handle& handle,
+    void check_GPU_mem_limit(miopen::Handle& handle,
                              miopen::RNNDescriptor& rnnDesc,
                              seqTensor<T>& input,
                              seqTensor<T>& output,
@@ -1468,16 +1761,11 @@ struct rnn_seq_api_test_driver : test_driver
                                sizeof(T);
 
         size_t device_mem = handle.GetGlobalMemorySize();
-
-        if(total_mem >= device_mem)
-        {
-            show_command();
-            std::cout << "Config requires " << total_mem
-                      << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                      << " Bytes of memory." << std::endl;
-            return false;
-        }
-        return true;
+        std::stringstream ss{};
+        ss << "Config requires " << total_mem
+           << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
+           << " Bytes of memory." << std::endl;
+        ASSERT_LT(total_mem, device_mem); // << ss.str();
     }
 
     void fill_buffers(seqTensor<T>& input,
@@ -1555,8 +1843,9 @@ struct rnn_seq_api_test_driver : test_driver
         if(io_layout == 1 && (!seqLenArray.empty()) &&
            (!std::is_sorted(seqLenArray.begin(), seqLenArray.end(), std::greater<>{})))
         {
-            MIOPEN_THROW("Incorrect input, seq_lens should not to increase with "
-                         "miopenRNNDataSeqMajorNotPadded layout\n");
+            GTEST_FAIL() << "Incorrect input, seq_lens should not to increase with "
+                            "miopenRNNDataSeqMajorNotPadded layout"
+                         << std::endl;
         }
 
         if(!seqLenArray.empty())
@@ -1565,12 +1854,9 @@ struct rnn_seq_api_test_driver : test_driver
             {
 
                 int padding_val = 0;
-                printf("sampl_lens size == %zu is shmaller than time batch_size == %d, padding the "
-                       "rest "
-                       "of data with %d\n",
-                       seqLenArray.size(),
-                       batchSize,
-                       padding_val);
+                std::cout << "sampl_lens size == " << seqLenArray.size()
+                          << " is smaller than time batch_size == " << batchSize
+                          << ", padding the rest of data with " << padding_val << std::endl;
 
                 std::vector<int> new_seqLenArray(batchSize);
 
@@ -1583,12 +1869,14 @@ struct rnn_seq_api_test_driver : test_driver
             size_t seq_max_element = *std::max_element(seqLenArray.begin(), seqLenArray.end());
 
             if(seqLength < seq_max_element)
-                MIOPEN_THROW(
-                    "Incorrect input, seq_lens elements should be smaller or equal to seqLength\n");
+                GTEST_FAIL() << "Incorrect input, seq_lens elements should be smaller or equal "
+                                "to seqLength"
+                             << std::endl;
         }
         else
         {
-            printf("Empty batch sequence. Filling uniformly with max_seqLength:%d\n ", seqLength);
+            std::cout << "Empty batch sequence. Filling uniformly with max_seqLength: " << seqLength
+                      << std::endl;
             seqLenArray.resize(batchSize, seqLength);
         }
     }
@@ -1632,7 +1920,7 @@ struct rnn_seq_api_test_driver : test_driver
                                       miopenRNNMode_t(rnnMode),
                                       miopenRNNBiasMode_t(biasMode),
                                       miopenRNNAlgo_t(algoMode),
-                                      type);
+                                      miopen_type<T>{});
         }
         else
         {
@@ -1644,7 +1932,7 @@ struct rnn_seq_api_test_driver : test_driver
                                    miopenRNNMode_t(rnnMode),
                                    miopenRNNBiasMode_t(biasMode),
                                    miopenRNNAlgo_t(algoMode),
-                                   type);
+                                   miopen_type<T>{});
         }
 
         const auto inOut_layout   = rnn_data_layout(io_layout);
@@ -1679,6 +1967,7 @@ struct rnn_seq_api_test_driver : test_driver
 
         fill_buffers(input, dy, hx, cx, dhy, dcy, weights);
 
+        double tolerance = 0;
         // avoid BWD unexpected fails
         // https://github.com/ROCm/MIOpen/pull/2493#discussion_r1406959588
         if(inVecLen == 1 && hiddenSize == 13 && seqLength == 1 && batchSize == 1)
@@ -1690,20 +1979,49 @@ struct rnn_seq_api_test_driver : test_driver
             tolerance = 80;
         }
 
-        auto fwdTrain = verify(verify_train_rnn<T>{rnnDesc,
-                                                   input,
-                                                   output,
-                                                   dy,
-                                                   hx,
-                                                   cx,
-                                                   dhy,
-                                                   dcy,
-                                                   weights,
-                                                   nohx,
-                                                   nocx,
-                                                   nohy,
-                                                   nocy,
-                                                   skip_backward_data,
-                                                   skip_backward_weights});
+        auto fwdTrain = test_helpers::CompareResults(verify_train_rnn<T>{rnnDesc,
+                                                                         input,
+                                                                         output,
+                                                                         dy,
+                                                                         hx,
+                                                                         cx,
+                                                                         dhy,
+                                                                         dcy,
+                                                                         weights,
+                                                                         nohx,
+                                                                         nocx,
+                                                                         nohy,
+                                                                         nocy,
+                                                                         skip_backward_data,
+                                                                         skip_backward_weights},
+                                                     tolerance);
     }
+
+public:
+    std::vector<int> seqLenArray;
+    int seqLength{};
+    int inVecLen{};
+    int hiddenSize{};
+    int numLayers{};
+    int inputMode{};
+    int biasMode{};
+    int dirMode{};
+    int rnnMode{};
+    int algoMode{};
+    int batchSize{};
+    int useDropout{};
+    int io_layout{};
+
+    // Null pointer input
+    bool nohx{};
+    bool nocx{};
+    bool nohy{};
+    bool nocy{};
+
+    bool pytorchTensorDescriptorFormat{};
+
+    bool skip_backward_data{false};
+    bool skip_backward_weights{false};
 };
+
+} // namespace

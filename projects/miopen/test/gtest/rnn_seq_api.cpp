@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,20 +23,30 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "rnn_vanilla.hpp"
+#include "rnn_seq_api.hpp"
 
-int main(int argc, const char* argv[])
-{
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-    auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-    test_drive<rnn_vanilla_driver>(argc, argv);
+using GPU_RNNSeqApi_FP32 = RNNSeqApiCommon<float>;
+using GPU_RNNSeqApi_FP16 = RNNSeqApiCommon<half_float::half>;
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-    auto t_end = std::chrono::high_resolution_clock::now();
+TEST_P(GPU_RNNSeqApi_FP32, TestFloat) { run(); }
 
-    std::cout << "Wall clock: RNN test pass time: "
-              << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
-#endif
-    exit(0); // NOLINT (concurrency-mt-unsafe)
-}
+TEST_P(GPU_RNNSeqApi_FP16, TestFloat16) { run(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNSeqApi_FP32, GetValidRNNSeqCases());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP32, GetValidRNNSeqCases(true));
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNSeqApi_FP16, GetValidRNNSeqCases());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP16, GetValidRNNSeqCases(true));
+
+using GPU_LstmMSRnn_FP32 = RNNSeqApiCommon<float>;
+using GPU_LstmMSRnn_FP16 = RNNSeqApiCommon<half_float::half>;
+
+TEST_P(GPU_LstmMSRnn_FP32, TestFloat) { run(); }
+
+TEST_P(GPU_LstmMSRnn_FP16, TestFloat16) { run(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_LstmMSRnn_FP32, GetValidLstmMSCases<float>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP32, GetValidLstmMSCases<float>(true));
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_LstmMSRnn_FP16, GetValidLstmMSCases<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP16, GetValidLstmMSCases<half_float::half>(true));
