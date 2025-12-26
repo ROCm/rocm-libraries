@@ -73,303 +73,57 @@ using RNNSeqApiParam = std::tuple<int,
 
 auto RNNSeqGenCases(bool full_test = false)
 {
-    std::vector<int> modes(2, 0);
-    modes[1] = 1;
-
-    std::vector<int> inVecLen_vec   = full_test ? std::vector<int>{1, 7} : std::vector<int>{7};
-    std::vector<int> hiddenSize_vec = full_test ? std::vector<int>{7, 1, 13} : std::vector<int>{13};
-    std::vector<int> useDropout_vec = std::vector<int>{0, 1};
-    std::vector<int> numLayers_vec  = full_test ? std::vector<int>{1, 3} : std::vector<int>{3};
-    std::vector<int> inputMode_vec  = std::vector<int>{0, 1};
-    std::vector<int> biasMode_vec   = std::vector<int>{1};
-    std::vector<int> dirMode_vec    = std::vector<int>{0, 1};
-    std::vector<int> rnnMode_vec    = full_test ? std::vector<int>{2, 1, 3} : std::vector<int>{2};
-    std::vector<int> algoMode_vec   = full_test ? std::vector<int>{0, 2} : std::vector<int>{2};
-    std::vector<int> io_layout_vec  = full_test ? std::vector<int>{2, 1, 3} : std::vector<int>{3};
-    std::vector<int> batchSize_vec  = full_test ? std::vector<int>{1, 4, 6} : std::vector<int>{6};
-    std::vector<int> seqLength_vec  = full_test ? std::vector<int>{1, 4, 15} : std::vector<int>{15};
-
-    std::vector<std::vector<int>> seqLenArray_vec = {std::vector<int>{1, 15, 14, 15, 14, 1},
-                                                     std::vector<int>{1, 0, 3, 4, 2, 0},
-                                                     std::vector<int>{1, 2, 3, 4},
-                                                     std::vector<int>{4, 3, 2, 1},
-                                                     std::vector<int>{4, 4, 4, 4},
-                                                     std::vector<int>{1}};
-
-    std::vector<bool> nohx_vec                          = std::vector<bool>{false};
-    std::vector<bool> nocx_vec                          = std::vector<bool>{false, true};
-    std::vector<bool> nohy_vec                          = std::vector<bool>{false};
-    std::vector<bool> nocy_vec                          = std::vector<bool>{false, true};
-    std::vector<bool> pytorchTensorDescriptorFormat_vec = std::vector<bool>{false, true};
-    std::vector<bool> skip_backward_data_vec            = std::vector<bool>{false};
-    std::vector<bool> skip_backward_weights_vec         = std::vector<bool>{false};
-
-    std::vector<RNNSeqApiParam> cases;
-
-    // clang-format off
-    for(auto& inVecLen : inVecLen_vec)
-    {
-      for(auto& hiddenSize : hiddenSize_vec)
-      {
-        for(auto& useDropout : useDropout_vec)
-        {
-          for(auto& numLayers : numLayers_vec)
-          {
-            for(auto& inputMode : inputMode_vec)
-            {
-              if(inputMode == 1 && hiddenSize != inVecLen)
-                continue;
-              for(auto& biasMode : biasMode_vec)
-              {
-                for(auto& dirMode : dirMode_vec)
-                {
-                  for(auto& rnnMode : rnnMode_vec)
-                  {
-                    for(auto& algoMode : algoMode_vec)
-                    {
-                      if(algoMode == 2 && !(dirMode == 0 && rnnMode == miopenLSTM &&
-                          useDropout == 0 && inputMode == miopenRNNlinear))
-                          continue;
-                      for(auto& io_layout : io_layout_vec)
-                      {
-                        for(auto& batchSize : batchSize_vec)
-                        {
-                          if(useDropout == 1 && (hiddenSize == 1 || batchSize == 1))
-                              continue;
-                          for(auto& seqLength : seqLength_vec)
-                          {
-                            for(auto& seqLenArray : seqLenArray_vec)
-                            {
-                              if(seqLenArray.size() > batchSize)
-                                  continue;
-                                
-                              if(!seqLenArray.empty())
-                              {
-                                if(seqLength < *std::max_element(seqLenArray.begin(), 
-                                    seqLenArray.end()))
-                                {
-                                  continue;
-                                }
-
-                                if(io_layout == 1 && !std::is_sorted(seqLenArray.begin(),
-                                    seqLenArray.end(), std::greater<int>()))
-                                {
-                                  continue;
-                                }
-
-                                if(seqLenArray.size() != batchSize)
-                                  continue;
-
-                                bool is_seqLength_is_max_seq = seqLength ==
-                                                                *std::max_element(
-                                                                    seqLenArray.begin(),
-                                                                    seqLenArray.end());
-
-                                if(!is_seqLength_is_max_seq)
-                                  continue;
-                              }
-                                for(auto&& nohx : nohx_vec)
-                                {
-                                  if(biasMode == 1 && nohx)
-                                    continue;
-                                for(auto&& nocx : nocx_vec)
-                                {
-                                  for(auto&& nohy : nohy_vec)
-                                  {
-                                    for(auto&& nocy : nocy_vec)
-                                    {
-                                      if((rnnMode != 2) && (!nocx || !nocy))
-                                        continue;
-                                      for(auto&& pytorchTensorDescriptorFormat :
-                                                    pytorchTensorDescriptorFormat_vec)
-                                      {
-                                        for(auto&& skip_backward_data : skip_backward_data_vec)
-                                        {
-                                          for(auto&& skip_backward_weights : 
-                                                        skip_backward_weights_vec)
-                                          {
-                                            cases.push_back(make_tuple(inVecLen,
-                                                                     hiddenSize,
-                                                                     useDropout,
-                                                                     numLayers,
-                                                                     inputMode,
-                                                                     biasMode,
-                                                                     dirMode,
-                                                                     rnnMode,
-                                                                     algoMode,
-                                                                     io_layout,
-                                                                     batchSize,
-                                                                     seqLength,
-                                                                     seqLenArray,
-                                                                     nohx,
-                                                                     nocx,
-                                                                     nohy,
-                                                                     nocy,
-                                                                     pytorchTensorDescriptorFormat,
-                                                                     skip_backward_data,
-                                                                     skip_backward_weights));
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    // clang-format on
-    return cases;
+    return ::testing::Combine(::testing::ValuesIn({7}),
+                              ::testing::ValuesIn({13}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({1}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({6}),
+                              ::testing::ValuesIn({15}),
+                              ::testing::ValuesIn({std::vector<int>{1, 15, 14, 15, 14, 1},
+                                                   std::vector<int>{1, 0, 3, 4, 2, 0},
+                                                   std::vector<int>{1, 2, 3, 4},
+                                                   std::vector<int>{4, 3, 2, 1},
+                                                   std::vector<int>{4, 4, 4, 4},
+                                                   std::vector<int>{1}}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}));
 }
 
-auto GetValidRNNSeqCases(bool full_test = false)
+auto LstmMSGenCases()
 {
-    const auto cases = RNNSeqGenCases(full_test);
-    return ::testing::ValuesIn(cases);
-}
-
-template <typename T>
-auto LstmMSGenCases(bool full_test = false)
-{
-    std::vector<int> modes(2, 0);
-    modes[1] = 1;
-
-    std::vector<int> inVecLen_vec   = full_test ? std::vector<int>{1, 7} : std::vector<int>{7};
-    std::vector<int> hiddenSize_vec = full_test ? std::vector<int>{13, 1} : std::vector<int>{13};
-    std::vector<int> useDropout_vec = std::vector<int>{0};
-    std::vector<int> numLayers_vec  = std::vector<int>{3};
-    std::vector<int> inputMode_vec  = std::vector<int>{0};
-    std::vector<int> biasMode_vec   = std::vector<int>{0, 1};
-    std::vector<int> dirMode_vec    = std::vector<int>{0};
-    std::vector<int> rnnMode_vec    = std::vector<int>{2};
-    std::vector<int> algoMode_vec   = std::vector<int>{0};
-    std::vector<int> io_layout_vec  = std::vector<int>{2};
-    std::vector<int> batchSize_vec  = full_test ? std::vector<int>{1, 6} : std::vector<int>{6};
-    std::vector<int> seqLength_vec  = std::vector<int>{38};
-
-    std::vector<std::vector<int>> seqLenArray_vec = {
-        std::vector<int>{34, 3, 2, 1}, std::vector<int>{1, 15, 34, 15, 34, 1}, std::vector<int>{}};
-
-    std::vector<bool> nohx_vec                          = std::vector<bool>{false, true};
-    std::vector<bool> nocx_vec                          = std::vector<bool>{false, true};
-    std::vector<bool> nohy_vec                          = std::vector<bool>{false, true};
-    std::vector<bool> nocy_vec                          = std::vector<bool>{false, true};
-    std::vector<bool> pytorchTensorDescriptorFormat_vec = std::vector<bool>{false, true};
-    std::vector<bool> skip_backward_data_vec            = std::vector<bool>{false};
-    std::vector<bool> skip_backward_weights_vec         = std::vector<bool>{false};
-
-    std::vector<RNNSeqApiParam> cases;
-
-    // clang-format off
-    for(auto& inVecLen : inVecLen_vec)
-    {
-      for(auto& hiddenSize : hiddenSize_vec)
-      {
-        for(auto& useDropout : useDropout_vec)
-        {
-          for(auto& numLayers : numLayers_vec)
-          {
-            for(auto& inputMode : inputMode_vec)
-            {
-              for(auto& biasMode : biasMode_vec)
-              {
-                for(auto& dirMode : dirMode_vec)
-                {
-                  for(auto& rnnMode : rnnMode_vec)
-                  {
-                    for(auto& algoMode : algoMode_vec)
-                    {
-                      for(auto& io_layout : io_layout_vec)
-                      {
-                        for(auto& batchSize : batchSize_vec)
-                        {
-                          for(auto& seqLength : seqLength_vec)
-                          {
-                            for(auto& seqLenArray : seqLenArray_vec)
-                            {
-                              for(auto&& nohx : nohx_vec)
-                              {
-                                if(nohx && biasMode == 1)
-                                {
-                                  continue;
-                                }
-                                for(auto&& nocx : nocx_vec)
-                                {
-                                  for(auto&& nohy : nohy_vec)
-                                  {
-                                    for(auto&& nocy : nocy_vec)
-                                    {
-                                      if(miopen_type<T>{} == miopenHalf && nohy && nocy)
-                                      {
-                                        continue;
-                                      }
-                                      for(auto&& pytorchTensorDescriptorFormat :
-                                                  pytorchTensorDescriptorFormat_vec)
-                                      {
-                                        for(auto&& skip_backward_data : skip_backward_data_vec)
-                                        {
-                                          for(auto&& skip_backward_weights : 
-                                                      skip_backward_weights_vec)
-                                          {
-                                              cases.push_back(make_tuple(inVecLen,
-                                                                          hiddenSize,
-                                                                          useDropout,
-                                                                          numLayers,
-                                                                          inputMode,
-                                                                          biasMode,
-                                                                          dirMode,
-                                                                          rnnMode,
-                                                                          algoMode,
-                                                                          io_layout,
-                                                                          batchSize,
-                                                                          seqLength,
-                                                                          seqLenArray,
-                                                                          nohx,
-                                                                          nocx,
-                                                                          nohy,
-                                                                          nocy,
-                                                                          pytorchTensorDescriptorFormat,
-                                                                          skip_backward_data,
-                                                                          skip_backward_weights));
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    // clang-format on
-    return cases;
-}
-
-template <typename T>
-auto GetValidLstmMSCases(bool full_test = false)
-{
-    const auto cases = LstmMSGenCases<T>(full_test);
-    return ::testing::ValuesIn(cases);
+    return ::testing::Combine(::testing::ValuesIn({1, 7}),
+                              ::testing::ValuesIn({13, 1}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({1, 6}),
+                              ::testing::ValuesIn({38}),
+                              ::testing::ValuesIn({std::vector<int>{34, 3, 2, 1},
+                                                   std::vector<int>{1, 15, 34, 15, 34, 1},
+                                                   std::vector<int>{}}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}));
 }
 
 template <class TensorT>
@@ -1880,6 +1634,81 @@ protected:
                       << std::endl;
             seqLenArray.resize(batchSize, seqLength);
         }
+    }
+
+    bool is_skip_comb()
+    {
+        if(!this->seqLenArray.empty())
+        {
+            if(this->seqLenArray.size() != this->batchSize)
+                return true;
+
+            bool is_seqLength_is_max_seq =
+                this->seqLength ==
+                *std::max_element(this->seqLenArray.begin(), this->seqLenArray.end());
+
+            if(!is_seqLength_is_max_seq)
+                return true;
+        }
+
+        return false;
+    }
+
+    bool is_correct_params()
+    {
+        if(this->useDropout == 1 && (this->hiddenSize == 1 || this->batchSize == 1))
+            return false;
+
+        if(this->inputMode == 1 && this->hiddenSize != this->inVecLen)
+            return false;
+
+        if((this->rnnMode != 2) && (!this->nocx || !this->nocy))
+            return false;
+
+        if(this->seqLenArray.size() > this->batchSize)
+            return false;
+
+        if(this->biasMode && this->nohx)
+            return false;
+
+        if(!this->seqLenArray.empty())
+        {
+            if(this->seqLength <
+               *std::max_element(this->seqLenArray.begin(), this->seqLenArray.end()))
+                return false;
+
+            if(this->io_layout == 1)
+            {
+                return std::is_sorted(
+                    this->seqLenArray.begin(), this->seqLenArray.end(), std::greater<int>());
+            }
+        }
+        return true;
+    }
+
+    bool is_dynamic_algo_skip_case()
+    {
+        if(this->algoMode != 2)
+            return false;
+
+        if(this->dirMode == 0 && this->rnnMode == miopenLSTM && this->useDropout == 0 &&
+           this->inputMode == miopenRNNlinear)
+            return false;
+        return true;
+    }
+
+    bool is_lstm_MS_skip()
+    {
+        // WA skip this test
+        if(this->nohx && this->biasMode == 1)
+            return true;
+
+        // WA for half verification at gfx90a.
+        if(miopen_type<T>{} == miopenHalf)
+            if(this->nohy && this->nocy)
+                return true;
+
+        return false;
     }
 
     void run()

@@ -28,25 +28,50 @@
 using GPU_RNNSeqApi_FP32 = RNNSeqApiCommon<float>;
 using GPU_RNNSeqApi_FP16 = RNNSeqApiCommon<half_float::half>;
 
-TEST_P(GPU_RNNSeqApi_FP32, TestFloat) { run(); }
+TEST_P(GPU_RNNSeqApi_FP32, TestFloat)
+{
 
-TEST_P(GPU_RNNSeqApi_FP16, TestFloat16) { run(); }
+    if(!is_correct_params() || is_skip_comb() || is_dynamic_algo_skip_case())
+    {
+        GTEST_SKIP() << "Incompatible argument combination, test skipped." << std::endl;
+    }
+    run();
+}
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNSeqApi_FP32, GetValidRNNSeqCases());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP32, GetValidRNNSeqCases(true));
+TEST_P(GPU_RNNSeqApi_FP16, TestFloat16)
+{
+    if(!is_correct_params() || is_skip_comb() || is_dynamic_algo_skip_case())
+    {
+        GTEST_SKIP() << "Incompatible argument combination, test skipped." << std::endl;
+    }
+    run();
+}
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNSeqApi_FP16, GetValidRNNSeqCases());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP16, GetValidRNNSeqCases(true));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP32, RNNSeqGenCases());
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP16, RNNSeqGenCases());
 
 using GPU_LstmMSRnn_FP32 = RNNSeqApiCommon<float>;
 using GPU_LstmMSRnn_FP16 = RNNSeqApiCommon<half_float::half>;
 
-TEST_P(GPU_LstmMSRnn_FP32, TestFloat) { run(); }
+TEST_P(GPU_LstmMSRnn_FP32, TestFloat)
+{
+    if(is_lstm_MS_skip())
+    {
+        GTEST_SKIP();
+    }
+    run();
+}
 
-TEST_P(GPU_LstmMSRnn_FP16, TestFloat16) { run(); }
+TEST_P(GPU_LstmMSRnn_FP16, TestFloat16)
+{
+    if(is_lstm_MS_skip())
+    {
+        GTEST_SKIP();
+    }
+    run();
+}
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_LstmMSRnn_FP32, GetValidLstmMSCases<float>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP32, GetValidLstmMSCases<float>(true));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP32, LstmMSGenCases());
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_LstmMSRnn_FP16, GetValidLstmMSCases<half_float::half>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP16, GetValidLstmMSCases<half_float::half>(true));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP16, LstmMSGenCases());
