@@ -269,6 +269,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
@@ -333,6 +335,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
@@ -395,6 +399,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false

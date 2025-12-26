@@ -182,9 +182,12 @@ TEST_P(GPU_ConvBiasActivFind2InferFusionFind_FP32, ConvBiasActivFind2Float_testF
         {miopenTensorBias, bias_dev.get()},
     };
 
+    Workspace wspace;
     for(auto& solution : solutions)
     {
-        ASSERT_NO_THROW(solution.Run(get_handle(), tensors, nullptr, 0));
+        auto cur_sol_ws = solution.GetWorkspaceSize();
+        wspace.resize(cur_sol_ws);
+        ASSERT_NO_THROW(solution.Run(get_handle(), tensors, wspace.ptr(), cur_sol_ws));
         ValidateResult();
     }
 }

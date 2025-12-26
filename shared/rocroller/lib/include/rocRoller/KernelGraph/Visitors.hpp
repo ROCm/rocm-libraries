@@ -312,6 +312,7 @@ namespace rocRoller
 
             MAKE_EDGE_VISITOR(CoordinateGraph::Alias);
             MAKE_EDGE_VISITOR(CoordinateGraph::Buffer);
+            MAKE_EDGE_VISITOR(CoordinateGraph::BaseAddress);
             MAKE_EDGE_VISITOR(CoordinateGraph::Offset);
             MAKE_EDGE_VISITOR(CoordinateGraph::Stride);
             MAKE_EDGE_VISITOR(CoordinateGraph::View);

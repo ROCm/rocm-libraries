@@ -37,9 +37,9 @@
 int main(int argc, char* argv[])
 {
     /***************************************
-   * Check device support                 *
-   **************************************/
-    if(!isF32Supported())
+    * Check device support                 *
+    **************************************/
+    if(!isF32Supported() || !isF32MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);
@@ -264,11 +264,12 @@ int main(int argc, char* argv[])
                                                      typeCompute));
 
     hiptensorDataType_t scalarType;
-    CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
-                desc,
-                HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-                (void*)&scalarType,
-                sizeof(scalarType)));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorOperationDescriptorGetAttribute(handle,
+                                                 desc,
+                                                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                 (void*)&scalarType,
+                                                 sizeof(scalarType)));
     assert(scalarType == HIPTENSOR_R_32F);
 
     /**************************

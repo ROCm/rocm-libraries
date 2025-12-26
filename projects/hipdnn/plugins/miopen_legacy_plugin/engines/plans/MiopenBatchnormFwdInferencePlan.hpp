@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
@@ -18,14 +18,14 @@ class BatchnormFwdInferenceParams
 {
 public:
     BatchnormFwdInferenceParams(
-        const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& attributes,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceParams(
-        const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
-        const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
+        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceParams(const BatchnormFwdInferenceParams&) = delete;

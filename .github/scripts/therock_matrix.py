@@ -1,6 +1,7 @@
 """
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
+
 import os
 
 subtree_to_project_map = {
@@ -13,6 +14,7 @@ subtree_to_project_map = {
     "projects/hiprand": "rand",
     "projects/hipsolver": "solver",
     "projects/hipsparse": "sparse",
+    "projects/hipsparselt": "sparse",
     "projects/miopen": "miopen",
     "projects/rocblas": "blas",
     "project/rocfft": "fft",
@@ -39,7 +41,7 @@ project_map = {
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "project_to_test": ["hipblaslt", "rocblas", "hipblas"],
+        "project_to_test": ["hipblaslt", "rocblas", "hipblas", "rocroller"],
     },
     "miopen": {
         "cmake_options": [
@@ -85,7 +87,7 @@ project_map = {
 additional_options = {
     "sparse": {
         "cmake_options": ["-DTHEROCK_ENABLE_SPARSE=ON"],
-        "project_to_test": ["rocsparse", "hipsparse"],
+        "project_to_test": ["rocsparse", "hipsparse", "hipsparselt"],
         "project_to_add": "blas",
     },
     "solver": {
@@ -93,6 +95,12 @@ additional_options = {
         "project_to_test": ["rocsolver", "hipsolver"],
         "project_to_add": "blas",
     },
+}
+
+# If a project has dependencies that are also being built, we combine build options and test options
+# This way, there will be no S3 upload overlap and we save redundant builds
+dependency_graph = {
+    "miopen": ["blas", "rand"],
 }
 
 
@@ -112,12 +120,12 @@ def collect_projects_to_run(subtrees):
             project_to_add = project_options_to_add["project_to_add"]
             # If `project_to_add` is in included, add options to the existing `project_map` entry
             if project_to_add in projects:
-                project_map[project_to_add]["cmake_options"] += project_options_to_add[
-                    "cmake_options"
-                ]
-                project_map[project_to_add][
-                    "project_to_test"
-                ] += project_options_to_add["project_to_test"]
+                project_map[project_to_add]["cmake_options"].extend(
+                    project_options_to_add["cmake_options"]
+                )
+                project_map[project_to_add]["project_to_test"].extend(
+                    project_options_to_add["project_to_test"]
+                )
             # If `project_to_add` is not included, only run build and tests for the optional project
             else:
                 projects.add(project_to_add)
@@ -127,6 +135,27 @@ def collect_projects_to_run(subtrees):
                 project_map[project_to_add]["project_to_test"] = project_options_to_add[
                     "project_to_test"
                 ]
+
+    # Check for potential dependencies
+    to_remove_from_project_map = []
+    for project in list(projects):
+        # Check if project has a dependency combine
+        if project in dependency_graph:
+            for dependency in dependency_graph[project]:
+                # If the dependency is also included, let's combine to avoid overlap
+                if dependency in projects:
+                    project_map[project]["cmake_options"].extend(
+                        project_map[dependency]["cmake_options"]
+                    )
+                    project_map[project]["project_to_test"].extend(
+                        project_map[dependency]["project_to_test"]
+                    )
+                    to_remove_from_project_map.append(dependency)
+
+    # if dependency is included in projects and parent is found, we delete the dependency as the parent will build and test
+    for to_remove_item in to_remove_from_project_map:
+        projects.remove(to_remove_item)
+        del project_map[to_remove_item]
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
@@ -139,12 +168,12 @@ def collect_projects_to_run(subtrees):
                 "additional_flags" in project_map_data
                 and platform in project_map_data["additional_flags"]
             ):
-                project_map_data["cmake_options"] += project_map_data[
-                    "additional_flags"
-                ][platform]
+                project_map_data["cmake_options"].extend(
+                    project_map_data["additional_flags"][platform]
+                )
 
             # To save time, only build what is needed
-            project_map_data["cmake_options"] += ["-DTHEROCK_ENABLE_ALL=OFF"]
+            project_map_data["cmake_options"].extend(["-DTHEROCK_ENABLE_ALL=OFF"])
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
             project_to_test_options = ",".join(project_map_data["project_to_test"])

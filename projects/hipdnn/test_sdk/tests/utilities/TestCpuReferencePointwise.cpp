@@ -3,15 +3,15 @@
 
 #include <cmath>
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::data_objects;
 
 namespace
 {

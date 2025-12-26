@@ -18,31 +18,34 @@ hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
         }
     }
 
-    throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                                               "Device buffer with the uid: " + std::to_string(uid)
-                                                   + " not found in the provided device buffers.");
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+        "Device buffer with the uid: " + std::to_string(uid)
+            + " not found in the provided device buffers.");
 }
 
-miopenDataType_t tensorDataTypeToMiopenDataType(const hipdnn_sdk::data_objects::DataType& dataType)
+miopenDataType_t
+    tensorDataTypeToMiopenDataType(const hipdnn_data_sdk::data_objects::DataType& dataType)
 {
     switch(dataType)
     {
-    case hipdnn_sdk::data_objects::DataType::FLOAT:
+    case hipdnn_data_sdk::data_objects::DataType::FLOAT:
         return miopenFloat;
-    case hipdnn_sdk::data_objects::DataType::HALF:
+    case hipdnn_data_sdk::data_objects::DataType::HALF:
         return miopenHalf;
-    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+    case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
         return miopenBFloat16;
     default:
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported data type for MIOpen: "
-                + std::string(hipdnn_sdk::data_objects::toString(dataType)));
+                + std::string(hipdnn_data_sdk::data_objects::toString(dataType)));
     }
 }
 
-const hipdnn_sdk::data_objects::TensorAttributes& findTensorAttributes(
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     int64_t uid)
 {
     if(auto tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
@@ -50,24 +53,25 @@ const hipdnn_sdk::data_objects::TensorAttributes& findTensorAttributes(
         return *tensorAttr->second;
     }
 
-    throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                               "Failed to find tensor with UID in tensorMap: "
-                                                   + std::to_string(uid));
+    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                   "Failed to find tensor with UID in tensorMap: "
+                                                       + std::to_string(uid));
 }
 
 MiopenTensor createTensor(
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
     int64_t uid)
 {
     const auto& tensorAttr = findTensorAttributes(tensorMap, uid);
     return {tensorAttr};
 }
 
-size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr)
+size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes& attr)
 {
     if(attr.dims()->size() < 3)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Tensor must have at least 3 dimensions, but got: "
                 + std::to_string(attr.dims()->size()));
@@ -76,10 +80,10 @@ size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr
     return attr.dims()->size() - 2;
 }
 
-ActivationParams
-    mapPointwiseModeToMiopenActivation(const hipdnn_sdk::data_objects::PointwiseAttributes& attrs)
+ActivationParams mapPointwiseModeToMiopenActivation(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs)
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
 
     switch(attrs.operation())
     {
@@ -114,7 +118,7 @@ ActivationParams
         }
         if(attrs.relu_lower_clip().has_value() && attrs.relu_lower_clip().value() != 0.f)
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Standard relu with a non-zero lower_clip is not supported");
         }
@@ -145,8 +149,8 @@ ActivationParams
             // Only support beta=1
             if(static_cast<double>(*attrs.softplus_beta()) != 1.0)
             {
-                throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                           "Softplus only supports beta = 1.0");
+                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                               "Softplus only supports beta = 1.0");
             }
         }
         return ActivationParams{miopenActivationSOFTRELU, 0.0, 0.0, 0.0};
@@ -155,8 +159,8 @@ ActivationParams
     case PM::IDENTITY:
         return ActivationParams{miopenActivationPASTHRU, 0.0, 0.0, 0.0};
     default:
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "Unsupported activation operation");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported activation operation");
     }
 }
 

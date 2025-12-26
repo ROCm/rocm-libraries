@@ -31,7 +31,6 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-
 TYPE_SIZE_BYTES = {
     "fp4": 0.5,
     "fp6": 0.75,
