@@ -55,6 +55,10 @@ template <bool IsConst = false>
 class ITensorIterator
 {
 public:
+    // forward declarations
+    struct LinearIndex;
+    struct CompositeIndex;
+
     using iterator_category = std::forward_iterator_tag;
     using value_type = std::conditional_t<IsConst, const void*, void*>;
     using difference_type = std::ptrdiff_t;
@@ -62,34 +66,30 @@ public:
     using reference = std::conditional_t<IsConst, const void*, void*>;
 
     using TensorType = std::conditional_t<IsConst, const ITensor&, ITensor&>;
+    using TensorPointerType = std::conditional_t<IsConst, ITensor const*, ITensor*>;
 
+    using IndexType = std::variant<LinearIndex, CompositeIndex>;
+
+public:
     ITensorIterator() = default;
 
     template <bool C = IsConst, std::enable_if_t<!C, int> = 0>
     ITensorIterator(ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
-        , _indices(_tensor.dims().size(), 0)
+        , _index(makeIndex(&_tensor, isEnd))
     {
-        if(isEnd && !_tensor.dims().empty())
-        {
-            _indices[0] = _tensor.dims()[0];
-        }
     }
 
     template <bool C = IsConst, std::enable_if_t<C, int> = 0>
     ITensorIterator(const ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
-        , _indices(_tensor.dims().size(), 0)
+        , _index(makeIndex(&_tensor, isEnd))
     {
-        if(isEnd && !_tensor.dims().empty())
-        {
-            _indices[0] = _tensor.dims()[0];
-        }
     }
 
     ITensorIterator(const ITensorIterator& other)
         : _tensor(other._tensor)
-        , _indices(other._indices)
+        , _index(other._index)
     {
     }
 
@@ -100,7 +100,7 @@ public:
         if(this != &other)
         {
             _tensor = other._tensor;
-            _indices = other._indices;
+            _index = other._index;
         }
         return *this;
     }
@@ -110,29 +110,14 @@ public:
     value_type operator*()
     {
         throwIfOutOfBounds("Cannot dereference end iterator");
-
-        return _tensor.hostDataOffsetFromIndex(_tensor.getIndex(_indices));
+        return _tensor.hostDataOffsetFromIndex(
+            std::visit([](auto& idx) { return idx.getValue(); }, _index));
     }
 
     ITensorIterator& operator++()
     {
         throwIfOutOfBounds("Iterator cannot be incremented past the end");
-
-        const auto& dims = _tensor.dims();
-        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
-        {
-            auto dimIdx = static_cast<size_t>(dim);
-            _indices[dimIdx]++;
-            if(_indices[dimIdx] < dims[dimIdx])
-            {
-                return *this;
-            }
-            _indices[dimIdx] = 0;
-        }
-
-        //set 1 past end.
-        _indices[0] = dims[0];
-
+        std::visit([](auto& idx) { ++idx; }, _index);
         return *this;
     }
 
@@ -145,7 +130,7 @@ public:
 
     bool operator==(const ITensorIterator& other) const
     {
-        return (&_tensor == &other._tensor) && (_indices == other._indices);
+        return (&_tensor == &other._tensor) && (_index == other._index);
     }
 
     bool operator!=(const ITensorIterator& other) const
@@ -153,23 +138,147 @@ public:
         return !(*this == other);
     }
 
-    std::vector<int64_t> indices() const
+    IndexType index() const
     {
-        return _indices;
+        return _index;
     }
+
+    struct LinearIndex
+    {
+        LinearIndex(TensorPointerType tensor, bool isEnd)
+            : index(0)
+            , tensor(tensor)
+
+        {
+            if(isEnd && !tensor->dims().empty())
+            {
+                index = static_cast<decltype(index)>(tensor->elementCount());
+            }
+        }
+
+        LinearIndex& operator++()
+        {
+            ++index;
+            return *this;
+        }
+
+        LinearIndex operator++(int)
+        {
+            auto temp{*this};
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(const LinearIndex& other) const
+        {
+            return index == other.index && tensor == other.tensor;
+        }
+
+        bool operator!=(const LinearIndex& other) const
+        {
+            return !((*this) == other);
+        }
+
+        bool isOutOfBounds() const
+        {
+            return index == static_cast<decltype(index)>(tensor->elementCount());
+        }
+
+        int64_t getValue() const
+        {
+            return index;
+        }
+
+        int64_t index;
+        TensorPointerType tensor;
+    };
+
+    struct CompositeIndex
+    {
+        CompositeIndex(TensorPointerType tensor, bool isEnd)
+            : indices(tensor->dims().size(), 0)
+            , tensor(tensor)
+        {
+            if(isEnd && !tensor->dims().empty())
+            {
+                indices[0] = tensor->dims()[0];
+            }
+        }
+
+        CompositeIndex& operator++()
+        {
+            const auto& dims = tensor->dims();
+            for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
+            {
+                auto dimIdx = static_cast<size_t>(dim);
+                indices[dimIdx]++;
+                if(indices[dimIdx] < dims[dimIdx])
+                {
+                    return *this;
+                }
+                indices[dimIdx] = 0;
+            }
+
+            //set 1 past end.
+            indices[0] = dims[0];
+            return *this;
+        }
+
+        CompositeIndex operator++(int)
+        {
+            auto temp{*this};
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(const CompositeIndex& other) const
+        {
+            return indices == other.indices && tensor == other.tensor;
+        }
+
+        bool operator!=(const CompositeIndex& other) const
+        {
+            return !((*this) == other);
+        }
+
+        bool isOutOfBounds() const
+        {
+            const auto& dims = tensor->dims();
+            return dims.empty() || indices[0] == dims[0];
+        }
+
+        int64_t getValue() const
+        {
+            return tensor->getIndex(indices);
+        }
+
+        std::vector<int64_t> indices;
+        TensorPointerType tensor;
+    };
 
 private:
     void throwIfOutOfBounds(const std::string& reason) const
     {
-        const auto& dims = _tensor.dims();
-        if(dims.empty() || _indices[0] == dims[0])
+        if(std::visit([](const auto& idx) { return idx.isOutOfBounds(); }, _index))
         {
             throw std::out_of_range(reason);
         }
     }
 
+    IndexType makeIndex(TensorPointerType tensor, bool isEnd)
+    {
+        if(tensor->isPacked())
+        {
+            return LinearIndex(tensor, isEnd);
+        }
+        else
+        {
+            return CompositeIndex(tensor, isEnd);
+        }
+    }
+
     TensorType _tensor;
-    std::vector<int64_t> _indices;
+    IndexType _index;
 };
 
 class ITensor
@@ -491,16 +600,9 @@ public:
     void fillWithValue(T value) override
     {
         _memory.markHostModified();
-        if(isPacked())
+        for(auto valuePtr : (*this))
         {
-            auto data{_memory.hostData()};
-            std::fill(data, data + _elementCount, value);
-        }
-        else
-        {
-            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-                this->setHostValue(value, indices);
-            });
+            *static_cast<T*>(valuePtr) = value;
         }
     }
 
@@ -512,23 +614,11 @@ public:
                                                            static_cast<float>(max));
 
         _memory.markHostModified();
-
-        if(isPacked())
+        for(auto valuePtr : (*this))
         {
-            auto data{_memory.hostData()};
-            for(size_t i{0}; i < _elementCount; i++)
-            {
-                data[i] = static_cast<T>(distribution(generator));
-            }
-        }
-        else
-        {
-            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-                this->setHostValue(static_cast<T>(distribution(generator)), indices);
-            });
+            *static_cast<T*>(valuePtr) = static_cast<T>(distribution(generator));
         }
     }
-
     bool isPacked() const override
     {
         return _packed;
