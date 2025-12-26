@@ -57,12 +57,18 @@ auto GetDeterministicConvCase()
     return GetConvTestForGroupXdlops<miopenHalf>(miopenTensorNDHWC, std::move(test_case));
 }
 
+template <miopenDataType_t datatype>
 const auto& GetTestParams()
 {
     static const auto params = [] {
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+
+        if constexpr(datatype != miopenFloat)
+        {
+            supportedDevices = supportedDevices | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
+        }
 #else
         Gpu supportedDevices = Gpu::None;
 #endif
@@ -126,45 +132,45 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDeterministicApplicabil
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
                                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW),
                                           testing::ValuesIn(GetConvSmokeTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenBFloat16>()),
                                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW),
                                           testing::ValuesIn(GetConvSmokeTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenFloat>()),
                                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW),
                                           testing::ValuesIn(GetConvSmokeTestCases())));
 
 // Full tests
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
                                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW),
                                           testing::ValuesIn(GetConvFullTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenBFloat16>()),
                                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW),
                                           testing::ValuesIn(GetConvFullTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP32,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenFloat>()),
                                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW),
                                           testing::ValuesIn(GetConvFullTestCases())));
 
 // Device applicability tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlopsDevApplicability_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
                                           testing::Values(GetDevApplicabilityConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(
