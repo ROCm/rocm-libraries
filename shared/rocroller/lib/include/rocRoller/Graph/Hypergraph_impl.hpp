@@ -109,15 +109,9 @@ namespace rocRoller
                               el);
         }
 
-        inline const SettingsOption<std::size_t> GraphNodeLabelMaxLength{
-            "GRAPH_NODE_LABEL_MAX_LENGTH",
-            "Maximum length of KernelGraph node expression when emitting DOT",
-            std::size_t{0},
-            -1};
-
         inline std::string truncate(std::string const& s)
         {
-            auto const maxLen = Settings::Get(GraphNodeLabelMaxLength);
+            auto const maxLen = Settings::Get(Settings::GraphNodeLabelMaxLength);
 
             if(maxLen == 0 || s.size() <= maxLen)
             {
