@@ -30,7 +30,7 @@
 
 namespace pooling2d_gtest {
 
-// Dataset definitions (matching original pooling2d.hpp ctest driver):
+// Dataset definitions (matching original pooling2d.hpp ctest driver, now removed):
 // - Dataset 0: Default dataset with various tensor sizes (tested in pooling2d.cpp)
 // - Dataset 1: Intended for testing of asymmetric configs (tested in pooling2d_asymmetric.cpp)
 // - Dataset 2: Intended for testing of configs with wide window (tested in pooling2d_wide.cpp)
