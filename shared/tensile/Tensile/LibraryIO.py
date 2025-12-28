@@ -168,16 +168,36 @@ class LibraryLogic(NamedTuple):
     library: SolutionLibrary.MasterSolutionLibrary
 
 
-def parseLibraryLogicFile(filename, outputArchName=None):
+def parseLibraryLogicFile(filename, scheduleToArchs=None):
     """Wrapper function to read and parse a library logic file.
 
     Args:
         filename: Path to the library logic file.
-        outputArchName: Optional override for output architecture name. If provided,
-            this name will be used for all output file naming (lazy libraries, code objects)
-            while the original ArchitectureName is still used for ISA capabilities.
+        scheduleToArchs: Optional dict mapping schedule names to list of output arch names.
+            When a schedule has multiple archs, this function returns multiple results.
+
+    Returns:
+        List of LibraryLogic tuples (always a list for consistent handling).
     """
-    return parseLibraryLogicData(readYAML(filename), filename, outputArchName)
+    data = readYAML(filename)
+
+    # Get schedule name from data
+    if isinstance(data, list):
+        scheduleName = data[1] if len(data) > 1 else None
+    else:
+        scheduleName = data.get("ScheduleName")
+
+    # Get list of output archs for this schedule
+    outputArchs = None
+    if scheduleToArchs and scheduleName:
+        outputArchs = scheduleToArchs.get(scheduleName)
+
+    if outputArchs:
+        # Return one result per requested arch
+        return [parseLibraryLogicData(data, filename, arch) for arch in outputArchs]
+    else:
+        # No override - use original arch name, still return as list
+        return [parseLibraryLogicData(data, filename, None)]
 
 
 def parseLibraryLogicData(data, srcFile="?", outputArchName=None):

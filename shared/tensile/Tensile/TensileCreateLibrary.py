@@ -32,6 +32,7 @@ if __name__ == "__main__":
 
 import collections
 import copy
+import functools
 import itertools
 import os
 import re
@@ -1038,56 +1039,35 @@ def makeSolutions(
 
 def parseLibraryLogicFiles(
     logicFiles: List[str],
-    scheduleToRequestedArchs: Optional[Dict[str, List[str]]] = None
+    scheduleToArchs: Optional[Dict[str, List[str]]] = None
 ) -> List[LibraryIO.LibraryLogic]:
     """Load and parse logic (yaml) files.
 
     Given a list of paths to yaml files containing library logic, load the files
     into memory and parse the data into a named tuple (i.e. LibraryLogic).
 
-    If scheduleToRequestedArchs maps a schedule to multiple archs (e.g., navi31 -> [gfx1100, gfx11-generic]),
-    the logic file is parsed multiple times, once per arch, producing separate libraries.
-    This supports cases like --architecture=gfx1100;gfx11-generic where both outputs are needed.
-
     Args:
         logicFiles: List of paths to logic files.
-        scheduleToRequestedArchs: Optional mapping from schedule name to list of requested arch names.
+        scheduleToArchs: Optional mapping from schedule name to list of output arch names.
+            When a schedule has multiple archs (e.g., gfx1100 and gfx11-generic both
+            mapping to navi31), the logic file is parsed once but produces multiple outputs.
 
     Returns:
         List of library logic tuples.
     """
-    if not scheduleToRequestedArchs:
-        # No override - use original parallel parsing
+    if scheduleToArchs:
+        parseFunc = functools.partial(
+            LibraryIO.parseLibraryLogicFile,
+            scheduleToArchs=scheduleToArchs
+        )
+        results = Common.ParallelMap(parseFunc, logicFiles, "Reading logic files", multiArg=False)
+        # flatten to 1D list since each result is a list from
+        # `parseLibraryLogicFile` is a list
+        return itertools.chain.from_iterable(results)
+    else:
         return Common.ParallelMap(
             LibraryIO.parseLibraryLogicFile, logicFiles, "Reading logic files", multiArg=False
         )
-
-    # When we have arch overrides, parse each file once per requested arch
-    results = []
-    for path in logicFiles:
-        # Load YAML once
-        rawData = LibraryIO.readYAML(path)
-
-        # Get schedule name from raw data
-        if isinstance(rawData, list):
-            scheduleName = rawData[1] if len(rawData) > 1 else None
-        else:
-            scheduleName = rawData.get("ScheduleName")
-
-        # Get list of requested archs for this schedule
-        requestedArchs = scheduleToRequestedArchs.get(scheduleName) if scheduleName else None
-
-        if not requestedArchs:
-            # No override - parse with original arch name
-            result = LibraryIO.parseLibraryLogicData(rawData, path, outputArchName=None)
-            results.append(result)
-        else:
-            # Parse once per requested arch
-            for reqArch in requestedArchs:
-                result = LibraryIO.parseLibraryLogicData(rawData, path, outputArchName=reqArch)
-                results.append(result)
-
-    return results
 
 
 def generateLogicData(
@@ -1095,7 +1075,7 @@ def generateLogicData(
     version: str,
     printLevel: int,
     separate: bool,
-    scheduleToRequestedArchs: Optional[Dict[str, List[str]]] = None
+    scheduleToArchs: Optional[Dict[str, List[str]]] = None
 ) -> Dict[str, MasterSolutionLibrary]:
     """Generates a dictionary of master solution libraries.
 
@@ -1104,16 +1084,16 @@ def generateLogicData(
         version: User provided version for the library.
         printLevel: Level of debug printing requested.
         separate: Separate libraries by architecture.
-        scheduleToRequestedArchs: Optional mapping from schedule name to list of requested arch names.
-            When provided, logic files are parsed once per requested arch, producing separate libraries
-            with the correct output names (e.g., gfx11-generic instead of gfx1100).
+        scheduleToArchs: Optional mapping from schedule name to list of output arch names.
+            When a schedule has multiple archs (e.g., gfx1100 and gfx11-generic both
+            mapping to navi31), the logic file produces multiple outputs.
 
     Returns:
         For separate architectures, a dictionary of architecture
         separated master solution libraries; otherwise, a single
         master solution library for all architectures.
     """
-    libraries = parseLibraryLogicFiles(logicFiles, scheduleToRequestedArchs)
+    libraries = parseLibraryLogicFiles(logicFiles, scheduleToArchs)
     logicList = libraries if not printLevel else Utils.tqdm(libraries, desc="Processing logic data")
     masterLibraries = makeMasterLibraries(logicList, separate)
     if separate and "fallback" in masterLibraries:
@@ -1501,20 +1481,22 @@ def TensileCreateLibrary():
     tPrint(2, "#   " + "\n#   ".join(logicFiles))
 
     # Build mapping from schedule name to list of requested arch names
-    # This supports cases like --architecture=gfx1100;gfx11-generic where both outputs are needed
-    # For each logic file (keyed by schedule), we parse once per requested arch
-    scheduleToRequestedArchs = None
+    # This handles cases like gfx1100;gfx11-generic where both map to navi31
+    # Each logic file will produce one output per requested arch for its schedule
+    scheduleToArchs = None
     if args["SeparateArchitectures"]:
         requestedArchs = splitDelimitedString(args["Architecture"], {";", "_"})
-        scheduleToRequestedArchs = collections.defaultdict(list)
+        scheduleToArchs = collections.defaultdict(list)
         for reqArch in requestedArchs:
             scheduleName = getArchitectureName(reqArch)
             if scheduleName:
-                scheduleToRequestedArchs[scheduleName].append(reqArch)
+                scheduleToArchs[scheduleName].append(reqArch)
+        # Convert to regular dict, or None if empty
+        scheduleToArchs = dict(scheduleToArchs) if scheduleToArchs else None
 
     masterLibraries = generateLogicData(
         logicFiles, args["Version"], args["PrintLevel"], args["SeparateArchitectures"],
-        scheduleToRequestedArchs
+        scheduleToArchs
     )
 
     solutions = generateSolutions(masterLibraries, args["SeparateArchitectures"])
