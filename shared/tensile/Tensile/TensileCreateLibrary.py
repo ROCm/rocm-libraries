@@ -1483,6 +1483,8 @@ def TensileCreateLibrary():
     # Build mapping from schedule name to list of requested arch names
     # This handles cases like gfx1100;gfx11-generic where both map to navi31
     # Each logic file will produce one output per requested arch for its schedule
+    # Note: xnack variants (gfx90a:xnack-, gfx90a:xnack+) are normalized to base name
+    # since xnack handling is done at kernel compile level, not library level
     scheduleToArchs = None
     if args["SeparateArchitectures"]:
         requestedArchs = splitDelimitedString(args["Architecture"], {";", "_"})
@@ -1490,7 +1492,10 @@ def TensileCreateLibrary():
         for reqArch in requestedArchs:
             scheduleName = getArchitectureName(reqArch)
             if scheduleName:
-                scheduleToArchs[scheduleName].append(reqArch)
+                # Normalize: strip xnack suffix to avoid duplicate library entries
+                baseName = reqArch.split(':')[0]
+                if baseName not in scheduleToArchs[scheduleName]:
+                    scheduleToArchs[scheduleName].append(baseName)
         # Convert to regular dict, or None if empty
         scheduleToArchs = dict(scheduleToArchs) if scheduleToArchs else None
 
