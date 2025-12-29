@@ -77,18 +77,16 @@ extern "C" {
 *  @param[in]
 *  alpha       scalar \f$\alpha\f$.
 *  @param[in]
-*  vecX        sparse matrix descriptor.
+*  vecX        sparse vector descriptor.
 *  @param[in]
 *  beta        scalar \f$\beta\f$.
 *  @param[inout]
-*  vecY        dense matrix descriptor.
+*  vecY        dense vector descriptor.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta or \p vecY pointer is
-*          invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_axpby.cpp doc example
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

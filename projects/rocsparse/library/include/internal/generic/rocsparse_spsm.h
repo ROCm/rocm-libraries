@@ -110,6 +110,9 @@ extern "C" {
 *  Only the \ref rocsparse_spsm_stage_buffer_size stage and the \ref rocsparse_spsm_stage_compute stage
 *  support execution in a hipGraph context. The \ref rocsparse_spsm_stage_preprocess stage does not support hipGraph.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]
@@ -148,20 +151,18 @@ extern "C" {
 *  \par Example
 *  \snippet example_rocsparse_spsm.cpp doc example
 */
-__attribute__((deprecated("This function is deprecated and will be removed in a future release. "
-                          "Use rocsparse_sptrsm instead."))) ROCSPARSE_EXPORT rocsparse_status
-    rocsparse_spsm(rocsparse_handle            handle,
-                   rocsparse_operation         trans_A,
-                   rocsparse_operation         trans_B,
-                   const void*                 alpha,
-                   rocsparse_const_spmat_descr matA,
-                   rocsparse_const_dnmat_descr matB,
-                   const rocsparse_dnmat_descr matC,
-                   rocsparse_datatype          compute_type,
-                   rocsparse_spsm_alg          alg,
-                   rocsparse_spsm_stage        stage,
-                   size_t*                     buffer_size,
-                   void*                       temp_buffer);
+ROCSPARSE_EXPORT rocsparse_status rocsparse_spsm(rocsparse_handle            handle,
+                                                 rocsparse_operation         trans_A,
+                                                 rocsparse_operation         trans_B,
+                                                 const void*                 alpha,
+                                                 rocsparse_const_spmat_descr matA,
+                                                 rocsparse_const_dnmat_descr matB,
+                                                 const rocsparse_dnmat_descr matC,
+                                                 rocsparse_datatype          compute_type,
+                                                 rocsparse_spsm_alg          alg,
+                                                 rocsparse_spsm_stage        stage,
+                                                 size_t*                     buffer_size,
+                                                 void*                       temp_buffer);
 #ifdef __cplusplus
 }
 #endif

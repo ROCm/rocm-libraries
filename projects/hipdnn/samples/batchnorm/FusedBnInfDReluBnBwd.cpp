@@ -6,18 +6,18 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
 void SampleRunner::operator()(const TensorLayout& layout)
@@ -74,7 +74,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto [dx, dscale, dbias] = graph->batchnorm_backward(dxDrelu, x, scale, bnBwdAttributes);
     dx->set_name("dx");
-    dx->set_data_type(inputType);
     dx->set_output(true);
 
     dscale->set_name("dscale");
@@ -84,6 +83,21 @@ void SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_name("dbias");
     dbias->set_data_type(intermediateType);
     dbias->set_output(true);
+
+    HIPDNN_FE_CHECK(graph->validate());
+    std::cout << "Graph validation successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+    std::cout << "Operation graph build successful.\n";
+
+    HIPDNN_FE_CHECK(graph->create_execution_plans());
+    std::cout << "Execution plans created successfully.\n";
+
+    HIPDNN_FE_CHECK(graph->check_support());
+    std::cout << "Graph support check successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_plans());
+    std::cout << "Plans build successful.\n";
 
     // Create tensors for execution
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -108,21 +122,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                          static_cast<IntermediateType>(0.1f));
     savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                            static_cast<IntermediateType>(2.0f));
-
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
@@ -172,7 +171,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         // Execute on CPU using graph executor
         auto serializedGraph = graph->buildFlatbufferOperationGraph();
-        test_utilities::CpuReferenceGraphExecutor cpuExecutor;
+        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
         // Tolerance range is high due to data-type mismatch between plugin and reference impl.
@@ -180,10 +179,11 @@ void SampleRunner::operator()(const TensorLayout& layout)
         // Issue is due to the reference not splitting the input / output datatypes.
         const auto inputTol = 4e-2f;
 
-        auto dxValidator = test_utilities::CpuFpReferenceValidation<InputType>(
+        auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
             static_cast<InputType>(inputTol), static_cast<InputType>(inputTol));
-        auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-            static_cast<IntermediateType>(inputTol), static_cast<IntermediateType>(inputTol));
+        auto dscaleDbiasValidator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
+                static_cast<IntermediateType>(inputTol), static_cast<IntermediateType>(inputTol));
 
         bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
         bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);

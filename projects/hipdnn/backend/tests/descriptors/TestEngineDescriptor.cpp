@@ -13,12 +13,13 @@
 #include "mocks/MockHandle.hpp"
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 
 #include <memory>
 
 using namespace hipdnn_backend;
 using namespace plugin;
+using namespace hipdnn_backend::test_utilities;
 using namespace ::testing;
 
 using ::testing::Return;
@@ -85,12 +86,10 @@ protected:
 
     void SetUp() override
     {
-        _engineWrapper = hipdnn_sdk::test_utilities::createDescriptor<EngineDescriptor>();
-        _mockGraphWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockGraphDescriptor>();
-        _mockGraphBadTypeWrapper
-            = hipdnn_sdk::test_utilities::createDescriptor<MockGraphDescriptor>();
-        _mockWrongTypeWrapper
-            = hipdnn_sdk::test_utilities::createDescriptor<MockEngineDescriptor>();
+        _engineWrapper = createDescriptor<EngineDescriptor>();
+        _mockGraphWrapper = createDescriptor<MockGraphDescriptor>();
+        _mockGraphBadTypeWrapper = createDescriptor<MockGraphDescriptor>();
+        _mockWrongTypeWrapper = createDescriptor<MockEngineDescriptor>();
         _mockHandle = std::make_unique<MockHandle>();
         _mockEnginePluginResourceManager = std::make_shared<MockEnginePluginResourceManager>();
 
@@ -106,7 +105,7 @@ private:
     void serializeEngineDetails(int64_t engineId)
     {
         flatbuffers::FlatBufferBuilder builder;
-        hipdnn_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
+        hipdnn_data_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
         engineDetailsBuilder.add_engine_id(engineId);
         builder.Finish(engineDetailsBuilder.Finish());
         _engineDetailsBuffer = builder.Release();

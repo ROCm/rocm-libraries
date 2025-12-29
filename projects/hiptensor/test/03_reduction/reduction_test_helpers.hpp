@@ -32,6 +32,7 @@
 #include "hiptensor_length_generation.hpp"
 #include "hiptensor_options.hpp"
 #include "llvm/yaml_parser.hpp"
+#include "reduction_test_params.hpp"
 
 #ifdef HIPTENSOR_TEST_YAML_INCLUDE
 #include HIPTENSOR_TEST_YAML_INCLUDE
@@ -39,6 +40,11 @@
 #else
 #define HIPTENSOR_TEST_YAML_BUNDLE 0
 #endif // HIPTENSOR_TEST_YAML_INCLUDE
+
+// Define a placeholder macro for clangd when YAML bundle is not available
+#ifndef HIPTENSOR_TEST_GET_YAML
+#define HIPTENSOR_TEST_GET_YAML ""
+#endif
 
 auto inline load_config_params()
 {

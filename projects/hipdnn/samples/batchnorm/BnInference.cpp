@@ -5,17 +5,17 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/utilities/Constants.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 // Note: Sample temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
 
@@ -48,7 +48,22 @@ void SampleRunner::operator()(const TensorLayout& layout)
     bnAttributes.set_name("bn_inference_node");
 
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
-    y->set_output(true).set_data_type(inputType);
+    y->set_output(true);
+
+    HIPDNN_FE_CHECK(graph->validate());
+    std::cout << "Graph validation successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+    std::cout << "Operation graph build successful.\n";
+
+    HIPDNN_FE_CHECK(graph->create_execution_plans());
+    std::cout << "Execution plans created successfully.\n";
+
+    HIPDNN_FE_CHECK(graph->check_support());
+    std::cout << "Graph support check successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_plans());
+    std::cout << "Plans build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
     utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
@@ -66,21 +81,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                     static_cast<IntermediateType>(1.0f));
     invVarianceTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                            static_cast<IntermediateType>(1.0f));
-
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
@@ -101,19 +101,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
-        auto tolerance = test_utilities::batchnorm::getToleranceInference<InputType>();
+        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<InputType>();
         double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
-        test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::
-            batchnormFwdInference(xTensor,
-                                  scaleTensor,
-                                  biasTensor,
-                                  meanTensor,
-                                  invVarianceTensor,
-                                  yRefTensor,
-                                  epsilon);
+        hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInference(
+            xTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, yRefTensor);
 
-        auto validator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto validator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool yValid = validator.allClose(yRefTensor, yTensor);
 

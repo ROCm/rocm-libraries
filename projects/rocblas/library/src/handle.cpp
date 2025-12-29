@@ -378,6 +378,30 @@ Processor _rocblas_handle::getActiveArch()
     {
         return Processor::gfx1030;
     }
+    else if(deviceString.find("gfx1031") != std::string::npos)
+    {
+        return Processor::gfx1031;
+    }
+    else if(deviceString.find("gfx1032") != std::string::npos)
+    {
+        return Processor::gfx1032;
+    }
+    else if(deviceString.find("gfx1033") != std::string::npos)
+    {
+        return Processor::gfx1033;
+    }
+    else if(deviceString.find("gfx1034") != std::string::npos)
+    {
+        return Processor::gfx1034;
+    }
+    else if(deviceString.find("gfx1035") != std::string::npos)
+    {
+        return Processor::gfx1035;
+    }
+    else if(deviceString.find("gfx1036") != std::string::npos)
+    {
+        return Processor::gfx1036;
+    }
     else if(deviceString.find("gfx1100") != std::string::npos)
     {
         return Processor::gfx1100;
@@ -401,6 +425,14 @@ Processor _rocblas_handle::getActiveArch()
     else if(deviceString.find("gfx1151") != std::string::npos)
     {
         return Processor::gfx1151;
+    }
+    else if(deviceString.find("gfx1152") != std::string::npos)
+    {
+        return Processor::gfx1152;
+    }
+    else if(deviceString.find("gfx1153") != std::string::npos)
+    {
+        return Processor::gfx1153;
     }
     else if(deviceString.find("gfx1200") != std::string::npos)
     {

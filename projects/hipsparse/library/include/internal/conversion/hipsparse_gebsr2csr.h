@@ -126,9 +126,6 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
 *              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_gebsr2csr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

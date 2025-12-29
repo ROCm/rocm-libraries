@@ -5,17 +5,17 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
 void SampleRunner::operator()(const TensorLayout& layout)
@@ -63,14 +63,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
     dxAttr->set_output(true);
 
-    utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
-    utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
-    utilities::Tensor<InputType> dxTensor(dxAttr->get_dim(), layout);
-
-    dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    dxTensor.fillWithValue(static_cast<InputType>(0.0f));
-
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
 
@@ -85,6 +77,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
+
+    utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
+    utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
+    utilities::Tensor<InputType> dxTensor(dxAttr->get_dim(), layout);
+
+    dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    dxTensor.fillWithValue(static_cast<InputType>(0.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[dyAttr->get_uid()] = dyTensor.memory().deviceData();
@@ -114,13 +114,13 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> dxRefTensor(dxAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convBwdData(
+        hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::dgrad(
             dxRefTensor, wTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance = test_utilities::conv::getToleranceBwd<InputType>();
+        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceBwd<InputType>();
 
         auto dxValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
 

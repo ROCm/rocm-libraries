@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -28,17 +28,18 @@ struct FlatmmProblem
     index_t stride_C;
 };
 
-template <int SharedGranularityMN, int SharedGranularityK = 0>
+template <int SharedGranularityMN, int SharedGranularityK = 0, typename ScaleType_ = float>
 struct FlatmmScalePointer
 {
+    using ScaleType                    = ScaleType_;
     static constexpr int GranularityMN = SharedGranularityMN;
     static constexpr int GranularityK  = SharedGranularityK;
 
-    const float* ptr;
+    const ScaleType* ptr;
 
     CK_TILE_HOST_DEVICE FlatmmScalePointer() = default;
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_) : ptr(ptr_) {}
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_, [[maybe_unused]] index_t length_)
+    CK_TILE_HOST_DEVICE FlatmmScalePointer(const ScaleType* ptr_) : ptr(ptr_) {}
+    CK_TILE_HOST_DEVICE FlatmmScalePointer(const ScaleType* ptr_, [[maybe_unused]] index_t length_)
         : ptr(ptr_)
     {
     }
@@ -57,23 +58,24 @@ struct FlatmmScalePointer
         return ret;
     }
 
-    CK_TILE_HOST_DEVICE float operator[](index_t i) const = delete;
+    CK_TILE_HOST_DEVICE ScaleType operator[](index_t i) const = delete;
 };
 
-template <int SharedGranularityMN>
-struct FlatmmScalePointer<SharedGranularityMN, 0>
+template <int SharedGranularityMN, typename ScaleType_>
+struct FlatmmScalePointer<SharedGranularityMN, 0, ScaleType_>
 {
+    using ScaleType                    = ScaleType_;
     static constexpr int GranularityMN = SharedGranularityMN;
     static constexpr int GranularityK  = 0;
 
     static_assert(GranularityMN != 0);
 
-    const float* ptr;
+    const ScaleType* ptr;
     index_t length;
 
     CK_TILE_HOST_DEVICE FlatmmScalePointer() = default;
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_) : ptr(ptr_), length(1) {}
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_, index_t length_)
+    CK_TILE_HOST_DEVICE FlatmmScalePointer(const ScaleType* ptr_) : ptr(ptr_), length(1) {}
+    CK_TILE_HOST_DEVICE FlatmmScalePointer(const ScaleType* ptr_, index_t length_)
         : ptr(ptr_), length(length_)
     {
     }
@@ -94,7 +96,7 @@ struct FlatmmScalePointer<SharedGranularityMN, 0>
         return ret;
     }
 
-    CK_TILE_HOST_DEVICE float operator[](index_t i) const
+    CK_TILE_HOST_DEVICE ScaleType operator[](index_t i) const
     {
         // with additional oob check
         if constexpr(GranularityMN == 1)
@@ -105,23 +107,24 @@ struct FlatmmScalePointer<SharedGranularityMN, 0>
 };
 
 // shared granularityMN = -1 means no scale
-template <>
-struct FlatmmScalePointer<-1, 0>
+template <typename ScaleType_>
+struct FlatmmScalePointer<-1, 0, ScaleType_>
 {
+    using ScaleType                    = ScaleType_;
     static constexpr int GranularityMN = -1;
     static constexpr int GranularityK  = 0;
 
-    const float* ptr = nullptr;
+    const ScaleType* ptr = nullptr;
 
     CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer() = default;
-    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const float*) {}
-    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const float*, index_t) {}
+    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const ScaleType*) {}
+    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const ScaleType*, index_t) {}
 
     CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer operator+(index_t) const
     {
         return FlatmmScalePointer{};
     }
-    CK_TILE_HOST_DEVICE constexpr float operator[](index_t) const
+    CK_TILE_HOST_DEVICE constexpr ScaleType operator[](index_t) const
     {
         return 1; // alway return 1, it doesn't change the result
     }
@@ -363,8 +366,8 @@ struct FlatmmKernel
         template <class KernelArgs>
         __device__ SplitKBatchOffset(const KernelArgs& kargs, const std::size_t k_id = blockIdx.z)
         {
-            constexpr auto N1   = TilePartitioner::BlockGemmShape::WarpTile::at(number<1>{});
-            constexpr auto K1   = TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{});
+            constexpr auto N1   = BlockGemmShape::WarpTile::at(number<1>{});
+            constexpr auto K1   = BlockGemmShape::WarpTile::at(number<2>{});
             const index_t K_t   = kargs.k_batch * K1;
             const index_t KRead = (kargs.K + K_t - 1) / K_t * K1;
 
@@ -662,17 +665,21 @@ struct FlatmmKernel
 
         const auto scale_m_view = make_naive_tensor_view<address_space_enum::global>(
             kargs.scale_m_ptr.ptr,
-            make_tuple(
-                kargs.M / ScaleGranularityM,
-                ScaleGranularityKA == 0 ? 1 : splitk_batch_offset.splitted_k / ScaleGranularityKA),
+            make_tuple(kargs.M / ScaleGranularityM,
+                       ScaleGranularityKA == 0
+                           ? 1
+                           : splitk_batch_offset.splitted_k /
+                                 (ScaleGranularityKA != 0 ? ScaleGranularityKA : 1)),
             make_tuple(scale_stride_m, 0),
             number < ScaleGranularityM == 1 ? FlatmmPipeline::GetVectorSizeA() : 1 > {},
             number<1>{});
         const auto scale_n_view = make_naive_tensor_view<address_space_enum::global>(
             kargs.scale_n_ptr.ptr,
-            make_tuple(
-                ScaleGranularityKB == 0 ? 1 : (splitk_batch_offset.splitted_k / ScaleGranularityKB),
-                kargs.N / ScaleGranularityN),
+            make_tuple(ScaleGranularityKB == 0
+                           ? 1
+                           : (splitk_batch_offset.splitted_k /
+                              (ScaleGranularityKB != 0 ? ScaleGranularityKB : 1)),
+                       kargs.N / ScaleGranularityN),
             make_tuple(0, scale_stride_n),
             number < ScaleGranularityN == 1 ? FlatmmPipeline::GetVectorSizeB() : 1 > {},
             number<1>{});

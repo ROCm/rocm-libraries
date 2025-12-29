@@ -30,7 +30,6 @@
 #include "elementwise/elementwise_cpu_reference.hpp"
 #include "elementwise_test.hpp"
 #include "hiptensor_options.hpp"
-#include "logger.hpp"
 #include "util.hpp"
 #include "utils.hpp"
 
@@ -59,7 +58,8 @@ namespace hiptensor
     // False = skip test
     bool PermutationTest::checkDevice(hiptensorDataType_t datatype) const
     {
-        return isF32Supported() && ((datatype == HIPTENSOR_R_32F) || (datatype == HIPTENSOR_R_16F));
+        return (isF16Supported() && (datatype == HIPTENSOR_R_16F))
+               || (isF32Supported() && (datatype == HIPTENSOR_R_32F));
     }
 
     bool PermutationTest::checkSizes() const

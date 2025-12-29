@@ -48,13 +48,13 @@ extern "C" {
 *  @param[in]
 *  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  matA                matrix descriptor.
+*  matA                sparse matrix descriptor.
 *  @param[in]
-*  vecX                vector descriptor.
+*  vecX                dense vector descriptor.
 *  @param[in]
 *  beta                scalar \f$\beta\f$.
 *  @param[inout]
-*  vecY                vector descriptor.
+*  vecY                dense vector descriptor.
 *  @param[in]
 *  computeType         floating point precision for the SpMV computation.
 *  @param[in]
@@ -62,11 +62,12 @@ extern "C" {
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y or
-*               \p pBufferSizeInBytes pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
-*               currently not supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p vecX, \p beta, 
+*          \p vecY or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
+*          or vector dimensions are incompatible.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -225,11 +226,13 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
-*  <tr><th>A / X      <th>Y         <th>compute_type
-*  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
-*  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><th>A / X      <th>Y          <th>compute_type
+*  <tr><td>HIP_R_8I   <td>HIP_R_32I  <td>HIP_R_32I
+*  <tr><td>HIP_R_8I   <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_16F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  \par Mixed-regular real precisions
@@ -293,9 +296,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \snippet example_hipsparse_spmv.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

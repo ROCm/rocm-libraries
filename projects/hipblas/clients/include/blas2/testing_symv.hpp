@@ -202,7 +202,7 @@ void testing_symv(const Arguments& arg)
     device_vector<T> d_alpha(1);
     device_vector<T> d_beta(1);
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_matrix(

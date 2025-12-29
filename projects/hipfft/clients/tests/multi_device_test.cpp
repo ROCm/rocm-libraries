@@ -116,10 +116,6 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
     auto distribute_params = [=, &all_params](const std::vector<fft_params>& params) {
         for(auto& p : params)
         {
-            // callbacks are not currently supported for multi-proc transforms
-            if(p.run_callbacks && mp_lib == fft_params::fft_mp_lib_mpi)
-                continue;
-
             // test library splitting
             if(!type)
             {

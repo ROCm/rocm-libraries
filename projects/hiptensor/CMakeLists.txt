@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -59,8 +59,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 #Set clang - driver mode to g++
 set(CLANG_DRIVER_MODE "--driver-mode=g++")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O1 -ggdb") # clang++ crashes with -O0
-set(CMAKE_CXX_FLAGS_MINSIZEREL "-O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O1 -ggdb")           # clang++ crashes with -O0
+set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
 
 # Project options
 if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
@@ -182,7 +182,7 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
-find_package( composable_kernel 1.0.0 REQUIRED PATHS $ENV{CK_DIR}/lib/cmake /opt/rocm /opt/rocm/ck COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
+find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
 rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
 
 # Configure library build
@@ -207,30 +207,30 @@ if(HIPTENSOR_BUILD_SAMPLES)
 endif()
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.1.0" )
+set ( VERSION_STRING "2.2.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
-# configure a header file to pass the CMake version settings to the source
+# Configure a header file to pass the CMake version settings to the source
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h" )
 
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfigVersion.cmake"
-    VERSION "${VERSION_STRING}"
-    COMPATIBILITY AnyNewerVersion
+# Define package dependencies for export
+set(PACKAGE_DEPENDS
+    PACKAGE hip
+    PACKAGE composable_kernel
 )
 
-configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
-     "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfig.cmake"
-     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
-     NO_CHECK_REQUIRED_COMPONENTS_MACRO
+set(PACKAGE_STATIC_DEPENDS
+    PACKAGE Threads
 )
 
-rocm_install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfigVersion.cmake"
-    "cmake/Functions/hiptensorSupportedArchitectures.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
+# Export targets using ROCm automation
+rocm_export_targets(
+    TARGETS hiptensor
+    DEPENDS
+        ${PACKAGE_DEPENDS}
+    STATIC_DEPENDS
+        ${PACKAGE_STATIC_DEPENDS}
 )
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

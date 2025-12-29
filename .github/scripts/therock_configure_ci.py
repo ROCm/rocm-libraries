@@ -21,6 +21,36 @@ from config_loader import load_repo_config
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+# Paths matching any of these patterns are considered to have no influence over
+# build or test workflows so any related jobs can be skipped if all paths
+# modified by a commit/PR match a pattern in this list.
+SKIPPABLE_PATH_PATTERNS = [
+    "docs/*",
+    ".gitignore",
+    "*.md",
+    "*.rst",
+    "projects/*/docs/*",
+    "projects/*/.gitignore",
+    "projects/*/*.md",
+    "projects/*/*.rst",
+    "shared/*/docs/*",
+    "shared/*/.gitignore",
+    "shared/*/*.md",
+    "shared/*/*.rst",
+]
+
+
+def is_path_skippable(path: str) -> bool:
+    """Determines if a given relative path to a file matches any skippable patterns."""
+    return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
+
+
+def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
+    """Returns true if at least one path is not in the skippable set."""
+    if paths is None:
+        return False
+    return any(not is_path_skippable(p) for p in paths)
+
 
 def set_github_output(d: Mapping[str, str]):
     """Sets GITHUB_OUTPUT values.
@@ -36,6 +66,7 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -44,14 +75,19 @@ def retry(max_attempts, delay_seconds, exceptions):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
+                    )
                     attempt += 1
                     if attempt < max_attempts:
                         backoff = delay_seconds * (2 ** (attempt - 1))
                         time.sleep(backoff)
             return func(*args, **kwargs)
+
         return newfn
+
     return decorator
+
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
@@ -98,10 +134,22 @@ def retrieve_projects(args):
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
-    subtrees = get_changed_path_projects(modified_paths)
 
     # by default, we select full tests
     test_type = "full"
+
+    # Check if CI should be skipped based on modified paths
+    # (only for push and pull_request events, not workflow_dispatch or nightly)
+    if args.get("is_push") or args.get("is_pull_request"):
+        paths_set = set(modified_paths)
+        contains_non_skippable_files = check_for_non_skippable_path(paths_set)
+
+        # If only skippable paths were modified, skip CI
+        if not contains_non_skippable_files:
+            logging.info("Only skippable paths were modified, skipping CI")
+            return [], test_type
+
+    subtrees = get_changed_path_projects(modified_paths)
 
     if args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":
@@ -113,6 +161,9 @@ def retrieve_projects(args):
     if args.get("is_push") or args.get("is_pull_request"):
         related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
         if related_to_therock_ci:
+            logging.info(
+                "Enabling all projects since a related workflow file was modified"
+            )
             subtrees = list(subtree_to_project_map.keys())
             test_type = "smoke"
 
@@ -126,16 +177,18 @@ def retrieve_projects(args):
 
 
 def run(args):
+    platform = args.get("platform")
     project_to_run, test_type = retrieve_projects(args)
-    set_github_output({
-        "projects": json.dumps(project_to_run),
-        "test_type": test_type
-    })
+    set_github_output(
+        {f"{platform}_projects": json.dumps(project_to_run), "test_type": test_type}
+    )
 
 
 if __name__ == "__main__":
     args = {}
     github_event_name = os.getenv("GITHUB_EVENT_NAME")
+    platform = os.getenv("PLATFORM")
+    args["platform"] = platform
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"

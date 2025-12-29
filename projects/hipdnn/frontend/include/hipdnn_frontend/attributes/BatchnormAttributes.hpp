@@ -4,14 +4,12 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
@@ -261,7 +259,7 @@ public:
             .set_momentum(std::move(momentum));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto peerStatsVector = std::vector<int64_t>{};
@@ -281,7 +279,7 @@ public:
         auto nextRunningMean = get_next_running_mean();
         auto nextRunningVariance = get_next_running_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormAttributesDirect(
+        return hipdnn_data_sdk::data_objects::CreateBatchnormAttributesDirect(
             builder,
             get_x()->get_uid(),
             get_scale()->get_uid(),
@@ -348,5 +346,4 @@ private:
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

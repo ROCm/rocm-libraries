@@ -1,11 +1,12 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
 
 #include <string>
@@ -35,6 +36,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
     using QDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::QDataType>;
     using KDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::KDataType>;
     using VDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::VDataType>;
+    using PDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::PDataType>;
     using BiasDataType = ck_tile::remove_cvref_t<typename FmhaPipeline::BiasDataType>;
     using RandValOutputDataType =
         ck_tile::remove_cvref_t<typename FmhaPipeline::RandValOutputDataType>;
@@ -53,57 +55,12 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
     static constexpr auto BiasEnum          = FmhaPipeline::BiasEnum;
     static constexpr bool kStoreLSE         = FmhaPipeline::kStoreLSE;
     static constexpr bool kHasDropout       = FmhaPipeline::kHasDropout;
-    static constexpr bool kDoFp8StaticQuant = FmhaPipeline::Problem::kDoFp8StaticQuant;
+    static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
     static constexpr bool kUseAsyncCopy = FmhaPipeline::Policy::AsyncCopy;
-
-    // clang-format off
-    template <typename T> struct t2s;
-    template <> struct t2s<float> { static constexpr const char * name = "fp32"; };
-    template <> struct t2s<ck_tile::fp16_t> { static constexpr const char * name = "fp16"; };
-    template <> struct t2s<ck_tile::bf16_t> { static constexpr const char * name = "bf16"; };
-    template <> struct t2s<ck_tile::fp8_t> { static constexpr const char * name = "fp8"; };
-    template <> struct t2s<ck_tile::bf8_t> { static constexpr const char * name = "bf8"; };
-    // clang-format on
-
-    CK_TILE_HOST static std::string GetName()
-    {
-        // sync with generate.py
-        // clang-format off
-        using bfs = typename FmhaPipeline::BlockFmhaShape;
-        using g0br = typename bfs::Gemm0BlockWarps;
-        using g1br = typename bfs::Gemm1BlockWarps;
-        using g0wt = typename bfs::Gemm0WarpTile;
-        using g1wt = typename bfs::Gemm1WarpTile;
-        #define _SS_  std::string
-        #define _TS_  std::to_string
-        auto pn = [&] () {
-            std::string n;
-            if (kPadSeqLenQ) n += "s";
-            if (kPadSeqLenK) n += "sk";
-            if (kPadHeadDimQ) n += "d";
-            if (kPadHeadDimV) n += "dv";
-            return n.empty() ? n : std::string("p") + n; }();
-        return
-            _SS_("fmha_batch_prefill_d") + _TS_(bfs::kQKHeaddim) + "_" + _SS_(t2s<QDataType>::name) +
-            "_" + (kIsGroupMode ? "group" : "batch") + "_"
-            "b" + _TS_(bfs::kM0) + "x" + _TS_(bfs::kN0) + "x" + _TS_(bfs::kK0) + "x" +
-                    _TS_(bfs::kN1) + "x" + _TS_(bfs::kK1) + "x" + _TS_(bfs::kQKHeaddim) + "_" +
-            "r" + _TS_(g0br::at(ck_tile::number<0>{})) + "x" + _TS_(g0br::at(ck_tile::number<1>{})) + "x" + _TS_(g0br::at(ck_tile::number<2>{})) + "_" +
-            "r" + _TS_(g1br::at(ck_tile::number<0>{})) + "x" + _TS_(g1br::at(ck_tile::number<1>{})) + "x" + _TS_(g1br::at(ck_tile::number<2>{})) + "_" +
-            "w" + _TS_(g0wt::at(ck_tile::number<0>{})) + "x" + _TS_(g0wt::at(ck_tile::number<1>{})) + "x" + _TS_(g0wt::at(ck_tile::number<2>{})) + "_" +
-            "w" + _TS_(g1wt::at(ck_tile::number<0>{})) + "x" + _TS_(g1wt::at(ck_tile::number<1>{})) + "x" + _TS_(g1wt::at(ck_tile::number<2>{})) + "_" +
-            (kBlockPerCuInput == -1 ? "" : ("o" + _TS_(kBlockPerCu) + "_")) + _SS_(FmhaPipeline::name) + "_" +
-            "v" + (std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor> ? "r" : "c") + (pn.empty() ? "_npad" : "_" + pn) +
-            (kHasLogitsSoftCap ? "_logits" : "_nlogits" ) + (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? _SS_("_nbias") : (_SS_("_") + BlockAttentionBiasEnumToStr<BiasEnum>::name)) +
-            (kHasMask ? "_" + _SS_(FmhaMask::name) : "_nmask") + (kStoreLSE ? "_lse" : "_nlse" ) + (kHasDropout ? "_dropout" : "_ndropout" ) + (kDoFp8StaticQuant ? "_squant" : "_nsquant" );
-        #undef _SS_
-        #undef _TS_
-        // clang-format on
-    }
 
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
                                   // arg
@@ -198,14 +155,8 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
     struct FmhaFwdMaskKargs
     {
         // ck_tile::index_t window_size_left, window_size_right;
-        ck_tile::index_t window_size_left, window_size_right;
+        ck_tile::index_t window_size_left, window_size_right, sink_size;
         ck_tile::GenericAttentionMaskEnum mask_type;
-    };
-
-    struct FmhaFwdFp8StaticQuantKargs
-    {
-        float scale_p;
-        float scale_o;
     };
 
     struct FmhaFwdCommonLSEKargs
@@ -213,6 +164,13 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         void* lse_ptr                     = nullptr;
         ck_tile::index_t nhead_stride_lse = 0;
         ck_tile::index_t batch_stride_lse = 0;
+    };
+
+    struct FmhaFwdCommonQScaleKargs
+    {
+        const void* q_descale_ptr = nullptr;
+        const void* k_descale_ptr = nullptr;
+        const void* v_descale_ptr = nullptr;
     };
 
     struct FmhaFwdDropoutSeedOffset
@@ -278,7 +236,9 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                                 FmhaFwdEmptyKargs<0>>>,
           std::conditional_t<kHasMask, FmhaFwdMaskKargs, FmhaFwdEmptyKargs<1>>,
           std::conditional_t<kStoreLSE, FmhaFwdCommonLSEKargs, FmhaFwdEmptyKargs<2>>,
-          std::conditional_t<kDoFp8StaticQuant, FmhaFwdFp8StaticQuantKargs, FmhaFwdEmptyKargs<3>>,
+          std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
+                             FmhaFwdCommonQScaleKargs,
+                             FmhaFwdEmptyKargs<3>>,
           std::conditional_t<kHasDropout, FmhaFwdBatchModeDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>
     {
@@ -297,7 +257,9 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                                 FmhaFwdEmptyKargs<0>>>,
           std::conditional_t<kHasMask, FmhaFwdMaskKargs, FmhaFwdEmptyKargs<1>>,
           std::conditional_t<kStoreLSE, FmhaFwdCommonLSEKargs, FmhaFwdEmptyKargs<2>>,
-          std::conditional_t<kDoFp8StaticQuant, FmhaFwdFp8StaticQuantKargs, FmhaFwdEmptyKargs<3>>,
+          std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
+                             FmhaFwdCommonQScaleKargs,
+                             FmhaFwdEmptyKargs<3>>,
           std::conditional_t<kHasDropout, FmhaFwdCommonDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>
     {
@@ -321,6 +283,9 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
               const void* k_ptr,
               const void* v_ptr,
               const void* bias_ptr,
+              const void* q_descale_ptr,
+              const void* k_descale_ptr,
+              const void* v_descale_ptr,
               void* rand_val_ptr,
               void* lse_ptr,
               void* o_ptr,
@@ -337,8 +302,8 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
               ck_tile::index_t page_block_size,
 #endif
               float scale_s,
-              float scale_p,
-              float scale_o,
+              [[maybe_unused]] float scale_p,
+              [[maybe_unused]] float scale_o,
               float logits_soft_cap,
               ck_tile::index_t stride_q,
               ck_tile::index_t stride_k,
@@ -362,6 +327,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
               ck_tile::index_t batch_stride_o,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
+              ck_tile::index_t sink_size,
               ck_tile::index_t mask_type,
               float p_drop,
               bool s_randval,
@@ -401,7 +367,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     {},               // placeholder for bias
                     {},               // placeholder for mask
                     {},               // placeholder for lse
-                    {},               // placeholder for fp8_static_quant args
+                    {},               // placeholder for qscale
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
                     batch_stride_q,
@@ -425,6 +391,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         {
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
+            kargs.sink_size         = sink_size;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
         }
         if constexpr(kStoreLSE)
@@ -433,10 +400,11 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             kargs.nhead_stride_lse = nhead_stride_lse;
             kargs.batch_stride_lse = batch_stride_lse;
         }
-        if constexpr(kDoFp8StaticQuant)
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
         {
-            kargs.scale_p = scale_p;
-            kargs.scale_o = scale_o;
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
         }
         if constexpr(kHasDropout)
         {
@@ -473,6 +441,9 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
               const void* k_ptr,
               const void* v_ptr,
               const void* bias_ptr,
+              const void* q_descale_ptr,
+              const void* k_descale_ptr,
+              const void* v_descale_ptr,
               void* rand_val_ptr,
               void* lse_ptr,
               void* o_ptr,
@@ -489,8 +460,8 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
               ck_tile::index_t page_block_size,
 #endif
               float scale_s,
-              float scale_p,
-              float scale_o,
+              [[maybe_unused]] float scale_p,
+              [[maybe_unused]] float scale_o,
               float logits_soft_cap,
               ck_tile::index_t stride_q,
               ck_tile::index_t stride_k,
@@ -509,6 +480,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
               ck_tile::index_t batch_stride_v,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
+              ck_tile::index_t sink_size,
               ck_tile::index_t mask_type,
               float p_drop,
               bool s_randval,
@@ -548,7 +520,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     {},               // placeholder for bias
                     {},               // placeholder for mask
                     {},               // placeholder for lse
-                    {},               // placeholder for fp8_static_quant args
+                    {},               // placeholder for qscale
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
@@ -570,6 +542,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         {
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
+            kargs.sink_size         = sink_size;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
         }
         if constexpr(kStoreLSE)
@@ -577,10 +550,11 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             kargs.lse_ptr          = lse_ptr;
             kargs.nhead_stride_lse = nhead_stride_lse;
         }
-        if constexpr(kDoFp8StaticQuant)
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
         {
-            kargs.scale_p = scale_p;
-            kargs.scale_o = scale_o;
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
         }
         if constexpr(kHasDropout)
         {
@@ -1005,7 +979,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                             rand_val_ptr,
                             make_tuple(kargs.seqlen_q, kargs.seqlen_k),
                             make_tuple(kargs.stride_randval, 1),
-                            number<1>{},
+                            number<FmhaPipeline::kAlignmentRandVal>{},
                             number<1>{});
 
                     return pad_tensor_view(randval_dram_naive,
@@ -1026,6 +1000,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                 return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                     kargs.window_size_left,
                     kargs.window_size_right,
+                    kargs.sink_size,
                     kargs.seqlen_q,
                     kargs.seqlen_k,
                     kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
@@ -1068,48 +1043,75 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
 
         AttentionVariant variant;
         const auto variant_params = [&] {
+            const float scale_s = [&] {
+                if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+                {
+                    float q_descale = *(reinterpret_cast<const float*>(kargs.q_descale_ptr));
+                    float k_descale = *(reinterpret_cast<const float*>(kargs.k_descale_ptr));
+
+                    return kargs.scale_s * q_descale * k_descale;
+                }
+                else
+                {
+                    return kargs.scale_s;
+                }
+            }();
+
             if constexpr(kHasLogitsSoftCap)
             {
                 return ck_tile::LogitsSoftCapParams<FmhaMask, CK_TILE_FMHA_FWD_FAST_EXP2>{
-                    mask, kargs.scale_s, kargs.logits_soft_cap, kargs.logits_soft_cap_rcp};
+                    mask, scale_s, kargs.logits_soft_cap, kargs.logits_soft_cap_rcp};
             }
             else
             {
-                return ck_tile::StandardAttentionParams<FmhaMask>{mask, kargs.scale_s};
+                return ck_tile::StandardAttentionParams<FmhaMask>{mask, scale_s};
             }
         }();
 
         BlockIndices block_indices{i_batch, i_nhead, i_nhead / kargs.nhead_ratio_qk};
 
-        auto o_acc_tile = [&]() {
-            if constexpr(kDoFp8StaticQuant)
+        auto o_acc_tile = [&] {
+            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
             {
-                return FmhaPipeline{}(
-                    q_dram_window,
-                    identity{}, // q_element_func
-                    k_dram_window,
-                    identity{}, // k_element_func
-                    v_dram_window,
-                    identity{}, // v_element_func
-                    bias_dram_window,
-                    identity{}, // bias_element_func
-                    randval_dram_window,
-                    lse_dram_window,
-                    identity{},                                          // lse_element_func
-                    identity{},                                          // s_acc_element_func
-                    scales{kargs.scale_p},                               // p_compute_element_func
-                    composes(saturates<fp8_t>{}, scales{kargs.scale_o}), // o_acc_element_func
-                    mask,
-                    position_encoding,
-                    kargs.scale_s,
-                    variant,
-                    variant_params,
-                    block_indices,
-                    smem_ptr,
-                    kargs.kv_page_indices,
-                    kargs.stride_k,
-                    kargs.stride_v,
-                    dropout);
+                // TODO - move global load of descale to pipeline
+                float v_descale = *(reinterpret_cast<const float*>(kargs.v_descale_ptr));
+
+                float scale_p = ck_tile::type_convert<float>(ck_tile::numeric<PDataType>::max());
+                float scale_o = v_descale / scale_p;
+
+                auto o_acc_element_func = [&]() {
+                    if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
+                        return ck_tile::composes(ck_tile::saturates<ck_tile::fp8_t>{},
+                                                 ck_tile::scales{scale_o});
+                    else
+                        return ck_tile::scales{scale_o};
+                }();
+
+                return FmhaPipeline{}(q_dram_window,
+                                      identity{}, // q_element_func
+                                      k_dram_window,
+                                      identity{}, // k_element_func
+                                      v_dram_window,
+                                      identity{}, // v_element_func
+                                      bias_dram_window,
+                                      identity{}, // bias_element_func
+                                      randval_dram_window,
+                                      lse_dram_window,
+                                      identity{},         // lse_element_func
+                                      identity{},         // s_acc_element_func
+                                      scales{scale_p},    // p_compute_element_func
+                                      o_acc_element_func, // o_acc_element_func
+                                      mask,
+                                      position_encoding,
+                                      variant_params.sm_scale,
+                                      variant,
+                                      variant_params,
+                                      block_indices,
+                                      smem_ptr,
+                                      kargs.kv_page_indices,
+                                      kargs.stride_k,
+                                      kargs.stride_v,
+                                      dropout);
             }
             else
             {
@@ -1121,7 +1123,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                       lse_dram_window,
                                       mask,
                                       position_encoding,
-                                      kargs.scale_s,
+                                      variant_params.sm_scale,
                                       variant,
                                       variant_params,
                                       block_indices,

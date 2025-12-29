@@ -210,7 +210,7 @@ void testing_getrs(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dB.memcheck());
     CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
-    double             gpu_time_used, hipblas_error;
+    double             gpu_time_used{0}, hipblas_error{0};
     hipblasLocalHandle handle(arg);
     hipblasOperation_t op = HIPBLAS_OP_N;
 

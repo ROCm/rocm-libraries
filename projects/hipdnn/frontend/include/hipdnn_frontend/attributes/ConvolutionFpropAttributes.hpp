@@ -4,15 +4,13 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
+#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class ConvFpropAttributes : public Attributes<ConvFpropAttributes>
 {
@@ -187,18 +185,19 @@ public:
         return math_mode;
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        return hipdnn_sdk::data_objects::CreateConvolutionFwdAttributesDirect(builder,
-                                                                              get_x()->get_uid(),
-                                                                              get_w()->get_uid(),
-                                                                              get_y()->get_uid(),
-                                                                              &pre_padding,
-                                                                              &post_padding,
-                                                                              &stride,
-                                                                              &dilation,
-                                                                              toSdkType(math_mode));
+        return hipdnn_data_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+            builder,
+            get_x()->get_uid(),
+            get_w()->get_uid(),
+            get_y()->get_uid(),
+            &pre_padding,
+            &post_padding,
+            &stride,
+            &dilation,
+            toSdkType(math_mode));
     }
 
 private:
@@ -247,5 +246,4 @@ private:
     }
 };
 typedef ConvFpropAttributes Conv_fprop_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

@@ -23,15 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <array>
-#include <cassert>
 #include <miopen/batch_norm.hpp>
 #include <miopen/fusion.hpp>
 #include <miopen/fusion_plan.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/visit_float.hpp>
-#include <miopen/stringutils.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
@@ -40,13 +37,15 @@
 #include <miopen/find_solution.hpp>
 #include <miopen/conv/solver_finders.hpp>
 #include <miopen/driver_arguments.hpp>
-#include <miopen/config.hpp>
 
-#include <ostream>
-#include <ios>
-#include <algorithm>
-#include <string>
 #include <half/half.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <optional>
+#include <ostream>
+#include <string>
 
 #define MIOPEN_CHECK(x)          \
     if(x != miopenStatusSuccess) \
@@ -136,7 +135,8 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
                                          const FusionDescription& problem,
                                          std::vector<Allocator::ManageDataPtr>& invoke_bufs,
                                          miopen::OperatorArgs& params,
-                                         const FusionPlanDescriptor& plan)
+                                         const FusionPlanDescriptor& plan,
+                                         size_t req_workspace)
 {
     const auto allocate_buffer = [&](std::size_t size) {
         auto ptr = handle.Create(size);
@@ -328,8 +328,15 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
     const auto out_ptr = allocate_buffer(out_desc.GetNumBytes());
     MIOPEN_LOG_I("out addr: " << out_ptr << ", size: " << in_desc.GetNumBytes());
 
+    void* ws_ptr = nullptr;
+    if(req_workspace > 0)
+    {
+        ws_ptr = allocate_buffer(req_workspace);
+        MIOPEN_LOG_I("workspace addr: " << ws_ptr << ", size: " << req_workspace);
+    }
+
     return miopen::fusion::FusionInvokeParams(
-        params, in_desc, in_ptr, out_desc, out_ptr, gfx90aaltimpl);
+        params, in_desc, in_ptr, out_desc, out_ptr, gfx90aaltimpl, ws_ptr, req_workspace);
 }
 
 namespace debug {
@@ -453,7 +460,11 @@ miopenStatus_t FusionPlanDescriptor::AddOp(std::shared_ptr<FusionOpDescriptor> d
         desc->SetInputDesc(input_desc);
     else
         desc->SetInputDesc(output_desc);
-    desc->GetOutputDesc(output_desc);
+    auto status = desc->GetOutputDesc(output_desc);
+    if(status != miopenStatusSuccess)
+    {
+        return status;
+    }
     op_map.emplace_back(desc);
     op_count++;
     return miopenStatusSuccess;
@@ -809,8 +820,17 @@ struct FusionFindParameters : PrimitiveFindParameters
 {
 };
 
+class FusionSolverFinderBase : public SolversFinderMixin<FusionDescription, FusionFindParameters>
+{
+public:
+    ~FusionSolverFinderBase() override = default;
+
+    virtual std::size_t GetWorkspaceSize(const ExecutionContext& ctx,
+                                         const FusionDescription& problem) const = 0;
+};
+
 template <class SolverContainer>
-class FusionSolverFinder : public SolversFinderMixin<FusionDescription, FusionFindParameters>
+class FusionSolverFinder : public FusionSolverFinderBase
 {
 public:
     explicit FusionSolverFinder(SolverContainer solvers_, const std::string& algo_name)
@@ -844,6 +864,22 @@ protected:
                                              options);
     }
 
+    std::size_t GetWorkspaceSize(const ExecutionContext& ctx,
+                                 const FusionDescription& problem) const override
+    {
+        const auto fusion_ctx = FusionContext(ctx);
+
+        auto workspace_sizes = solvers.GetWorkspaceSizes(fusion_ctx, problem);
+
+        return workspace_sizes.empty() ? 0
+                                       : std::max_element(workspace_sizes.begin(),
+                                                          workspace_sizes.end(),
+                                                          [](const auto& a, const auto& b) {
+                                                              return a.second < b.second;
+                                                          })
+                                             ->second;
+    }
+
 private:
     SolverContainer solvers;
     AlgorithmName algo;
@@ -869,7 +905,7 @@ static const std::vector<std::unique_ptr<ISolversFinder>>& GetFusionSolverFinder
 static std::vector<Solution>
 FindFusion(const ExecutionContext& ctx,
            const FusionDescription& fusion_problem,
-           const std::function<fusion::FusionInvokeParams()>& invoke_params,
+           const std::function<fusion::FusionInvokeParams(size_t)>& invoke_params,
            const std::optional<FindOptions>& options = std::nullopt)
 {
     return UserFindDbRecord::TryLoad(
@@ -878,12 +914,28 @@ FindFusion(const ExecutionContext& ctx,
         [&]() {
             // fusion_ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(fusion_ctx);
 
+            // During fusion search, workspace size is not constrained.
+            // To avoid allocating all available memory upfront, we calculate the required
+            // workspace size based on applicable solvers and allocate only what's needed.
+
+            const auto& finders = GetFusionSolverFinders();
+            auto workspace_size = std::size_t{0};
+            for(const auto& finder : finders)
+            {
+                if(const auto* fusion_finder =
+                       dynamic_cast<const FusionSolverFinderBase*>(finder.get()))
+                {
+                    workspace_size = std::max(workspace_size,
+                                              fusion_finder->GetWorkspaceSize(ctx, fusion_problem));
+                }
+            }
+
             // We need buffers for find, thus we lazily get them, possibly allocating.
-            return FindCore(invoke_params(),
+            return FindCore(invoke_params(workspace_size),
                             ctx,
                             fusion_problem,
                             FusionFindParameters{},
-                            GetFusionSolverFinders(),
+                            finders,
                             options);
         },
         "fusion");
@@ -980,7 +1032,6 @@ std::vector<miopenConvSolution_t> GetSolutions(const FusionContext& ctx,
 
 miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
 {
-    std::vector<Allocator::ManageDataPtr> invoke_bufs;
     miopen::OperatorArgs params;
 
     const auto& fusion_problem = FusionDescription{this};
@@ -997,8 +1048,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
 
     {
         FindMode findMode(solver::Primitive::Fusion);
-        auto sol = boost::optional<miopenConvSolution_t>{};
-
+        auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
         {
             const auto ctx      = FusionContext{handle};
@@ -1061,9 +1111,10 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         }
         else
         {
-            find_results = Find(handle, [&]() {
+            std::vector<Allocator::ManageDataPtr> invoke_bufs;
+            find_results = Find(handle, [&](size_t req_workspace) {
                 return AllocateBuffersAndMakeFusionInvokeParams(
-                    handle, fusion_problem, invoke_bufs, params, *this);
+                    handle, fusion_problem, invoke_bufs, params, *this, req_workspace);
             });
         }
     }
@@ -1107,7 +1158,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
 
 std::vector<Solution>
 FusionPlanDescriptor::Find(const Handle& handle,
-                           const std::function<fusion::FusionInvokeParams()>& invoke_params,
+                           const std::function<fusion::FusionInvokeParams(size_t)>& invoke_params,
                            const std::optional<FindOptions>& options) const
 {
     auto ctx = ExecutionContext(&handle);

@@ -4,13 +4,11 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormBackwardAttributes : public Attributes<BatchnormBackwardAttributes>
 {
@@ -190,7 +188,7 @@ public:
         return set_mean(std::move(mean)).set_inv_variance(std::move(invVariance));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormBackwardAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto peerStatsVector = std::vector<int64_t>{};
@@ -205,7 +203,7 @@ public:
         auto mean = get_mean();
         auto invVariance = get_inv_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributesDirect(
+        return hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributesDirect(
             builder,
             get_dy()->get_uid(),
             get_x()->get_uid(),
@@ -267,5 +265,4 @@ private:
     }
 };
 typedef BatchnormBackwardAttributes Batchnorm_backward_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

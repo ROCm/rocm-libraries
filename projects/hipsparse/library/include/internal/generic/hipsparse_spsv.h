@@ -67,11 +67,11 @@ hipsparseStatus_t hipsparseSpSV_destroyDescr(hipsparseSpSVDescr_t descr);
 *  @param[in]
 *  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  matA                matrix descriptor.
+*  matA                sparse matrix descriptor.
 *  @param[in]
-*  x                   vector descriptor.
+*  x                   dense vector descriptor.
 *  @param[inout]
-*  y                   vector descriptor.
+*  y                   dense vector descriptor.
 *  @param[in]
 *  computeType         floating point precision for the SpSV computation.
 *  @param[in]
@@ -81,11 +81,11 @@ hipsparseStatus_t hipsparseSpSV_destroyDescr(hipsparseSpSVDescr_t descr);
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr or
-*               \p pBufferSizeInBytes pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is
-*               currently not supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr or
+*          \p pBufferSizeInBytes is nullptr, or \p opA is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -243,9 +243,6 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 *               pointer is invalid.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \snippet example_hipsparse_spsv.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

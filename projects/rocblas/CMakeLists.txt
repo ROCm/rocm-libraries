@@ -68,7 +68,7 @@ get_os_id(OS_ID)
 message (STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "5.2.0" )
+set ( VERSION_STRING "5.3.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -425,6 +425,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocblas-coverage_*.profraw -o ./coverage-report/rocblas.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/librocblas.so -instr-profile=./coverage-report/rocblas.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/librocblas.so -instr-profile=./coverage-report/rocblas.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocblas.so -instr-profile=./coverage-report/rocblas.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

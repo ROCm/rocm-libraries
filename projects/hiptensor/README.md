@@ -1,7 +1,7 @@
 # hipTensor
 
 > [!NOTE]
-> The published documentation is available at [hipTensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+> The published documentation is available at [hipTensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `projects/hiptensor/docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 Welcome! hiptensor is AMD's C++ library for accelerating tensor primitives using GPU matrix cores on AMD's latest discrete GPUs.
 
@@ -10,6 +10,7 @@ Welcome! hiptensor is AMD's C++ library for accelerating tensor primitives using
 hipTensor currently supports the following AMDGPU architectures:
 
 * CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'
+* RDNA class GPU featuring matrix core support: gfx1200 and gfx1201
 
 > [!NOTE]
 > Double precision FP64 datatype support requires gfx90a, gfx942 or gfx950
@@ -35,7 +36,7 @@ For more detailed information, please refer to the [hipTensor installation guide
 
 | Option                              | Description                                             | Default Value                               |
 |-------------------------------------|---------------------------------------------------------|---------------------------------------------|
-| GPU_TARGETS                         | Build code for specific GPU target(s)                   | gfx908;gfx90a;gfx942;gfx950                 |
+| GPU_TARGETS                         | Build code for specific GPU target(s)                   | gfx908;gfx90a;gfx942;gfx950;gfx12-generic   |
 | HIPTENSOR_BUILD_TESTS               | Build the tests                                         | ON                                          |
 | HIPTENSOR_BUILD_SAMPLES             | Build the samples                                       | ON                                          |
 | HIPTENSOR_BUILD_COMPRESSED_DBG      | Enable compressed debug symbols                         | ON                                          |
@@ -65,7 +66,7 @@ pip3 install -r sphinx/requirements.txt
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
 
-The HTML documentation can be viewed in your browser by opening docs/_build/html/index.html result.
+The HTML documentation can be viewed in your browser by opening the `docs/_build/html/index.html` result.
 
 The latest official documentation for hipTensor is available at:
 [https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).

@@ -28,6 +28,8 @@
 
 #include "client/GEMMParameters.hpp"
 
+#include <functional>
+
 namespace rocRoller
 {
     namespace Client
@@ -38,7 +40,11 @@ namespace rocRoller
             {
                 std::ostringstream rv;
 
-                rv << "GEMM_" << toString(transA) << toString(transB);
+                // TODO: Use abbreviated type names.  Currently the
+                // types are strings.  If we change them to DataType
+                // we can use shorter names.
+
+                rv << toString(transA) << toString(transB);
 
                 if(scaleA != rocRoller::Operations::ScaleMode::None)
                 {
@@ -69,73 +75,98 @@ namespace rocRoller
 
                 if(scaleSkipPermlane)
                 {
-                    rv << "_PreSW_AB";
+                    rv << "_PreSW";
+                }
+
+                if(!scalePretileA.empty())
+                {
+                    rv << "_PTA";
+                    rocRoller::streamJoin(rv, scalePretileA, "x");
+                }
+
+                if(!scalePretileB.empty())
+                {
+                    rv << "_PTB";
+                    rocRoller::streamJoin(rv, scalePretileB, "x");
                 }
 
                 return rv.str();
             }
 
-            std::string SolutionParameters::generateKernelName() const
+            KernelNames SolutionParameters::generateKernelName() const
             {
-                std::ostringstream rv;
-                rv << types.kernelNamePart();
+                auto constexpr maxLength = 196;
 
-                rv << "_MT";
-                rocRoller::streamJoin(rv, std::vector{macM, macN, macK}, "x");
+                std::ostringstream fullName;
 
-                rv << "_WG";
-                rocRoller::streamJoin(rv, std::vector{workgroupSizeX, workgroupSizeY}, "x");
+                fullName << "RRGEMM_";
+                fullName << types.kernelNamePart();
+                fullName << "_WGTS";
+                rocRoller::streamJoin(fullName, std::vector{macM, macN, macK}, "x");
+                fullName << "_WGS";
+                rocRoller::streamJoin(fullName, std::vector{workgroupSizeX, workgroupSizeY}, "x");
 
                 if(workgroupMappingDim != -1)
                 {
-                    rv << "_WGM" << workgroupMappingDim;
+                    fullName << "_WGM" << workgroupMappingDim;
                 }
 
-                rv << "_WGMXCC";
-                rocRoller::streamJoin(rv, std::vector{workgroupRemapXCC}, "");
+                fullName << "_WGMXCC";
+                rocRoller::streamJoin(fullName, std::vector{workgroupRemapXCC}, "");
                 if(workgroupRemapXCC && workgroupRemapXCCValue > 0)
                 {
-                    rocRoller::streamJoin(rv, std::vector{workgroupRemapXCCValue}, "");
+                    rocRoller::streamJoin(fullName, std::vector{workgroupRemapXCCValue}, "");
                 }
 
-                rv << "_LA" << loadPathA;
-                rv << "_LB" << loadPathB;
+                fullName << "_LA" << loadPathA;
+                fullName << "_LB" << loadPathB;
 
-                rv << "_SD" << storeLDSD;
+                fullName << "_SD" << storeLDSD;
 
-                rv << "_SLDS";
-                rocRoller::streamJoin(rv, std::vector{loadLDSScaleA, loadLDSScaleB}, "");
+                fullName << "_LSA" << loadPathAScale;
+                fullName << "_LSB" << loadPathBScale;
 
-                rv << "_UNROLL";
-                rocRoller::streamJoin(rv, std::vector{unrollX, unrollY}, "x");
+                fullName << "_UNROLL";
+                rocRoller::streamJoin(fullName, std::vector{unrollX, unrollY}, "x");
 
-                rv << "_SwizzleScale" << swizzleScale << prefetchScale;
-                rv << "_SwizzleTileSize" << swizzleTileSize;
+                fullName << "_SwizzleScale" << swizzleScale << prefetchScale;
+                fullName << "_SwizzleTileSize" << swizzleTileSize;
 
                 if(prefetch)
                 {
-                    rv << "_PF";
+                    fullName << "_PF";
                     rocRoller::streamJoin(
-                        rv, std::vector{prefetchInFlight, prefetchLDSFactor}, "x");
-                    rv << "m" << prefetchMixMemOps;
+                        fullName, std::vector{prefetchInFlight, prefetchLDSFactor}, "x");
+                    fullName << "m" << prefetchMixMemOps;
                 }
 
-                rv << "_MI";
+                fullName << "_MI";
                 rocRoller::streamJoin(
-                    rv, std::vector{waveM, waveN, waveK, (waveB < 0 ? -waveB : waveB)}, "x");
+                    fullName, std::vector{waveM, waveN, waveK, (waveB < 0 ? -waveB : waveB)}, "x");
 
-                rv << "_" << scheduler;
+                fullName << "_" << scheduler;
 
                 if(streamK)
                 {
-                    rv << "_SK";
+                    fullName << "_SK";
                     if(streamKTwoTileDPFirst)
-                        rv << "2TDPFirst";
+                        fullName << "2TDPFirst";
                     else if(streamKTwoTile)
-                        rv << "2T";
+                        fullName << "2T";
                 }
 
-                return rv.str();
+                auto fullNameStr  = fullName.str();
+                auto shortNameStr = fullNameStr;
+
+                // Truncate and append hash if necessary
+                if(shortNameStr.length() > maxLength)
+                {
+                    auto hashedValue = std::hash<std::string>{}(fullNameStr);
+                    shortNameStr     = fmt::format(
+                        "{}_{:08x}", shortNameStr.substr(0, maxLength - 9), hashedValue);
+                }
+
+                return KernelNames{fullNameStr, shortNameStr};
             }
 
             std::string toString(TransposeType trans)
@@ -200,7 +231,9 @@ namespace rocRoller
                 if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
                    or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
                 {
-                    s << " BlockSize:" << x.scaleBlockSize;
+                    s << " BlockSize: " << x.scaleBlockSize;
+                    s << " Pretile A: " << x.scalePretileA;
+                    s << " Pretile B: " << x.scalePretileB;
                 }
                 s << std::endl;
                 return s;
@@ -209,7 +242,12 @@ namespace rocRoller
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x)
             {
                 s << "MxNxK:     " << x.m << "x" << x.n << "x" << x.k << std::endl;
+                s << "alpha:     " << x.alpha << std::endl;
+                s << "beta:      " << x.beta << std::endl;
                 s << x.types;
+                s << "ScaleVals: A: " << x.scaleValueA << " B: " << x.scaleValueB << std::endl;
+                s << "InitModes: A: " << x.initModeA << " B: " << x.initModeB
+                  << " C: " << x.initModeC << std::endl;
                 return s;
             }
 
@@ -235,7 +273,8 @@ namespace rocRoller
                 s << "Load A:          " << x.loadPathA << std::endl;
                 s << "Load B:          " << x.loadPathB << std::endl;
                 s << "Store D LDS:     " << x.storeLDSD << std::endl;
-                s << "LSDScale:        " << x.loadLDSScaleA << x.loadLDSScaleB << std::endl;
+                s << "Load AScale:     " << x.loadPathAScale << std::endl;
+                s << "Load BScale:     " << x.loadPathBScale << std::endl;
                 s << "Prefetch:        "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
                   << " LDS:" << x.prefetchLDSFactor << " mixMemOps: " << x.prefetchMixMemOps
@@ -342,6 +381,63 @@ namespace rocRoller::Client::GEMMClient::CLI
         {
             std::cerr << "Invalid format for MxK/NxL tuple.\n" << std::endl;
             return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
+    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        bool               fail = false;
+        std::istringstream iss(arg);
+        std::string        token;
+
+        if(arg == "Bounded")
+            result = DGen::DataInitMode(DGen::Bounded{});
+        else if(arg == "BoundedAlternatingSign")
+            result = DGen::DataInitMode(DGen::BoundedAlternatingSign{});
+        else if(arg == "Unbounded")
+            result = DGen::DataInitMode(DGen::Unbounded{});
+        else if(arg == "Identity")
+            result = DGen::DataInitMode(DGen::Identity{});
+        else if(arg == "Ones")
+            result = DGen::DataInitMode(DGen::Ones{});
+        else if(arg == "Zeros")
+            result = DGen::DataInitMode(DGen::Zeros{});
+        else if(arg == "TrigonometricFromFloat")
+            result = DGen::DataInitMode(DGen::TrigonometricFromFloat{});
+        else if(startsWith("NormalFromFloat", arg.begin(), arg.end()))
+        {
+            try
+            {
+                iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit
+                               | std::ifstream::badbit);
+                std::getline(iss, token, '(');
+                std::getline(iss, token, ',');
+                double mean = std::stod(token);
+                std::getline(iss, token, ')');
+                double std_dev = std::stod(token);
+
+                result = DGen::DataInitMode(DGen::NormalFromFloat{mean, std_dev});
+            }
+            catch(const std::invalid_argument&)
+            {
+                fail = true;
+            }
+            catch(const std::ios_base::failure&)
+            {
+                fail = true;
+            }
+            if(fail)
+            {
+                std::cerr << "Invalid format for Init Mode." << std::endl;
+                std::cerr << "Expected: NormalFromFloat(<mean>, <std_dev>)" << std::endl;
+                std::cerr << "For example: --initMode_A=\"NormalFromFloat(0.0, 1.0)\"" << std::endl;
+                return PARSE_FAILURE;
+            }
         }
 
         return PARSE_SUCCESS;

@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_spmm_batched_csc_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_spmm_batched_csc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              m         = 100;
@@ -176,7 +177,7 @@ void testing_spmm_batched_csc_bad_arg(void)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spmm_batched_csc(Arguments argus)
+void testing_spmm_batched_csc(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
     J                    m        = argus.M;
@@ -205,7 +206,7 @@ hipsparseStatus_t testing_spmm_batched_csc(Arguments argus)
 #if(defined(CUDART_VERSION))
     if(orderB != orderC || orderB != HIPSPARSE_ORDER_COL)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 #endif
 
@@ -237,7 +238,7 @@ hipsparseStatus_t testing_spmm_batched_csc(Arguments argus)
                             idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // Some matrix properties
@@ -512,8 +513,6 @@ hipsparseStatus_t testing_spmm_batched_csc(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMM_BATCHED_CSC_HPP

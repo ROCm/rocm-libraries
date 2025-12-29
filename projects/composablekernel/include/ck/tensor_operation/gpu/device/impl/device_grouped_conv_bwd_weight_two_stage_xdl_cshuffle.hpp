@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -1742,6 +1742,11 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
                 }
             }
             else
+            {
+                return false;
+            }
+            // TODO: this is needed because there is a bug
+            if(arg.k_batch_ > 1)
             {
                 return false;
             }

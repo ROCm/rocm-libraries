@@ -33,9 +33,15 @@ namespace rocsparse
     void one(const rocsparse_handle handle, rocsparse_float_complex** one);
     void one(const rocsparse_handle handle, rocsparse_double_complex** one);
 
-    void set_minus_one_async(hipStream_t            stream,
-                             rocsparse_pointer_mode pointer_mode,
-                             rocsparse_indextype    data_indextype,
-                             void*                  data);
+    rocsparse_status set_minus_one_async(rocsparse_pointer_mode pointer_mode,
+                                         rocsparse_indextype    data_indextype,
+                                         void*                  data,
+                                         hipStream_t            stream);
+
+    rocsparse_status set_minus_one_async(rocsparse_pointer_mode pointer_mode,
+                                         rocsparse_indextype    data_indextype,
+                                         int64_t                data_size,
+                                         void*                  data,
+                                         hipStream_t            stream);
 
 }
