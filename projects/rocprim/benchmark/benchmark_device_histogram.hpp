@@ -286,8 +286,9 @@ struct device_multi_histogram_even_benchmark : public primbench::benchmark_inter
 
         if constexpr(!IsAutotuning)
         {
-            j.add("entropy", get_entropy_percents(m_entropy_reduction));
             j.add("bins", m_bins);
+            j.add("scale", m_scale);
+            j.add("entropy", get_entropy_percents(m_entropy_reduction));
         }
 
         return j;
