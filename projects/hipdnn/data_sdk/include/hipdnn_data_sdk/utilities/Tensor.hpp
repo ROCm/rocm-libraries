@@ -561,6 +561,8 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
         return std::make_unique<Tensor<uint8_t>>(dims, strides);
     case data_objects::DataType::INT32:
         return std::make_unique<Tensor<int32_t>>(dims, strides);
+    case data_objects::DataType::INT8:
+        return std::make_unique<Tensor<int8_t>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }
