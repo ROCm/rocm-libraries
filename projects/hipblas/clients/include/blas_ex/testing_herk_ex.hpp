@@ -361,7 +361,7 @@ void testing_herk_ex(const Arguments& arg)
     double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
-    hipblas_init_matrix(hA, arg, hipblas_client_never_set_nan, hipblas_hermitian_matrix, true);
+    hipblas_init_matrix(hA, arg, hipblas_client_never_set_nan, hipblas_general_matrix, true);
     hipblas_init_matrix(hC_host, arg, hipblas_client_never_set_nan, hipblas_hermitian_matrix);
 
     // copy matrix is easy in STL; hC_device = hC_host: save a copy in hC_device which will be output of device function

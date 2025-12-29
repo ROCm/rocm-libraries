@@ -118,7 +118,7 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(hipblas_negate(value));
                 }
         }
-        else if(matrix_type == hipblas_triangular_matrix)
+        else if(matrix_type != hipblas_diagonally_dominant_triangular_matrix)
         {
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -130,6 +130,11 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
                                                  : (j <= i ? rand_gen() : T(0.0f));
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(hipblas_negate(value));
                 }
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "Invalid matrix_type for hipblas_init_matrix_alternating_sign function!");
         }
     }
 }
@@ -315,6 +320,10 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
                 }
             }
         }
+        else
+        {
+            throw std::invalid_argument("Invalid matrix_type for hipblas_init_matrix function!");
+        }
     }
 }
 
@@ -427,6 +436,11 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
                               : (j <= i ? T(seedReset ? cos(i + j * M) : sin(i + j * M)) : T(0.0f));
                     A[i + j * lda] = value;
                 }
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "Invalid matrix_type for hipblas_init_matrix_trig function!");
         }
     }
 }

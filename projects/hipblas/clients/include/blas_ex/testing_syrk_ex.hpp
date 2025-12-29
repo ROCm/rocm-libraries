@@ -273,7 +273,7 @@ void testing_syrk_ex(const Arguments& arg)
 
     // Initial Data on CPU
     hipblas_init_matrix(hA, arg, hipblas_client_alpha_sets_nan, hipblas_general_matrix, true);
-    hipblas_init_matrix(hC_host, arg, hipblas_client_beta_sets_nan, hipblas_general_matrix);
+    hipblas_init_matrix(hC_host, arg, hipblas_client_beta_sets_nan, hipblas_symmetric_matrix);
 
     hC_device = hC_host;
     hC_gold   = hC_host;
