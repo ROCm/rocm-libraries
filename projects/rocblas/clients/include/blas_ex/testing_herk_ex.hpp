@@ -96,7 +96,7 @@ void testing_herk_ex_bad_arg(const Arguments& arg)
         rocblas_init_matrix(
             hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true, true);
         rocblas_init_matrix(
-            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false, true);
+            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false);
 
         CHECK_HIP_ERROR(dA.transfer_from(hA));
         CHECK_HIP_ERROR(dC.transfer_from(hC));
