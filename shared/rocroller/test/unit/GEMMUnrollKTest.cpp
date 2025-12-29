@@ -211,12 +211,11 @@ namespace GEMMTests
     INSTANTIATE_TEST_SUITE_P(
         GEMMLDSPrefetchTest,
         GEMMLDSPrefetchTestGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(
-                ::testing::Values(1, 2),           // prefetchInFlight
-                ::testing::Values(0, 1, 2),        // prefetchLDSFactor
-                ::testing::Values(false, true)))); // prefetchMixMemOps
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(1, 2), // prefetchInFlight
+                                              ::testing::Values(0, 1, 2), // prefetchLDSFactor
+                                              ::testing::Values(false,
+                                                                true)))); // prefetchMixMemOps
 
     // Params are: prefetchInFlight, prefetchLDSFactor, prefetchMixMemOps
     class GEMMFP16LDSPrefetchTestGPU : public BaseGEMMContextFixture<std::tuple<int, int, bool>>
@@ -255,12 +254,11 @@ namespace GEMMTests
     INSTANTIATE_TEST_SUITE_P(
         GEMMFP16LDSPrefetchTest,
         GEMMFP16LDSPrefetchTestGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(
-                ::testing::Values(1, 2),           // prefetchInFlight
-                ::testing::Values(0, 2),           // prefetchLDSFactor
-                ::testing::Values(false, true)))); // prefetchMixMemOps
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(1, 2), // prefetchInFlight
+                                              ::testing::Values(0, 2), // prefetchLDSFactor
+                                              ::testing::Values(false,
+                                                                true)))); // prefetchMixMemOps
 
     // Params are: prefetchInFlight, prefetchLDSFactor, prefetchMixMemOps
     class GEMMLDSMultiPrefetchTestGPU : public BaseGEMMContextFixture<std::tuple<int, int, bool>>
@@ -293,11 +291,10 @@ namespace GEMMTests
     INSTANTIATE_TEST_SUITE_P(
         GEMMLDSMultiPrefetchTest,
         GEMMLDSMultiPrefetchTestGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(
-                ::testing::Values(1, 2, 3),        // prefetchInFlight
-                ::testing::Values(0, 2),           // prefetchLDSFactor
-                ::testing::Values(false, true)))); // prefetchMixMemOps
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(1, 2, 3), // prefetchInFlight
+                                              ::testing::Values(0, 2), // prefetchLDSFactor
+                                              ::testing::Values(false,
+                                                                true)))); // prefetchMixMemOps
 
 } // namespace GEMMTests
