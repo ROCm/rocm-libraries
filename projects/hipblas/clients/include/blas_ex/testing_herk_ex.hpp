@@ -53,7 +53,7 @@ inline void testname_herk_ex(const Arguments& arg, std::string& name)
 template <typename Ti, typename To = Ti, typename Tex = To>
 void testing_herk_ex_bad_arg(const Arguments& arg)
 {
-    using Ts = hipblas_internal_type<Tex>;
+    using Ts     = hipblas_internal_type<Tex>;
     using Tab_ex = real_t<Tex>;
 
     auto hipblasHerkExFn    = arg.api == FORTRAN ? hipblasHerkExFortran : hipblasHerkEx;
@@ -82,7 +82,7 @@ void testing_herk_ex_bad_arg(const Arguments& arg)
     device_matrix<To> dC(N, N, ldc);
 
     device_vector<Tab_ex> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Tab_ex                 h_alpha{1.0f}, h_beta{2.0f}, h_one{1.0f}, h_zero{0.0f};
+    Tab_ex                h_alpha{1.0f}, h_beta{2.0f}, h_one{1.0f}, h_zero{0.0f};
 
     if constexpr(std::is_same_v<Tab_ex, hipblasHalf>)
         h_one = float_to_half(1.0f);
@@ -109,51 +109,181 @@ void testing_herk_ex_bad_arg(const Arguments& arg)
         }
 
         DAPI_EXPECT(HIPBLAS_STATUS_NOT_INITIALIZED,
-            hipblasHerkExFn, (nullptr, uplo, transA, N, K, alpha, dA, aType, lda, beta, dC, cType, ldc, computeType)
-            );
+                    hipblasHerkExFn,
+                    (nullptr,
+                     uplo,
+                     transA,
+                     N,
+                     K,
+                     alpha,
+                     dA,
+                     aType,
+                     lda,
+                     beta,
+                     dC,
+                     cType,
+                     ldc,
+                     computeType));
 
         DAPI_EXPECT(HIPBLAS_STATUS_INVALID_VALUE, // enum is valid but not for this function
-            hipblasHerkExFn, (handle, HIPBLAS_FILL_MODE_FULL, transA, N, K, alpha, dA, aType, lda, beta, dC, cType, ldc, computeType)
-            );
+                    hipblasHerkExFn,
+                    (handle,
+                     HIPBLAS_FILL_MODE_FULL,
+                     transA,
+                     N,
+                     K,
+                     alpha,
+                     dA,
+                     aType,
+                     lda,
+                     beta,
+                     dC,
+                     cType,
+                     ldc,
+                     computeType));
 
         DAPI_EXPECT(HIPBLAS_STATUS_INVALID_VALUE, // enum is valid but not for this function
-            hipblasHerkExFn, (handle, uplo, HIPBLAS_OP_T, N, K, alpha, dA, aType, lda, beta, dC, cType, ldc, computeType)
-            );
-            
+                    hipblasHerkExFn,
+                    (handle,
+                     uplo,
+                     HIPBLAS_OP_T,
+                     N,
+                     K,
+                     alpha,
+                     dA,
+                     aType,
+                     lda,
+                     beta,
+                     dC,
+                     cType,
+                     ldc,
+                     computeType));
+
         DAPI_EXPECT(HIPBLAS_STATUS_INVALID_ENUM,
-            hipblasHerkExFn,(handle, uplo, (hipblasOperation_t)HIPBLAS_FILL_MODE_FULL, N, K, alpha, dA, aType, lda, beta, dC, cType, ldc, computeType)
-            );
+                    hipblasHerkExFn,
+                    (handle,
+                     uplo,
+                     (hipblasOperation_t)HIPBLAS_FILL_MODE_FULL,
+                     N,
+                     K,
+                     alpha,
+                     dA,
+                     aType,
+                     lda,
+                     beta,
+                     dC,
+                     cType,
+                     ldc,
+                     computeType));
 
         if(arg.bad_arg_all)
         {
             DAPI_EXPECT(HIPBLAS_STATUS_INVALID_VALUE,
-                hipblasHerkExFn, (handle, uplo, transA, N, K, nullptr, dA, aType, lda, beta, dC, cType, ldc, computeType)
-                );
+                        hipblasHerkExFn,
+                        (handle,
+                         uplo,
+                         transA,
+                         N,
+                         K,
+                         nullptr,
+                         dA,
+                         aType,
+                         lda,
+                         beta,
+                         dC,
+                         cType,
+                         ldc,
+                         computeType));
             DAPI_EXPECT(HIPBLAS_STATUS_INVALID_VALUE,
-                hipblasHerkExFn, (handle, uplo, transA, N, K, alpha, nullptr, aType, lda, beta, dC, cType, ldc, computeType)
-                );
+                        hipblasHerkExFn,
+                        (handle,
+                         uplo,
+                         transA,
+                         N,
+                         K,
+                         alpha,
+                         nullptr,
+                         aType,
+                         lda,
+                         beta,
+                         dC,
+                         cType,
+                         ldc,
+                         computeType));
             DAPI_EXPECT(HIPBLAS_STATUS_INVALID_VALUE,
-                hipblasHerkExFn, (handle, uplo, transA, N, K, alpha, dA, aType, lda, nullptr, dC, cType, ldc, computeType)
-                );
+                        hipblasHerkExFn,
+                        (handle,
+                         uplo,
+                         transA,
+                         N,
+                         K,
+                         alpha,
+                         dA,
+                         aType,
+                         lda,
+                         nullptr,
+                         dC,
+                         cType,
+                         ldc,
+                         computeType));
             DAPI_EXPECT(HIPBLAS_STATUS_INVALID_VALUE,
-                hipblasHerkExFn, (handle, uplo, transA, N, K, alpha, dA, aType, lda, beta, nullptr, cType, ldc, computeType)
-                );
-         }
+                        hipblasHerkExFn,
+                        (handle,
+                         uplo,
+                         transA,
+                         N,
+                         K,
+                         alpha,
+                         dA,
+                         aType,
+                         lda,
+                         beta,
+                         nullptr,
+                         cType,
+                         ldc,
+                         computeType));
+        }
 
         // With N == 0, can have all nullptrs
-        DAPI_CHECK(
-            hipblasHerkExFn,(handle, uplo, transA, 0, K, nullptr, nullptr, aType, lda, nullptr, nullptr, cType, ldc, computeType));
+        DAPI_CHECK(hipblasHerkExFn,
+                   (handle,
+                    uplo,
+                    transA,
+                    0,
+                    K,
+                    nullptr,
+                    nullptr,
+                    aType,
+                    lda,
+                    nullptr,
+                    nullptr,
+                    cType,
+                    ldc,
+                    computeType));
 
         // With alpha == 0, can have A be nullptr
-        DAPI_CHECK(
-            hipblasHerkExFn,(handle, uplo, transA, N, K, zero, nullptr, aType, lda, beta, dC, cType, ldc, computeType));
+        DAPI_CHECK(hipblasHerkExFn,
+                   (handle,
+                    uplo,
+                    transA,
+                    N,
+                    K,
+                    zero,
+                    nullptr,
+                    aType,
+                    lda,
+                    beta,
+                    dC,
+                    cType,
+                    ldc,
+                    computeType));
     }
 }
 
 template <typename Ti, typename To = Ti, typename Tex = To>
 void testing_herk_ex(const Arguments& arg)
 {
-    using Ts = hipblas_internal_type<Tex>;
+    using Ts     = hipblas_internal_type<Tex>;
     using Tab_ex = real_t<Tex>;
 
     auto hipblasHerkExFn    = arg.api == FORTRAN ? hipblasHerkExFortran : hipblasHerkEx;
@@ -181,17 +311,32 @@ void testing_herk_ex(const Arguments& arg)
 
     // argument sanity check, quick return if input parameters are invalid before allocating invalid
     // memory
-    bool invalid_size = N < 0 || K < 0 || ldc < N || (transA == HIPBLAS_OP_N && lda < N) || (transA != HIPBLAS_OP_N && lda < K);
+    bool invalid_size = N < 0 || K < 0 || ldc < N || (transA == HIPBLAS_OP_N && lda < N)
+                        || (transA != HIPBLAS_OP_N && lda < K);
     if(invalid_size || !N)
     {
         DAPI_EXPECT(invalid_size ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS,
-            hipblasHerkExFn,(handle, uplo, transA, N, K, nullptr, nullptr, aType, lda, nullptr, nullptr, cType, ldc, computeType));
+                    hipblasHerkExFn,
+                    (handle,
+                     uplo,
+                     transA,
+                     N,
+                     K,
+                     nullptr,
+                     nullptr,
+                     aType,
+                     lda,
+                     nullptr,
+                     nullptr,
+                     cType,
+                     ldc,
+                     computeType));
         return;
     }
 
     // Naming: `h` is in CPU (host) memory, `d` is in GPU (device) memory
-    size_t A_row = (transA == HIPBLAS_OP_N ? N : K);
-    size_t A_col = (transA == HIPBLAS_OP_N ? K : N);
+    size_t A_row  = (transA == HIPBLAS_OP_N ? N : K);
+    size_t A_col  = (transA == HIPBLAS_OP_N ? K : N);
     size_t A_size = size_t(lda) * A_col;
     size_t C_size = size_t(ldc) * N;
 
@@ -202,8 +347,8 @@ void testing_herk_ex(const Arguments& arg)
     host_matrix<To> hC_cpu(N, N, ldc);
 
     // Allocate device memory
-    device_matrix<Ti> dA(A_row, A_col, lda);
-    device_matrix<To> dC(N, N, ldc);
+    device_matrix<Ti>     dA(A_row, A_col, lda);
+    device_matrix<To>     dC(N, N, ldc);
     device_vector<Tab_ex> d_alpha(1);
     device_vector<Tab_ex> d_beta(1);
 
@@ -214,7 +359,6 @@ void testing_herk_ex(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(d_beta.memcheck());
 
     double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
- 
 
     // Initial Data on CPU
     hipblas_init_matrix(hA, arg, hipblas_client_never_set_nan, hipblas_hermitian_matrix, true);
@@ -237,16 +381,42 @@ void testing_herk_ex(const Arguments& arg)
         =================================================================== */
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
 
-       DAPI_CHECK(hipblasHerkExFn,(
-            handle, uplo, transA, N, K, &h_alpha, dA, aType, lda, &h_beta, dC, cType, ldc, computeType));
+        DAPI_CHECK(hipblasHerkExFn,
+                   (handle,
+                    uplo,
+                    transA,
+                    N,
+                    K,
+                    &h_alpha,
+                    dA,
+                    aType,
+                    lda,
+                    &h_beta,
+                    dC,
+                    cType,
+                    ldc,
+                    computeType));
 
         CHECK_HIP_ERROR(hC_host.transfer_from(dC));
         CHECK_HIP_ERROR(dC.transfer_from(hC_device));
 
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
-        DAPI_CHECK(hipblasHerkExFn,(
-            handle, uplo, transA, N, K, d_alpha, dA, aType, lda, d_beta, dC, cType, ldc, computeType));
+        DAPI_CHECK(hipblasHerkExFn,
+                   (handle,
+                    uplo,
+                    transA,
+                    N,
+                    K,
+                    d_alpha,
+                    dA,
+                    aType,
+                    lda,
+                    d_beta,
+                    dC,
+                    cType,
+                    ldc,
+                    computeType));
 
         CHECK_HIP_ERROR(hC_device.transfer_from(dC));
 
@@ -255,7 +425,8 @@ void testing_herk_ex(const Arguments& arg)
         =================================================================== */
 
         // reference calculation for golden result
-        ref_herk_ex<Ti, To, Tab_ex>(uplo, transA, N, K, h_alpha, hA.data(), lda, h_beta, hC_cpu.data(), ldc);
+        ref_herk_ex<Ti, To, Tab_ex>(
+            uplo, transA, N, K, h_alpha, hA.data(), lda, h_beta, hC_cpu.data(), ldc);
 
         if(arg.unit_check)
         {
@@ -281,16 +452,30 @@ void testing_herk_ex(const Arguments& arg)
         {
             if(iter == arg.cold_iters)
                 gpu_time_used = get_time_us_sync(stream);
-            DAPI_DISPATCH(hipblasHerkExFn, (handle, uplo, transA, N, K, &h_alpha, dA, aType, lda, &h_beta, dC, cType, ldc, computeType));
+            DAPI_DISPATCH(hipblasHerkExFn,
+                          (handle,
+                           uplo,
+                           transA,
+                           N,
+                           K,
+                           &h_alpha,
+                           dA,
+                           aType,
+                           lda,
+                           &h_beta,
+                           dC,
+                           cType,
+                           ldc,
+                           computeType));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
 
         hipblasHerkExModel{}.log_args<To>(std::cout,
                                           arg,
                                           gpu_time_used,
-            herk_gflop_count<Ts>(N, K),
-            herk_gbyte_count<Ts>(N, K),
-            hipblas_error_host,
-            hipblas_error_device);
+                                          herk_gflop_count<Ts>(N, K),
+                                          herk_gbyte_count<Ts>(N, K),
+                                          hipblas_error_host,
+                                          hipblas_error_device);
     }
 }

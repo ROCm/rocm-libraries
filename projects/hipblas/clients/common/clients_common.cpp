@@ -208,6 +208,7 @@
 #include "blas_ex/testing_gemm_batched_ex.hpp"
 #include "blas_ex/testing_gemm_ex.hpp"
 #include "blas_ex/testing_gemm_strided_batched_ex.hpp"
+#include "blas_ex/testing_herk_ex.hpp"
 #include "blas_ex/testing_nrm2_batched_ex.hpp"
 #include "blas_ex/testing_nrm2_ex.hpp"
 #include "blas_ex/testing_nrm2_strided_batched_ex.hpp"
@@ -218,7 +219,6 @@
 #include "blas_ex/testing_scal_ex.hpp"
 #include "blas_ex/testing_scal_strided_batched_ex.hpp"
 #include "blas_ex/testing_syrk_ex.hpp"
-#include "blas_ex/testing_herk_ex.hpp"
 #include "blas_ex/testing_trsm_batched_ex.hpp"
 #include "blas_ex/testing_trsm_ex.hpp"
 #include "blas_ex/testing_trsm_strided_batched_ex.hpp"
@@ -578,12 +578,11 @@ struct perf_herk_ex : hipblas_test_invalid
 {
 };
 template <typename Ti, typename To, typename Tc>
-struct perf_herk_ex<Ti,
-                    To,
-                    Tc,
-                    std::enable_if_t<!std::is_same<Ti, void>{}
-                                     && (is_complex<To>
-                                          && is_complex<Ti>)>>
+struct perf_herk_ex<
+    Ti,
+    To,
+    Tc,
+    std::enable_if_t<!std::is_same<Ti, void>{} && (is_complex<To> && is_complex<Ti>)>>
     : hipblas_test_valid
 {
     void operator()(const Arguments& arg)

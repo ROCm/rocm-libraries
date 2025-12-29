@@ -104,7 +104,8 @@ namespace
         Ti,
         To,
         Tc,
-        std::enable_if_t<!std::is_same_v<
+        std::enable_if_t<
+            !std::is_same_v<
                 Ti,
                 void> && (std::is_same_v<Ti, std::complex<float>> || std::is_same_v<Ti, std::complex<double>>)>>
         : hipblas_test_valid
@@ -131,7 +132,8 @@ namespace
     using herk_ex = herk_ex_template<herk_ex_testing, HERK_EX>;
     TEST_P(herk_ex, blas3)
     {
-        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(hipblas_herk_ex_dispatch<herk_ex_testing>(GetParam()));
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(
+            hipblas_herk_ex_dispatch<herk_ex_testing>(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(herk_ex);
 

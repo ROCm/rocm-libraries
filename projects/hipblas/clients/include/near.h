@@ -49,7 +49,6 @@
 // sqrt(0.5) factor for complex cutoff calculations
 constexpr double sqrthalf = 0.7071067811865475244;
 
-
 /*! \brief Template: gtest near compare two matrices float/double/complex */
 template <typename T>
 void near_check_general(int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU, double abs_error);
@@ -89,7 +88,7 @@ void near_check_mixed(int64_t                        M,
                       const T*                       hGPU,
                       double                         abs_error);
 
-// currently only used for half-precision comparisons in dot_ex tests
+// mixed precision or hpl
 template <class T>
 inline constexpr double error_tolerance = get_epsilon<T>();
 
@@ -106,7 +105,7 @@ inline constexpr double error_tolerance<std::complex<float>> = 1 / 10000.0;
 template <>
 inline constexpr double error_tolerance<std::complex<double>> = 1 / 1000000.0;
 
-// currently only used for gemm_ex
+// mixed precision or hpl
 template <class Tc, class Ti, class To>
 static constexpr double sum_error_tolerance_for_gfx11 = get_epsilon<Tc>();
 
