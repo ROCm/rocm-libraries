@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from copy import deepcopy
 from math import floor
+from typing import Optional, Union
 
 from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Common.Utilities import printWarning
@@ -317,18 +318,18 @@ class ValidatorInstruction(ABC):
     issued_at: float
 
     @abstractmethod
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         ...
 
 @dataclass
 class LocalRead(ValidatorInstruction):
     name: str
     num_vmfma: int
-    issued_at: int | float
+    issued_at: Union[int, float]
     needed_by: int
-    guaranteed_by: int | float = float('inf')
+    guaranteed_by: Union[int, float] = float('inf')
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         # Needs to be guaranteed BEFORE the index at which it's needed since the
         # SWaitCnt is issued AFTER the vmfma.
         if self.guaranteed_by < self.needed_by:
@@ -360,13 +361,13 @@ class LocalRead(ValidatorInstruction):
 class GlobalRead(ValidatorInstruction):
     name: str
     num_vmfma: int
-    issued_at: int | float
+    issued_at: Union[int, float]
     swap_global_read_order: bool
     needed_by: float = float('inf')
-    guaranteed_by: int | float = float('inf')
-    barriered_at: list[int | float] = field(default_factory=list)
+    guaranteed_by: Union[int, float] = float('inf')
+    barriered_at: list[Union[int, float]] = field(default_factory=list)
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         if self.issued_at < self.guaranteed_by < self.needed_by:
             if any(self.guaranteed_by < barriered_at < self.needed_by for barriered_at in self.barriered_at):
                     return None
@@ -412,7 +413,7 @@ class GlobalRead(ValidatorInstruction):
 
 @dataclass
 class SWait(ValidatorInstruction):
-    issued_at: int | float
+    issued_at: Union[int, float]
     dscnt: int
     vlcnt: int
     vscnt: int
@@ -422,18 +423,18 @@ class SWait(ValidatorInstruction):
     def _is_valid(self) -> bool:
         return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at >= -1
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         if self._is_valid():
             return None
         return f"SWait at index {floor(self.issued_at)} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={floor(self.issued_at)}."
 
 @dataclass
 class Barrier(ValidatorInstruction):
-    issued_at: int | float
+    issued_at: Union[int, float]
     comment: str
     name: str = "SBarrier"
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         return f"Barrier at index {floor(self.issued_at)} is not valid. Must be >= -1." if self.issued_at < -1 else None
 
 MAIN_LOOP_PREV = "ML-1"
@@ -662,7 +663,7 @@ class Timeline:
             
             self.combined_timeline.extend(self._timelines[loop_name])
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         """
         Validate the timeline by calling the validate method of each instruction.
         """
@@ -951,7 +952,7 @@ def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bo
     1. The GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
     2. The LR1s and LR0s are guaranteed to be complete before the first VMFMA that uses their data.
     """
-    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> str | None:
+    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> Optional[str]:
         if len(schedule_info.mfmaReorder) != 0:
             printWarning("Do not currently support mfmaReorder in CMS validation, cannot guarantee that LR1s will be correct.")
             return None
@@ -985,7 +986,7 @@ def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context
         printWarning("idMap not found in context. Skipping CMS validation for correct number of instructions.")
         return True, ""
 
-    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> str | None:
+    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> Optional[str]:
         for instruction_name in schedule_info.optSchedule.keys():
             schedule = schedule_get(instruction_name, code_path, schedule_info)
 

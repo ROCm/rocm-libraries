@@ -10,15 +10,15 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
 void SampleRunner::operator()(const TensorLayout& layout)
@@ -148,12 +148,15 @@ void SampleRunner::operator()(const TensorLayout& layout)
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_sdk::data_objects::PointwiseMode::ADD, biasRefTensor, convRefTensor, biasTensor);
+            hipdnn_data_sdk::data_objects::PointwiseMode::ADD,
+            biasRefTensor,
+            convRefTensor,
+            biasTensor);
 
         // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, biasRefTensor);
+            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, biasRefTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
 

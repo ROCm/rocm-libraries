@@ -112,7 +112,7 @@ namespace rocsparse
                     val = rocsparse::conj(val);
                 }
 
-                rocsparse::atomic_add(&y[col], row_val * val);
+                rocsparse::atomic_add(y, col, n, row_val * val);
             }
             else
             {

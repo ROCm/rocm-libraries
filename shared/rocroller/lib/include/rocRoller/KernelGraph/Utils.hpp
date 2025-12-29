@@ -100,6 +100,34 @@ namespace rocRoller
         std::string toString(UnrollColouring const&);
 
         /**
+         * @brief Colouring of operations and coordinates by NaryArgument.
+         *
+         * Return value of `colourByNaryArgument`.
+         */
+        struct NaryArgumentColouring
+        {
+            std::map<int, NaryArgument> coordinateColour; //< Coordinate colouring.
+            std::map<int, NaryArgument> operationColour; //< Control operation colouring.
+        };
+
+        /**
+         * @brief Colour coordinates and operations by NaryArgument
+         * based on Multiply operations.
+         *
+         * Traverses the graph starting from `start` (or the entire
+         * graph if `start` is -1) and finds all Multiply
+         * operations. For each multiply, determines which coordinates
+         * and control operations contribute to each argument (LHS,
+         * LHS_SCALE, RHS, RHS_SCALE) by tracing backward
+         * dependencies.
+         *
+         * @param graph The kernel graph to analyze
+         * @param start Starting control operation (-1 for entire graph)
+         * @return NaryArgumentColouring with coordinate and control mappings
+         */
+        NaryArgumentColouring colourByNaryArgument(KernelGraph const& graph, int start = -1);
+
+        /**
          * @brief Colour operations and coordinates by unroll value.
          *
          * Starts at `topOp` (or the top of the graph if `topOp` is
