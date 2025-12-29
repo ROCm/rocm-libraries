@@ -46,9 +46,6 @@ project( rocfft-clients-tests LANGUAGES CXX )
 
 set(CMAKE_CXX_STANDARD 20)
 
-include(CheckIncludeFileCXX)
-check_include_file_cxx("scope" HAVE_SCOPE_HEADER)
-check_include_file_cxx("experimental/scope" HAVE_EXPERIMENTAL_SCOPE_HEADER)
 
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
@@ -238,13 +235,18 @@ else()
   include_directories(${FFTW_INCLUDE_DIRS})
 endif()
 
+include(CheckIncludeFileCXX)
+check_include_file_cxx("scope" HAVE_SCOPE_HEADER)
+check_include_file_cxx("experimental/scope" HAVE_EXPERIMENTAL_SCOPE_HEADER)
 if(HAVE_SCOPE_HEADER OR HAVE_EXPERIMENTAL_SCOPE_HEADER )
-  target_compile_definitions(rocfft-test PRIVATE HAVE_SCOPE_EXIT)
+  #find_package(Boost REQUIRED COMPONENTS tokenizer)
+  find_package(Boost REQUIRED)
 else()
+  #find_package( Boost REQUIRED COMPONENTS scope_exit tokenizer )
   find_package( Boost REQUIRED )
-  set( Boost_DEBUG ON )
-  set( Boost_DETAILED_FAILURE_MSG ON )
 endif()
+set( Boost_DEBUG ON )
+set( Boost_DETAILED_FAILURE_MSG ON )
 
 
 set( rocfft-test_include_dirs

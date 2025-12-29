@@ -52,7 +52,8 @@ namespace std
 #endif
 namespace fs = std::filesystem;
 
-#ifdef HAVE_SCOPE_EXIT
+#if __has_include(<scope>) || __has_include(<experimental/scope>)
+#define HAVE_SCOPE_EXIT
 #if __has_include(<scope>)
 #include <scope>
 namespace scope = std;
@@ -61,6 +62,7 @@ namespace scope = std;
 namespace scope = std::experimental;
 #endif
 #else
+// Fallback to boost
 #include <boost/scope_exit.hpp>
 #endif
 
