@@ -27,7 +27,7 @@ function(add_test_plugin target_name)
 
     target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-    target_link_libraries(${target_name} PUBLIC hipdnn_sdk hipdnn_plugin_sdk hip::host)
+    target_link_libraries(${target_name} PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
 
     target_compile_options(${target_name} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 

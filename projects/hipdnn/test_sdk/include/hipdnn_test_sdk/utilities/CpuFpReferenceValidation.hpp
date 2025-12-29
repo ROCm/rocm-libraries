@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/utilities/TensorView.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
@@ -31,8 +31,8 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
-    bool allClose(hipdnn_sdk::utilities::ITensor& reference,
-                  hipdnn_sdk::utilities::ITensor& implementation) const override
+    bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
+                  hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
@@ -40,8 +40,8 @@ public:
             return false;
         }
 
-        hipdnn_sdk::utilities::TensorView<T> refView(reference);
-        hipdnn_sdk::utilities::TensorView<T> implView(implementation);
+        hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
+        hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
         std::atomic<bool> result(true);
 
@@ -84,23 +84,23 @@ private:
 };
 
 inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
-    createAllCloseValidator(hipdnn_sdk::data_objects::DataType dataType,
+    createAllCloseValidator(hipdnn_data_sdk::data_objects::DataType dataType,
                             float absoluteTolerance = std::numeric_limits<float>::epsilon(),
                             float relativeTolerance = std::numeric_limits<float>::epsilon())
 {
     switch(dataType)
     {
-    case hipdnn_sdk::data_objects::DataType::FLOAT:
+    case hipdnn_data_sdk::data_objects::DataType::FLOAT:
         return std::make_unique<CpuFpReferenceValidation<float>>(absoluteTolerance,
                                                                  relativeTolerance);
-    case hipdnn_sdk::data_objects::DataType::HALF:
+    case hipdnn_data_sdk::data_objects::DataType::HALF:
         return std::make_unique<CpuFpReferenceValidation<half>>(
             static_cast<half>(absoluteTolerance), static_cast<half>(relativeTolerance));
-    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+    case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
         return std::make_unique<CpuFpReferenceValidation<hip_bfloat16>>(
             static_cast<hip_bfloat16>(absoluteTolerance),
             static_cast<hip_bfloat16>(relativeTolerance));
-    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+    case hipdnn_data_sdk::data_objects::DataType::DOUBLE:
         return std::make_unique<CpuFpReferenceValidation<double>>(
             static_cast<double>(absoluteTolerance), static_cast<double>(relativeTolerance));
     default:

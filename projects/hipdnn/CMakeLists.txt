@@ -167,7 +167,7 @@ list(
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
-add_subdirectory(sdk)
+add_subdirectory(data_sdk)
 
 if(HIP_DNN_BUILD_BACKEND)
     add_subdirectory(backend)
@@ -179,7 +179,6 @@ endif()
 
 add_subdirectory(test_sdk)
 add_subdirectory(plugin_sdk)
-add_subdirectory(data_sdk)
 
 add_subdirectory(tests)
 
@@ -208,7 +207,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)"
+        "\(.*deps.*\)|\(.*tests.*\)|\(.*data_sdk/include/hipdnn_data_sdk/data_objects.*\)"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -219,8 +218,6 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
-        -object
-        ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object

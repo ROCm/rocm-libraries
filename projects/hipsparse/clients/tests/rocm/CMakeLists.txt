@@ -28,15 +28,20 @@ set(HIPSPARSE_TEST_SOURCES
     test_gthrz.cpp
     test_roti.cpp
     test_sctr.cpp
+    test_doti.cpp
+    test_dotci.cpp
     # Level 2
     test_bsrmv.cpp
     test_bsrsv2.cpp
     test_bsrxmv.cpp
     test_csrsv2.cpp
+    test_csrmv.cpp
     test_gemvi.cpp
+    test_hybmv.cpp
     # Level 3
     test_bsrmm.cpp
     test_bsrsm2.cpp
+    test_csrmm.cpp
     test_csrsm2.cpp
     test_gemmi.cpp
     # Precond 
@@ -65,9 +70,12 @@ set(HIPSPARSE_TEST_SOURCES
     test_cscsort.cpp
     test_csr2bsr.cpp
     test_csr2coo.cpp
+    test_csr2csc.cpp
+    test_csr2csc_ex2.cpp
     test_csr2csr_compress.cpp
     test_csr2dense.cpp
     test_csr2gebsr.cpp
+    test_csr2hyb.cpp
     test_csrilusv.cpp
     test_csrsort.cpp
     test_csru2csr.cpp
@@ -76,6 +84,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_gebsr2csr.cpp
     test_gebsr2gebsc.cpp
     test_gebsr2gebsr.cpp
+    test_hyb2csr.cpp
     test_identity.cpp
     test_nnz.cpp
     test_prune_csr2csr.cpp
