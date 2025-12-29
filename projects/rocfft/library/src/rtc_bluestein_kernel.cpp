@@ -73,12 +73,12 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     generator.generate_src
         = [=](const std::string& kernel_name) { return bluestein_single_rtc(kernel_name, specs); };
 
-    generator.construct_rtckernel = [=](const std::string&       kernel_name,
-                                        const std::vector<char>& code,
-                                        dim3                     gridDim,
-                                        dim3                     blockDim) {
+    generator.construct_rtckernel = [=](const std::string&                       kernel_name,
+                                        std::shared_future<hipModule_wrapper_t>& module,
+                                        dim3                                     gridDim,
+                                        dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelBluesteinSingle(kernel_name, code, gridDim, blockDim));
+            new RTCKernelBluesteinSingle(kernel_name, module, gridDim, blockDim));
     };
 
     return generator;
@@ -179,12 +179,12 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
     generator.generate_src
         = [=](const std::string& kernel_name) { return bluestein_multi_rtc(kernel_name, specs); };
 
-    generator.construct_rtckernel = [=](const std::string&       kernel_name,
-                                        const std::vector<char>& code,
-                                        dim3                     gridDim,
-                                        dim3                     blockDim) {
+    generator.construct_rtckernel = [=](const std::string&                       kernel_name,
+                                        std::shared_future<hipModule_wrapper_t>& module,
+                                        dim3                                     gridDim,
+                                        dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(new RTCKernelBluesteinMulti(
-            kernel_name, scheme, N, M, numof, count, code, gridDim, blockDim));
+            kernel_name, scheme, N, M, numof, count, module, gridDim, blockDim));
     };
 
     return generator;

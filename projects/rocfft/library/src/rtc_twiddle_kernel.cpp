@@ -32,6 +32,11 @@ RTCKernelTwiddle RTCKernelTwiddle::generate(const std::string& gpu_arch,
         [=](const std::string& kernel_name) { return twiddle_rtc(kernel_name, type, precision); }};
 
     auto code = RTCCache::cached_compile(kernel_name, gpu_arch, generator, generator_sum());
+    hipModule_wrapper_t module;
+    module.alloc(code.data());
+    std::promise<hipModule_wrapper_t>       module_promise;
+    std::shared_future<hipModule_wrapper_t> module_future = module_promise.get_future();
+    module_promise.set_value(std::move(module));
 
-    return RTCKernelTwiddle{kernel_name, code, {}, {}};
+    return RTCKernelTwiddle{kernel_name, module_future, {}, {}};
 }

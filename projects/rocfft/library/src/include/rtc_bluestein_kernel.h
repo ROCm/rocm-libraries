@@ -27,11 +27,11 @@
 // single-kernel bluestein
 struct RTCKernelBluesteinSingle : public RTCKernel
 {
-    RTCKernelBluesteinSingle(const std::string&       kernel_name,
-                             const std::vector<char>& code,
-                             dim3                     gridDim,
-                             dim3                     blockDim)
-        : RTCKernel(kernel_name, code, gridDim, blockDim)
+    RTCKernelBluesteinSingle(const std::string&                       kernel_name,
+                             std::shared_future<hipModule_wrapper_t>& module,
+                             dim3                                     gridDim,
+                             dim3                                     blockDim)
+        : RTCKernel(kernel_name, module, gridDim, blockDim)
     {
     }
 
@@ -45,16 +45,16 @@ struct RTCKernelBluesteinSingle : public RTCKernel
 // multi-kernel bluestein
 struct RTCKernelBluesteinMulti : public RTCKernel
 {
-    RTCKernelBluesteinMulti(const std::string&       kernel_name,
-                            ComputeScheme            scheme,
-                            size_t                   N,
-                            size_t                   M,
-                            size_t                   numof,
-                            size_t                   count,
-                            const std::vector<char>& code,
-                            dim3                     gridDim,
-                            dim3                     blockDim)
-        : RTCKernel(kernel_name, code, gridDim, blockDim)
+    RTCKernelBluesteinMulti(const std::string&                       kernel_name,
+                            ComputeScheme                            scheme,
+                            size_t                                   N,
+                            size_t                                   M,
+                            size_t                                   numof,
+                            size_t                                   count,
+                            std::shared_future<hipModule_wrapper_t>& module,
+                            dim3                                     gridDim,
+                            dim3                                     blockDim)
+        : RTCKernel(kernel_name, module, gridDim, blockDim)
         , scheme(scheme)
         , N(N)
         , M(M)

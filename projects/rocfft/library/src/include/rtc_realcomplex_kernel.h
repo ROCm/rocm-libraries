@@ -25,11 +25,11 @@
 
 struct RTCKernelRealComplex : public RTCKernel
 {
-    RTCKernelRealComplex(const std::string&       kernel_name,
-                         const std::vector<char>& code,
-                         dim3                     gridDim,
-                         dim3                     blockDim)
-        : RTCKernel(kernel_name, code, gridDim, blockDim)
+    RTCKernelRealComplex(const std::string&                       kernel_name,
+                         std::shared_future<hipModule_wrapper_t>& module,
+                         dim3                                     gridDim,
+                         dim3                                     blockDim)
+        : RTCKernel(kernel_name, module, gridDim, blockDim)
     {
     }
 
@@ -42,12 +42,12 @@ struct RTCKernelRealComplex : public RTCKernel
 
 struct RTCKernelRealComplexEven : public RTCKernel
 {
-    RTCKernelRealComplexEven(const std::string&       kernel_name,
-                             size_t                   half_N,
-                             const std::vector<char>& code,
-                             dim3                     gridDim,
-                             dim3                     blockDim)
-        : RTCKernel(kernel_name, code, gridDim, blockDim)
+    RTCKernelRealComplexEven(const std::string&                       kernel_name,
+                             size_t                                   half_N,
+                             std::shared_future<hipModule_wrapper_t>& module,
+                             dim3                                     gridDim,
+                             dim3                                     blockDim)
+        : RTCKernel(kernel_name, module, gridDim, blockDim)
         , half_N(half_N)
     {
     }
@@ -62,28 +62,11 @@ struct RTCKernelRealComplexEven : public RTCKernel
 
 struct RTCKernelRealComplexEvenTranspose : public RTCKernel
 {
-    RTCKernelRealComplexEvenTranspose(const std::string&       kernel_name,
-                                      const std::vector<char>& code,
-                                      dim3                     gridDim,
-                                      dim3                     blockDim)
-        : RTCKernel(kernel_name, code, gridDim, blockDim)
-    {
-    }
-
-    static RTCKernel::RTCGenerator generate_from_node(const LeafNode&    node,
-                                                      const std::string& gpu_arch,
-                                                      bool               enable_callbacks);
-
-    virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
-};
-
-struct RTCKernelApplyCallback : public RTCKernel
-{
-    RTCKernelApplyCallback(const std::string&       kernel_name,
-                           const std::vector<char>& code,
-                           dim3                     gridDim,
-                           dim3                     blockDim)
-        : RTCKernel(kernel_name, code, gridDim, blockDim)
+    RTCKernelRealComplexEvenTranspose(const std::string&                       kernel_name,
+                                      std::shared_future<hipModule_wrapper_t>& module,
+                                      dim3                                     gridDim,
+                                      dim3                                     blockDim)
+        : RTCKernel(kernel_name, module, gridDim, blockDim)
     {
     }
 
