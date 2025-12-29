@@ -4,7 +4,7 @@
 #include "MiopenEngine.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
-#include <hipdnn_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 
 namespace miopen_legacy_plugin
 {
@@ -38,7 +38,7 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_sdk::data_objects::CreateEngineDetails(builder, _id);
+    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

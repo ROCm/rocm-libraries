@@ -5,8 +5,8 @@
 
 #include <type_traits>
 
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -220,6 +220,10 @@ constexpr T getTolerance()
     else if constexpr(std::is_same_v<T, hip_bfloat16>)
     {
         return 1e-2_bf;
+    }
+    else if constexpr(std::is_same_v<T, int8_t>)
+    {
+        return 0;
     }
     else
     {

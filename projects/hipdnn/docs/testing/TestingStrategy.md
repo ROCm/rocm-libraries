@@ -16,7 +16,7 @@ White box tests focus on internal implementation details of hipDNN components.
 |-----------|----------|---------|-------------|--------------|
 | **Backend** | `backend/tests/` | Test internal implementation of hipDNN backend | Minimal/None | Windows & Linux |
 | **Frontend** | `frontend/tests/` | Test internal implementation of hipDNN frontend | Minimal/None | Windows & Linux |
-| **SDK** | `sdk/tests/` | Test internal implementation of hipDNN SDK | Minimal/None | Windows & Linux |
+| **SDK** | `data_sdk/tests/` | Test internal implementation of hipDNN SDK | Minimal/None | Windows & Linux |
 | **Plugin** | `plugins/<name>/tests/` | Test internal implementation of specific plugin | Minimal & fast | Windows & Linux |
 
 Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_DEVICE()` so tests run and pass correctly on CPU only machines.

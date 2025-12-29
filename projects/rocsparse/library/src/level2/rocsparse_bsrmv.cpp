@@ -203,11 +203,25 @@ namespace rocsparse
                       rocsparse_datatype_f32_r),
 
          BSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+
+         BSRMV_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i64,
                       rocsparse_indextype_i32,
                       rocsparse_datatype_f16_r,
                       rocsparse_datatype_f16_r,
                       rocsparse_datatype_f32_r),
+
+         BSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
 
          BSRMV_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i64,
@@ -217,11 +231,25 @@ namespace rocsparse
                       rocsparse_datatype_f32_r),
 
          BSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+
+         BSRMV_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i32,
                       rocsparse_indextype_i32,
                       rocsparse_datatype_bf16_r,
                       rocsparse_datatype_bf16_r,
                       rocsparse_datatype_f32_r),
+
+         BSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r),
 
          BSRMV_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i64,
@@ -232,10 +260,24 @@ namespace rocsparse
 
          BSRMV_CONFIG(rocsparse_datatype_f32_r,
                       rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r),
+
+         BSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
                       rocsparse_indextype_i64,
                       rocsparse_datatype_bf16_r,
                       rocsparse_datatype_bf16_r,
                       rocsparse_datatype_f32_r),
+
+         BSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r),
 
          BSRMV_CONFIG(rocsparse_datatype_f32_c,
                       rocsparse_indextype_i32,

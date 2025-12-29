@@ -4,7 +4,7 @@
 #pragma once
 
 #include <filesystem>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <string>
 
 #ifdef _WIN32
