@@ -159,11 +159,11 @@ struct SchemeTree
 
 using SchemeTreeVec = std::vector<std::unique_ptr<SchemeTree>>;
 
-static SchemeTreeVec EmptySchemeTreeVec = {};
+extern SchemeTreeVec EmptySchemeTreeVec;
 
 using SchemeVec = std::vector<ComputeScheme>;
 
-static SchemeVec EmptySchemeVec = {};
+extern SchemeVec EmptySchemeVec;
 
 class TreeNode;
 class LeafNode;

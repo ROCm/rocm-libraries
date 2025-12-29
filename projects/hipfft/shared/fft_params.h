@@ -2620,7 +2620,7 @@ static bool lexical_cast(const std::string& word, fft_params::fft_mp_lib& mp_lib
 }
 
 // This is used with CLI11 so that the user can type an integer on the
-// command line and we store into an enum varaible
+// command line and we store into an enum variable
 template <typename _Elem, typename _Traits>
 std::basic_istream<_Elem, _Traits>& operator>>(std::basic_istream<_Elem, _Traits>& stream,
                                                fft_array_type&                     atype)
