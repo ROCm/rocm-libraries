@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
+#include "PlatformUtils.hpp"
 
 #include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
 #include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
@@ -16,7 +17,6 @@
 
 #include <hip/hip_runtime.h>
 #include <mutex>
-#include <sys/utsname.h>
 
 namespace hipdnn_backend
 {
@@ -42,21 +42,7 @@ void logSystemInfo()
         return;
     }
 
-    struct utsname buffer;
-    if(uname(&buffer) != 0)
-    {
-        logger->warn("Failed to retrieve system information using uname");
-    }
-    else
-    {
-        logger->info("System Information: [System Name: {}, Node Name: {}, Release: {}, Version: "
-                     "{}, Machine: {}]",
-                     buffer.sysname,
-                     buffer.nodename,
-                     buffer.release,
-                     buffer.version,
-                     buffer.machine);
-    }
+    logger->info(platform_utilities::getSystemInfo());
 }
 
 void logHipDeviceInfo(hipStream_t stream)
@@ -85,8 +71,8 @@ void logHipDeviceInfo(hipStream_t stream)
     }
 
     logger->info(
-        "HIP Device Information: [Device: {}, Name: {}, Global Mem: {} bytes, Compute: {}.{}, "
-        "MPs: {}, Clock: {} kHz]",
+        "HIP Device Information: {Device: {}, Name: {}, Global Mem: {} bytes, Compute: {}.{}, "
+        "MPs: {}, Clock: {} kHz}",
         deviceId,
         props.name,
         props.totalGlobalMem,

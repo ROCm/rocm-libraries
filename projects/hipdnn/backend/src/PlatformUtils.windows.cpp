@@ -76,6 +76,12 @@ void* getSymbol(PluginLibHandle handle, const char* symbolName)
     return symbol;
 }
 
+std::string getSystemInfo()
+{
+    // TODO: implement full system info retrieval for windows
+    return "System Information: {System Name: Windows}";
+}
+
 }
 
 #endif // _WIN32
