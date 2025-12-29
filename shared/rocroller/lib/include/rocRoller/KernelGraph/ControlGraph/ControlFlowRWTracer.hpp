@@ -76,6 +76,28 @@ namespace rocRoller::KernelGraph
          */
         std::vector<ReadWriteRecord> coordinatesReadWrite(int coordinate) const;
 
+        /**
+         * @brief Build backward dependencies for all coordinates.
+         *
+         * Computes a map showing which coordinates each coordinate depends on.
+         * This is computed once and can be queried multiple times efficiently
+         * via getCoordinateDependencies().
+         *
+         * Must be called before using getCoordinateDependencies().
+         */
+        void buildDependencies();
+
+        /**
+         * @brief Get all coordinate dependencies for a given coordinate.
+         *
+         * Returns the set of coordinates that the given coordinate depends on
+         * (its provenance). Must call buildDependencies() first.
+         *
+         * @param coordinate The coordinate tag to trace dependencies for
+         * @return Set of all coordinate tags that the given coordinate depends on
+         */
+        std::set<int> getCoordinateDependencies(int coordinate) const;
+
         void operator()(ControlGraph::AssertOp const& op, int tag);
         void operator()(ControlGraph::Assign const& op, int tag);
         void operator()(ControlGraph::Barrier const& op, int tag);
@@ -111,6 +133,7 @@ namespace rocRoller::KernelGraph
         void trackRegister(int control, int coordinate, ReadWrite rw);
         void trackConnections(int control, std::unordered_set<int> const& exclude, ReadWrite rw);
         void trackOffsetAndStride(int control, ReadWrite rw);
+        void trackBuffer(int control, ReadWrite rw);
 
         bool hasGeneratedInputs(int const& tag);
         void generate(std::set<int> candidates);
@@ -120,6 +143,10 @@ namespace rocRoller::KernelGraph
         std::set<int>                m_completedControlNodes;
         std::vector<ReadWriteRecord> m_trace;
         bool                         m_trackConnections;
+
+        // Backward dependency cache: coordinate -> set of coordinates it depends on
+        mutable std::map<int, std::set<int>> m_dependencies;
+        mutable bool                         m_dependenciesBuilt = false;
 
     private:
         /**

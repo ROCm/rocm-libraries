@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef TESTING_SPMV_SELL_HPP
-#define TESTING_SPMV_SELL_HPP
+#ifndef TESTING_SPMV_CSR_HPP
+#define TESTING_SPMV_CSR_HPP
 
 #include "display.hpp"
 #include "flops.hpp"

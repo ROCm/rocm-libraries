@@ -33,6 +33,7 @@ add_executable(
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestINode.cpp
+    TestMatmulAttributes.cpp
     TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
