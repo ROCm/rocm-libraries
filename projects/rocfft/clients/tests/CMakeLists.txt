@@ -248,13 +248,21 @@ endif()
 set( Boost_DEBUG ON )
 set( Boost_DETAILED_FAILURE_MSG ON )
 
-
-set( rocfft-test_include_dirs
-  $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
-  ${ROCM_CLANG_ROOT}/include
+if( Boost_Found)
+  set( rocfft-test_include_dirs
+    $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
+    ${ROCM_CLANG_ROOT}/include
   )
-
+else()
+  set( rocfft-test_include_dirs
+    $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
+    ${ROCM_CLANG_ROOT}/include
+  )
+endif()
+  
 set( rocfft-test_link_libs
   ${FFTW_LIBRARIES}
   )
