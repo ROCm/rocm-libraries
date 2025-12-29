@@ -588,8 +588,8 @@ void Solution::RunImpl(const Handle& handle,
 
 void Solution::RunImpl(const Handle& handle,
                        const std::unordered_map<miopenTensorArgumentId_t, RunInput>& inputs,
-                       Data_t /*workspace*/,
-                       std::size_t /*workspace_size*/,
+                       Data_t workspace,
+                       std::size_t workspace_size,
                        const FusedProblem& problem_)
 {
     const auto buffer_getter = [&](auto id, auto&& descriptor) {
@@ -603,8 +603,12 @@ void Solution::RunImpl(const Handle& handle,
         return found->second.buffer;
     };
 
+    const auto workspace_getter = [&]() {
+        return FindOptions::Workspace{workspace, workspace_size};
+    };
+
     OperatorArgs op_args;
-    const auto invoke_params = problem_.MakeInvokeParams(buffer_getter, op_args);
+    const auto invoke_params = problem_.MakeInvokeParams(buffer_getter, workspace_getter, op_args);
 
     if(invoker)
     {

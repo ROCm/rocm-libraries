@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <miopen/miopen.h>
 
 namespace miopen_legacy_plugin
@@ -12,7 +12,7 @@ namespace miopen_legacy_plugin
 class MiopenTensor
 {
 public:
-    MiopenTensor(const hipdnn_sdk::data_objects::TensorAttributes& tensor);
+    MiopenTensor(const hipdnn_data_sdk::data_objects::TensorAttributes& tensor);
 
     MiopenTensor(const MiopenTensor&) = delete;
     MiopenTensor& operator=(const MiopenTensor&) = delete;

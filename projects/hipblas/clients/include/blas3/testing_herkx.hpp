@@ -283,7 +283,7 @@ void testing_herkx(const Arguments& arg)
     T h_alpha = arg.get_alpha<T>();
     U h_beta  = arg.get_beta<U>();
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_matrix(hA, arg, hipblas_client_alpha_sets_nan, hipblas_general_matrix, true);

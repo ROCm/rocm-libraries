@@ -4,7 +4,7 @@
 #pragma once
 
 #include <cstdlib>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <string>
 
 namespace hipdnn_test_sdk::utilities
@@ -16,26 +16,26 @@ public:
     ScopedEnvironmentVariableSetter(const std::string& varName, const std::string& value = "")
         : _varName(varName)
     {
-        _originalValue = hipdnn_sdk::utilities::getEnv(varName.c_str());
+        _originalValue = hipdnn_data_sdk::utilities::getEnv(varName.c_str());
         _hadOriginalValue = !_originalValue.empty();
-        hipdnn_sdk::utilities::setEnv(varName.c_str(), value.c_str());
+        hipdnn_data_sdk::utilities::setEnv(varName.c_str(), value.c_str());
     }
 
     ~ScopedEnvironmentVariableSetter()
     {
         if(_hadOriginalValue)
         {
-            hipdnn_sdk::utilities::setEnv(_varName.c_str(), _originalValue.c_str());
+            hipdnn_data_sdk::utilities::setEnv(_varName.c_str(), _originalValue.c_str());
         }
         else
         {
-            hipdnn_sdk::utilities::unsetEnv(_varName.c_str());
+            hipdnn_data_sdk::utilities::unsetEnv(_varName.c_str());
         }
     }
 
     void setValue(const std::string& value)
     {
-        hipdnn_sdk::utilities::setEnv(_varName.c_str(), value.c_str());
+        hipdnn_data_sdk::utilities::setEnv(_varName.c_str(), value.c_str());
     }
 
     ScopedEnvironmentVariableSetter(const ScopedEnvironmentVariableSetter&) = delete;
