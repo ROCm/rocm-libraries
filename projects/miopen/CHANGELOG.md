@@ -6,6 +6,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Optimized
 * Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels
 
+### Resolved issues
+* Fixed calculation of workspace size for fusions when tuning is done
+
 ## MIOpen 3.5.1 for ROCm 7.2.0
 ### Changed
 * Ported several OCL kernels to HIP

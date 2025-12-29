@@ -122,7 +122,7 @@ void testing_iamax_iamin(const Arguments& arg, FUNC func)
     // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory, plz follow this
     // practice
     host_vector<T> hx(N, incx);
-    R              cpu_result, hipblas_result_host, hipblas_result_device;
+    R              cpu_result{0}, hipblas_result_host{0}, hipblas_result_device{0};
 
     device_vector<T> dx(N, incx);
     device_vector<R> d_hipblas_result(1);
@@ -136,8 +136,8 @@ void testing_iamax_iamin(const Arguments& arg, FUNC func)
     // copy data from CPU to device
     CHECK_HIP_ERROR(dx.transfer_from(hx));
 
-    double gpu_time_used;
-    R      hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0};
+    R      hipblas_error_host{0}, hipblas_error_device{0};
 
     if(arg.unit_check || arg.norm_check)
     {

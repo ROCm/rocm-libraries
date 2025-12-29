@@ -130,7 +130,7 @@ void testing_axpy_batched(const Arguments& arg)
 
     T alpha = arg.get_alpha<T>();
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory, plz follow this practice
     host_batch_vector<T> hy_host(N, incy, batch_count);
