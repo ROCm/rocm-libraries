@@ -114,7 +114,7 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
     graph = transform<AddPRNG>(graph, context.get());
     graph = transform<UpdateWavefrontParameters>(graph, params);
     graph = transform<AddComputeIndex>(graph);
-    graph = transform<AssignComputeIndex>(graph, context.get());
+    graph = transform<AssignComputeIndex>(graph, context.get(), example.getCommand());
 
     ControlFlowRWTracer tracer(graph);
 
