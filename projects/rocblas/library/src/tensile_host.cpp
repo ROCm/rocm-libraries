@@ -83,20 +83,21 @@ namespace
     // Maps specific architectures to their generic fallback.
     // When exact-match libraries don't exist, try the generic variant.
     // Add new mappings as needed.
+	// Reference: https://llvm.org/docs/AMDGPUUsage.html
     static const std::unordered_map<std::string, std::string> archFallbackMap = {
-        // gfx9 family -> gfx9-generic
+		// Vega and non-CDNA
         {"gfx900", "gfx9-generic"},
         {"gfx902", "gfx9-generic"},
         {"gfx904", "gfx9-generic"},
         {"gfx906", "gfx9-generic"},
-        {"gfx908", "gfx9-generic"},
         {"gfx909", "gfx9-generic"},
-        {"gfx90a", "gfx9-generic"},
         {"gfx90c", "gfx9-generic"},
-        {"gfx940", "gfx9-generic"},
-        {"gfx941", "gfx9-generic"},
-        {"gfx942", "gfx9-generic"},
-        // gfx10 family -> gfx10-3-generic (RDNA2)
+		// RDNA1
+        {"gfx1010", "gfx10-1-generic"},
+        {"gfx1011", "gfx10-1-generic"},
+        {"gfx1012", "gfx10-1-generic"},
+        {"gfx1013", "gfx10-1-generic"},
+        // RDNA2
         {"gfx1030", "gfx10-3-generic"},
         {"gfx1031", "gfx10-3-generic"},
         {"gfx1032", "gfx10-3-generic"},
@@ -104,7 +105,7 @@ namespace
         {"gfx1034", "gfx10-3-generic"},
         {"gfx1035", "gfx10-3-generic"},
         {"gfx1036", "gfx10-3-generic"},
-        // gfx11 family -> gfx11-generic (RDNA3)
+        // RDNA3/3.5
         {"gfx1100", "gfx11-generic"},
         {"gfx1101", "gfx11-generic"},
         {"gfx1102", "gfx11-generic"},
@@ -113,6 +114,12 @@ namespace
         {"gfx1151", "gfx11-generic"},
         {"gfx1152", "gfx11-generic"},
         {"gfx1153", "gfx11-generic"},
+		// RDNA4
+        {"gfx1200", "gfx12-generic"},
+        {"gfx1201", "gfx12-generic"},
+		// MI300[a-zA-Z]
+		{"gfx942", "gfx9-4-generic"},
+		{"gfx950", "gfx9-4-generic"},
     };
 
     static std::string getArchFallback(const std::string& arch)
