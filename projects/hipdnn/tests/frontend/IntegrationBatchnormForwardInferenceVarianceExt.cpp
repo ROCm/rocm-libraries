@@ -40,7 +40,7 @@ struct IntegrationTestCase
 
     friend std::ostream& operator<<(std::ostream& os, const IntegrationTestCase& tc)
     {
-        os << "BatchnormTestCase{" << "plugin_path: " << tc.pluginPath
+        os << "BatchnormVarianceExtTestCase{" << "plugin_path: " << tc.pluginPath
            << ", description: " << tc.description << ", graph_name: " << tc.graphName
            << ", expected_failure: ";
 
@@ -66,13 +66,13 @@ struct IntegrationTestCase
     }
 };
 
-// Test class for frontend integration tests.
+// Test class for frontend integration tests with variance_ext.
 // This class runs end-to-end tests to ensure the frontend API works as expected.
 // Notes:
 //        - We are using fake test plugins to simulate different scenarios.
 //        - The tests will validate the graph creation, execution plan building, and execution through the full flow.
-//        - We are using a batchnorm graph since the graph doesn't really matter due to fake plugins.
-class IntegrationBatchnormForwardInferenceFp32
+//        - We are using a batchnorm variance_ext graph since the graph doesn't really matter due to fake plugins.
+class IntegrationBatchnormForwardInferenceVarianceExtFp32
     : public ::testing::TestWithParam<IntegrationTestCase>
 {
 protected:
@@ -87,7 +87,7 @@ protected:
             , scaleTensor(Tensor<Intermediate_type>(derivedDims))
             , biasTensor(Tensor<Intermediate_type>(derivedDims))
             , meanTensor(Tensor<Intermediate_type>(derivedDims))
-            , invVarianceTensor(Tensor<Intermediate_type>(derivedDims))
+            , varianceTensor(Tensor<Intermediate_type>(derivedDims))
         {
             // Initialize with simple constant values
             xTensor.fillWithValue(static_cast<Input_type>(1.0f));
@@ -95,7 +95,7 @@ protected:
             scaleTensor.fillWithValue(static_cast<Intermediate_type>(1.0f));
             biasTensor.fillWithValue(static_cast<Intermediate_type>(0.0f));
             meanTensor.fillWithValue(static_cast<Intermediate_type>(0.0f));
-            invVarianceTensor.fillWithValue(static_cast<Intermediate_type>(1.0f));
+            varianceTensor.fillWithValue(static_cast<Intermediate_type>(1.0f));
         }
 
         std::vector<int64_t> derivedDims;
@@ -104,14 +104,14 @@ protected:
         Tensor<Intermediate_type> scaleTensor;
         Tensor<Intermediate_type> biasTensor;
         Tensor<Intermediate_type> meanTensor;
-        Tensor<Intermediate_type> invVarianceTensor;
+        Tensor<Intermediate_type> varianceTensor;
     };
 
     struct BatchnormTestTensors
     {
         std::shared_ptr<TensorAttributes> x;
         std::shared_ptr<TensorAttributes> mean;
-        std::shared_ptr<TensorAttributes> invVariance;
+        std::shared_ptr<TensorAttributes> variance;
         std::shared_ptr<TensorAttributes> scale;
         std::shared_ptr<TensorAttributes> bias;
         std::shared_ptr<TensorAttributes> y;
@@ -177,13 +177,13 @@ protected:
         }
         tensors.mean = std::make_shared<TensorAttributes>(std::move(meanAttr));
 
-        auto invVarianceAttr
-            = makeTensorAttributes("inv_variance", DataType::FLOAT, tensorBundle.invVarianceTensor);
+        auto varianceAttr
+            = makeTensorAttributes("variance", DataType::FLOAT, tensorBundle.varianceTensor);
         if(useManualUids)
         {
-            invVarianceAttr.set_uid(uid++);
+            varianceAttr.set_uid(uid++);
         }
-        tensors.invVariance = std::make_shared<TensorAttributes>(std::move(invVarianceAttr));
+        tensors.variance = std::make_shared<TensorAttributes>(std::move(varianceAttr));
 
         auto scaleAttr = makeTensorAttributes("scale", DataType::FLOAT, tensorBundle.scaleTensor);
         if(useManualUids)
@@ -199,11 +199,11 @@ protected:
         }
         tensors.bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
-        BatchnormInferenceAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_inference");
+        BatchnormInferenceAttributesVarianceExt bnAttrs;
+        bnAttrs.set_name("batchnorm_inference_variance_ext");
 
-        tensors.y = graph->batchnorm_inference(
-            tensors.x, tensors.mean, tensors.invVariance, tensors.scale, tensors.bias, bnAttrs);
+        tensors.y = graph->batchnorm_inference_variance_ext(
+            tensors.x, tensors.mean, tensors.variance, tensors.scale, tensors.bias, bnAttrs);
 
         if(useManualUids)
         {
@@ -221,8 +221,8 @@ protected:
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[tensors.x->get_uid()] = tensorBundle.xTensor.memory().deviceData();
         variantPack[tensors.mean->get_uid()] = tensorBundle.meanTensor.memory().deviceData();
-        variantPack[tensors.invVariance->get_uid()]
-            = tensorBundle.invVarianceTensor.memory().deviceData();
+        variantPack[tensors.variance->get_uid()]
+            = tensorBundle.varianceTensor.memory().deviceData();
         variantPack[tensors.scale->get_uid()] = tensorBundle.scaleTensor.memory().deviceData();
         variantPack[tensors.bias->get_uid()] = tensorBundle.biasTensor.memory().deviceData();
         variantPack[tensors.y->get_uid()] = tensorBundle.yTensor.memory().deviceData();
@@ -258,7 +258,7 @@ protected:
 
         ASSERT_TRUE(tensors.x->has_uid());
         ASSERT_TRUE(tensors.mean->has_uid());
-        ASSERT_TRUE(tensors.invVariance->has_uid());
+        ASSERT_TRUE(tensors.variance->has_uid());
         ASSERT_TRUE(tensors.scale->has_uid());
         ASSERT_TRUE(tensors.bias->has_uid());
         ASSERT_TRUE(tensors.y->has_uid());
@@ -302,26 +302,26 @@ private:
 
 INSTANTIATE_TEST_SUITE_P(
     ,
-    IntegrationBatchnormForwardInferenceFp32,
+    IntegrationBatchnormForwardInferenceVarianceExtFp32,
     ::testing::Values(
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
                             "DefaultPluginWithManualUids",
-                            "DefaultPluginBatchnormTest",
+                            "DefaultPluginBatchnormVarianceExtTest",
                             FailurePoint::NONE,
                             true},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
                             "DefaultPluginWithAutoUids",
-                            "DefaultPluginBatchnormTestAutoUID",
+                            "DefaultPluginBatchnormVarianceExtTestAutoUID",
                             FailurePoint::NONE,
                             false},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testExecuteFailsPluginPath(),
                             "ExecuteFailsPlugin",
-                            "ExecuteFailsPluginBatchnormTest",
+                            "ExecuteFailsPluginBatchnormVarianceExtTest",
                             FailurePoint::EXECUTE,
                             true},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testNoApplicableEnginesAPluginPath(),
                             "NoApplicableEnginesPlugin",
-                            "NoEnginesPluginBatchnormTest",
+                            "NoEnginesPluginBatchnormVarianceExtTest",
                             FailurePoint::CREATE_EXECUTION_PLAN,
                             true}),
     // Provide a custom name for each test instance
@@ -333,7 +333,7 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     });
 
-TEST_P(IntegrationBatchnormForwardInferenceFp32, ExecutePluginPipeline)
+TEST_P(IntegrationBatchnormForwardInferenceVarianceExtFp32, ExecutePluginPipeline)
 {
     runTest();
 }
