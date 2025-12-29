@@ -648,12 +648,24 @@ namespace rocRoller
                 /*
                  */
                 auto mixDataAndScale = [&](auto dataArgument, auto scaleArgument) {
-                    auto numDataChains  = ldsByArgAndSmallK[{dataArgument, 0}].size();
-                    auto numScaleChains = ldsByArgAndSmallK[{scaleArgument, 0}].size();
-
-                    // Count unique "smallk" values
+                    // Count unique lds-prefetch unroll (small-k) values
                     int numDataPrefetchValues  = ldsPrefetchValues[dataArgument].size();
                     int numScalePrefetchValues = ldsPrefetchValues[scaleArgument].size();
+
+                    // Get number of data/scale chains (grows with number of jammed wavetiles)
+                    size_t numDataChains = 0;
+                    if(numDataPrefetchValues > 0)
+                    {
+                        int minDataK  = *ldsPrefetchValues[dataArgument].begin();
+                        numDataChains = ldsByArgAndSmallK.at({dataArgument, minDataK}).size();
+                    }
+
+                    size_t numScaleChains = 0;
+                    if(numScalePrefetchValues > 0)
+                    {
+                        int minScaleK  = *ldsPrefetchValues[scaleArgument].begin();
+                        numScaleChains = ldsByArgAndSmallK.at({scaleArgument, minScaleK}).size();
+                    }
 
                     if(numScaleChains > 0)
                     {
@@ -664,22 +676,23 @@ namespace rocRoller
                             for(int idxData = 0; idxData < numDataPerScale; ++idxData)
                             {
                                 for(int k = 0; k < numDataPrefetchValues; ++k)
-                                    prefetchChain.push_back(ldsByArgAndSmallK[{
-                                        dataArgument, k}][idxScale * numDataPerScale + idxData]);
+                                    prefetchChain.push_back(
+                                        ldsByArgAndSmallK.at({dataArgument, k})
+                                            .at(idxScale * numDataPerScale + idxData));
                             }
 
                             for(int k = 0; k < numScalePrefetchValues; ++k)
                                 prefetchChain.push_back(
-                                    ldsByArgAndSmallK[{scaleArgument, k}][idxScale]);
+                                    ldsByArgAndSmallK.at({scaleArgument, k}).at(idxScale));
                         }
                     }
                     else
                     {
-                        for(int idxData = 0; idxData < numDataPrefetchValues; ++idxData)
+                        for(int idxData = 0; idxData < numDataChains; ++idxData)
                         {
                             for(int k = 0; k < numDataPrefetchValues; ++k)
                                 prefetchChain.push_back(
-                                    ldsByArgAndSmallK[{dataArgument, k}][idxData]);
+                                    ldsByArgAndSmallK.at({dataArgument, k}).at(idxData));
                         }
                     }
                 };
