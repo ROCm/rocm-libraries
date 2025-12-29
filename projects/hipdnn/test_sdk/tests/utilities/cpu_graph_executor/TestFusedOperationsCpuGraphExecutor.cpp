@@ -3,11 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -16,8 +16,8 @@
 #include <hipdnn_test_sdk/utilities/pointwise/BinaryOperationFunctors.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 
 class TestFusedOperationsCpuGraphExecutor : public ::testing::Test

@@ -110,18 +110,6 @@ namespace rocRoller
                                                    CoordinateGraph::Transformer      coords);
 
             /**
-             * @brief Generate instructions needed to calculate offset and stride information
-             *
-             * @param tag The tag of the node in the control graph
-             * @param load The node in the control graph
-             * @param coords Known coordinates
-             * @return Generator<Instruction>
-             */
-            Generator<Instruction> genComputeIndex(int                               tag,
-                                                   ControlGraph::ComputeIndex const& ci,
-                                                   CoordinateGraph::Transformer      coords);
-
-            /**
              * @brief Information needed in order to load or store a tile.
              *
              * @field tag The tag of the control graph node generating the load or store

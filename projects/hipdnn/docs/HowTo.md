@@ -44,10 +44,10 @@ The hipDNN backend is a shared library that provides the core C API for graph ex
 The hipDNN SDK is a header-only C++ library that provides utilities and interfaces for plugin development. For complete SDK functionality and future roadmap, see the [SDK section in the Design Guide](./Design.md#sdk).
 
 #### Key Components
-- Plugin interface definitions: [`sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h)
-- Schema files: [`sdk/schemas/`](../sdk/schemas/)
-- Test utilities (incl. reference implementations): [`sdk/tests/test_utilities/`](../sdk/tests/test_utilities/)
-- Logging [`sdk/include/hipdnn_sdk/logging/Logger.hpp`](../sdk/include/hipdnn_sdk/logging/Logger.hpp)
+- Plugin interface definitions: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
+- Schema files: [`data_sdk/schemas/`](../data_sdk/schemas/)
+- Test utilities (incl. reference implementations): [`data_sdk/tests/test_utilities/`](../data_sdk/tests/test_utilities/)
+- Logging [`data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp`](../data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp)
 
 ### CMake Integration
 
@@ -73,7 +73,7 @@ target_link_libraries(your_target PRIVATE hipdnn::backend)
 
 #### SDK Integration
 ```cmake
-find_package(hipdnn_sdk REQUIRED)
+find_package(hipdnn_data_sdk REQUIRED)
 target_link_libraries(your_plugin PRIVATE hipdnn::sdk)
 ```
 
@@ -105,7 +105,7 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 #### Key Concepts
 - Graphs and operations are defined using `.fbs` schema files
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
-- Schema files are located in [`sdk/schemas/`](../sdk/schemas/)
+- Schema files are located in [`data_sdk/schemas/`](../data_sdk/schemas/)
 ---
 
 ## Extending hipDNN
@@ -133,12 +133,12 @@ When adding a completely new operation type (not currently supported in hipDNN),
 If the operation is new to hipDNN, start by defining its data structures:
 
 1. **Create Attribute Schema**
-   - Add a new `.fbs` file in [`sdk/schemas/`](../sdk/schemas/)
+   - Add a new `.fbs` file in [`data_sdk/schemas/`](../data_sdk/schemas/)
    - Define the operation's attributes (parameters, configurations)
-   - Example: [`sdk/schemas/batchnorm_attributes.fbs`](../sdk/schemas/batchnorm_attributes.fbs)
+   - Example: [`data_sdk/schemas/batchnorm_attributes.fbs`](../data_sdk/schemas/batchnorm_attributes.fbs)
 
 2. **Update Graph Schema**
-   - Modify [`sdk/schemas/graph.fbs`](../sdk/schemas/graph.fbs)
+   - Modify [`data_sdk/schemas/graph.fbs`](../data_sdk/schemas/graph.fbs)
    - Add your new attributes to the `NodeAttributes` union
    - Include your schema file
 
