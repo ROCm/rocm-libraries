@@ -319,4 +319,57 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
             CHECK(assignStack.back() == assign);
         }
     }
+
+    SECTION("no hoist when coordinate used after loop")
+    {
+        // Avoid hoisting when assigned-to coordinate is used after the loop,
+        // for the case where loop is zero-iteration
+
+        int coord = graph.coordinates.addElement(Linear{});
+
+        auto   constantExpr = Expression::literal(42.0f);
+        Assign assignInLoop;
+        assignInLoop.expression = constantExpr;
+        int assignInLoopNode    = graph.control.addElement(assignInLoop);
+        graph.mapper.connect(assignInLoopNode, coord, NaryArgument::DEST);
+
+        const auto firstDownstreamNode
+            = graph.control.getOutputNodeIndices<Body>(kLoop).take(1).only().value();
+        if(firstDownstreamNode != -1)
+        {
+            insertBefore(graph, firstDownstreamNode, assignInLoopNode, assignInLoopNode);
+        }
+
+        auto useExpr = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{coord, Register::Type::Scalar, DataType::Float});
+        Assign assignAfterLoop;
+        assignAfterLoop.expression = useExpr;
+        int assignAfterLoopNode    = graph.control.addElement(assignAfterLoop);
+
+        int resultCoord = graph.coordinates.addElement(Linear{});
+        graph.mapper.connect(assignAfterLoopNode, resultCoord, NaryArgument::DEST);
+
+        const auto nodeAfterLoop = graph.control.nodesAfter(kLoop).take(1).only().value();
+        AssertFatal(nodeAfterLoop != -1, ShowValue(nodeAfterLoop));
+
+        insertBefore(graph, nodeAfterLoop, assignAfterLoopNode, assignAfterLoopNode);
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
+
+        graph = transform<HoistLoopInvariant>(graph);
+
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
+
+        {
+            const auto loopStack   = controlStack(kLoop, graph);
+            const auto assignStack = controlStack(assignInLoopNode, graph);
+
+            REQUIRE(loopStack.size() + 1 == assignStack.size());
+
+            for(size_t i = 0; i < loopStack.size(); ++i)
+            {
+                CHECK(loopStack[i] == assignStack[i]);
+            }
+            CHECK(assignStack.back() == assignInLoopNode);
+        }
+    }
 }

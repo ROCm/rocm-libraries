@@ -122,6 +122,23 @@ namespace rocRoller::KernelGraph
         return visitor.tags;
     }
 
+    // If the control node is inside a loop, return the loop node, else -1
+    int getParentLoop(KernelGraph const& graph, int control)
+    {
+        auto stack          = controlStack(control, graph);
+        int  containingLoop = -1;
+        for(auto it = stack.rbegin(); it != stack.rend(); ++it)
+        {
+            int node = *it;
+            if(graph.control.get<ForLoopOp>(node).has_value()
+               || graph.control.get<DoWhileOp>(node).has_value())
+            {
+                return node;
+            }
+        }
+        return -1;
+    }
+
     CoordinateToLoops buildCoordinateLoopMapping(KernelGraph const&         graph,
                                                  ControlFlowRWTracer const& tracer)
     {
@@ -142,17 +159,7 @@ namespace rocRoller::KernelGraph
             }
 
             auto stack          = controlStack(record.control, graph);
-            int  containingLoop = -1;
-            for(auto it = stack.rbegin(); it != stack.rend(); ++it)
-            {
-                int node = *it;
-                if(graph.control.get<ForLoopOp>(node).has_value()
-                   || graph.control.get<DoWhileOp>(node).has_value())
-                {
-                    containingLoop = node;
-                    break;
-                }
-            }
+            int  containingLoop = getParentLoop(graph, record.control);
             if(containingLoop != -1)
             {
                 result[record.coordinate][containingLoop].insert(record.control);
@@ -184,6 +191,13 @@ namespace rocRoller::KernelGraph
             {
                 AssertFatal(loopNode >= 0);
 
+                /* TODO for this PR: 
+                - handle cases where a read occurs before write in loop
+                - write note for hoisting cases where for loop executes zero times
+                */
+
+                // Skip if more than one write in the loop body
+                // As currently does not handle multiple reaching definitions (branch within loop body)
                 if(controlNodes.size() != 1
                    || countCoordinateWritesInLoop(graph, loopNode, coordinate, tracer) != 1)
                 {
@@ -225,7 +239,34 @@ namespace rocRoller::KernelGraph
                     }
                 }
 
-                if(allTagsLoopInvariant)
+                if(!allTagsLoopInvariant)
+                {
+                    continue;
+                }
+
+                bool       coordinateUsedAfterLoop = false;
+                const auto readingControlNodes     = [&]() -> Generator<int> {
+                    for(const auto record : tracer.coordinatesReadWrite(coordinate))
+                    {
+                        if(record.rw == ControlFlowRWTracer::READ)
+                        {
+                            co_yield record.control;
+                        }
+                    }
+                }()
+                                                              .to<std::set>();
+
+                // If coordinate is read after loop, hoisting with a zero-iteration loop changes behavior
+                for(int nodeAfterLoop : graph.control.nodesAfter(loopNode))
+                {
+                    if(readingControlNodes.find(nodeAfterLoop) != readingControlNodes.end())
+                    {
+                        coordinateUsedAfterLoop = true;
+                        break;
+                    }
+                }
+
+                if(!coordinateUsedAfterLoop)
                 {
                     Log::debug("HoistLoopInvariant, hoisting {}, {}, to, {}, {}",
                                controlNode,
