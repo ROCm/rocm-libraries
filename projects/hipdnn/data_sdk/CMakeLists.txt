@@ -11,6 +11,8 @@ hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
+find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
+
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
 # imported, we will instead use find_package and not install the headers.
@@ -93,17 +95,18 @@ _hipdnn_data_sdk_process_dependency(
 
 add_library(hipdnn_data_sdk INTERFACE)
 
-# Extract and use include directories from dependency targets instead of linking
-# Remove this if TheRock 3rd Party deps get installed as clang + header only, and go back to target_link_libraries
-foreach(_dep_target flatbuffers::flatbuffers spdlog::spdlog_header_only nlohmann_json::nlohmann_json)
-    if(TARGET ${_dep_target})
-        get_target_property(_dep_includes ${_dep_target} INTERFACE_INCLUDE_DIRECTORIES)
-        if(_dep_includes)
-            message(STATUS "hipdnn_data_sdk adding includes from ${_dep_target}: ${_dep_includes}")
-            target_include_directories(hipdnn_data_sdk SYSTEM INTERFACE ${_dep_includes})
-        endif()
-    endif()
-endforeach()
+# Add includes from dependency targets
+hipdnn_add_dependency_includes(flatbuffers::flatbuffers)
+hipdnn_add_dependency_includes(spdlog::spdlog_header_only)
+hipdnn_add_dependency_includes(nlohmann_json::nlohmann_json)
+
+if (fmt_FOUND)
+    message(STATUS "fmt library found, using system fmt")
+    hipdnn_add_dependency_includes(fmt::fmt COMPILE_DEFINITION SPDLOG_FMT_EXTERNAL)
+else()
+    message(STATUS "fmt library not found, using bundled fmt from spdlog")
+endif()
+target_compile_definitions(hipdnn_data_sdk INTERFACE FMT_HEADER_ONLY)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
@@ -157,12 +160,7 @@ endif()
 
 # This is required to use hip/hip_fp16.h and hip/hip_bfloat16.h in any code that includes the sdk By
 # doing this, we don't need to link to hip::device
-target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__ FMT_HEADER_ONLY)
-
-# If spdlog is not being exported locally, define SPDLOG_FMT_EXTERNAL to use the external fmt library
-if(NOT _hipdnn_data_sdk_local_export_includes)
-    target_compile_definitions(hipdnn_data_sdk INTERFACE SPDLOG_FMT_EXTERNAL)
-endif()
+target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkTargets.cmake"

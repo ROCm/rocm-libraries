@@ -54,6 +54,29 @@ function(hipdnn_add_dependency dep_name)
     endif()
 endfunction()
 
+# Extract and use include directories from dependency targets instead of linking
+# Function to add include directories and optional compile definitions from dependency targets
+function(hipdnn_add_dependency_includes TARGET_NAME)
+    # Parse optional arguments
+    set(options "")
+    set(oneValueArgs COMPILE_DEFINITION)
+    set(multiValueArgs "")
+    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(TARGET ${TARGET_NAME})
+        get_target_property(_dep_includes ${TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_dep_includes)
+            message(VERBOSE "hipdnn_data_sdk adding includes from ${TARGET_NAME}: ${_dep_includes}")
+            target_include_directories(hipdnn_data_sdk SYSTEM INTERFACE ${_dep_includes})
+        endif()
+
+        if(ARG_COMPILE_DEFINITION)
+            target_compile_definitions(hipdnn_data_sdk INTERFACE ${ARG_COMPILE_DEFINITION})
+        endif()
+    endif()
+endfunction()
+
+
 # Builds a dependency locally
 macro(_build_local)
     cmake_policy(PUSH)
