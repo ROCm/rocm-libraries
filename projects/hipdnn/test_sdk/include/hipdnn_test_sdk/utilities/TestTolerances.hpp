@@ -221,6 +221,10 @@ constexpr T getTolerance()
     {
         return 1e-2_bf;
     }
+    else if constexpr(std::is_same_v<T, int8_t>)
+    {
+        return 0;
+    }
     else
     {
         static_assert(false, "Type not supported");
