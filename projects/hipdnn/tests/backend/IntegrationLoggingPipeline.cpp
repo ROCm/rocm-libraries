@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 namespace fs = std::filesystem;
@@ -22,14 +23,14 @@ protected:
         // Create temp log file path
         _logFile = fs::temp_directory_path() / "hipdnn_test_log.txt";
 
-        setenv("HIPDNN_LOG_LEVEL", "info", 1);
-        setenv("HIPDNN_LOG_FILE", _logFile.c_str(), 1);
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.string().c_str());
     }
 
     void TearDown() override
     {
-        unsetenv("HIPDNN_LOG_LEVEL");
-        unsetenv("HIPDNN_LOG_FILE");
+        hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_LEVEL");
+        hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_FILE");
 
         if(fs::exists(_logFile))
         {
