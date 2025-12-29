@@ -5,6 +5,13 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.37
 
+### Optimized
+
+* Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when 
+  creating plans that exist concurrently.
+
+### Resolved issues
+
 * Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
 * Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
 * Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
