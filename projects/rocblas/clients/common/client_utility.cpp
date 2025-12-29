@@ -445,6 +445,12 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
         setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
     }
 
+    if(arg.graph_test)
+    {
+        m_stream_order_env_set = true;
+        setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
+    }
+
     auto status = rocblas_create_handle(&m_handle);
     if(status != rocblas_status_success)
         throw std::runtime_error(rocblas_status_to_string(status));
@@ -519,6 +525,11 @@ rocblas_local_handle::~rocblas_local_handle()
     }
 
     rocblas_destroy_handle(m_handle);
+
+    if(m_stream_order_env_set)
+    {
+        setenv("ROCBLAS_STREAM_ORDER_ALLOC", "0", true);
+    }
 }
 
 void rocblas_local_handle::rocblas_stream_begin_capture()
@@ -556,7 +567,8 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     CHECK_HIP_ERROR(hipStreamDestroy(m_graph_stream));
     m_graph_stream = nullptr;
 
-    m_handle->set_stream_order_memory_allocation(false);
+    if(!m_stream_order_env_set)
+        m_handle->set_stream_order_memory_allocation(false);
 }
 
 void rocblas_parallel_initialize_thread(int id, size_t& memory_used)
