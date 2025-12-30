@@ -137,4 +137,60 @@ void checkBatchnormFwdActivationModeSupported(
 void checkBatchnormBwdActivationModeSupported(
     const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr);
 
+// ============================================================================
+// Batchnorm Type Configuration - Single Source of Truth
+// ============================================================================
+
+/// Specifies data types for different tensor roles in batchnorm operations.
+///
+/// Current MIOpen Requirements (as of v6.x):
+/// - IO tensors: Must all be the same type (FLOAT, HALF, or BFLOAT16)
+/// - Affine tensors (scale, bias): Must be FLOAT
+/// - Stat tensors (mean, variance): Must be FLOAT
+///
+/// When MIOpen support changes, update BnTypeConfigs::VALID array.
+struct BnTensorTypes
+{
+    hipdnn_sdk::data_objects::DataType io; ///< Type for IO tensors (x, y, dx, dy)
+    hipdnn_sdk::data_objects::DataType affine; ///< Type for affine (scale, bias, dscale, dbias)
+    hipdnn_sdk::data_objects::DataType stat; ///< Type for stat (mean, variance)
+};
+
+/// Canonical batchnorm type configurations matching MIOpen requirements.
+/// This is the SINGLE SOURCE OF TRUTH for supported type combinations.
+namespace bn_type_configs
+{
+using DT = hipdnn_sdk::data_objects::DataType;
+
+// ========================================================================
+// Valid Configurations (per MIOpen v6.x specification)
+// ========================================================================
+
+/// IO=FLOAT, Affine=FLOAT, Stat=FLOAT (baseline)
+inline constexpr BnTensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT};
+
+/// IO=HALF, Affine=FLOAT, Stat=FLOAT (mixed precision with FP16)
+inline constexpr BnTensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT};
+
+/// IO=BFLOAT16, Affine=FLOAT, Stat=FLOAT (mixed precision with BF16)
+inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT};
+
+/// All currently supported type configurations
+inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
+
+// ========================================================================
+// Helper Functions for Validation
+// ========================================================================
+
+/// Returns all allowed IO data types from VALID configurations
+std::vector<hipdnn_sdk::data_objects::DataType> getAllowedIoTypes();
+
+/// Returns all allowed affine data types from VALID configurations
+std::vector<hipdnn_sdk::data_objects::DataType> getAllowedAffineTypes();
+
+/// Returns all allowed stat data types from VALID configurations
+std::vector<hipdnn_sdk::data_objects::DataType> getAllowedStatTypes();
+
+} // namespace bn_type_configs
+
 } // namespace miopen_legacy_plugin

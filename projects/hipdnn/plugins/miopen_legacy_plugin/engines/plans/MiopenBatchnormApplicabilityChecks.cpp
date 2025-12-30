@@ -15,6 +15,53 @@ namespace miopen_legacy_plugin
 {
 
 // ============================================
+// Type Configuration Helper Functions
+// ============================================
+
+std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
+{
+    std::vector<hipdnn_sdk::data_objects::DataType> types;
+    types.reserve(VALID.size());
+    for(const auto& config : VALID)
+    {
+        // Add if not already present (handles duplicates if any)
+        if(std::find(types.begin(), types.end(), config.io) == types.end())
+        {
+            types.push_back(config.io);
+        }
+    }
+    return types;
+}
+
+std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedAffineTypes()
+{
+    std::vector<hipdnn_sdk::data_objects::DataType> types;
+    types.reserve(VALID.size());
+    for(const auto& config : VALID)
+    {
+        if(std::find(types.begin(), types.end(), config.affine) == types.end())
+        {
+            types.push_back(config.affine);
+        }
+    }
+    return types;
+}
+
+std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedStatTypes()
+{
+    std::vector<hipdnn_sdk::data_objects::DataType> types;
+    types.reserve(VALID.size());
+    for(const auto& config : VALID)
+    {
+        if(std::find(types.begin(), types.end(), config.stat) == types.end())
+        {
+            types.push_back(config.stat);
+        }
+    }
+    return types;
+}
+
+// ============================================
 // Tensor Descriptor Implementation
 // ============================================
 
@@ -324,30 +371,58 @@ void checkTensorDataTypesSupported(
     const std::vector<int64_t>& statTensorIds,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
-    using DataType = hipdnn_sdk::data_objects::DataType;
-
-    // Validate IO tensors (FLOAT, HALF, or BFLOAT16 - all must match)
+    // Validate IO tensors using bn_type_configs (single source of truth)
     validators::validateConsistentDataTypes(
         ioTensorIds,
         tensorMap,
-        {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+        bn_type_configs::getAllowedIoTypes(),
         "Batchnorm implementation supports only FLOAT, HALF, and BFLOAT16 data types for x, y, "
         "dy, and dx tensors.",
         "All IO tensors for batchnorm must have the same data type.");
 
-    // Validate affine tensors (FLOAT only)
-    validators::validateFixedDataType(affineTensorIds,
-                                      tensorMap,
-                                      DataType::FLOAT,
-                                      "Batchnorm implementation supports only FLOAT data type for "
-                                      "scale and bias tensors.");
+    // Validate affine tensors using bn_type_configs
+    const auto allowedAffineTypes = bn_type_configs::getAllowedAffineTypes();
+    if(allowedAffineTypes.size() == 1)
+    {
+        // Currently only one affine type allowed (FLOAT), use fixed validation
+        validators::validateFixedDataType(affineTensorIds,
+                                          tensorMap,
+                                          allowedAffineTypes[0],
+                                          "Batchnorm implementation supports only FLOAT data type "
+                                          "for scale and bias tensors.");
+    }
+    else
+    {
+        // Future: Multiple affine types allowed, use consistent validation
+        validators::validateConsistentDataTypes(
+            affineTensorIds,
+            tensorMap,
+            allowedAffineTypes,
+            "Batchnorm affine tensors use unsupported data type.",
+            "All affine tensors for batchnorm must have the same data type.");
+    }
 
-    // Validate stat tensors (FLOAT only)
-    validators::validateFixedDataType(statTensorIds,
-                                      tensorMap,
-                                      DataType::FLOAT,
-                                      "Batchnorm implementation supports only FLOAT data type for "
-                                      "mean and variance tensors.");
+    // Validate stat tensors using bn_type_configs
+    const auto allowedStatTypes = bn_type_configs::getAllowedStatTypes();
+    if(allowedStatTypes.size() == 1)
+    {
+        // Currently only one stat type allowed (FLOAT), use fixed validation
+        validators::validateFixedDataType(statTensorIds,
+                                          tensorMap,
+                                          allowedStatTypes[0],
+                                          "Batchnorm implementation supports only FLOAT data type "
+                                          "for mean and variance tensors.");
+    }
+    else
+    {
+        // Future: Multiple stat types allowed, use consistent validation
+        validators::validateConsistentDataTypes(
+            statTensorIds,
+            tensorMap,
+            allowedStatTypes,
+            "Batchnorm stat tensors use unsupported data type.",
+            "All stat tensors for batchnorm must have the same data type.");
+    }
 }
 
 void checkTensorShapesSupported(
@@ -475,6 +550,9 @@ void checkBatchnormTensorConfigSupported(
     const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
+    // Validate activation mode first (defense in depth - catch unsupported modes early)
+    checkBatchnormBwdActivationModeSupported(actAttr);
+
     std::vector<int64_t> ioTensorIds = {bnBwdAttr.x_tensor_uid(),
                                         actAttr.in_1_tensor_uid().value(), // dy
                                         bnBwdAttr.dx_tensor_uid()};
