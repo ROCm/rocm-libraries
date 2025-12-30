@@ -37,7 +37,6 @@ inline __HOST_DEVICE__ bool operator!=(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 inline __HOST_DEVICE__ bool operator>(hip_fp8_e4m3 a, hip_fp8_e4m3 b)
 {
     return float(a) > float(b);
-    ;
 }
 
 inline __HOST_DEVICE__ bool operator>=(hip_fp8_e4m3 a, hip_fp8_e4m3 b)

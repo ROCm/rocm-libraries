@@ -44,13 +44,11 @@ inline __HOST_DEVICE__ bool operator>(half a, half b)
 inline __HOST_DEVICE__ bool operator<=(half a, half b)
 {
     return static_cast<float>(a) <= static_cast<float>(b);
-    ;
 }
 
 inline __HOST_DEVICE__ bool operator>=(half a, half b)
 {
     return static_cast<float>(a) >= static_cast<float>(b);
-    ;
 }
 
 namespace hipdnn_data_sdk::utilities::fp16
