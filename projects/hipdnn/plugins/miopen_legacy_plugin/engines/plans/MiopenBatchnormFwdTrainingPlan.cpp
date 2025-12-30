@@ -3,7 +3,7 @@
 
 #include "MiopenBatchnormFwdTrainingPlan.hpp"
 #include "MiopenUtils.hpp"
-#include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -13,8 +13,9 @@ namespace miopen_legacy_plugin
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE_TRAINING = miopenBNSpatial;
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_sdk::data_objects::BatchnormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
@@ -66,7 +67,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
        || attributes.next_running_mean_tensor_uid().has_value()
        || attributes.next_running_variance_tensor_uid().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "Running statistics should have been rejected by plan builder");
     }
@@ -74,9 +75,10 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
 }
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_sdk::data_objects::BatchnormAttributes& attributes,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
@@ -92,7 +94,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     // Validate that activation input matches batchnorm output
     if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "BatchnormFwdTrainingParams: Activation input must match batchnorm output");
     }
@@ -121,7 +123,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
        || attributes.next_running_mean_tensor_uid().has_value()
        || attributes.next_running_variance_tensor_uid().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "Running statistics should have been rejected by plan builder");
     }
@@ -269,7 +271,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     // Running statistics should have been rejected by plan builder
     if(_trainingParams.hasRunningStats())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "Running statistics should have been rejected by plan builder");
     }
@@ -288,7 +290,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
         miopenActivationDescriptor_t activationDesc;
         THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor(&activationDesc));
         auto activationDescRes
-            = hipdnn_sdk::utilities::ScopedResource<miopenActivationDescriptor_t>(
+            = hipdnn_data_sdk::utilities::ScopedResource<miopenActivationDescriptor_t>(
                 activationDesc, [](miopenActivationDescriptor_t desc) {
                     auto status = miopenDestroyActivationDescriptor(desc);
                     if(status != miopenStatusSuccess)

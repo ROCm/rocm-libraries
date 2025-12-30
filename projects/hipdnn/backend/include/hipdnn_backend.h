@@ -15,7 +15,7 @@
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnStatus.h"
-#include <hipdnn_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 
 // NOLINTBEGIN
 #ifdef __cplusplus

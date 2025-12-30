@@ -5,8 +5,8 @@
 #include <memory>
 #include <set>
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -16,7 +16,7 @@
 
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 TEST(TestMiopenEngine, ConstructorAndId)
 {
@@ -162,7 +162,7 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, result);
 
-    hipdnn_plugin::EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);
 }
 

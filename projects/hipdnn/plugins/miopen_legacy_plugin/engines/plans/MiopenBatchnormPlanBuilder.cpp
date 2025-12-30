@@ -1,9 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <miopen/miopen.h>
 #include <string>
 #include <unordered_set>
@@ -20,14 +20,14 @@ namespace miopen_legacy_plugin
 namespace
 {
 
-std::tuple<const hipdnn_sdk::data_objects::BatchnormInferenceAttributes&,
-           const hipdnn_sdk::data_objects::PointwiseAttributes&,
-           const hipdnn_sdk::data_objects::BatchnormBackwardAttributes&>
-    getBatchnormBackwardFusionNodeAttrs(const hipdnn_plugin::IGraph& opGraph)
+std::tuple<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes&,
+           const hipdnn_data_sdk::data_objects::PointwiseAttributes&,
+           const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes&>
+    getBatchnormBackwardFusionNodeAttrs(const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     if(opGraph.nodeCount() != 3)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm fusion requires exactly 3 nodes. Graph has "
                 + std::to_string(opGraph.nodeCount()) + " nodes");
@@ -35,19 +35,19 @@ std::tuple<const hipdnn_sdk::data_objects::BatchnormInferenceAttributes&,
 
     const auto& bnInfAttr
         = opGraph.getNodeWrapper(0)
-              .attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+              .attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
 
-    const auto& actAttr
-        = opGraph.getNodeWrapper(1).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+    const auto& actAttr = opGraph.getNodeWrapper(1)
+                              .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
     const auto& bnBwdAttr
         = opGraph.getNodeWrapper(2)
-              .attributesAs<hipdnn_sdk::data_objects::BatchnormBackwardAttributes>();
+              .attributesAs<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>();
 
     return {bnInfAttr, actAttr, bnBwdAttr};
 }
 
-auto getBatchnormBackwardFusionNodeAttrsLogErrors(const hipdnn_plugin::IGraph& opGraph)
+auto getBatchnormBackwardFusionNodeAttrsLogErrors(const hipdnn_plugin_sdk::IGraph& opGraph)
     -> std::optional<decltype(getBatchnormBackwardFusionNodeAttrs(opGraph))>
 {
     try
@@ -62,17 +62,18 @@ auto getBatchnormBackwardFusionNodeAttrsLogErrors(const hipdnn_plugin::IGraph& o
 }
 
 void batchnormBwdFusionCheckTensors(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
-    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
     static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_BWD};
 
     if(s_supportedActivations.count(actAttr.operation()) == 0)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm fusion currently only supports RELU_BWD activation");
     }
@@ -80,7 +81,7 @@ void batchnormBwdFusionCheckTensors(
     // in_0 must be the batchnorm inference output (forward path)
     if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation in_0 must be the batchnorm inference output tensor (y)");
     }
@@ -88,7 +89,7 @@ void batchnormBwdFusionCheckTensors(
     // in_1 must be the dy (gradient from downstream)
     if(!actAttr.in_1_tensor_uid().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation backward requires in_1 tensor (dy gradient)");
     }
@@ -96,7 +97,7 @@ void batchnormBwdFusionCheckTensors(
     // Verify activation backwards output is BN backward dy input
     if(actAttr.out_0_tensor_uid() != bnBwdAttr.dy_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward dy input must be the activation output tensor");
     }
@@ -104,7 +105,7 @@ void batchnormBwdFusionCheckTensors(
     // Verify that different BN operations use shared inputs where applicable
     if(bnBwdAttr.x_tensor_uid() != bnInfAttr.x_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward must use the same X tensor as batchnorm inference");
     }
@@ -112,7 +113,7 @@ void batchnormBwdFusionCheckTensors(
     if(bnBwdAttr.mean_tensor_uid().has_value()
        && bnBwdAttr.mean_tensor_uid().value() != bnInfAttr.mean_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward must use the same mean tensor as batchnorm inference");
     }
@@ -120,14 +121,14 @@ void batchnormBwdFusionCheckTensors(
     if(bnBwdAttr.inv_variance_tensor_uid().has_value()
        && bnBwdAttr.inv_variance_tensor_uid().value() != bnInfAttr.inv_variance_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward must use the same inv_variance tensor as batchnorm inference");
     }
 
     if(bnBwdAttr.scale_tensor_uid() != bnInfAttr.scale_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward must use the same scale tensor as batchnorm inference");
     }
@@ -149,7 +150,7 @@ void batchnormBwdFusionCheckTensors(
     if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorInvVar.virtual_()
        || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
     }
@@ -159,7 +160,7 @@ void batchnormBwdFusionCheckTensors(
 
     if(actTensorIn1.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_1 (dy gradient) must be non-virtual");
     }
 
@@ -170,7 +171,7 @@ void batchnormBwdFusionCheckTensors(
 
     if(!actTensorIn0.virtual_() || !actTensorOut.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation input from batchnorm must be virtual, output must be virtual");
     }
@@ -187,23 +188,24 @@ void batchnormBwdFusionCheckTensors(
     if(!bnBwdTensorDy.virtual_() || bnBwdTensorDx.virtual_() || bnBwdTensorDscale.virtual_()
        || bnBwdTensorDbias.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward dy input must be virtual, output tensors must be non-virtual");
     }
 }
 
 void batchnormFwdFusionCheckTensors(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
     static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD};
 
     if(s_supportedActivations.count(actAttr.operation()) == 0)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm fusion currently only supports RELU_FWD activation");
     }
@@ -211,7 +213,7 @@ void batchnormFwdFusionCheckTensors(
     // in_0 must be the batchnorm inference output (forward path)
     if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation in_0 must be the batchnorm inference output tensor (y)");
     }
@@ -233,7 +235,7 @@ void batchnormFwdFusionCheckTensors(
     if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorInvVar.virtual_()
        || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
     }
@@ -245,17 +247,18 @@ void batchnormFwdFusionCheckTensors(
 
     if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation input from batchnorm must be virtual, output must be non virtual");
     }
 }
 
 bool batchnormBwdFusionCheckTensorsLogErrors(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
-    const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     try
     {
@@ -270,9 +273,10 @@ bool batchnormBwdFusionCheckTensorsLogErrors(
 }
 
 bool batchnormFwdFusionCheckTensorsLogErrors(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     try
     {
@@ -290,12 +294,12 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
 
 bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin::IGraph& opGraph) const
+    const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     auto areAllNodesF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
-                return node->computeDataType() == hipdnn_sdk::data_objects::DataType::FLOAT;
+                return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
             });
     };
 
@@ -310,10 +314,11 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             return false;
         }
 
-        if(!opGraph.hasOnlySupportedAttributes(std::set<hipdnn_sdk::data_objects::NodeAttributes>{
-               hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
-               hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-               hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
+        if(!opGraph.hasOnlySupportedAttributes(
+               std::set<hipdnn_data_sdk::data_objects::NodeAttributes>{
+                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
         {
             HIPDNN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
             return false;
@@ -326,7 +331,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         const auto& node = opGraph.getNode(0);
 
         // Only batchnorm training (BatchnormAttributes) has running statistics
-        if(node.attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes)
+        if(node.attributes_type()
+           == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes)
         {
             const auto* attr = node.attributes_as_BatchnormAttributes();
             if(attr != nullptr && attr->prev_running_mean_tensor_uid().has_value()
@@ -342,7 +348,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         // Note: BN Fwd inference temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
         if(node.attributes_type()
-           == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
+           == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
         {
             HIPDNN_LOG_WARN("Batchnorm inference support is temporarily disabled.");
             return false;
@@ -364,9 +370,10 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         bool isFwdInferenceFirst
             = node0.attributesType()
-              == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
-        bool isPointwiseSecond = node1.attributesType()
-                                 == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+              == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
+        bool isPointwiseSecond
+            = node1.attributesType()
+              == hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
 
         if(!(isFwdInferenceFirst && isPointwiseSecond))
         {
@@ -376,8 +383,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         }
 
         if(!batchnormFwdFusionCheckTensorsLogErrors(
-               node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>(),
-               node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>(),
+               node0.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>(),
+               node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>(),
                opGraph.getTensorMap()))
         {
             return false;
@@ -426,7 +433,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
 size_t MiopenBatchnormPlanBuilder::getWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     //batchnorm plan builder does not require workspace size
     return 0u;
@@ -436,12 +443,12 @@ namespace
 {
 
 void buildPlanInferenceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                  const hipdnn_plugin::IGraph& opGraph,
-                                  const hipdnn_plugin::INodeWrapper& nodeWrapper,
+                                  const hipdnn_plugin_sdk::IGraph& opGraph,
+                                  const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
                                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr
-        = nodeWrapper.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
 
     BatchnormFwdInferenceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
@@ -449,11 +456,12 @@ void buildPlanInferenceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandl
 }
 
 void buildPlanFwdTrainingSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_plugin::IGraph& opGraph,
-                                    const hipdnn_plugin::INodeWrapper& nodeWrapper,
+                                    const hipdnn_plugin_sdk::IGraph& opGraph,
+                                    const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
                                     HipdnnEnginePluginExecutionContext& executionContext)
 {
-    const auto& attr = nodeWrapper.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+    const auto& attr
+        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
 
     BatchnormFwdTrainingParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
@@ -461,12 +469,12 @@ void buildPlanFwdTrainingSingleNode([[maybe_unused]] const HipdnnEnginePluginHan
 }
 
 void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_plugin::IGraph& opGraph,
-                            const hipdnn_plugin::INodeWrapper& nodeWrapper,
+                            const hipdnn_plugin_sdk::IGraph& opGraph,
+                            const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
                             HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr
-        = nodeWrapper.attributesAs<hipdnn_sdk::data_objects::BatchnormBackwardAttributes>();
+        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>();
 
     BatchnormBwdParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));
@@ -474,7 +482,7 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
 }
 
 void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                       const hipdnn_plugin::IGraph& opGraph,
+                                       const hipdnn_plugin_sdk::IGraph& opGraph,
                                        HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto [bnInfAttr, actAttr, bnBwdAttr] = getBatchnormBackwardFusionNodeAttrs(opGraph);
@@ -486,15 +494,16 @@ void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePlugin
 }
 
 void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                          const hipdnn_plugin::IGraph& opGraph,
+                                          const hipdnn_plugin_sdk::IGraph& opGraph,
                                           HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
 
     const auto& fwdInference
-        = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
-    const auto& activation = node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+        = node0.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
+    const auto& activation
+        = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
     BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
@@ -505,7 +514,7 @@ void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePlu
 
 void MiopenBatchnormPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin::IGraph& opGraph,
+    const hipdnn_plugin_sdk::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
@@ -527,23 +536,24 @@ void MiopenBatchnormPlanBuilder::buildPlan(
 
     switch(nodeWrapper.attributesType())
     {
-    case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
         HIPDNN_LOG_INFO("Building batchnorm fwd inference plan for node: {}", nodeName);
         buildPlanInferenceSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
-    case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
         HIPDNN_LOG_INFO("Building batchnorm fwd training plan for node: {}", nodeName);
         buildPlanFwdTrainingSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
-    case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
         HIPDNN_LOG_INFO("Building batchnorm backward plan for node: {}", nodeName);
         buildPlanBwdSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     default:
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for batchnorm plan builder: "
-                + std::string(hipdnn_sdk::data_objects::toString(nodeWrapper.attributesType())));
+                + std::string(
+                    hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
 }
 
