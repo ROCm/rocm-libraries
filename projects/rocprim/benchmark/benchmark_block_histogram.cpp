@@ -64,7 +64,7 @@
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 128 * primbench::MiB);
+    primbench::executor executor(argc, argv, 512 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     using histogram_atomic_t = histogram<rocprim::block_histogram_algorithm::using_atomic>;
