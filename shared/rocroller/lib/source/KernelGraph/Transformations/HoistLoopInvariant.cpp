@@ -326,15 +326,12 @@ namespace rocRoller::KernelGraph
     {
         auto records = tracer.coordinatesReadWrite(coordinate);
 
-        // Collect all read nodes within this loop
-        // TODO: does this pattern exist elsewhere in code? maybe make DRY?
         std::vector<int> readNodes;
         for(const auto& record : records)
         {
             if(record.rw == ControlFlowRWTracer::READ)
             {
                 auto stack = controlStack(record.control, graph);
-                // Check if this read is within the target loop
                 if(std::find(stack.begin(), stack.end(), loopNode) != stack.end())
                 {
                     readNodes.push_back(record.control);
@@ -342,7 +339,7 @@ namespace rocRoller::KernelGraph
             }
         }
 
-        // Check if any read node comes before the write node in control flow
+        // Check if any read node comes before the write node (within loop)
         for(int readNode : readNodes)
         {
             if(readNode == writeControlNode)
