@@ -6,6 +6,9 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
+#endif
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_frontend/Error.hpp>
@@ -274,6 +277,70 @@ public:
                                                                            result.first,
                                                                            result.second);
     }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    void deserialize(const nlohmann::json& json)
+    {
+        if(json.contains("uid"))
+        {
+            set_uid(json.at("uid").get<int64_t>());
+        }
+        if(json.contains("name"))
+        {
+            set_name(json.at("name").get<std::string>());
+        }
+        if(json.contains("data_type"))
+        {
+            set_data_type(
+                fromSdkType(json.at("data_type").get<hipdnn_data_sdk::data_objects::DataType>()));
+        }
+        if(json.contains("dims"))
+        {
+            set_dim(json.at("dims").get<std::vector<int64_t>>());
+        }
+        if(json.contains("strides"))
+        {
+            set_stride(json.at("strides").get<std::vector<int64_t>>());
+        }
+        if(json.contains("virtual"))
+        {
+            set_is_virtual(json.at("virtual").get<bool>());
+        }
+
+        // Deserialize pass-by-value
+        if(json.contains("value_type") && json.contains("value"))
+        {
+            auto valueType
+                = json.at("value_type").get<hipdnn_data_sdk::data_objects::TensorValue>();
+            switch(valueType)
+            {
+            case hipdnn_data_sdk::data_objects::TensorValue::Float32Value:
+                set_value(json.at("value").get<float>());
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Float64Value:
+                set_value(json.at("value").get<double>());
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Float16Value:
+                // Note: SDK usually serializes half as float in JSON for readability
+                // We'll trust set_value to handle type conversions or assume exact match if possible
+                // Here we cast to float for now as JSON doesn't have native half
+                set_value(static_cast<half>(json.at("value").get<float>()));
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value:
+                set_value(static_cast<hip_bfloat16>(json.at("value").get<float>()));
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Float8Value:
+                set_value(json.at("value").get<uint8_t>());
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Int32Value:
+                set_value(json.at("value").get<int32_t>());
+                break;
+            default:
+                break;
+            }
+        }
+    }
+#endif
 
 private:
     int64_t _uid = 0;

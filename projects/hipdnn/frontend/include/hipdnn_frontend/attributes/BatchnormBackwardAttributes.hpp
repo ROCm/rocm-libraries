@@ -5,6 +5,9 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
+#endif
 #include <memory>
 #include <unordered_map>
 
@@ -216,6 +219,40 @@ public:
             get_dscale()->get_uid(),
             get_dbias()->get_uid());
     }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    void
+        deserialize(const nlohmann::json& json,
+                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        auto& inputsJson = json.at("inputs");
+        auto& outputsJson = json.at("outputs");
+
+        set_dy(tensorMap.at(inputsJson.at("dy_tensor_uid").get<int64_t>()));
+        set_x(tensorMap.at(inputsJson.at("x_tensor_uid").get<int64_t>()));
+        set_scale(tensorMap.at(inputsJson.at("scale_tensor_uid").get<int64_t>()));
+
+        if(auto uid = inputsJson.at("mean_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_mean(tensorMap.at(*uid));
+        }
+        if(auto uid = inputsJson.at("inv_variance_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_inv_variance(tensorMap.at(*uid));
+        }
+
+        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
+        for(auto uid : inputsJson.at("peer_stats_tensor_uid").get<std::vector<int64_t>>())
+        {
+            peerStats.push_back(tensorMap.at(uid));
+        }
+        set_peer_stats(peerStats);
+
+        set_dx(tensorMap.at(outputsJson.at("dx_tensor_uid").get<int64_t>()));
+        set_dscale(tensorMap.at(outputsJson.at("dscale_tensor_uid").get<int64_t>()));
+        set_dbias(tensorMap.at(outputsJson.at("dbias_tensor_uid").get<int64_t>()));
+    }
+#endif
 
 private:
     std::shared_ptr<TensorAttributes> getInput(InputNames name) const

@@ -5,6 +5,9 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
+#endif
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -300,6 +303,62 @@ public:
             nextRunningVariance ? flatbuffers::Optional<int64_t>(nextRunningVariance->get_uid())
                                 : flatbuffers::nullopt);
     }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    void
+        deserialize(const nlohmann::json& json,
+                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        auto& inputsJson = json.at("inputs");
+        auto& outputsJson = json.at("outputs");
+
+        set_x(tensorMap.at(inputsJson.at("x_tensor_uid").get<int64_t>()));
+        set_scale(tensorMap.at(inputsJson.at("scale_tensor_uid").get<int64_t>()));
+        set_bias(tensorMap.at(inputsJson.at("bias_tensor_uid").get<int64_t>()));
+        set_epsilon(tensorMap.at(inputsJson.at("epsilon_tensor_uid").get<int64_t>()));
+
+        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
+        for(auto uid : inputsJson.at("peer_stats_tensor_uid").get<std::vector<int64_t>>())
+        {
+            peerStats.push_back(tensorMap.at(uid));
+        }
+        set_peer_stats(peerStats);
+
+        if(auto uid = inputsJson.at("prev_running_mean_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_prev_running_mean(tensorMap.at(*uid));
+        }
+        if(auto uid
+           = inputsJson.at("prev_running_variance_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_prev_running_variance(tensorMap.at(*uid));
+        }
+        if(auto uid = inputsJson.at("momentum_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_momentum(tensorMap.at(*uid));
+        }
+
+        set_y(tensorMap.at(outputsJson.at("y_tensor_uid").get<int64_t>()));
+
+        if(auto uid = outputsJson.at("mean_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_mean(tensorMap.at(*uid));
+        }
+        if(auto uid = outputsJson.at("inv_variance_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_inv_variance(tensorMap.at(*uid));
+        }
+        if(auto uid = outputsJson.at("next_running_mean_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_next_running_mean(tensorMap.at(*uid));
+        }
+        if(auto uid
+           = outputsJson.at("next_running_variance_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_next_running_variance(tensorMap.at(*uid));
+        }
+    }
+#endif
 
 private:
     std::shared_ptr<TensorAttributes> getInput(InputNames name) const

@@ -5,6 +5,9 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
+#endif
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <unordered_map>
@@ -197,6 +200,28 @@ public:
             &dilation,
             toSdkType(math_mode));
     }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    void
+        deserialize(const nlohmann::json& json,
+                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        auto& inputsJson = json.at("inputs");
+        auto& outputsJson = json.at("outputs");
+        auto& paramsJson = json.at("parameters");
+
+        set_dy(tensorMap.at(inputsJson.at("dy_tensor_uid").get<int64_t>()));
+        set_w(tensorMap.at(inputsJson.at("w_tensor_uid").get<int64_t>()));
+        set_dx(tensorMap.at(outputsJson.at("dx_tensor_uid").get<int64_t>()));
+
+        set_pre_padding(paramsJson.at("pre_padding").get<std::vector<int64_t>>());
+        set_post_padding(paramsJson.at("post_padding").get<std::vector<int64_t>>());
+        set_stride(paramsJson.at("stride").get<std::vector<int64_t>>());
+        set_dilation(paramsJson.at("dilation").get<std::vector<int64_t>>());
+        set_convolution_mode(
+            fromSdkType(paramsJson.at("conv_mode").get<hipdnn_data_sdk::data_objects::ConvMode>()));
+    }
+#endif
 
 private:
     std::shared_ptr<TensorAttributes> getInput(InputNames name) const

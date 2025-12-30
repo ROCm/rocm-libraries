@@ -5,6 +5,9 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
+#endif
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
@@ -224,6 +227,60 @@ public:
             elu_alpha,
             softplus_beta);
     }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    void
+        deserialize(const nlohmann::json& json,
+                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        auto& inputsJson = json.at("inputs");
+        auto& outputsJson = json.at("outputs");
+
+        set_mode(fromSdkType(
+            inputsJson.at("operation").get<hipdnn_data_sdk::data_objects::PointwiseMode>()));
+
+        if(auto val = inputsJson.at("relu_lower_clip").get<std::optional<float>>())
+        {
+            set_relu_lower_clip(*val);
+        }
+        if(auto val = inputsJson.at("relu_upper_clip").get<std::optional<float>>())
+        {
+            set_relu_upper_clip(*val);
+        }
+        if(auto val = inputsJson.at("relu_lower_clip_slope").get<std::optional<float>>())
+        {
+            set_relu_lower_clip_slope(*val);
+        }
+        if(auto val = inputsJson.at("swish_beta").get<std::optional<float>>())
+        {
+            set_swish_beta(*val);
+        }
+        if(auto val = inputsJson.at("elu_alpha").get<std::optional<float>>())
+        {
+            set_elu_alpha(*val);
+        }
+        if(auto val = inputsJson.at("softplus_beta").get<std::optional<float>>())
+        {
+            set_softplus_beta(*val);
+        }
+        if(auto val = inputsJson.at("axis_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_axis(*val);
+        }
+
+        set_input_0(tensorMap.at(inputsJson.at("in_0_tensor_uid").get<int64_t>()));
+        if(auto uid = inputsJson.at("in_1_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_input_1(tensorMap.at(*uid));
+        }
+        if(auto uid = inputsJson.at("in_2_tensor_uid").get<std::optional<int64_t>>())
+        {
+            set_input_2(tensorMap.at(*uid));
+        }
+
+        set_output_0(tensorMap.at(outputsJson.at("out_0_tensor_uid").get<int64_t>()));
+    }
+#endif
 
 private:
     std::shared_ptr<TensorAttributes> getInput(InputNames name) const
