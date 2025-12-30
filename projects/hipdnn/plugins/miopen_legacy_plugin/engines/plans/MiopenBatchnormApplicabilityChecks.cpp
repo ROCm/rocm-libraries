@@ -18,9 +18,9 @@ namespace miopen_legacy_plugin
 // Type Configuration Helper Functions
 // ============================================
 
-std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
+std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
 {
-    std::vector<hipdnn_sdk::data_objects::DataType> types;
+    std::vector<hipdnn_data_sdk::data_objects::DataType> types;
     types.reserve(VALID.size());
     for(const auto& config : VALID)
     {
@@ -33,9 +33,9 @@ std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTyp
     return types;
 }
 
-std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedAffineTypes()
+std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedAffineTypes()
 {
-    std::vector<hipdnn_sdk::data_objects::DataType> types;
+    std::vector<hipdnn_data_sdk::data_objects::DataType> types;
     types.reserve(VALID.size());
     for(const auto& config : VALID)
     {
@@ -47,9 +47,9 @@ std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedAffin
     return types;
 }
 
-std::vector<hipdnn_sdk::data_objects::DataType> bn_type_configs::getAllowedStatTypes()
+std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedStatTypes()
 {
-    std::vector<hipdnn_sdk::data_objects::DataType> types;
+    std::vector<hipdnn_data_sdk::data_objects::DataType> types;
     types.reserve(VALID.size());
     for(const auto& config : VALID)
     {

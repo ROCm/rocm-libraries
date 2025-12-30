@@ -3,9 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
@@ -23,7 +23,7 @@ struct TensorConfig
 {
     int64_t uid;
     std::string name;
-    hipdnn_sdk::data_objects::DataType dataType;
+    hipdnn_data_sdk::data_objects::DataType dataType;
     std::vector<int64_t> dims;
     std::vector<int64_t> strides;
     std::string description;
@@ -142,7 +142,7 @@ inline std::vector<int64_t> getStrideOrder(Layout layout)
 // Helper to generate strides from dims + layout
 inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dims, Layout layout)
 {
-    return hipdnn_sdk::utilities::generateStrides(dims, getStrideOrder(layout));
+    return hipdnn_data_sdk::utilities::generateStrides(dims, getStrideOrder(layout));
 }
 
 // Helper to generate descriptive name
@@ -211,10 +211,10 @@ class TensorConfigBuilder
 {
 public:
     // Accept int64_t directly (works with UID structs)
-    TensorConfigBuilder(int64_t uid, std::string name, TensorRole role)
+    TensorConfigBuilder(int64_t uid, const std::string& name, TensorRole role)
         : _config{uid,
-                  std::move(name),
-                  hipdnn_sdk::data_objects::DataType::FLOAT,
+                  name,
+                  hipdnn_data_sdk::data_objects::DataType::FLOAT,
                   {},
                   {},
                   "",
@@ -225,7 +225,7 @@ public:
     {
     }
 
-    TensorConfigBuilder& withDataType(hipdnn_sdk::data_objects::DataType dt)
+    TensorConfigBuilder& withDataType(hipdnn_data_sdk::data_objects::DataType dt)
     {
         _config.dataType = dt;
         return *this;
@@ -243,9 +243,9 @@ public:
         return *this;
     }
 
-    TensorConfigBuilder& withDescription(std::string desc)
+    TensorConfigBuilder& withDescription(const std::string& desc)
     {
-        _config.description = std::move(desc);
+        _config.description = desc;
         return *this;
     }
 
@@ -281,7 +281,7 @@ private:
 /// Create an IO tensor (input/output) with specified parameters
 inline TensorConfig createIoTensor(int64_t uid,
                                    const std::string& name,
-                                   hipdnn_sdk::data_objects::DataType dt,
+                                   hipdnn_data_sdk::data_objects::DataType dt,
                                    const std::vector<int64_t>& dims,
                                    const std::vector<int64_t>& strides,
                                    bool isVirtual = false)
@@ -301,7 +301,7 @@ inline TensorConfig createIoTensor(int64_t uid,
 /// Create an affine tensor (scale/bias) with derived dimensions
 [[maybe_unused]] inline TensorConfig createAffineTensor(int64_t uid,
                                                         const std::string& name,
-                                                        hipdnn_sdk::data_objects::DataType dt,
+                                                        hipdnn_data_sdk::data_objects::DataType dt,
                                                         const std::vector<int64_t>& derivedDims,
                                                         const std::vector<int64_t>& derivedStrides)
 {
@@ -315,7 +315,7 @@ inline TensorConfig createIoTensor(int64_t uid,
 /// Create a stat tensor (mean/variance) with derived dimensions
 [[maybe_unused]] inline TensorConfig createStatTensor(int64_t uid,
                                                       const std::string& name,
-                                                      hipdnn_sdk::data_objects::DataType dt,
+                                                      hipdnn_data_sdk::data_objects::DataType dt,
                                                       const std::vector<int64_t>& derivedDims,
                                                       const std::vector<int64_t>& derivedStrides)
 {
@@ -356,7 +356,7 @@ inline std::vector<TensorConfig> createAffineTensorPair(const BnTensorTypes& typ
                                                         int64_t scaleUid = BnCommonTensorIds::SCALE,
                                                         int64_t biasUid = BnCommonTensorIds::BIAS)
 {
-    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(baseDims);
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(baseDims);
     auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
     return {createAffineTensor(scaleUid, "scale", types.affine, derivedDims, derivedStrides),
             createAffineTensor(biasUid, "bias", types.affine, derivedDims, derivedStrides)};
@@ -370,7 +370,7 @@ inline std::vector<TensorConfig> createStatTensorPair(const BnTensorTypes& types
                                                       int64_t invVarianceUid
                                                       = BnCommonTensorIds::INV_VARIANCE)
 {
-    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(baseDims);
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(baseDims);
     auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
     return {
         createStatTensor(meanUid, "mean", types.stat, derivedDims, derivedStrides),
@@ -425,7 +425,7 @@ inline std::vector<TensorConfig> createBatchnormTrainingTensors(const BnTensorTy
     // Optional stat outputs
     if(includeMeanOutput || includeInvVarianceOutput)
     {
-        auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+        auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
         auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
 
         if(includeMeanOutput)
@@ -461,7 +461,7 @@ inline std::vector<TensorConfig> createBatchnormBackwardTensors(const BnTensorTy
     configs.push_back(createIoTensor(UIDs::DX, "dx", types.io, dims, strides));
 
     // Affine tensors (scale, dscale, dbias)
-    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
     configs.push_back(
         createAffineTensor(UIDs::SCALE, "scale", types.affine, derivedDims, derivedStrides));
@@ -492,7 +492,7 @@ inline std::vector<TensorConfig> createBatchnormFusedBackwardTensors(
     using UIDs = BnFusedTensorIds;
     std::vector<TensorConfig> configs;
     auto strides = canonical_layouts::generateStrides(dims, layout);
-    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
 
     // Forward inputs (x, scale, bias, mean, invVariance)
@@ -566,9 +566,9 @@ auto generateTestCombinations(GeneratorFunc&& generator, const Containers&... co
 // ============================================================================
 
 /// Converts data type enum to string for test naming
-inline std::string dataTypeToString(hipdnn_sdk::data_objects::DataType dt)
+inline std::string dataTypeToString(hipdnn_data_sdk::data_objects::DataType dt)
 {
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
     switch(dt)
     {
     case DT::FLOAT:
@@ -590,9 +590,9 @@ inline std::string toString(const BnTensorTypes& types)
 }
 
 /// Converts activation mode enum to string for test naming
-inline std::string activationModeToString(hipdnn_sdk::data_objects::PointwiseMode mode)
+inline std::string activationModeToString(hipdnn_data_sdk::data_objects::PointwiseMode mode)
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
     switch(mode)
     {
     case PM::IDENTITY:
@@ -660,8 +660,8 @@ struct DataTypeIsSupportedTestCase
 {
     std::string name;
     bool shouldPass;
-    hipdnn_sdk::data_objects::DataType dataType;
-    std::vector<hipdnn_sdk::data_objects::DataType> allowedTypes;
+    hipdnn_data_sdk::data_objects::DataType dataType;
+    std::vector<hipdnn_data_sdk::data_objects::DataType> allowedTypes;
 
     friend std::ostream& operator<<(std::ostream& os, const DataTypeIsSupportedTestCase& tc)
     {
@@ -676,7 +676,7 @@ struct ConsistentDataTypesTestCase
     bool shouldPass;
     std::vector<TensorConfig> tensorConfigs;
     std::vector<int64_t> tensorIds;
-    std::vector<hipdnn_sdk::data_objects::DataType> allowedTypes;
+    std::vector<hipdnn_data_sdk::data_objects::DataType> allowedTypes;
 
     friend std::ostream& operator<<(std::ostream& os, const ConsistentDataTypesTestCase& tc)
     {
@@ -691,7 +691,7 @@ struct FixedDataTypeTestCase
     bool shouldPass;
     std::vector<TensorConfig> tensorConfigs;
     std::vector<int64_t> tensorIds;
-    hipdnn_sdk::data_objects::DataType expectedType;
+    hipdnn_data_sdk::data_objects::DataType expectedType;
 
     friend std::ostream& operator<<(std::ostream& os, const FixedDataTypeTestCase& tc)
     {
@@ -858,7 +858,7 @@ struct BatchnormFusedBackwardConfigTestCase
     int64_t dbiasUid;
     int64_t bnYVirtualUid;
     int64_t dxDreluVirtualUid;
-    hipdnn_sdk::data_objects::PointwiseMode activationMode;
+    hipdnn_data_sdk::data_objects::PointwiseMode activationMode;
 
     friend std::ostream& operator<<(std::ostream& os,
                                     const BatchnormFusedBackwardConfigTestCase& tc)
@@ -873,7 +873,7 @@ struct ActivationModeTestCase
 {
     std::string name;
     bool shouldPass;
-    hipdnn_sdk::data_objects::PointwiseMode mode;
+    hipdnn_data_sdk::data_objects::PointwiseMode mode;
     flatbuffers::Optional<double> reluLowerClip;
     flatbuffers::Optional<double> reluUpperClip;
     flatbuffers::Optional<double> reluLowerClipSlope;
@@ -889,24 +889,24 @@ struct ActivationModeTestCase
 // ============================================================================
 
 // Helper to build a minimal graph and return a tensorMap for testing
-std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*> buildTensorMap(
+std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*> buildTensorMap(
     flatbuffers::FlatBufferBuilder& builder,
-    const std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>&
+    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>&
         tensorOffsets)
 {
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test_graph",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorOffsets,
-                                                      nullptr);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_graph",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorOffsets,
+        nullptr);
 
     builder.Finish(graphOffset);
 
-    const auto* graph = hipdnn_sdk::data_objects::GetGraph(builder.GetBufferPointer());
-    std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*> tensorMap;
+    const auto* graph = hipdnn_data_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*> tensorMap;
 
     if(graph->tensors() != nullptr)
     {
@@ -923,7 +923,7 @@ std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*> b
 auto buildTensorMapFromConfigs(const std::vector<TensorConfig>& configs)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
     tensorOffsets.reserve(configs.size());
 
     for(const auto& config : configs)
@@ -931,9 +931,9 @@ auto buildTensorMapFromConfigs(const std::vector<TensorConfig>& configs)
         if(config.isPassByValue)
         {
             // Create a pass-by-value tensor with embedded scalar value
-            hipdnn_sdk::data_objects::Float64Value floatValue(config.passedValue);
+            hipdnn_data_sdk::data_objects::Float64Value floatValue(config.passedValue);
             auto valueOffset = builder.CreateStruct(floatValue).Union();
-            tensorOffsets.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+            tensorOffsets.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
                 builder,
                 config.uid,
                 config.name.c_str(),
@@ -941,19 +941,19 @@ auto buildTensorMapFromConfigs(const std::vector<TensorConfig>& configs)
                 &config.strides,
                 &config.dims,
                 config.isVirtual,
-                hipdnn_sdk::data_objects::TensorValue::Float64Value,
+                hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
                 valueOffset));
         }
         else
         {
             tensorOffsets.push_back(
-                hipdnn_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                       config.uid,
-                                                                       config.name.c_str(),
-                                                                       config.dataType,
-                                                                       &config.strides,
-                                                                       &config.dims,
-                                                                       config.isVirtual));
+                hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                            config.uid,
+                                                                            config.name.c_str(),
+                                                                            config.dataType,
+                                                                            &config.strides,
+                                                                            &config.dims,
+                                                                            config.isVirtual));
         }
     }
 
@@ -978,42 +978,42 @@ inline flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
 
     // Build tensor attribute offsets from configs
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
     tensorOffsets.reserve(configs.size());
     for(const auto& cfg : configs)
     {
         tensorOffsets.push_back(
-            hipdnn_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                   cfg.uid,
-                                                                   cfg.name.c_str(),
-                                                                   cfg.dataType,
-                                                                   &cfg.strides,
-                                                                   &cfg.dims,
-                                                                   cfg.isVirtual));
+            hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                        cfg.uid,
+                                                                        cfg.name.c_str(),
+                                                                        cfg.dataType,
+                                                                        &cfg.strides,
+                                                                        &cfg.dims,
+                                                                        cfg.isVirtual));
     }
 
     // Create BatchnormInferenceAttributes with specified UIDs
-    auto bnInfAttrs = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    auto bnInfAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
         builder, xUid, meanUid, invVarianceUid, scaleUid, biasUid, yUid);
 
     // Create node
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_inference",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttrs.Union()));
 
     // Build graph
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test_graph",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorOffsets,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_graph",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorOffsets,
+        &nodes);
 
     builder.Finish(graphOffset);
     return builder;
@@ -1034,16 +1034,16 @@ inline flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
 
     // Build tensor attribute offsets
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
     tensorOffsets.reserve(configs.size());
     for(const auto& cfg : configs)
     {
         if(cfg.isPassByValue)
         {
             // Create a pass-by-value tensor with embedded scalar value
-            hipdnn_sdk::data_objects::Float64Value floatValue(cfg.passedValue);
+            hipdnn_data_sdk::data_objects::Float64Value floatValue(cfg.passedValue);
             auto valueOffset = builder.CreateStruct(floatValue).Union();
-            tensorOffsets.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+            tensorOffsets.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
                 builder,
                 cfg.uid,
                 cfg.name.c_str(),
@@ -1051,24 +1051,24 @@ inline flatbuffers::FlatBufferBuilder
                 &cfg.strides,
                 &cfg.dims,
                 cfg.isVirtual,
-                hipdnn_sdk::data_objects::TensorValue::Float64Value,
+                hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
                 valueOffset));
         }
         else
         {
             tensorOffsets.push_back(
-                hipdnn_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                       cfg.uid,
-                                                                       cfg.name.c_str(),
-                                                                       cfg.dataType,
-                                                                       &cfg.strides,
-                                                                       &cfg.dims,
-                                                                       cfg.isVirtual));
+                hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                            cfg.uid,
+                                                                            cfg.name.c_str(),
+                                                                            cfg.dataType,
+                                                                            &cfg.strides,
+                                                                            &cfg.dims,
+                                                                            cfg.isVirtual));
         }
     }
 
     // Create BatchnormAttributes (training mode) with specified UIDs
-    auto bnAttrs = hipdnn_sdk::data_objects::CreateBatchnormAttributes(
+    auto bnAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(
         builder,
         xUid, // x_tensor_uid
         scaleUid, // scale_tensor_uid
@@ -1086,23 +1086,23 @@ inline flatbuffers::FlatBufferBuilder
     );
 
     // Create node
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_training",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnAttrs.Union()));
 
     // Build graph
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test_graph",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorOffsets,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_graph",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorOffsets,
+        &nodes);
 
     builder.Finish(graphOffset);
     return builder;
@@ -1124,22 +1124,22 @@ inline flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
 
     // Build tensor attribute offsets
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
     tensorOffsets.reserve(configs.size());
     for(const auto& cfg : configs)
     {
         tensorOffsets.push_back(
-            hipdnn_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                   cfg.uid,
-                                                                   cfg.name.c_str(),
-                                                                   cfg.dataType,
-                                                                   &cfg.strides,
-                                                                   &cfg.dims,
-                                                                   cfg.isVirtual));
+            hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                        cfg.uid,
+                                                                        cfg.name.c_str(),
+                                                                        cfg.dataType,
+                                                                        &cfg.strides,
+                                                                        &cfg.dims,
+                                                                        cfg.isVirtual));
     }
 
     // Create BatchnormBackwardAttributes with specified UIDs
-    auto bnBwdAttrs = hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+    auto bnBwdAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
         builder,
         dyUid, // dy_tensor_uid
         xUid, // x_tensor_uid
@@ -1153,23 +1153,23 @@ inline flatbuffers::FlatBufferBuilder
     );
 
     // Create node
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_backward",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttrs.Union()));
 
     // Build graph
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test_graph",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorOffsets,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_graph",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorOffsets,
+        &nodes);
 
     builder.Finish(graphOffset);
     return builder;
@@ -1189,41 +1189,41 @@ inline flatbuffers::FlatBufferBuilder
                                      int64_t dbiasUid,
                                      int64_t bnYVirtualUid,
                                      int64_t dxDreluVirtualUid,
-                                     hipdnn_sdk::data_objects::PointwiseMode activationMode
-                                     = hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD)
+                                     hipdnn_data_sdk::data_objects::PointwiseMode activationMode
+                                     = hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD)
 {
     flatbuffers::FlatBufferBuilder builder;
 
     // Build tensor attribute offsets
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
     tensorOffsets.reserve(configs.size());
     for(const auto& cfg : configs)
     {
         tensorOffsets.push_back(
-            hipdnn_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                   cfg.uid,
-                                                                   cfg.name.c_str(),
-                                                                   cfg.dataType,
-                                                                   &cfg.strides,
-                                                                   &cfg.dims,
-                                                                   cfg.isVirtual));
+            hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                        cfg.uid,
+                                                                        cfg.name.c_str(),
+                                                                        cfg.dataType,
+                                                                        &cfg.strides,
+                                                                        &cfg.dims,
+                                                                        cfg.isVirtual));
     }
 
     // Create 3 nodes for the fusion
-    std::vector<flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttrs = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    auto bnInfAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
         builder, xUid, meanUid, invVarianceUid, scaleUid, biasUid, bnYVirtualUid);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_inference",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttrs.Union()));
 
     // Node 1: Activation (Backward mode, e.g., RELU_BWD)
-    auto actAttrs = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto actAttrs = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         activationMode,
         flatbuffers::nullopt, // relu_lower_clip
@@ -1235,15 +1235,15 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // in_2_tensor_uid
         dxDreluVirtualUid // out_0_tensor_uid (virtual DX_drelu)
     );
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "activation_bwd",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttrs.Union()));
 
     // Node 2: Batchnorm Backward
-    auto bnBwdAttrs = hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+    auto bnBwdAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
         builder,
         dxDreluVirtualUid, // dy_tensor_uid (virtual DX_drelu)
         xUid, // x_tensor_uid
@@ -1254,22 +1254,22 @@ inline flatbuffers::FlatBufferBuilder
         dxUid,
         dscaleUid,
         dbiasUid);
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_backward",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttrs.Union()));
 
     // Build graph
-    auto graphOffset
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "test_graph",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::HALF,
-                                                      hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                                      &tensorOffsets,
-                                                      &nodes);
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_graph",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorOffsets,
+        &nodes);
 
     builder.Finish(graphOffset);
     return builder;
@@ -1406,7 +1406,7 @@ inline std::vector<TensorDescriptorListTestCase> getValidateConsistentLayoutsTes
 // Validates that a data type is in the allowed list
 inline std::vector<DataTypeIsSupportedTestCase> getValidateDataTypeIsSupportedTestCases()
 {
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
     std::vector<DT> ioTypes = {DT::FLOAT, DT::HALF, DT::BFLOAT16};
 
     return {
@@ -1452,7 +1452,7 @@ inline std::vector<SpatialDimensionsTestCase> getValidateSpatialDimensionsTestCa
 inline std::vector<ConsistentDataTypesTestCase> getValidateConsistentDataTypesTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
 
     const auto& testDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto testStrides = generateStrides(testDims, Layout::NCHW);
@@ -1500,10 +1500,10 @@ inline std::vector<ConsistentDataTypesTestCase> getValidateConsistentDataTypesTe
 inline std::vector<FixedDataTypeTestCase> getValidateFixedDataTypeTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto derivedDims
-        = hipdnn_sdk::utilities::getDerivedShape(shapes::INFERENCE_4D[2]); // {1, 3, 1, 1}
+        = hipdnn_data_sdk::utilities::getDerivedShape(shapes::INFERENCE_4D[2]); // {1, 3, 1, 1}
     auto derivedStrides = generateStrides(derivedDims, Layout::NCHW);
 
     return {
@@ -1552,13 +1552,13 @@ inline std::vector<FixedDataTypeTestCase> getValidateFixedDataTypeTestCases()
 inline std::vector<ConsistentShapesTestCase> getValidateConsistentShapesTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto canonicalDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto canonicalStrides = generateStrides(canonicalDims, Layout::NCHW);
     auto mediumDims = shapes::INFERENCE_4D[1]; // {1, 3, 112, 112}
     auto mediumStrides = generateStrides(mediumDims, Layout::NCHW);
-    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(canonicalDims); // {1, 3, 1, 1}
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(canonicalDims); // {1, 3, 1, 1}
     auto derivedStrides = generateStrides(derivedDims, Layout::NCHW);
     auto differentChannelsDims = shapes::DIFFERENT_CHANNELS_4D; // {1, 5, 224, 224}
     auto differentChannelsStrides = generateStrides(differentChannelsDims, Layout::NCHW);
@@ -1611,7 +1611,7 @@ inline std::vector<ConsistentShapesTestCase> getValidateConsistentShapesTestCase
 inline std::vector<TensorLayoutsAndDimsTestCase> getCheckTensorLayoutsAndDimsSupportedTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto dims4D = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto dims5D = shapes::INFERENCE_5D[0]; // {1, 3, 16, 224, 224}
@@ -1649,11 +1649,11 @@ inline std::vector<TensorLayoutsAndDimsTestCase> getCheckTensorLayoutsAndDimsSup
 inline std::vector<TensorDataTypesComponentTestCase> getCheckTensorDataTypesSupportedTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto ioDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto ioStrides = generateStrides(ioDims, Layout::NCHW);
-    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(ioDims); // {1, 3, 1, 1}
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(ioDims); // {1, 3, 1, 1}
     auto derivedStrides = generateStrides(derivedDims, Layout::NCHW);
 
     return {
@@ -1711,7 +1711,7 @@ inline std::vector<TensorDataTypesComponentTestCase> getCheckTensorDataTypesSupp
 inline std::vector<TensorShapesComponentTestCase> getCheckTensorShapesSupportedTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto inferenceDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto inferenceStrides = generateStrides(inferenceDims, Layout::NCHW);
@@ -1723,13 +1723,14 @@ inline std::vector<TensorShapesComponentTestCase> getCheckTensorShapesSupportedT
     auto insufficientStrides = generateStrides(insufficientDims, Layout::NCHW);
 
     auto derivedDimsInference
-        = hipdnn_sdk::utilities::getDerivedShape(inferenceDims); // {1, 3, 1, 1}
+        = hipdnn_data_sdk::utilities::getDerivedShape(inferenceDims); // {1, 3, 1, 1}
     auto derivedStridesInference = generateStrides(derivedDimsInference, Layout::NCHW);
-    auto derivedDimsTraining = hipdnn_sdk::utilities::getDerivedShape(trainingDims); // {1, 3, 1, 1}
+    auto derivedDimsTraining
+        = hipdnn_data_sdk::utilities::getDerivedShape(trainingDims); // {1, 3, 1, 1}
     auto derivedStridesTraining = generateStrides(derivedDimsTraining, Layout::NCHW);
 
-    auto wrongChannelDerivedDims
-        = hipdnn_sdk::utilities::getDerivedShape(shapes::DIFFERENT_CHANNELS_4D); // {1, 5, 1, 1}
+    auto wrongChannelDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(
+        shapes::DIFFERENT_CHANNELS_4D); // {1, 5, 1, 1}
     auto wrongChannelDerivedStrides = generateStrides(wrongChannelDerivedDims, Layout::NCHW);
 
     return {
@@ -1799,7 +1800,7 @@ inline std::vector<BatchnormInferenceConfigTestCase>
     getCheckBatchnormInferenceConfigSupportedTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
     using UIDs = BnCommonTensorIds;
 
     std::vector<BatchnormInferenceConfigTestCase> cases;
@@ -1862,7 +1863,7 @@ inline std::vector<BatchnormInferenceConfigTestCase>
     // Unhappy paths - mixed layouts (x is NCHW, y is NHWC)
     auto nchwStrides = generateStrides(sampleDims, Layout::NCHW);
     auto nhwcStrides = generateStrides(sampleDims, Layout::NHWC);
-    auto sampleDerivedDims = hipdnn_sdk::utilities::getDerivedShape(sampleDims);
+    auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
     auto sampleDerivedStrides = generateStrides(sampleDerivedDims, Layout::NCHW);
 
     std::vector<TensorConfig> mixedLayoutConfigs
@@ -1896,7 +1897,7 @@ inline std::vector<BatchnormTrainingConfigTestCase>
     getCheckBatchnormTrainingConfigSupportedTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
     using UIDs = BnTrainingTensorIds;
 
     std::vector<BatchnormTrainingConfigTestCase> cases;
@@ -2003,7 +2004,7 @@ inline std::vector<BatchnormTrainingConfigTestCase>
 
     // Unhappy paths - invalid IO data type (UINT8 instead of FLOAT)
     auto sampleTrainingStrides = generateStrides(sampleTrainingDims, Layout::NCHW);
-    auto derivedTrainingDims = hipdnn_sdk::utilities::getDerivedShape(sampleTrainingDims);
+    auto derivedTrainingDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleTrainingDims);
     auto derivedTrainingStrides = generateStrides(derivedTrainingDims, Layout::NCHW);
 
     std::vector<TensorConfig> invalidTypeConfigs = {
@@ -2090,7 +2091,7 @@ inline std::vector<BatchnormBackwardConfigTestCase>
     getCheckBatchnormBackwardConfigSupportedTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
     using UIDs = BnBackwardTensorIds;
 
     std::vector<BatchnormBackwardConfigTestCase> cases;
@@ -2177,7 +2178,7 @@ inline std::vector<BatchnormBackwardConfigTestCase>
     // Create custom config with invalid affine type
     auto sampleDims = shapes::INFERENCE_4D[0];
     auto sampleStrides = generateStrides(sampleDims, Layout::NCHW);
-    auto sampleDerivedDims = hipdnn_sdk::utilities::getDerivedShape(sampleDims);
+    auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
     auto sampleDerivedStrides = generateStrides(sampleDerivedDims, Layout::NCHW);
 
     std::vector<TensorConfig> invalidAffineConfigs = {
@@ -2263,13 +2264,13 @@ inline std::vector<BatchnormFusedBackwardConfigTestCase>
     getCheckBatchnormFusedBackwardConfigSupportedTestCases()
 {
     using namespace canonical_layouts;
-    using DT = hipdnn_sdk::data_objects::DataType;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
     using UIDs = BnFusedTensorIds;
 
     std::vector<BatchnormFusedBackwardConfigTestCase> cases;
 
     // Supported backward activation modes (from atomic validation tests)
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
     const std::vector<PM> supportedBwdActivations = {PM::IDENTITY, PM::RELU_BWD};
 
     // Happy paths - all inference shapes × all 4D layouts × all valid type configs × all supported activations
@@ -2337,7 +2338,7 @@ inline std::vector<BatchnormFusedBackwardConfigTestCase>
     // Unhappy paths - invalid data type (create custom config with UINT8)
     auto sampleDims = shapes::INFERENCE_4D[0];
     auto sampleStrides = generateStrides(sampleDims, Layout::NCHW);
-    auto sampleDerivedDims = hipdnn_sdk::utilities::getDerivedShape(sampleDims);
+    auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
     auto sampleDerivedStrides = generateStrides(sampleDerivedDims, Layout::NCHW);
 
     std::vector<TensorConfig> invalidTypeConfigs
@@ -2474,25 +2475,25 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormFwdActivationModeSup
         // Happy paths - supported activation modes
         {"AcceptsIdentity",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::IDENTITY,
+         hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"AcceptsRelu",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"AcceptsClippedRelu",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
          flatbuffers::nullopt,
          flatbuffers::Optional<double>(6.0),
          flatbuffers::nullopt},
         {"AcceptsClamp",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
          flatbuffers::Optional<double>(0.0),
          flatbuffers::Optional<double>(6.0),
          flatbuffers::nullopt},
@@ -2500,25 +2501,25 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormFwdActivationModeSup
         // Unhappy paths - unsupported activation modes
         {"RejectsLeakyRelu",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::Optional<double>(0.01)},
         {"RejectsSigmoid",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"RejectsTanh",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::TANH_FWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"RejectsReluBwdInFwdContext",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
@@ -2533,25 +2534,25 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormBwdActivationModeSup
         // Happy paths - supported activation modes
         {"AcceptsIdentityBwd",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::IDENTITY,
+         hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"AcceptsReluBwd",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"AcceptsClippedReluBwd",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
          flatbuffers::nullopt,
          flatbuffers::Optional<double>(6.0),
          flatbuffers::nullopt},
         {"AcceptsClampBwd",
          true,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
          flatbuffers::Optional<double>(0.0),
          flatbuffers::Optional<double>(6.0),
          flatbuffers::nullopt},
@@ -2559,25 +2560,25 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormBwdActivationModeSup
         // Unhappy paths - unsupported activation modes
         {"RejectsLeakyReluBwd",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::Optional<double>(0.01)},
         {"RejectsSigmoidBwd",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_BWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"RejectsTanhBwd",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::TANH_BWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
         {"RejectsReluFwdInBwdContext",
          false,
-         hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+         hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::nullopt},
@@ -2628,16 +2629,16 @@ TEST_P(TestValidateConsistentDimensions, ValidatesCorrectly)
     for(size_t i = 0; i < tc.tensorDims.size(); ++i)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto tensorOffset = hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        auto tensorOffset = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
             builder,
             static_cast<int64_t>(i + 1),
             ("tensor_" + std::to_string(i + 1)).c_str(),
-            hipdnn_sdk::data_objects::DataType::FLOAT,
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
             &tc.tensorStrides[i],
             &tc.tensorDims[i]);
         builder.Finish(tensorOffset);
 
-        const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::TensorAttributes>(
+        const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
             builder.GetBufferPointer());
         tensors.emplace_back(attr);
     }
@@ -2671,16 +2672,16 @@ TEST_P(TestValidatePackedTensors, ValidatesCorrectly)
     for(size_t i = 0; i < tc.tensorDims.size(); ++i)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto tensorOffset = hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        auto tensorOffset = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
             builder,
             static_cast<int64_t>(i + 1),
             ("tensor_" + std::to_string(i + 1)).c_str(),
-            hipdnn_sdk::data_objects::DataType::FLOAT,
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
             &tc.tensorStrides[i],
             &tc.tensorDims[i]);
         builder.Finish(tensorOffset);
 
-        const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::TensorAttributes>(
+        const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
             builder.GetBufferPointer());
         tensors.emplace_back(attr);
     }
@@ -2737,16 +2738,16 @@ TEST_P(TestValidateConsistentLayouts, ValidatesCorrectly)
     for(size_t i = 0; i < tc.tensorDims.size(); ++i)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto tensorOffset = hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        auto tensorOffset = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
             builder,
             static_cast<int64_t>(i + 1),
             ("tensor_" + std::to_string(i + 1)).c_str(),
-            hipdnn_sdk::data_objects::DataType::FLOAT,
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
             &tc.tensorStrides[i],
             &tc.tensorDims[i]);
         builder.Finish(tensorOffset);
 
-        const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::TensorAttributes>(
+        const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
             builder.GetBufferPointer());
         tensors.emplace_back(attr);
     }
@@ -3193,19 +3194,19 @@ TEST_P(TestCheckBatchnormFwdActivationModeSupported, ValidatesCorrectly)
     const auto& tc = GetParam();
 
     flatbuffers::FlatBufferBuilder builder;
-    auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(builder,
-                                                                       tc.mode,
-                                                                       tc.reluLowerClip,
-                                                                       tc.reluUpperClip,
-                                                                       tc.reluLowerClipSlope,
-                                                                       flatbuffers::nullopt,
-                                                                       1,
-                                                                       flatbuffers::nullopt,
-                                                                       flatbuffers::nullopt,
-                                                                       2);
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(builder,
+                                                                            tc.mode,
+                                                                            tc.reluLowerClip,
+                                                                            tc.reluUpperClip,
+                                                                            tc.reluLowerClipSlope,
+                                                                            flatbuffers::nullopt,
+                                                                            1,
+                                                                            flatbuffers::nullopt,
+                                                                            flatbuffers::nullopt,
+                                                                            2);
     builder.Finish(actAttr);
 
-    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+    const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
     if(tc.shouldPass)
@@ -3234,19 +3235,19 @@ TEST_P(TestCheckBatchnormBwdActivationModeSupported, ValidatesCorrectly)
     const auto& tc = GetParam();
 
     flatbuffers::FlatBufferBuilder builder;
-    auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(builder,
-                                                                       tc.mode,
-                                                                       tc.reluLowerClip,
-                                                                       tc.reluUpperClip,
-                                                                       tc.reluLowerClipSlope,
-                                                                       flatbuffers::nullopt,
-                                                                       1,
-                                                                       flatbuffers::nullopt,
-                                                                       flatbuffers::nullopt,
-                                                                       2);
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(builder,
+                                                                            tc.mode,
+                                                                            tc.reluLowerClip,
+                                                                            tc.reluUpperClip,
+                                                                            tc.reluLowerClipSlope,
+                                                                            flatbuffers::nullopt,
+                                                                            1,
+                                                                            flatbuffers::nullopt,
+                                                                            flatbuffers::nullopt,
+                                                                            2);
     builder.Finish(actAttr);
 
-    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+    const auto* attr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
         builder.GetBufferPointer());
 
     if(tc.shouldPass)

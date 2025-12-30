@@ -155,16 +155,17 @@ void checkBatchnormBwdActivationModeSupported(
 /// When MIOpen support changes, update BnTypeConfigs::VALID array.
 struct BnTensorTypes
 {
-    hipdnn_sdk::data_objects::DataType io; ///< Type for IO tensors (x, y, dx, dy)
-    hipdnn_sdk::data_objects::DataType affine; ///< Type for affine (scale, bias, dscale, dbias)
-    hipdnn_sdk::data_objects::DataType stat; ///< Type for stat (mean, variance)
+    hipdnn_data_sdk::data_objects::DataType io; ///< Type for IO tensors (x, y, dx, dy)
+    hipdnn_data_sdk::data_objects::DataType
+        affine; ///< Type for affine (scale, bias, dscale, dbias)
+    hipdnn_data_sdk::data_objects::DataType stat; ///< Type for stat (mean, variance)
 };
 
 /// Canonical batchnorm type configurations matching MIOpen requirements.
 /// This is the SINGLE SOURCE OF TRUTH for supported type combinations.
 namespace bn_type_configs
 {
-using DT = hipdnn_sdk::data_objects::DataType;
+using DT = hipdnn_data_sdk::data_objects::DataType;
 
 // ========================================================================
 // Valid Configurations (per MIOpen v6.x specification)
@@ -187,13 +188,13 @@ inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOA
 // ========================================================================
 
 /// Returns all allowed IO data types from VALID configurations
-std::vector<hipdnn_sdk::data_objects::DataType> getAllowedIoTypes();
+std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
 
 /// Returns all allowed affine data types from VALID configurations
-std::vector<hipdnn_sdk::data_objects::DataType> getAllowedAffineTypes();
+std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
 
 /// Returns all allowed stat data types from VALID configurations
-std::vector<hipdnn_sdk::data_objects::DataType> getAllowedStatTypes();
+std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
 
 } // namespace bn_type_configs
 
