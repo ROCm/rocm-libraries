@@ -268,29 +268,6 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
-        struct MappingTraits<KernelGraph::ControlGraph::ComputeIndex, IO, Context>
-        {
-            using iot = IOTraits<IO>;
-            static void mapping(IO& io, KernelGraph::ControlGraph::ComputeIndex& op, Context&)
-            {
-                static_assert(sizeof(op) == 16);
-                iot::mapRequired(io, "forward", op.forward);
-                iot::mapRequired(io, "isStorePartOfGlobalToLDS", op.isStorePartOfGlobalToLDS);
-                iot::mapRequired(io, "valueType", op.valueType);
-                iot::mapRequired(io, "offsetType", op.offsetType);
-                iot::mapRequired(io, "strideType", op.strideType);
-            }
-
-            static void mapping(IO& io, KernelGraph::ControlGraph::ComputeIndex& op)
-            {
-                AssertFatal((std::same_as<EmptyContext, Context>));
-
-                Context ctx;
-                mapping(io, op, ctx);
-            }
-        };
-
-        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::ControlGraph::Deallocate, IO, Context>
         {
             using iot = IOTraits<IO>;

@@ -20,7 +20,7 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
@@ -148,6 +148,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto dscaleHostPtr = dscaleTensor.memory().hostData();
     auto dbiasHostPtr = dbiasTensor.memory().hostData();
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
@@ -193,6 +195,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
         std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
         std::cout << "  dscale: " << (dscaleValid ? "successful" : "failed") << "\n";
         std::cout << "  dbias: " << (dbiasValid ? "successful" : "failed") << "\n";
+
+        validationPassed = dxValid && dscaleValid && dbiasValid;
     }
 
     std::cout << "First 10 dx values: ";
@@ -213,6 +217,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nFused BN Inference + Activation Backward + BN Backward graph execution "
               << "complete for " << inputType << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -225,9 +230,20 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All fused BN Inference + Activation Backward + BN Backward runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All fused BN Inference + Activation Backward + BN Backward runs completed "
+                  << "successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout << "One or more fused BN Inference + Activation Backward + BN Backward runs "
+                  << "failed validation.\n";
+        return 1;
+    }
 }
