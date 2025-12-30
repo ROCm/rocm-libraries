@@ -2724,7 +2724,7 @@ inline void host_bsrmv(hipsparseDirection_t dir,
             {
                 for(uint32_t k = 0; k < WFSIZE; ++k)
                 {
-                    if(j + k < row_end)
+                    if(j + static_cast<int>(k) < row_end)
                     {
                         int col = bsr_col_ind[j + k] - base;
 
@@ -2798,7 +2798,7 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                     {
                         for(uint32_t k = 0; k < WFSIZE; ++k)
                         {
-                            if(bj + k < bsr_dim)
+                            if(bj + static_cast<int>(k) < bsr_dim)
                             {
                                 if(dir == HIPSPARSE_DIRECTION_COLUMN)
                                 {
@@ -2922,7 +2922,7 @@ void host_bsrxmv(hipsparseDirection_t  dir,
                 int shift = (bsr_mask_ptr[i] - base) * bsr_dim;
                 for(int j = 0; j < bsr_dim; ++j)
                 {
-                    y[shift + j] *= beta;
+                    y[shift + j] = testing_mult(beta, y[shift + j]);
                 }
             }
         }
@@ -2988,7 +2988,7 @@ void host_bsrxmv(hipsparseDirection_t  dir,
             {
                 for(uint32_t k = 0; k < WFSIZE; ++k)
                 {
-                    if(j + k < row_end)
+                    if(j + static_cast<int>(k) < row_end)
                     {
                         int col = bsr_col_ind[j + k] - base;
 
@@ -3060,7 +3060,7 @@ void host_bsrxmv(hipsparseDirection_t  dir,
                     {
                         for(uint32_t k = 0; k < WFSIZE; ++k)
                         {
-                            if(bj + k < bsr_dim)
+                            if(bj + static_cast<int>(k) < bsr_dim)
                             {
                                 if(dir == HIPSPARSE_DIRECTION_COLUMN)
                                 {
