@@ -320,25 +320,33 @@ public:
     template <typename... Args>
     T& operator()(Args... indices)
     {
-        return memory().hostData()[getIndex(indices...)];
+        int64_t index = getIndex(indices...);
+        auto* data = memory().hostData();
+        return data[index];
     }
 
     template <typename... Args>
     const T& operator()(Args... indices) const
     {
-        return memory().hostData()[getIndex(indices...)];
+        int64_t index = getIndex(indices...);
+        const auto* data = memory().hostData();
+        return data[index];
     }
 
     template <typename IndexType>
     T& operator()(const std::vector<IndexType>& indices)
     {
-        return memory().hostData()[getIndex(indices)];
+        int64_t index = getIndex(indices);
+        auto* data = memory().hostData();
+        return data[index];
     }
 
     template <typename IndexType>
     const T& operator()(const std::vector<IndexType>& indices) const
     {
-        return memory().hostData()[getIndex(indices)];
+        int64_t index = getIndex(indices);
+        const auto* data = memory().hostData();
+        return data[index];
     }
 
     virtual void fillWithValue(T value) = 0;
