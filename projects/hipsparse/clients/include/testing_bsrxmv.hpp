@@ -36,7 +36,6 @@
 
 #include <cmath>
 #include <hipsparse.h>
-#include <string>
 #include <random>
 
 using namespace hipsparse;
@@ -475,8 +474,10 @@ void testing_bsrxmv(Arguments argus)
         hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * nb * block_dim, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dy_1, hy_1.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dy_2, hy_2.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
@@ -522,12 +523,12 @@ void testing_bsrxmv(Arguments argus)
 
     CHECK_HIP_ERROR(hipMemcpy(
         hbsr_row_ptr.data(), dbsr_row_ptr, sizeof(int) * (mb + 1), hipMemcpyDeviceToHost));
-    CHECK_HIP_ERROR(hipMemcpy(
-        hbsr_col_ind.data(), dbsr_col_ind, sizeof(int) * nnzb, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpy(hbsr_col_ind.data(), dbsr_col_ind, sizeof(int) * nnzb, hipMemcpyDeviceToHost));
     CHECK_HIP_ERROR(hipMemcpy(hbsr_val.data(),
-                                dbsr_val,
-                                sizeof(T) * nnzb * block_dim * block_dim,
-                                hipMemcpyDeviceToHost));
+                              dbsr_val,
+                              sizeof(T) * nnzb * block_dim * block_dim,
+                              hipMemcpyDeviceToHost));
 
     int size_of_mask = 0;
 
@@ -540,7 +541,7 @@ void testing_bsrxmv(Arguments argus)
     // 3. Create and fill the vector
     std::vector<int> marker(mb);
 
-    for (int i = 0; i < mb; ++i) 
+    for(int i = 0; i < mb; ++i)
     {
         marker[i] = d(gen); // Generates true (1) or false (0)
         if(marker[i] == 1)
@@ -551,7 +552,7 @@ void testing_bsrxmv(Arguments argus)
 
     // Initialization of the mask.
     std::vector<int> hbsr_mask_ptr(size_of_mask);
-    int count = 0;
+    int              count = 0;
     for(int i = 0; i < mb; ++i)
     {
         if(marker[i] == 1)
@@ -560,58 +561,62 @@ void testing_bsrxmv(Arguments argus)
         }
     }
 
-    auto dbsr_mask_ptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * size_of_mask), device_free};
+    auto dbsr_mask_ptr_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(int) * size_of_mask), device_free};
     int* dbsr_mask_ptr = (int*)dbsr_mask_ptr_managed.get();
 
-    CHECK_HIP_ERROR(hipMemcpy(dbsr_mask_ptr, hbsr_mask_ptr.data(), sizeof(int) * size_of_mask, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(
+        dbsr_mask_ptr, hbsr_mask_ptr.data(), sizeof(int) * size_of_mask, hipMemcpyHostToDevice));
 
     if(argus.unit_check)
     {
         // HIPSPARSE pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
         CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
-            dir,
-            trans,
-            size_of_mask,
-            mb,
-            nb,
-            nnzb,
-            &h_alpha,
-            descr,
-            dbsr_val,
-            dbsr_mask_ptr,
-            dbsr_row_ptr,
-            dbsr_row_ptr + 1,
-            dbsr_col_ind,
-            block_dim,
-            dx,
-            &h_beta,
-            dy_1));
+                                               dir,
+                                               trans,
+                                               size_of_mask,
+                                               mb,
+                                               nb,
+                                               nnzb,
+                                               &h_alpha,
+                                               descr,
+                                               dbsr_val,
+                                               dbsr_mask_ptr,
+                                               dbsr_row_ptr,
+                                               dbsr_row_ptr + 1,
+                                               dbsr_col_ind,
+                                               block_dim,
+                                               dx,
+                                               &h_beta,
+                                               dy_1));
 
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
-            dir,
-            trans,
-            size_of_mask,
-            mb,
-            nb,
-            nnzb,
-            d_alpha,
-            descr,
-            dbsr_val,
-            dbsr_mask_ptr,
-            dbsr_row_ptr,
-            dbsr_row_ptr + 1,
-            dbsr_col_ind,
-            block_dim,
-            dx,
-            d_beta,
-            dy_2));
+                                               dir,
+                                               trans,
+                                               size_of_mask,
+                                               mb,
+                                               nb,
+                                               nnzb,
+                                               d_alpha,
+                                               descr,
+                                               dbsr_val,
+                                               dbsr_mask_ptr,
+                                               dbsr_row_ptr,
+                                               dbsr_row_ptr + 1,
+                                               dbsr_col_ind,
+                                               block_dim,
+                                               dx,
+                                               d_beta,
+                                               dy_2));
 
         // copy output from device to CPU
-        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hy_1.data(), dy_1, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hy_2.data(), dy_2, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
 
         // Host bsrmv
         host_bsrxmv(dir,
@@ -647,23 +652,23 @@ void testing_bsrxmv(Arguments argus)
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
-                dir,
-                trans,
-                size_of_mask,
-                mb,
-                nb,
-                nnzb,
-                &h_alpha,
-                descr,
-                dbsr_val,
-                dbsr_mask_ptr,
-                dbsr_row_ptr,
-                dbsr_row_ptr + 1,
-                dbsr_col_ind,
-                block_dim,
-                dx,
-                &h_beta,
-                dy_1));
+                                                   dir,
+                                                   trans,
+                                                   size_of_mask,
+                                                   mb,
+                                                   nb,
+                                                   nnzb,
+                                                   &h_alpha,
+                                                   descr,
+                                                   dbsr_val,
+                                                   dbsr_mask_ptr,
+                                                   dbsr_row_ptr,
+                                                   dbsr_row_ptr + 1,
+                                                   dbsr_col_ind,
+                                                   block_dim,
+                                                   dx,
+                                                   &h_beta,
+                                                   dy_1));
         }
 
         double gpu_time_used = get_time_us();
@@ -672,31 +677,31 @@ void testing_bsrxmv(Arguments argus)
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(hipsparseXbsrxmv(handle,
-                dir,
-                trans,
-                size_of_mask,
-                mb,
-                nb,
-                nnzb,
-                &h_alpha,
-                descr,
-                dbsr_val,
-                dbsr_mask_ptr,
-                dbsr_row_ptr,
-                dbsr_row_ptr + 1,
-                dbsr_col_ind,
-                block_dim,
-                dx,
-                &h_beta,
-                dy_1));
+                                                   dir,
+                                                   trans,
+                                                   size_of_mask,
+                                                   mb,
+                                                   nb,
+                                                   nnzb,
+                                                   &h_alpha,
+                                                   descr,
+                                                   dbsr_val,
+                                                   dbsr_mask_ptr,
+                                                   dbsr_row_ptr,
+                                                   dbsr_row_ptr + 1,
+                                                   dbsr_col_ind,
+                                                   block_dim,
+                                                   dx,
+                                                   &h_beta,
+                                                   dy_1));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
         double gflop_count
             = spmv_gflop_count(m, nnzb * block_dim * block_dim, h_beta != make_DataType<T>(0.0));
-        double gbyte_count
-            = bsrmv_gbyte_count<T>(size_of_mask, nb, nnzb, block_dim, h_beta != make_DataType<T>(0.0));
+        double gbyte_count = bsrmv_gbyte_count<T>(
+            size_of_mask, nb, nnzb, block_dim, h_beta != make_DataType<T>(0.0));
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
