@@ -4,9 +4,10 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 namespace hipdnn_frontend::graph
 {
@@ -188,7 +189,7 @@ public:
         return set_mean(std::move(mean)).set_inv_variance(std::move(invVariance));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormBackwardAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto peerStatsVector = std::vector<int64_t>{};
@@ -203,7 +204,7 @@ public:
         auto mean = get_mean();
         auto invVariance = get_inv_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributesDirect(
+        return hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributesDirect(
             builder,
             get_dy()->get_uid(),
             get_x()->get_uid(),
@@ -215,53 +216,6 @@ public:
             get_dx()->get_uid(),
             get_dscale()->get_uid(),
             get_dbias()->get_uid());
-    }
-
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
-    {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    BatchnormBackwardAttributes& setInput(InputNames name,
-                                          const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-    BatchnormBackwardAttributes& setInput(InputNames name,
-                                          std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
-
-    BatchnormBackwardAttributes& setOutput(OutputNames name,
-                                           const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-    BatchnormBackwardAttributes& setOutput(OutputNames name,
-                                           std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
     }
 };
 typedef BatchnormBackwardAttributes Batchnorm_backward_attributes;

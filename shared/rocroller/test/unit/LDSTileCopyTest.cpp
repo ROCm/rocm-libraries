@@ -35,6 +35,7 @@
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
 
@@ -58,45 +59,45 @@ namespace LDSCopyTest
      *
      * Kernel
      *   |
-     *   --[body]--> Scope --[body]--> ComputeIndex --[seq]--> ComputeIndex --[seq]--> LoadTiled
+     *   --[body]--> Scope --[body]--> Assign --[seq]--> Assign --[seq]--> LoadTiled
      *                 |
      *                 |[seq]
      *                 |
      *                 v
-     *              Barrier --[seq]--> Scope --[seq]--> ComputeIndex --[seq]--> ComputeIndex --[seq] -->StoreLDSTiled
+     *              Barrier --[seq]--> Scope --[seq]--> Assign --[seq]--> Assign --[seq] -->StoreLDSTiled
      *
      *
      * New control graph:
      *
      * Kernel
      *   |
-     *   --[body]--> Scope --[body]--> ComputeIndex --[seq]--> ComputeIndex --[seq]--> NOP
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                             ComputeIndex
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                             ComputeIndex
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                                 NOP
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                                Barrier
-     *                                                                                  |
-     *                                                                                  |[seq]
-     *                                                                                  |
-     *                                                                                  v
-     *                                                                          LoadTileDirect2LDS
-    */
+     *   --[body]--> Scope --[body]--> Assign --[seq]--> Assign --[seq]--> NOP
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                     Assign
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                     Assign
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                      NOP
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                                     Barrier
+     *                                                                       |
+     *                                                                       |[seq]
+     *                                                                       |
+     *                                                                       v
+     *                                                               LoadTileDirect2LDS
+     */
     void addDirect2LDS(rocRoller::KernelGraph::KernelGraph& kgraph)
     {
         auto loadTiledNodes    = kgraph.control.getNodes<LoadTiled>().to<std::vector>();
@@ -244,11 +245,6 @@ namespace LDSCopyTest
 
         auto k = m_context->kernel();
 
-        k->addArgument(
-            {"a", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
-        k->addArgument(
-            {"result", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-
         k->setKernelDimensions(2);
         auto one = Expression::literal(1u);
         auto workitemCountExpr
@@ -274,13 +270,24 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
-        auto addComputeIndex = std::make_shared<AddComputeIndex>();
-        kgraph               = kgraph.transform(addComputeIndex);
+        auto command = std::make_shared<rocRoller::Command>();
+        command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},
+                                  Operations::OperationTag(0),
+                                  ArgumentType::Value,
+                                  DataDirection::WriteOnly,
+                                  "result");
+        command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},
+                                  Operations::OperationTag(1),
+                                  ArgumentType::Value,
+                                  DataDirection::ReadOnly,
+                                  "a");
+        auto assignIndexExprs = std::make_shared<AssignIndexExpressions>(m_context, command);
+        kgraph                = kgraph.transform(assignIndexExprs);
 
         if(m_context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context));
+        kgraph = kgraph.transform(std::make_shared<CleanArguments>(m_context, command));
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
