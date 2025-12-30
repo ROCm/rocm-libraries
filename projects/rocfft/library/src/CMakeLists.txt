@@ -132,6 +132,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
+     ${CMAKE_SOURCE_DIR}/shared/hip_object_wrapper.h
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_kernel.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_kernel.cpp
      ${CMAKE_SOURCE_DIR}/library/src/rtc_test_harness_helper.cpp

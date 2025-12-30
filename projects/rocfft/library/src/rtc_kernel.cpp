@@ -34,8 +34,10 @@
 #include "rtc_transpose_kernel.h"
 #include "tree_node.h"
 
+#ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
 std::map<RTCKernel::rtc_module_key, RTCKernel::rtc_module_t> RTCKernel::active_modules;
 std::mutex                                                   RTCKernel::active_modules_mutex;
+#endif
 
 RTCKernel::RTCKernel(const std::string&                       kernel_name,
                      std::shared_future<hipModule_wrapper_t>& module,

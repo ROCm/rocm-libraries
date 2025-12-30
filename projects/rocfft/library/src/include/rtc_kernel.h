@@ -132,12 +132,14 @@ struct RTCKernel
     {
         kernel = nullptr;
 
+#ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
         std::lock_guard<std::mutex> lock(active_modules_mutex);
         // decrement refcount and remove the module from the map if it's no longer used
         auto it = active_modules.find(rtc_module_key{kernel_name, deviceId});
         it->second.refcount--;
         if(it->second.refcount == 0)
             active_modules.erase(it);
+#endif
     }
 
     // disallow copies, since we expect this to be managed by smart ptr
@@ -181,6 +183,9 @@ struct RTCKernel
     int         deviceId = 0;
 
 protected:
+    std::shared_future<hipModule_wrapper_t> module;
+    hipFunction_t                           kernel = nullptr;
+
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     struct RTCGenerator
     {
@@ -203,10 +208,6 @@ protected:
         dim3 gridDim;
         dim3 blockDim;
     };
-#endif
-
-    std::shared_future<hipModule_wrapper_t> module;
-    hipFunction_t                           kernel = nullptr;
 
     // Keep track of modules that have been requested, so that if two
     // identical kernel requests come at the same time, we only
@@ -241,6 +242,7 @@ protected:
     };
     static std::map<rtc_module_key, rtc_module_t> active_modules;
     static std::mutex                             active_modules_mutex;
+#endif
 };
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
