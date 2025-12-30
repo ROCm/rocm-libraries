@@ -8,14 +8,14 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "TestPluginConstants.hpp"
 #include "plugin/EnginePlugin.hpp"
 
 using namespace hipdnn_backend;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 class SimpleEnginePluginManager : public plugin::PluginManagerBase<plugin::EnginePlugin>
 {

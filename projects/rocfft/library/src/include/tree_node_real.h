@@ -254,7 +254,8 @@ protected:
     void   SetupGridParam_internal(GridParam& gp) override{};
 
 public:
-    bool UseOutputLengthForPadding() override
+    std::vector<size_t> CollapsibleDims() override;
+    bool                UseOutputLengthForPadding() override
     {
         return true;
     }

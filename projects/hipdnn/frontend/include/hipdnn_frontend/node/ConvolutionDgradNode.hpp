@@ -4,12 +4,12 @@
 
 #include "Node.hpp"
 #include <algorithm>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <numeric>
 
 namespace hipdnn_frontend::graph
@@ -63,11 +63,6 @@ public:
 
         auto& dyDims = dy->get_dim();
 
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionDgradNode: dy tensor dimensions and strides must be set and positive");
-
         HIPDNN_RETURN_IF_LT(
             dyDims.size(),
             3,
@@ -75,11 +70,6 @@ public:
             "ConvolutionDgradNode: dy tensor must have at least 3 dimensions (N, C, spatial)");
 
         auto& wDims = w->get_dim();
-
-        HIPDNN_RETURN_IF_FALSE(
-            w->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionDgradNode: Weight tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(
             wDims.size(),
@@ -96,7 +86,6 @@ public:
             "ConvolutionDgradNode: dy tensor channels must match weight tensor output channels");
 
         auto& dxDims = dx->get_dim();
-        auto& dxStrides = dx->get_stride();
 
         if(!dxDims.empty())
         {
@@ -131,19 +120,6 @@ public:
                 ErrorCode::INVALID_VALUE,
                 "ConvolutionDgradNode: Weight tensor output channels must be divisible by "
                 "the number of groups");
-
-            HIPDNN_RETURN_IF_FALSE(
-                dx->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionDgradNode: dx tensor dimensions must be set and positive");
-        }
-
-        if(!dxStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(dx->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionDgradNode: dx tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         // Validate spatial parameter counts match spatial dimensions
@@ -202,6 +178,37 @@ public:
                                 0,
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionDgradNode: Post-padding must be non-negative");
+
+            if(!dxDims.empty())
+            {
+                auto outputSize = dyDims[i + 2];
+                auto kernelSize = wDims[i + 2];
+                auto inputSize = dxDims[i + 2];
+
+                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+
+                HIPDNN_RETURN_IF_LT(numerator,
+                                    0,
+                                    ErrorCode::INVALID_VALUE,
+                                    "ConvolutionDgradNode: Input spatial dimension at index "
+                                        + std::to_string(i) + " (" + std::to_string(inputSize)
+                                        + ") is too small for the kernel size ("
+                                        + std::to_string(kernelSize) + ") and dilation ("
+                                        + std::to_string(dilationVal) + ")");
+
+                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+
+                HIPDNN_RETURN_IF_NE(
+                    outputSize,
+                    expectedOutputSize,
+                    ErrorCode::INVALID_VALUE,
+                    "ConvolutionDgradNode: dy tensor spatial dimension at index "
+                        + std::to_string(i) + " (" + std::to_string(outputSize)
+                        + ") does not match expected dimension ("
+                        + std::to_string(expectedOutputSize)
+                        + ") given dx dimensions, kernel size, padding, stride, and dilation");
+            }
         }
 
         return {};
@@ -294,6 +301,14 @@ public:
                 auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
 
                 dxDims[i] = strideVal * (dySize - 1) + dilatedKernelSize - prePad - postPad;
+
+                HIPDNN_RETURN_IF_LE(
+                    dxDims[i],
+                    0,
+                    ErrorCode::INVALID_VALUE,
+                    "ConvolutionDgradNode: Inferred input spatial dimension at index "
+                        + std::to_string(i) + " (" + std::to_string(dxDims[i])
+                        + ") is non-positive. Check padding, stride, and dilation parameters.");
             }
 
             dx->set_dim(dxDims);
@@ -316,10 +331,10 @@ public:
                 "ConvolutionDgradNode: Stride dimension mismatch between dy and dx tensors");
 
             // Extract stride order from dy tensor and apply to dx tensor
-            auto strideOrder = hipdnn_sdk::utilities::extractStrideOrder(dyStrides);
+            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(dyStrides);
 
             // Generate dx strides using the extracted stride order and dx dimensions
-            auto dxStrides = hipdnn_sdk::utilities::generateStrides(dxDimsFinal, strideOrder);
+            auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDimsFinal, strideOrder);
 
             dx->set_stride(dxStrides);
         }
@@ -327,14 +342,14 @@ public:
         return {};
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

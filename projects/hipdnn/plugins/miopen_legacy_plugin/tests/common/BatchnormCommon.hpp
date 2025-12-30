@@ -8,8 +8,8 @@
 #include <random>
 #include <vector>
 
-#include <hipdnn_sdk/test_utilities/Seeds.hpp>
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 namespace test_bn_common
 {
@@ -33,7 +33,7 @@ struct BatchnormTestCase
     friend std::ostream& operator<<(std::ostream& ss, const BatchnormTestCase& tc)
     {
         ss << "(dims:";
-        hipdnn_sdk::utilities::vecToStream(ss, tc.dims);
+        hipdnn_data_sdk::utilities::vecToStream(ss, tc.dims);
         ss << " seed:" << tc.seed;
         ss << ")";
 
@@ -44,7 +44,7 @@ struct BatchnormTestCase
 // This is used for operation tests
 inline std::vector<BatchnormTestCase> getBatchnorm2dTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{1, 3, 14, 14}, seed},
@@ -54,7 +54,7 @@ inline std::vector<BatchnormTestCase> getBatchnorm2dTestCases()
 
 inline std::vector<BatchnormTestCase> getBnFwdInferenceTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{1, 3, 14, 14}, seed},
@@ -68,7 +68,7 @@ inline std::vector<BatchnormTestCase> getBnFwdInferenceTestCases()
 
 inline std::vector<BatchnormTestCase> getBnFwdInferenceFullTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{1, 16, 112, 112}, seed},
@@ -78,7 +78,7 @@ inline std::vector<BatchnormTestCase> getBnFwdInferenceFullTestCases()
 
 inline std::vector<BatchnormTestCase> getBnFwdInference3dTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{2, 3, 3, 1, 1}, seed},
@@ -88,7 +88,7 @@ inline std::vector<BatchnormTestCase> getBnFwdInference3dTestCases()
 
 inline std::vector<BatchnormTestCase> getBnBwdTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{1, 3, 14, 14}, seed},
@@ -101,7 +101,7 @@ inline std::vector<BatchnormTestCase> getBnBwdTestCases()
 
 inline std::vector<BatchnormTestCase> getBnBwdFullTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{1, 16, 112, 112}, seed},
@@ -111,7 +111,7 @@ inline std::vector<BatchnormTestCase> getBnBwdFullTestCases()
 
 inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{2, 3, 3, 1, 1}, seed},
@@ -121,7 +121,7 @@ inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
 
 inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke2dTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{2, 3, 1, 1}, seed}, // Minimal case
@@ -131,7 +131,7 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke2dTestCases()
 
 inline std::vector<BatchnormTestCase> getBnFwdTrainingFull2dTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{1, 3, 14, 14}, seed}, // Small batch
@@ -143,7 +143,7 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingFull2dTestCases()
 
 inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke3dTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{2, 3, 3, 1, 1}, seed}, // Minimal 3D case
@@ -153,7 +153,7 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke3dTestCases()
 
 inline std::vector<BatchnormTestCase> getBnFwdTrainingFull3dTestCases()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         {{2, 3, 3, 1, 1}, seed}, // Minimal case

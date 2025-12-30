@@ -371,6 +371,26 @@ namespace rocRoller
             return convert(DATATYPE, a);
         }
 
+        inline ExpressionPtr reinterpret(DataType dt, ExpressionPtr a)
+        {
+            auto argType = resultVariableType(a);
+            auto srcSize = DataTypeInfo::Get(argType.dataType).elementBytes;
+            auto dstSize = DataTypeInfo::Get(dt).elementBytes;
+
+            AssertFatal(srcSize == dstSize,
+                        "Reinterpret requires same size types: source type ",
+                        toString(argType.dataType),
+                        " (",
+                        srcSize,
+                        " bytes) != destination type ",
+                        toString(dt),
+                        " (",
+                        dstSize,
+                        " bytes)");
+
+            return std::make_shared<Expression>(Reinterpret{{.arg{a}}, dt});
+        }
+
         template <CCommandArgumentValue T>
         inline ExpressionPtr literal(T value)
         {
@@ -490,6 +510,8 @@ namespace rocRoller
         EXPRESSION_INFO(BitFieldExtract);
 
         EXPRESSION_INFO(Convert);
+
+        EXPRESSION_INFO(Reinterpret);
 
         EXPRESSION_INFO(Concatenate);
 
@@ -705,59 +727,6 @@ namespace rocRoller
             {
                 return std::make_tuple(exp.lhs, exp.r1hs, exp.r2hs);
             }
-        }
-
-        template <CCommandArgumentValue FromType, int Idx>
-        CommandArgumentValue reinterpret(FromType const& value, DataType targetDataType)
-        {
-            constexpr auto IdxType = static_cast<DataType>(Idx);
-
-            if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
-            {
-                Throw<FatalError>("Unsupported reinterpret to type: ", toString(targetDataType));
-                return 0;
-            }
-            else
-            {
-                using ToType = typename EnumTypeInfo<IdxType>::Type;
-
-                if(targetDataType == IdxType)
-                {
-                    AssertFatal(std::is_trivially_copyable_v<FromType>,
-                                "FromType must be trivially copyable");
-                    AssertFatal(std::is_trivially_copyable_v<ToType>,
-                                "ToType must be trivially copyable");
-
-                    if constexpr(!CCommandArgumentValue<
-                                     ToType> || sizeof(ToType) != sizeof(FromType))
-                    {
-                        Throw<FatalError>("Cannot reinterpret to ",
-                                          friendlyTypeName<ToType>(),
-                                          " from ",
-                                          friendlyTypeName<FromType>());
-                        return 0;
-                    }
-                    else
-                    {
-                        return std::bit_cast<ToType>(value);
-                    }
-                }
-                else
-                {
-                    return reinterpret<FromType, Idx + 1>(value, targetDataType);
-                }
-            }
-        }
-
-        inline CommandArgumentValue reinterpret(CommandArgumentValue const& value,
-                                                DataType                    targetDataType)
-        {
-            return std::visit(
-                [targetDataType](auto const& val) -> CommandArgumentValue {
-                    using FromType = std::decay_t<decltype(val)>;
-                    return reinterpret<FromType, 0>(val, targetDataType);
-                },
-                value);
         }
     }
 }

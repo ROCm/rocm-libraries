@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef TESTING_SPMV_SELL_HPP
-#define TESTING_SPMV_SELL_HPP
+#ifndef TESTING_SPMV_CSR_HPP
+#define TESTING_SPMV_CSR_HPP
 
 #include "display.hpp"
 #include "flops.hpp"
@@ -173,7 +173,7 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spmv_csr(Arguments argus)
+void testing_spmv_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -207,7 +207,7 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
     if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     std::vector<T> hx(n);
@@ -328,7 +328,8 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
         }
         else
         {
-            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+            std::cerr << "Error: Unknown wavefront size" << std::endl;
+            return;
         }
 
         for(J i = 0; i < m; ++i)
@@ -429,8 +430,6 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMV_CSR_HPP

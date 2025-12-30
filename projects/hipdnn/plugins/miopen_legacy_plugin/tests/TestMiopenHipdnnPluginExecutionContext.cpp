@@ -40,7 +40,7 @@ TEST(TestMiopenHipdnnEnginePluginExecutionContext, GetPlanThrowsIfNotSet)
 {
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(ctx.plan(), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ctx.plan(), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenHipdnnEnginePluginExecutionContext, GetWorkspaceSize)

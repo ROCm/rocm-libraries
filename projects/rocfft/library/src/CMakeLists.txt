@@ -151,7 +151,7 @@ set( kgen_logic_files
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
      ${CMAKE_SOURCE_DIR}/library/src/device/generator.py
-     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_lds.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_arch.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrr.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcc.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcr.py
@@ -555,6 +555,8 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1101 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1102 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1151 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
   add_custom_command(
     OUTPUT rocfft_kernel_cache.db

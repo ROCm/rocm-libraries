@@ -6,22 +6,22 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
@@ -47,8 +47,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t dilW = 1; // Width dilation
 
     auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType).set_intermediate_data_type(inputType).set_compute_data_type(
-        hipdnn_frontend::DataType::FLOAT); // MIOpen requires FLOAT compute type
+    graph->set_io_data_type(inputType)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(
+            hipdnn_frontend::DataType::FLOAT); // MIOpen requires FLOAT compute type
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
@@ -74,8 +76,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     graph::PointwiseAttributes biasAddAttributes;
     biasAddAttributes.set_name("bias_add_node");
     biasAddAttributes.set_mode(hipdnn_frontend::PointwiseMode::ADD);
-    biasAddAttributes.set_compute_data_type(
-        hipdnn_frontend::DataType::FLOAT); // MIOpen requires FLOAT compute type
+    biasAddAttributes.set_compute_data_type(inputType); // MIOpen requires FLOAT compute type
 
     auto biasOutAttr = graph->pointwise(convOutAttr, biasAttr, biasAddAttributes);
 
@@ -135,38 +136,46 @@ void SampleRunner::operator()(const TensorLayout& layout)
     }
     std::cout << '\n';
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation...\n";
 
         // Step 1: Compute convolution output
         utilities::Tensor<InputType> convRefTensor(convOutAttr->get_dim(), layout);
-        test_utilities::CpuFpReferenceConvolution::fprop(
+        hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, convRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
-        test_utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_sdk::data_objects::PointwiseMode::ADD, biasRefTensor, convRefTensor, biasTensor);
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+            hipdnn_data_sdk::data_objects::PointwiseMode::ADD,
+            biasRefTensor,
+            convRefTensor,
+            biasTensor);
 
         // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
-        test_utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, biasRefTensor);
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, biasRefTensor);
 
-        auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
+        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
 
         auto outValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool outValid = outValidator.allClose(yRefTensor, yTensor);
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  output: " << (outValid ? "successful" : "failed") << "\n";
+
+        validationPassed = outValid;
     }
 
     std::cout << "Fused Convolution fprop + Bias + Activ graph execution complete for " << inputType
               << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -179,9 +188,18 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All fused Conv fwd + Bias + Activation samples completed successfully.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All fused Conv fwd + Bias + Activation runs completed successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout << "One or more fused Conv fwd + Bias + Activation runs failed validation.\n";
+        return 1;
+    }
 }
