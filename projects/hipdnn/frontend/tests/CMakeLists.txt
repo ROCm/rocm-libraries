@@ -32,6 +32,7 @@ add_executable(
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
+    TestGraphSerialization.cpp
     TestINode.cpp
     TestNode.cpp
     TestPointwiseAttributes.cpp
