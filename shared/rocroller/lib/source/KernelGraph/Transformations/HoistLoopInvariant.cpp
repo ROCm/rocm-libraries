@@ -191,13 +191,8 @@ namespace rocRoller::KernelGraph
             {
                 AssertFatal(loopNode >= 0);
 
-                /* TODO for this PR: 
-                - handle cases where a read occurs before write in loop
-                - write note for hoisting cases where for loop executes zero times
-                */
-
                 // Skip if more than one write in the loop body
-                // As currently does not handle multiple reaching definitions (branch within loop body)
+                // As currently does not handle multiple reaching definitions (e.g. branch within loop body)
                 if(controlNodes.size() != 1
                    || countCoordinateWritesInLoop(graph, loopNode, coordinate, tracer) != 1)
                 {
@@ -211,10 +206,22 @@ namespace rocRoller::KernelGraph
 
                 int controlNode = *controlNodes.begin();
 
+                // Check for read-before-write pattern in the loop
+                // This prevents incorrect hoisting when a read depends on the value from a previous iteration
+                if(hasReadBeforeWriteInLoop(graph, loopNode, coordinate, controlNode, tracer))
+                {
+                    Log::debug("HoistLoopInvariant: skipping {} due to read-before-write pattern "
+                               "in loop {}",
+                               coordinate,
+                               loopNode);
+                    continue;
+                }
+
                 auto maybeAssign = graph.control.get<Assign>(controlNode);
                 if(!maybeAssign.has_value())
                 {
                     // Skip LoadLDSTile, StoreLDSTile, etc.
+                    // These nodes are more purposefully placed and are unlikely to be beneficial to hoist
                     Log::debug("HoistLoopInvariant: skipping {}",
                                Graph::variantToString(graph.control.getElement(controlNode)));
                     continue;
@@ -309,5 +316,47 @@ namespace rocRoller::KernelGraph
         }
 
         return writeCount;
+    }
+
+    bool hasReadBeforeWriteInLoop(KernelGraph const&         graph,
+                                  int                        loopNode,
+                                  int                        coordinate,
+                                  int                        writeControlNode,
+                                  ControlFlowRWTracer const& tracer)
+    {
+        auto records = tracer.coordinatesReadWrite(coordinate);
+
+        // Collect all read nodes within this loop
+        // TODO: does this pattern exist elsewhere in code? maybe make DRY?
+        std::vector<int> readNodes;
+        for(const auto& record : records)
+        {
+            if(record.rw == ControlFlowRWTracer::READ)
+            {
+                auto stack = controlStack(record.control, graph);
+                // Check if this read is within the target loop
+                if(std::find(stack.begin(), stack.end(), loopNode) != stack.end())
+                {
+                    readNodes.push_back(record.control);
+                }
+            }
+        }
+
+        // Check if any read node comes before the write node in control flow
+        for(int readNode : readNodes)
+        {
+            if(readNode == writeControlNode)
+            {
+                continue;
+            }
+            auto ordering = graph.control.compareNodes(
+                rocRoller::UseCacheIfAvailable, readNode, writeControlNode);
+            if(ordering == NodeOrdering::LeftFirst)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

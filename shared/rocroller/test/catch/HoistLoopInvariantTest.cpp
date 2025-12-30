@@ -232,11 +232,9 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
 
         const auto firstDownstreamNode
             = graph.control.getOutputNodeIndices<Body>(kLoop).take(1).only().value();
+        AssertFatal(firstDownstreamNode != -1, ShowValue(firstDownstreamNode));
+        insertBefore(graph, firstDownstreamNode, assign, assign);
 
-        if(firstDownstreamNode != -1)
-        {
-            insertBefore(graph, firstDownstreamNode, assign, assign);
-        }
         CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
 
         graph = transform<HoistLoopInvariant>(graph);
@@ -264,7 +262,7 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
         }
     }
 
-    SECTION("invalid hoist")
+    SECTION("no hoist incremented variable")
     {
         // Add assign node to kloop body that writes to incremented for loop variable
         // Verify that this node is *not* hoisted
@@ -370,6 +368,85 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
                 CHECK(loopStack[i] == assignStack[i]);
             }
             CHECK(assignStack.back() == assignInLoopNode);
+        }
+    }
+
+    SECTION("read-before-write prevents hoisting")
+    {
+        // Verify that when a coordinate is read before being written in a loop,
+        // the write cannot be hoisted (as it would change the first iteration's read value)
+        int coord     = graph.coordinates.addElement(Linear{});
+        int tempCoord = graph.coordinates.addElement(Linear{});
+
+        Assign readNode;
+        readNode.expression = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{coord, Register::Type::Scalar, DataType::Float});
+        int readNodeIdx = graph.control.addElement(readNode);
+        graph.mapper.connect(readNodeIdx, tempCoord, NaryArgument::DEST);
+
+        Assign writeNode;
+        writeNode.expression = Expression::literal(5.0f);
+        int writeNodeIdx     = graph.control.addElement(writeNode);
+        graph.mapper.connect(writeNodeIdx, coord, NaryArgument::DEST);
+
+        const auto firstNode
+            = graph.control.getOutputNodeIndices<Body>(kLoop).take(1).only().value();
+        insertBefore(graph, firstNode, readNodeIdx, readNodeIdx);
+        insertAfter(graph, readNodeIdx, writeNodeIdx, writeNodeIdx);
+
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
+        graph = transform<HoistLoopInvariant>(graph);
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
+
+        const auto writeStack = controlStack(writeNodeIdx, graph);
+        CHECK(std::find(writeStack.begin(), writeStack.end(), kLoop) != writeStack.end());
+    }
+
+    SECTION("write-before-read allows hoisting")
+    {
+        // Verify that when a coordinate is written before being read in a loop,
+        // the write can be hoisted (as the read always sees the written value)
+        int coord     = graph.coordinates.addElement(Linear{});
+        int tempCoord = graph.coordinates.addElement(Linear{});
+
+        Assign writeNode;
+        writeNode.expression = Expression::literal(5.0f);
+        int writeNodeIdx     = graph.control.addElement(writeNode);
+        graph.mapper.connect(writeNodeIdx, coord, NaryArgument::DEST);
+
+        Assign readNode;
+        readNode.expression = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{coord, Register::Type::Scalar, DataType::Float});
+        int readNodeIdx = graph.control.addElement(readNode);
+        graph.mapper.connect(readNodeIdx, tempCoord, NaryArgument::DEST);
+
+        const auto firstNode
+            = graph.control.getOutputNodeIndices<Body>(kLoop).take(1).only().value();
+        insertBefore(graph, firstNode, writeNodeIdx, writeNodeIdx);
+        insertAfter(graph, writeNodeIdx, readNodeIdx, readNodeIdx);
+
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 1);
+        graph = transform<HoistLoopInvariant>(graph);
+        CHECK(countCoordinateWritesInLoop(graph, kLoop, coord, ControlFlowRWTracer(graph)) == 0);
+
+        int newWriteNode = -1;
+        for(const auto& c : graph.mapper.getCoordinateConnections(coord))
+        {
+            if(graph.control.get<Assign>(c.control).has_value())
+            {
+                newWriteNode = c.control;
+                break;
+            }
+        }
+        REQUIRE(newWriteNode != -1);
+
+        const auto writeStack = controlStack(newWriteNode, graph);
+        const auto loopStack  = controlStack(kLoop, graph);
+        CHECK(std::find(writeStack.begin(), writeStack.end(), kLoop) == writeStack.end());
+        REQUIRE(loopStack.size() == writeStack.size());
+        for(size_t i = 0; i < loopStack.size() - 1; ++i)
+        {
+            CHECK(loopStack[i] == writeStack[i]);
         }
     }
 }
