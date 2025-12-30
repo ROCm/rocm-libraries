@@ -96,8 +96,15 @@ namespace GEMMTests
         gemm.workgroupSizeX = 128;
         gemm.workgroupSizeY = 2;
 
-        if(m_context->targetArchitecture().target().isRDNAGPU())
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
+            if(dataTypeAB == DataType::Float)
+            {
+                GTEST_SKIP() << "Architecture "
+                             << m_context->targetArchitecture().target().toString()
+                             << " does not support WMMA with Float";
+            }
+
             gemm.waveM = 16;
             gemm.waveN = 16;
             gemm.waveK = 16;
@@ -137,7 +144,11 @@ namespace GEMMTests
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
+        {
+            GTEST_SKIP() << "Architecture " << m_context->targetArchitecture().target().toString()
+                         << " does not support WMMA with Float";
+        }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
@@ -173,7 +184,19 @@ namespace GEMMTests
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
+        {
+            if(typeAB == DataType::Float)
+            {
+                GTEST_SKIP() << "Architecture "
+                             << m_context->targetArchitecture().target().toString()
+                             << " does not support WMMA with Float";
+            }
+
+            gemm.m = 16;
+            gemm.n = 16;
+            gemm.k = 16;
+        }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
