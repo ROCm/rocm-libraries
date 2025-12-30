@@ -317,6 +317,30 @@ public:
         data[index] = value;
     }
 
+    template <typename... Args>
+    T& operator()(Args... indices)
+    {
+        return memory().hostData()[getIndex(indices...)];
+    }
+
+    template <typename... Args>
+    const T& operator()(Args... indices) const
+    {
+        return memory().hostData()[getIndex(indices...)];
+    }
+
+    template <typename IndexType>
+    T& operator()(const std::vector<IndexType>& indices)
+    {
+        return memory().hostData()[getIndex(indices)];
+    }
+
+    template <typename IndexType>
+    const T& operator()(const std::vector<IndexType>& indices) const
+    {
+        return memory().hostData()[getIndex(indices)];
+    }
+
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
 
