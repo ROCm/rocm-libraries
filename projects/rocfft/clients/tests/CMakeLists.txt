@@ -46,7 +46,18 @@ project( rocfft-clients-tests LANGUAGES CXX )
 
 set(CMAKE_CXX_STANDARD 20)
 
-
+include(CheckIncludeFileCXX)
+check_include_file_cxx("scope" HAVE_SCOPE_HEADER)
+check_include_file_cxx("experimental/scope" HAVE_EXPERIMENTAL_SCOPE_HEADER)
+if(HAVE_SCOPE_HEADER OR HAVE_EXPERIMENTAL_SCOPE_HEADER )
+  #find_package(Boost REQUIRED COMPONENTS tokenizer)
+  find_package(Boost REQUIRED)
+else()
+  #find_package( Boost REQUIRED COMPONENTS scope_exit tokenizer )
+  find_package( Boost REQUIRED )
+endif()
+set( Boost_DEBUG ON )
+set( Boost_DETAILED_FAILURE_MSG ON )
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -235,33 +246,11 @@ else()
   include_directories(${FFTW_INCLUDE_DIRS})
 endif()
 
-include(CheckIncludeFileCXX)
-check_include_file_cxx("scope" HAVE_SCOPE_HEADER)
-check_include_file_cxx("experimental/scope" HAVE_EXPERIMENTAL_SCOPE_HEADER)
-if(HAVE_SCOPE_HEADER OR HAVE_EXPERIMENTAL_SCOPE_HEADER )
-  #find_package(Boost REQUIRED COMPONENTS tokenizer)
-  find_package(Boost REQUIRED)
-else()
-  #find_package( Boost REQUIRED COMPONENTS scope_exit tokenizer )
-  find_package( Boost REQUIRED )
-endif()
-set( Boost_DEBUG ON )
-set( Boost_DETAILED_FAILURE_MSG ON )
-
-if( Boost_Found)
-  set( rocfft-test_include_dirs
-    $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
-    ${ROCM_CLANG_ROOT}/include
-  )
-else()
-  set( rocfft-test_include_dirs
-    $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
-    ${ROCM_CLANG_ROOT}/include
-  )
-endif()
+set( rocfft-test_include_dirs
+ $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
+ $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
+ ${ROCM_CLANG_ROOT}/include
+)
   
 set( rocfft-test_link_libs
   ${FFTW_LIBRARIES}
