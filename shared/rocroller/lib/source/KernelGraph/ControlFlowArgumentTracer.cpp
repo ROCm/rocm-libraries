@@ -119,6 +119,7 @@ namespace rocRoller::KernelGraph
         void incorporate(int node, std::string const& arg)
         {
             auto& dest = m_referencedArgs[node];
+
             dest.insert(m_kernel->findArgument(arg).name);
         }
 
@@ -141,85 +142,23 @@ namespace rocRoller::KernelGraph
 
         void operator()(int node, CG::Assign const& op)
         {
-            incorporate(node, op.expression);
-        }
-
-        void operator()(int node, CG::ComputeIndex const& op)
-        {
-            for(int argIdx = 0; argIdx < static_cast<int>(Connections::ComputeIndexArgument::Count);
-                argIdx++)
+            auto dest = m_graph.mapper.get(node, NaryArgument::DEST);
+            if(dest > 0)
             {
-                auto arg = static_cast<Connections::ComputeIndexArgument>(argIdx);
-
-                auto dim = m_graph.mapper.get(node, Connections::ComputeIndex{arg});
-
-                if(dim > 0)
+                incorporate(node, m_tracer.trace(dest, true));
+                incorporate(node, m_tracer.trace(dest, false));
+                if(op.strideExpressionAttributes)
                 {
-                    incorporate(node, m_tracer.trace(dim, true));
+                    incorporate(node, op.strideExpressionAttributes->elementBlockStride);
+                    incorporate(node, op.strideExpressionAttributes->trLoadPairStride);
 
-                    if(arg == Connections::ComputeIndexArgument::TARGET)
-                    {
-                        auto dir = op.forward ? Graph::Direction::Upstream
-                                              : Graph::Direction::Downstream;
-
-                        auto [coords, path] = findRequiredCoordinates(dim, dir, m_graph);
-
-                        path = includeEdgeNeighbours(m_graph.coordinates, opposite(dir), path);
-
-                        std::unordered_set<std::string> targetCoords;
-                        for(auto coord : coords)
-                        {
-                            if(m_traceSizesInComputeIndex)
-                                mergeSets(targetCoords, m_tracer.trace(coord, false));
-                            mergeSets(targetCoords, m_tracer.trace(coord, true));
-                        }
-                        for(auto coord : path)
-                        {
-                            if(m_traceSizesInComputeIndex)
-                                mergeSets(targetCoords, m_tracer.trace(coord, false));
-                            mergeSets(targetCoords, m_tracer.trace(coord, true));
-                        }
-
-                        auto stride = m_graph.mapper.get(
-                            node,
-                            Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
-
-                        if(stride > 0)
-                        {
-                            Expression::ExpressionPtr expr;
-                            for(auto const& argName : targetCoords)
-                            {
-                                auto arg = std::make_shared<AssemblyKernelArgument>(
-                                    argName, DataType::Int32);
-
-                                auto argExpr
-                                    = std::make_shared<Expression::Expression>(std::move(arg));
-
-                                if(expr)
-                                    expr = expr + argExpr;
-                                else
-                                    expr = argExpr;
-                            }
-
-                            if(expr)
-                                m_tagManager.addExpression(stride, expr, {});
-                        }
-
-                        incorporate(node, std::move(targetCoords));
-
-                        auto buffer = m_graph.mapper.get(
-                            node,
-                            Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
-                        if(buffer > 0)
-                        {
-                            incorporate(node, m_tracer.trace(dim, false));
-                            auto pointer = m_tracer.call(dim);
-                            if(pointer)
-                                incorporate(node, std::move(*pointer));
-                        }
-                    }
+                    // Register the stride expression in the TagManager so that other nodes
+                    // referencing this stride coordinate (via DataFlowTag) can trace dependencies.
+                    m_tagManager.addExpression(dest, op.expression, {});
                 }
             }
+
+            incorporate(node, op.expression);
         }
 
         void operator()(int                                 node,
@@ -304,14 +243,11 @@ namespace rocRoller::KernelGraph
             incorporate(node, std::unordered_set<std::string>{});
         }
 
-        ControlFlowArgumentVisitor(KernelGraph const& graph,
-                                   AssemblyKernelPtr  kernel,
-                                   bool               traceSizesInComputeIndex = false)
+        ControlFlowArgumentVisitor(KernelGraph const& graph, AssemblyKernelPtr kernel)
             : TopoControlGraphVisitor(graph)
             , m_tracer{graph}
             , m_tagManager(nullptr)
             , m_kernel(std::move(kernel))
-            , m_traceSizesInComputeIndex(traceSizesInComputeIndex)
         {
         }
 
@@ -400,11 +336,6 @@ namespace rocRoller::KernelGraph
 
         // Arguments directly used in control flow (before propagation)
         std::set<std::string> m_directlyReferencedArgs;
-
-        // Whether to trace sizes (not just strides) in ComputeIndex operations.
-        // Default is false because index computation depends only on unroll-iteration and stride,
-        // which doesn't need sizes (see LoadStoreTileGenerator.cpp:getOffsetExpr).
-        bool m_traceSizesInComputeIndex = false;
 
         CoordinateArgumentTracer m_tracer;
 

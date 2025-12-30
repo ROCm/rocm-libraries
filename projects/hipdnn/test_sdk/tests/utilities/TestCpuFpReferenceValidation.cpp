@@ -5,14 +5,14 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::helpers;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::helpers;
 
 template <typename T>
 void makeTensorsEqual(T& tensor1, T& tensor2)
@@ -21,6 +21,8 @@ void makeTensorsEqual(T& tensor1, T& tensor2)
         tensor2.setHostValue(tensor1.getHostValue(indices), indices);
     });
 }
+
+/* ======== CpuFpReferenceValidation tests ======== */
 
 TEST(TestCpuFpReferenceValidation, NegativeToleranceThrows)
 {
@@ -339,3 +341,232 @@ TEST(TestCpuFpReferenceValidation, TensorSameElementCountDifferentDims)
     // even though element counts are the same
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
+
+/* ================================================= */
+
+/* ======== CpuIntReferenceValidation tests ======== */
+
+TEST(TestCpuIntReferenceValidationInt32, BasicTensorUsage)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {10, 10};
+
+    Tensor<int32_t> tensor1(dims);
+    tensor1.fillTensorWithRandomValues(-25, 25);
+    Tensor<int32_t> tensor2(dims);
+    makeTensorsEqual<Tensor<int32_t>>(tensor1, tensor2);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidationInt8, BasicTensorUsage)
+{
+    CpuIntReferenceValidation<int8_t> refValidation;
+    std::vector<int64_t> dims = {10, 10};
+
+    Tensor<int8_t> tensor1(dims);
+    tensor1.fillTensorWithRandomValues(-128, 127);
+    Tensor<int8_t> tensor2(dims);
+    makeTensorsEqual<Tensor<int8_t>>(tensor1, tensor2);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidationUint8, BasicTensorUsage)
+{
+    CpuIntReferenceValidation<uint8_t> refValidation;
+    std::vector<int64_t> dims = {10, 10};
+
+    Tensor<uint8_t> tensor1(dims);
+    tensor1.fillTensorWithRandomValues(0, 256);
+    Tensor<uint8_t> tensor2(dims);
+    makeTensorsEqual<Tensor<uint8_t>>(tensor1, tensor2);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+// TensorNotComparable tests
+TEST(TestCpuIntReferenceValidationInt32, TensorNotComparable)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {10, 10};
+
+    Tensor<int32_t> tensor1(dims);
+    Tensor<int32_t> tensor2(dims);
+    tensor1.fillTensorWithValue(-10);
+    tensor2.fillTensorWithValue(10);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidationInt8, TensorNotComparable)
+{
+    CpuIntReferenceValidation<int8_t> refValidation;
+    std::vector<int64_t> dims = {10, 10};
+
+    Tensor<int8_t> tensor1(dims);
+    Tensor<int8_t> tensor2(dims);
+    tensor1.fillTensorWithValue(-10);
+    tensor2.fillTensorWithValue(10);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidationUint8, TensorNotComparable)
+{
+    CpuIntReferenceValidation<uint8_t> refValidation;
+    std::vector<int64_t> dims = {10, 10};
+
+    Tensor<uint8_t> tensor1(dims);
+    Tensor<uint8_t> tensor2(dims);
+    tensor1.fillTensorWithValue(-10);
+    tensor2.fillTensorWithValue(10);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+// Edge case: different element counts
+TEST(TestCpuIntReferenceValidation, TensorDifferentElementCounts)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+
+    Tensor<int32_t> tensor1({10, 10});
+    Tensor<int32_t> tensor2({5, 5});
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidationStrided, StridedTensorEqual)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<int32_t> tensor1(dims, strides);
+    Tensor<int32_t> tensor2(dims, strides);
+
+    // Fill with same values
+    iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
+        auto value = static_cast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
+                                          + (indices[2] * 10) + indices[3]);
+        tensor1.setHostValue(value, indices);
+        tensor2.setHostValue(value, indices);
+    });
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidation, StridedTensorNotEqual)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<int32_t> tensor1(dims, strides);
+    Tensor<int32_t> tensor2(dims, strides);
+
+    // Fill tensor1
+    iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
+        auto value = static_cast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
+                                          + (indices[2] * 10) + indices[3]);
+        tensor1.setHostValue(value, indices);
+        tensor2.setHostValue(value, indices);
+    });
+
+    // Change one element in tensor2
+    std::vector<int64_t> indices = {1, 1, 1, 1};
+    tensor2.setHostValue(9999.0f, indices);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidation, StridedTensorAllZeros)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<int32_t> tensor1(dims, strides);
+    Tensor<int32_t> tensor2(dims, strides);
+
+    tensor1.fillTensorWithValue(0);
+    tensor2.fillTensorWithValue(0);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidation, StridedTensorDifferentStrides)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides1 = {2, 4, 8, 16};
+    std::vector<int64_t> strides2 = {8, 4, 2, 1}; // Different stride order
+
+    Tensor<int32_t> tensor1(dims, strides1);
+    Tensor<int32_t> tensor2(dims, strides2);
+
+    // Set same logical values despite different memory layouts
+    iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
+        auto value = static_cast<int32_t>(indices[0] + indices[1] + indices[2] + indices[3]);
+        tensor1.setHostValue(value, indices);
+        tensor2.setHostValue(value, indices);
+    });
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidation, StridedTensorFirstElementDiffers)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<int32_t> tensor1(dims, strides);
+    Tensor<int32_t> tensor2(dims, strides);
+
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    // Change first element
+    std::vector<int64_t> indices = {0, 0, 0, 0};
+    tensor2.setHostValue(2, indices);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidation, StridedTensorLastElementDiffers)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<int32_t> tensor1(dims, strides);
+    Tensor<int32_t> tensor2(dims, strides);
+
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    // Change last element
+    std::vector<int64_t> indices = {1, 1, 1, 1};
+    tensor2.setHostValue(2, indices);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidation, TensorSameElementCountDifferentDims)
+{
+    CpuIntReferenceValidation<int32_t> refValidation;
+
+    Tensor<int32_t> tensor1({2, 50}); // 100 elements
+    Tensor<int32_t> tensor2({10, 10}); // 100 elements
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    // Should return false because dimensions don't match
+    // even though element counts are the same
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+/* ================================================= */

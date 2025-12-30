@@ -3,9 +3,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -115,13 +115,13 @@ TEST(TestTensorAttributes, PackAttributes)
 
     auto bufferPointer = builder.GetBufferPointer();
     auto tensorAttributesFlatbuffer
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::TensorAttributes>(bufferPointer);
-    auto unpacked = std::unique_ptr<hipdnn_sdk::data_objects::TensorAttributesT>(
+        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(bufferPointer);
+    auto unpacked = std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>(
         tensorAttributesFlatbuffer->UnPack());
 
     EXPECT_EQ(unpacked->uid, 1);
     EXPECT_EQ(unpacked->name, "PackedTensor");
-    EXPECT_EQ(unpacked->data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(unpacked->data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(unpacked->strides, std::vector<int64_t>({1, 2, 3}));
     EXPECT_EQ(unpacked->dims, std::vector<int64_t>({4, 5, 6}));
     EXPECT_TRUE(unpacked->virtual_);
@@ -188,7 +188,7 @@ TEST(TestTensorAttributes, ValidateFailsOnNonPositiveDimension)
 
         EXPECT_EQ(tensor.validate(),
                   Error(ErrorCode::INVALID_VALUE, "Tensor  must have only positive dimensions"))
-            << "Dims: " << hipdnn_sdk::utilities::vecToString(dim);
+            << "Dims: " << hipdnn_data_sdk::utilities::vecToString(dim);
     }
 }
 
@@ -205,7 +205,8 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::BFLOAT16, ErrorCode::OK},
            {DataType::DOUBLE, ErrorCode::OK},
            {DataType::UINT8, ErrorCode::OK},
-           {DataType::INT32, ErrorCode::OK}};
+           {DataType::INT32, ErrorCode::OK},
+           {DataType::INT8, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {

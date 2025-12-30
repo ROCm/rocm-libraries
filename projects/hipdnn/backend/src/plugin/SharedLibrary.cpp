@@ -63,16 +63,16 @@ void SharedLibrary::load(const std::filesystem::path& libraryPath)
     // Check file extension and add prefix/suffix if needed
     if(modifiedLibraryPath.has_extension())
     {
-        if(modifiedLibraryPath.extension() != hipdnn_sdk::utilities::SHARED_LIB_EXT)
+        if(modifiedLibraryPath.extension() != hipdnn_data_sdk::utilities::SHARED_LIB_EXT)
         {
             throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                                   std::string("Invalid file extension. Expected ")
-                                      + hipdnn_sdk::utilities::SHARED_LIB_EXT);
+                                      + hipdnn_data_sdk::utilities::SHARED_LIB_EXT);
         }
     }
     else
     {
-        auto libraryName = hipdnn_sdk::utilities::getLibraryName(
+        auto libraryName = hipdnn_data_sdk::utilities::getLibraryName(
             modifiedLibraryPath.filename().string().c_str());
         modifiedLibraryPath = modifiedLibraryPath.parent_path() / libraryName;
     }

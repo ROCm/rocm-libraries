@@ -17,7 +17,7 @@ find_package(hip REQUIRED)
 # consumers. hipdnn_test_sdk shouldn't be needed by normal users of hipDNN, and is only incuded here
 # for validation purposes.
 find_package(hipdnn_frontend CONFIG REQUIRED)
-find_package(hipdnn_sdk CONFIG REQUIRED)
+find_package(hipdnn_data_sdk CONFIG REQUIRED)
 
 # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not need
 # this package.
@@ -29,7 +29,7 @@ function(add_hipdnn_sample NAME SOURCE)
     add_executable(${NAME} ${SOURCE})
     # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
-    # (brings in hipdnn_sdk as well).
+    # (brings in hipdnn_data_sdk as well).
     target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend hipdnn_test_sdk)
 endfunction()
 
@@ -48,7 +48,7 @@ add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
 
 if(WIN32)
     # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
-    # when consuming the hipdnn_sdk.  We need to clear these options Refer to issue:
+    # when consuming the hipdnn_data_sdk.  We need to clear these options Refer to issue:
     # https://github.com/ROCm/TheRock/issues/2003
 
     if(TARGET spdlog::spdlog_header_only)
@@ -63,3 +63,26 @@ if(WIN32)
         endif()
     endif()
 endif()
+
+# Enable testing and add sample tests
+enable_testing()
+
+# Helper function to add a hipDNN sample test
+function(add_hipdnn_sample_test TARGET_NAME)
+    add_test(NAME sample_${TARGET_NAME} COMMAND ${TARGET_NAME} --verify-cpu)
+    set_tests_properties(sample_${TARGET_NAME} PROPERTIES LABELS "sample_test")
+endfunction()
+
+# Register convolution samples as tests
+add_hipdnn_sample_test(conv_fprop)
+add_hipdnn_sample_test(conv_dgrad)
+add_hipdnn_sample_test(conv_wgrad)
+add_hipdnn_sample_test(fused_conv_fprop_activ)
+add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+
+# Register batchnorm samples as tests
+add_hipdnn_sample_test(bn_training)
+add_hipdnn_sample_test(fused_bn_training_activ)
+add_hipdnn_sample_test(bn_backward)
+add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
+# Note: bn_inference is currently disabled per issue #2459
