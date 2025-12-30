@@ -30,18 +30,10 @@ public:
         const auto a = attributes.get_a();
         const auto b = attributes.get_b();
         const auto c = attributes.get_c();
-
-        HIPDNN_RETURN_IF_FALSE(
-            a, ErrorCode::ATTRIBUTE_NOT_SET, "MatmulNode missing A input for pre-validation");
-
-        HIPDNN_RETURN_IF_FALSE(
-            b, ErrorCode::ATTRIBUTE_NOT_SET, "MatmulNode missing B input for pre-validation");
-
-        HIPDNN_RETURN_IF_FALSE(
-            c, ErrorCode::ATTRIBUTE_NOT_SET, "MatmulNode missing C output for pre-validation");
+        const auto minRank = 2;
 
         // Validate minimum dimensionality for matmul operands
-        const auto minRank = 2;
+        HIPDNN_CHECK_ERROR(validateTensors(a, b, c));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(a, minRank, "Input tensor A"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(b, minRank, "Input tensor B"));
 
@@ -69,17 +61,7 @@ public:
 
         // Validate broadcast-compatibility of batch dimensions (leading dims)
         const auto batchDims = aRank - minRank;
-        for(size_t i = 0; i < batchDims; ++i)
-        {
-            const auto aDimVal = aDims[i];
-            const auto bDimVal = bDims[i];
-            HIPDNN_RETURN_IF_TRUE(aDimVal % bDimVal != 0 && bDimVal % aDimVal != 0,
-                                  ErrorCode::INVALID_VALUE,
-                                  std::string("Matmul input tensors A and B have incompatible ")
-                                      + "batch dimensions for broadcasting at index "
-                                      + std::to_string(i) + ": A has dim=" + std::to_string(aDimVal)
-                                      + ", B has dim=" + std::to_string(bDimVal));
-        }
+        HIPDNN_CHECK_ERROR(validateBroadcastableBatchDims(aDims, bDims, batchDims));
 
         return {};
     }
@@ -91,15 +73,7 @@ public:
         const auto b = attributes.get_b();
         const auto c = attributes.get_c();
 
-        HIPDNN_RETURN_IF_FALSE(
-            a, ErrorCode::ATTRIBUTE_NOT_SET, "MatmulNode missing A input for setting properties");
-
-        HIPDNN_RETURN_IF_FALSE(
-            b, ErrorCode::ATTRIBUTE_NOT_SET, "MatmulNode missing B input for setting properties");
-
-        HIPDNN_RETURN_IF_FALSE(
-            c, ErrorCode::ATTRIBUTE_NOT_SET, "MatmulNode missing C output for setting properties");
-
+        HIPDNN_CHECK_ERROR(validateTensors(a, b, c));
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
         // Infer output dimensions if not set
@@ -110,22 +84,15 @@ public:
 
             // Compute common broadcasted batch shape from leading dims using divisibility rule:
             // for each batch dim i: require a[i] % b[i] == 0 || b[i] % a[i] == 0, and take max(a[i], b[i])
-            std::vector<int64_t> cDims;
-            cDims.reserve(aDims.size());
             const auto minRank = 2;
             const auto batchDims = aDims.size() - minRank;
+            HIPDNN_CHECK_ERROR(validateBroadcastableBatchDims(aDims, bDims, batchDims));
+
+            std::vector<int64_t> cDims;
+            cDims.reserve(aDims.size());
             for(size_t i = 0; i < batchDims; ++i)
             {
-                const auto aDimVal = aDims[i];
-                const auto bDimVal = bDims[i];
-                HIPDNN_RETURN_IF_TRUE(aDimVal % bDimVal != 0 && bDimVal % aDimVal != 0,
-                                      ErrorCode::INVALID_VALUE,
-                                      std::string("Matmul input tensors A and B have incompatible ")
-                                          + "batch dimensions for broadcasting at index "
-                                          + std::to_string(i)
-                                          + ": A has dim=" + std::to_string(aDimVal)
-                                          + ", B has dim=" + std::to_string(bDimVal));
-                cDims.push_back(std::max(aDimVal, bDimVal));
+                cDims.push_back(std::max(aDims[i], bDims[i]));
             }
             cDims.push_back(aDims[aDims.size() - 2]); // M
             cDims.push_back(bDims[bDims.size() - 1]); // N
@@ -152,6 +119,40 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+private:
+    static Error validateTensors(const std::shared_ptr<TensorAttributes>& a,
+                                 const std::shared_ptr<TensorAttributes>& b,
+                                 const std::shared_ptr<TensorAttributes>& c)
+    {
+        HIPDNN_RETURN_IF_FALSE(
+            a, ErrorCode::ATTRIBUTE_NOT_SET, std::string("MatmulNode missing A input"));
+        HIPDNN_RETURN_IF_FALSE(
+            b, ErrorCode::ATTRIBUTE_NOT_SET, std::string("MatmulNode missing B input"));
+        HIPDNN_RETURN_IF_FALSE(
+            c, ErrorCode::ATTRIBUTE_NOT_SET, std::string("MatmulNode missing C output"));
+
+        return {};
+    }
+
+    static Error validateBroadcastableBatchDims(const std::vector<int64_t>& aDims,
+                                                const std::vector<int64_t>& bDims,
+                                                size_t batchDims)
+    {
+        for(size_t i = 0; i < batchDims; ++i)
+        {
+            const auto aDimVal = aDims[i];
+            const auto bDimVal = bDims[i];
+            HIPDNN_RETURN_IF_TRUE(aDimVal % bDimVal != 0 && bDimVal % aDimVal != 0,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("Matmul input tensors A and B have incompatible ")
+                                      + "batch dimensions for broadcasting at index "
+                                      + std::to_string(i) + ": A has dim=" + std::to_string(aDimVal)
+                                      + ", B has dim=" + std::to_string(bDimVal));
+        }
+
+        return {};
     }
 };
 }

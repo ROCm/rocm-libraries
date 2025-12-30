@@ -11,7 +11,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
-TEST(TestMatmulNode, PreValidateNode_Succeeds2D)
+TEST(TestMatmulNode, PreValidateNodeSucceeds2D)
 {
     MatmulAttributes attrs;
     auto a = std::make_shared<TensorAttributes>();
@@ -31,7 +31,7 @@ TEST(TestMatmulNode, PreValidateNode_Succeeds2D)
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
-TEST(TestMatmulNode, PreValidateNode_MissingA)
+TEST(TestMatmulNode, PreValidateNodeMissingA)
 {
     MatmulAttributes attrs;
     attrs.set_b(std::make_shared<TensorAttributes>());
@@ -43,7 +43,7 @@ TEST(TestMatmulNode, PreValidateNode_MissingA)
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestMatmulNode, PreValidateNode_MissingB)
+TEST(TestMatmulNode, PreValidateNodeMissingB)
 {
     MatmulAttributes attrs;
     attrs.set_a(std::make_shared<TensorAttributes>());
@@ -55,7 +55,7 @@ TEST(TestMatmulNode, PreValidateNode_MissingB)
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestMatmulNode, PreValidateNode_MissingC)
+TEST(TestMatmulNode, PreValidateNodeMissingC)
 {
     MatmulAttributes attrs;
     attrs.set_a(std::make_shared<TensorAttributes>());
@@ -67,7 +67,7 @@ TEST(TestMatmulNode, PreValidateNode_MissingC)
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestMatmulNode, PreValidateNode_MismatchedRanks)
+TEST(TestMatmulNode, PreValidateNodeMismatchedRanks)
 {
     MatmulAttributes attrs;
     auto a = std::make_shared<TensorAttributes>();
@@ -86,7 +86,7 @@ TEST(TestMatmulNode, PreValidateNode_MismatchedRanks)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestMatmulNode, PreValidateNode_MismatchedInnerK)
+TEST(TestMatmulNode, PreValidateNodeMismatchedInnerK)
 {
     MatmulAttributes attrs;
     auto a = std::make_shared<TensorAttributes>();
@@ -105,7 +105,7 @@ TEST(TestMatmulNode, PreValidateNode_MismatchedInnerK)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestMatmulNode, PreValidateNode_IncompatibleBatch)
+TEST(TestMatmulNode, PreValidateNodeIncompatibleBatch)
 {
     MatmulAttributes attrs;
     auto a = std::make_shared<TensorAttributes>();
@@ -124,7 +124,7 @@ TEST(TestMatmulNode, PreValidateNode_IncompatibleBatch)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestMatmulNode, PreValidateNode_BroadcastableBatch)
+TEST(TestMatmulNode, PreValidateNodeBroadcastableBatch)
 {
     MatmulAttributes attrs;
     auto a = std::make_shared<TensorAttributes>();
@@ -143,7 +143,7 @@ TEST(TestMatmulNode, PreValidateNode_BroadcastableBatch)
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
-TEST(TestMatmulNode, InferPropertiesNode_MissingA)
+TEST(TestMatmulNode, InferPropertiesNodeMissingA)
 {
     MatmulAttributes attrs;
     attrs.set_b(std::make_shared<TensorAttributes>());
@@ -155,7 +155,7 @@ TEST(TestMatmulNode, InferPropertiesNode_MissingA)
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestMatmulNode, InferPropertiesNode_MissingB)
+TEST(TestMatmulNode, InferPropertiesNodeMissingB)
 {
     MatmulAttributes attrs;
     attrs.set_a(std::make_shared<TensorAttributes>());
@@ -167,7 +167,7 @@ TEST(TestMatmulNode, InferPropertiesNode_MissingB)
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestMatmulNode, InferPropertiesNode_MissingC)
+TEST(TestMatmulNode, InferPropertiesNodeMissingC)
 {
     MatmulAttributes attrs;
     attrs.set_a(std::make_shared<TensorAttributes>());
@@ -179,7 +179,7 @@ TEST(TestMatmulNode, InferPropertiesNode_MissingC)
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestMatmulNode, InferPropertiesNode_Infer2DOutputDimsAndStrides)
+TEST(TestMatmulNode, InferPropertiesNodeInfer2DOutputDimsAndStrides)
 {
     MatmulAttributes attrs;
     auto a = std::make_shared<TensorAttributes>();
@@ -209,7 +209,7 @@ TEST(TestMatmulNode, InferPropertiesNode_Infer2DOutputDimsAndStrides)
     EXPECT_EQ(strides[1], 1);
 }
 
-TEST(TestMatmulNode, InferPropertiesNode_InferBatchedDimsAndStrides)
+TEST(TestMatmulNode, InferPropertiesNodeInferBatchedDimsAndStrides)
 {
     MatmulAttributes attrs;
     auto a = std::make_shared<TensorAttributes>();
