@@ -2878,16 +2878,6 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                       base);
 }
 
-
-
-
-
-
-
-
-
-
-
 template <typename T>
 void host_bsrxmv(hipsparseDirection_t  dir,
                  hipsparseOperation_t  trans,
@@ -3115,31 +3105,6 @@ void host_bsrxmv(hipsparseDirection_t  dir,
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 template <typename T, typename I, typename J>
 inline void host_sellmv(hipsparseOperation_t trans,

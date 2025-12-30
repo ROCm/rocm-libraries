@@ -474,9 +474,9 @@ void testing_bsrxmv(Arguments argus)
     CHECK_HIP_ERROR(
         hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * n, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * m, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * m, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * nb * block_dim, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * mb * block_dim, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
@@ -565,13 +565,6 @@ void testing_bsrxmv(Arguments argus)
 
     CHECK_HIP_ERROR(hipMemcpy(dbsr_mask_ptr, hbsr_mask_ptr.data(), sizeof(int) * size_of_mask, hipMemcpyHostToDevice));
 
-    std::cout << "hbsr_mask_ptr" << std::endl;
-    for(size_t i = 0; i < hbsr_mask_ptr.size(); i++)
-    {
-        std::cout << hbsr_mask_ptr[i] << " ";
-    }
-    std::cout << "" << std::endl;
-
     if(argus.unit_check)
     {
         // HIPSPARSE pointer mode host
@@ -617,8 +610,8 @@ void testing_bsrxmv(Arguments argus)
             dy_2));
 
         // copy output from device to CPU
-        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * mb * block_dim, hipMemcpyDeviceToHost));
 
         // Host bsrmv
         host_bsrxmv(dir,
@@ -641,28 +634,6 @@ void testing_bsrxmv(Arguments argus)
 
         unit_check_near(1, mb * block_dim, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, mb * block_dim, 1, hy_gold.data(), hy_2.data());
-
-
-        // std::cout << "hy_1" << std::endl;
-        // for(size_t i = 0; i < hy_1.size(); i++)
-        // {
-        //     std::cout << hy_1[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-        // std::cout << "hy_2" << std::endl;
-        // for(size_t i = 0; i < hy_2.size(); i++)
-        // {
-        //     std::cout << hy_2[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-        // std::cout << "hy_gold" << std::endl;
-        // for(size_t i = 0; i < hy_gold.size(); i++)
-        // {
-        //     std::cout << hy_gold[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
     }
 
     if(argus.timing)
