@@ -26,14 +26,14 @@
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST_ROUTINE(bsrxmv,
-            level2,
-            arg.M,
-            arg.N,
-            arg.block_dim,
-            arg.alpha,
-            arg.alphai,
-            arg.beta,
-            arg.betai,
-            arg.dirA,
-            arg.baseA);
+             level2,
+             arg.M,
+             arg.N,
+             arg.block_dim,
+             arg.alpha,
+             arg.alphai,
+             arg.beta,
+             arg.betai,
+             arg.dirA,
+             arg.baseA);
 #endif
