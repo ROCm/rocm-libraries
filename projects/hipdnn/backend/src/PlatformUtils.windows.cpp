@@ -79,7 +79,7 @@ void* getSymbol(PluginLibHandle handle, const char* symbolName)
 std::string getSystemInfo()
 {
     // TODO: implement full system info retrieval for windows
-    return "System Information: {System Name: Windows}";
+    return "System Information: {{System Name: Windows}}";
 }
 
 }

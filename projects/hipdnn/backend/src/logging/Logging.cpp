@@ -71,8 +71,8 @@ void logHipDeviceInfo(hipStream_t stream)
     }
 
     logger->info(
-        "HIP Device Information: {Device: {}, Name: {}, Global Mem: {} bytes, Compute: {}.{}, "
-        "MPs: {}, Clock: {} kHz}",
+        "HIP Device Information: {{Device: {}, Name: {}, Global Mem: {} bytes, Compute: {}.{}, "
+        "MPs: {}, Clock: {} kHz}}",
         deviceId,
         props.name,
         props.totalGlobalMem,

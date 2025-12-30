@@ -578,7 +578,7 @@ std::string EnginePluginResourceManager::toString() const
         pluginPathStrings.push_back(path.string());
     }
 
-    return fmt::format("EnginePluginResourceManager: {loadedPlugins={}, loadedPluginPaths=[{}]}",
+    return fmt::format("EnginePluginResourceManager: {{loadedPlugins={}, loadedPluginPaths=[{}]}}",
                        loadedPlugins.size(),
                        fmt::join(pluginPathStrings, ", "));
 }
