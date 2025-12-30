@@ -224,6 +224,8 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spmv_sell.yaml
     rocm/test_spsm_coo.yaml
     rocm/test_spsm_csr.yaml
+    rocm/test_spsm_ex_coo.yaml
+    rocm/test_spsm_ex_csr.yaml
     rocm/test_spsv_coo.yaml
     rocm/test_spsv_csr.yaml
     rocm/test_spvv.yaml)
