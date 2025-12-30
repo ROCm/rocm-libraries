@@ -707,9 +707,6 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
-
-        kernel["UsePLRPack"] = True
-
         optSchedule = {
             'SYNC'  : [[-1, 25, 25, 46, 46, 55, 55, 72, 72]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
