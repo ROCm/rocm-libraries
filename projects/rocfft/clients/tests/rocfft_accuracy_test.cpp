@@ -34,7 +34,38 @@
 #include "../../shared/subprocess.h"
 #include "rocfft/rocfft.h"
 
-extern std::vector<std::string> mp_launch_argv;
+extern std::vector<std::string> mp_launch_words;
+struct user_mp_launch_command
+{
+    std::string              exe;
+    std::vector<std::string> user_mp_argv;
+};
+static user_mp_launch_command get_mp_launch_command()
+{
+    auto combine_quoted_args_from = [&](size_t& start_idx) {
+        std::string    ret;
+        constexpr char quote = '"';
+        while(start_idx < mp_launch_words.size()
+              && (ret.empty() || (ret.front() == quote && ret.back() != quote)))
+        {
+            if(!ret.empty())
+                ret += " ";
+            ret += mp_launch_words[start_idx++];
+        }
+        if(!ret.empty() && ret.front() == quote)
+            ret.erase(ret.begin());
+        if(!ret.empty() && ret.back() == quote)
+            ret.erase(ret.begin() + ret.size() - 1);
+        return ret;
+    };
+
+    size_t                 running_idx = 0;
+    user_mp_launch_command ret;
+    ret.exe = combine_quoted_args_from(running_idx);
+    while(running_idx < mp_launch_words.size())
+        ret.user_mp_argv.push_back(combine_quoted_args_from(running_idx));
+    return ret;
+}
 
 extern last_cpu_fft_cache last_cpu_fft_data;
 
@@ -107,12 +138,13 @@ TEST_P(accuracy_test, vs_fftw)
     }
     case fft_params::fft_mp_lib_mpi:
     {
-        if(mp_launch_argv.empty())
-            GTEST_FAIL() << "Required multi-process launch command was omitted";
-
         // Multi-proc FFT.
-        std::string              exe = mp_launch_argv.front();
-        std::vector<std::string> argv(mp_launch_argv.begin() + 1, mp_launch_argv.end());
+        static const auto mp_launch_command = get_mp_launch_command();
+
+        if(mp_launch_command.exe.empty())
+            GTEST_FAIL() << "Required multi-process executable to launch was omitted "
+                            "(\"--mp_launch\" option)";
+        auto argv = mp_launch_command.user_mp_argv;
         // append test token and ask for accuracy test
         argv.push_back("--token");
         argv.push_back(testcase_token);
@@ -120,7 +152,7 @@ TEST_P(accuracy_test, vs_fftw)
 
         // throws an exception if launch fails or if subprocess
         // returns nonzero exit code
-        execute_subprocess(exe, argv, {});
+        execute_subprocess(mp_launch_command.exe, argv, {});
         break;
     }
     default:

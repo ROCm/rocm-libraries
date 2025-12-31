@@ -125,7 +125,7 @@ fft_params::fft_mp_lib mp_lib = fft_params::fft_mp_lib_none;
 // Number of multi-process ranks to launch
 int mp_ranks = 1;
 // Multi-process launch command (e.g. mpirun --np 4 /path/to/rocfft_mpi_worker)
-std::vector<std::string> mp_launch_argv;
+std::vector<std::string> mp_launch_words;
 
 void init_gtest_flags()
 {
@@ -420,10 +420,13 @@ int main(int argc, char* argv[])
         ->default_val(1)
         ->check(CLI::NonNegativeNumber);
     app.add_option("--mp_launch",
-                   mp_launch_argv,
-                   "Command line prefix to launch multi-process transforms, e.g. \"mpirun --np 4 "
-                   "/path/to/rocfft_mpi_worker\"")
-        ->default_val(decltype(mp_launch_argv)()) /* empty command by default */
+                   mp_launch_words,
+                   "Command line prefix to launch multi-process transforms, e.g. \n"
+                   "\"mpirun --np 4 /path/to/rocfft_mpi_worker\"\n"
+                   "NOTE: embedded quotes must be used for all command arguments that contain "
+                   "space character(s). For instance,\n"
+                   "\"mpirun --np 4 \\\"/path with spaces/to/rocfft_mpi_worker\\\"\"")
+        ->default_val(decltype(mp_launch_words)()) /* empty command by default */
         ->delimiter(' ') /* splits the command into its words */
         ->each([&](const std::string&) {
             if(mp_lib == fft_params::fft_mp_lib_none)
