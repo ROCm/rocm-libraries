@@ -454,12 +454,6 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
-        if(unrollK == 4
-           && (loadPathAB == SolutionParams::LoadPath::BufferToLDSViaVGPR || waveK == 128))
-        {
-            GTEST_SKIP() << "FIXME: Re-visit when ClusterParallelChains is implemented";
-        }
-
         int waveM = (waveK == 128) ? 16 : 32;
         int waveN = (waveK == 128) ? 16 : 32;
 
@@ -513,19 +507,44 @@ namespace GEMMTests
                                                 ::testing::Combine(::testing::Values(64, 128),
                                                                    ::testing::Values(0, 2, 4))));
 
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMTest,
-        SwizzleScaledF4TNTestGPU,
-        ::testing::Combine(currentGPUISA(),
-                           ::testing::Values(64, 128),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                             SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                             SolutionParams::LoadPath::BufferToLDS),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                             SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                             SolutionParams::LoadPath::BufferToLDS),
-                           ::testing::Values(0, 2, 4),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                             SolutionParams::LoadPath::BufferToVGPR)));
+    using SwizzleScaledF4TNParamGenerator
+        = ::testing::internal::ParamGenerator<SwizzleScaledF4TNTestGPU::ParamType>;
+    static auto
+        FilterValidSwizzleScaledF4TNParams(SwizzleScaledF4TNParamGenerator&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+
+        std::vector<SwizzleScaledF4TNTestGPU::ParamType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& waveK      = std::get<1>(inputParam);
+            auto const& loadScaleA = std::get<2>(inputParam);
+            auto const& loadScaleB = std::get<3>(inputParam);
+            auto const& unrollK    = std::get<4>(inputParam);
+            auto const& loadAB     = std::get<5>(inputParam);
+
+            if(unrollK == 4 && (loadAB == LP::BufferToLDSViaVGPR || waveK == 128))
+                continue;
+
+            filtered.push_back(inputParam);
+        }
+
+        return ::testing::ValuesIn(filtered);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(GEMMTest,
+                             SwizzleScaledF4TNTestGPU,
+                             FilterValidSwizzleScaledF4TNParams(::testing::Combine(
+                                 currentGPUISA(),
+                                 ::testing::Values(64, 128),
+                                 ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDS),
+                                 ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                   SolutionParams::LoadPath::BufferToLDS),
+                                 ::testing::Values(0, 2, 4),
+                                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                   SolutionParams::LoadPath::BufferToVGPR))));
 
 } // namespace GEMMTests
