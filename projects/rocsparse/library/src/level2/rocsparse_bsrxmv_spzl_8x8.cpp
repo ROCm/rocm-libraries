@@ -178,7 +178,7 @@ namespace rocsparse
 
         if(bsr_mask_ptr != nullptr)
         {
-            row = bsr_mask_ptr[row] - idx_base;
+            row = (row < size_of_mask) ? bsr_mask_ptr[row] - idx_base : mb;
         }
 
         // BSR row entry and exit point

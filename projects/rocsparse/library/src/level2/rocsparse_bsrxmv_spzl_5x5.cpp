@@ -50,7 +50,7 @@ namespace rocsparse
         int row = blockIdx.x * blockDim.y + threadIdx.y;
         if(bsr_mask_ptr != nullptr)
         {
-            row = bsr_mask_ptr[row] - idx_base;
+            row = (row < size_of_mask) ? bsr_mask_ptr[row] - idx_base : mb;
         }
 
         if((row < mb) && (local_j < block_size))
@@ -149,17 +149,6 @@ namespace rocsparse
         I row_begin = bsr_row_ptr[row] - idx_base;
         I row_end   = (bsr_end_ptr == nullptr) ? (bsr_row_ptr[row + 1] - idx_base)
                                                : (bsr_end_ptr[row] - idx_base);
-
-#if 0
-    // Each thread block processes a single BSR row
-    J row = bsr_mask_ptr[hipBlockIdx_x] - idx_base;
-
-
-
-    // BSR row entry and exit point
-    I row_begin = bsr_row_ptr[row] - idx_base;
-    I row_end   = bsr_end_ptr[row] - idx_base;
-#endif
 
         // BSR block row accumulator
         T sum = static_cast<T>(0);
