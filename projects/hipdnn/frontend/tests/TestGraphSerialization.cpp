@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -12,27 +13,18 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
 // Helper function to create a tensor with computed contiguous strides
-std::shared_ptr<TensorAttributes>
-    createTensor(const std::string& name, std::vector<int64_t> dims, DataType dtype, int64_t uid)
+std::shared_ptr<TensorAttributes> createTensor(const std::string& name,
+                                               const std::vector<int64_t>& dims,
+                                               DataType dtype,
+                                               int64_t uid)
 {
     auto tensor = std::make_shared<TensorAttributes>();
-    // Compute contiguous strides from dims (row-major order)
-    std::vector<int64_t> strides(dims.size());
-    int64_t stride = 1;
-    for(size_t i = dims.size(); i > 0; --i)
-    {
-        strides[i - 1] = stride;
-        stride *= dims[i - 1];
-    }
-    tensor->set_name(name).set_dim(dims).set_stride(strides).set_data_type(dtype).set_uid(uid);
+    tensor->set_name(name)
+        .set_dim(dims)
+        .set_stride(hipdnn_data_sdk::utilities::generateStrides(dims))
+        .set_data_type(dtype)
+        .set_uid(uid);
     return tensor;
-}
-
-// Convenience alias for 4D tensors
-std::shared_ptr<TensorAttributes>
-    createTensor4D(const std::string& name, std::vector<int64_t> dims, DataType dtype, int64_t uid)
-{
-    return createTensor(name, std::move(dims), dtype, uid);
 }
 
 // Helper function to create a 1D tensor (for scale/bias)
@@ -159,7 +151,7 @@ TEST(TestGraphSerialization, GraphAttributesPreserved)
     graph.set_intermediate_data_type(DataType::BFLOAT16);
 
     // Add a simple node so graph is not empty
-    auto x = createTensor4D("x", {1, 16, 8, 8}, DataType::HALF, 1);
+    auto x = createTensor("x", {1, 16, 8, 8}, DataType::HALF, 1);
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::IDENTITY);
     graph.pointwise(x, pwAttrs);
@@ -185,7 +177,7 @@ TEST(TestGraphSerialization, PreferredEngineIdPreserved)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_preferred_engine_id_ext(42);
 
-    auto x = createTensor4D("x", {1, 16, 8, 8}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 16, 8, 8}, DataType::FLOAT, 1);
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
@@ -283,8 +275,8 @@ TEST(TestGraphSerialization, VirtualTensorsSerialized)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto w = createTensor4D("w", {64, 64, 3, 3}, DataType::FLOAT, 2);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {64, 64, 3, 3}, DataType::FLOAT, 2);
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_padding({1, 1}).set_stride({1, 1}).set_dilation({1, 1});
@@ -329,8 +321,8 @@ TEST(TestGraphSerialization, ConvFpropNodeSerialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto w = createTensor4D("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_padding({1, 1}).set_stride({2, 2}).set_dilation({1, 1}).set_convolution_mode(
@@ -364,8 +356,8 @@ TEST(TestGraphSerialization, ConvDgradNodeSerialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto dy = createTensor4D("dy", {1, 128, 16, 16}, DataType::FLOAT, 1);
-    auto w = createTensor4D("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
+    auto dy = createTensor("dy", {1, 128, 16, 16}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
 
     ConvDgradAttributes dgradAttrs;
     dgradAttrs.set_padding({1, 1}).set_stride({2, 2}).set_dilation({1, 1});
@@ -397,8 +389,8 @@ TEST(TestGraphSerialization, ConvWgradNodeSerialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto dy = createTensor4D("dy", {1, 128, 16, 16}, DataType::FLOAT, 1);
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 2);
+    auto dy = createTensor("dy", {1, 128, 16, 16}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 2);
 
     ConvWgradAttributes wgradAttrs;
     wgradAttrs.set_padding({1, 1}).set_stride({2, 2}).set_dilation({1, 1});
@@ -434,7 +426,7 @@ TEST(TestGraphSerialization, BatchnormNodeSerialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
     auto scale = createTensor1D("scale", 64, DataType::FLOAT, 2);
     auto bias = createTensor1D("bias", 64, DataType::FLOAT, 3);
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
@@ -470,7 +462,7 @@ TEST(TestGraphSerialization, BatchnormInferenceNodeSerialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
     auto mean = createTensor1D("mean", 64, DataType::FLOAT, 2);
     auto invVariance = createTensor1D("inv_variance", 64, DataType::FLOAT, 3);
     auto scale = createTensor1D("scale", 64, DataType::FLOAT, 4);
@@ -505,8 +497,8 @@ TEST(TestGraphSerialization, BatchnormBackwardNodeSerialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto dy = createTensor4D("dy", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 2);
+    auto dy = createTensor("dy", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 2);
     auto scale = createTensor1D("scale", 64, DataType::FLOAT, 3);
     auto mean = createTensor1D("mean", 64, DataType::FLOAT, 4);
     auto invVariance = createTensor1D("inv_variance", 64, DataType::FLOAT, 5);
@@ -555,7 +547,7 @@ TEST(TestGraphSerialization, UnaryPointwiseSerialization)
         graph.set_name("unary_pointwise_test");
         graph.set_compute_data_type(DataType::FLOAT);
 
-        auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+        auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
 
         PointwiseAttributes pwAttrs;
         pwAttrs.set_mode(mode);
@@ -595,8 +587,8 @@ TEST(TestGraphSerialization, BinaryPointwiseSerialization)
         graph.set_name("binary_pointwise_test");
         graph.set_compute_data_type(DataType::FLOAT);
 
-        auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-        auto y = createTensor4D("y", {1, 64, 32, 32}, DataType::FLOAT, 2);
+        auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+        auto y = createTensor("y", {1, 64, 32, 32}, DataType::FLOAT, 2);
 
         PointwiseAttributes pwAttrs;
         pwAttrs.set_mode(mode);
@@ -628,9 +620,9 @@ TEST(TestGraphSerialization, TernaryPointwiseSerialization)
     graph.set_name("ternary_pointwise_test");
     graph.set_compute_data_type(DataType::FLOAT);
 
-    auto condition = createTensor4D("condition", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 2);
-    auto y = createTensor4D("y", {1, 64, 32, 32}, DataType::FLOAT, 3);
+    auto condition = createTensor("condition", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 2);
+    auto y = createTensor("y", {1, 64, 32, 32}, DataType::FLOAT, 3);
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::BINARY_SELECT);
@@ -660,7 +652,7 @@ TEST(TestGraphSerialization, PointwiseWithExtraAttributes)
     graph.set_name("pointwise_extra_attrs_test");
     graph.set_compute_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::ELU_FWD);
@@ -694,8 +686,8 @@ TEST(TestGraphSerialization, ConvReluFusionSerialization)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto w = createTensor4D("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_padding({1, 1}).set_stride({1, 1}).set_dilation({1, 1});
@@ -734,8 +726,8 @@ TEST(TestGraphSerialization, ConvBiasReluFusionSerialization)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto w = createTensor4D("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
     auto bias = createTensor1D("bias", 128, DataType::FLOAT, 3);
 
     ConvFpropAttributes convAttrs;
@@ -779,9 +771,9 @@ TEST(TestGraphSerialization, ResidualBlockSerialization)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto w1 = createTensor4D("w1", {64, 64, 3, 3}, DataType::FLOAT, 2);
-    auto w2 = createTensor4D("w2", {64, 64, 3, 3}, DataType::FLOAT, 3);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w1 = createTensor("w1", {64, 64, 3, 3}, DataType::FLOAT, 2);
+    auto w2 = createTensor("w2", {64, 64, 3, 3}, DataType::FLOAT, 3);
 
     // First conv
     ConvFpropAttributes conv1Attrs;
@@ -837,7 +829,7 @@ TEST(TestGraphSerialization, HalfPrecisionSerialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::HALF);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::HALF, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::HALF, 1);
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
@@ -861,7 +853,7 @@ TEST(TestGraphSerialization, BFloat16Serialization)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::BFLOAT16);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::BFLOAT16, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::BFLOAT16, 1);
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
@@ -890,8 +882,8 @@ TEST(TestGraphSerialization, BinarySerializationRoundTrip)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto w = createTensor4D("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_padding({1, 1}).set_stride({1, 1}).set_dilation({1, 1});
@@ -935,7 +927,7 @@ TEST(TestGraphSerialization, BinaryVsJsonConsistency)
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
@@ -974,7 +966,7 @@ TEST(TestGraphSerialization, LargeDimensionsSerialization)
     graph.set_name("large_dims_test");
     graph.set_compute_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {16, 1024, 128, 128}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {16, 1024, 128, 128}, DataType::FLOAT, 1);
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
@@ -1043,7 +1035,7 @@ TEST(TestGraphSerialization, MultipleIndependentBranches)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
 
     // Branch 1: ReLU
     PointwiseAttributes relu1Attrs;
@@ -1087,7 +1079,7 @@ TEST(TestGraphSerialization, DeepChainSerialization)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    auto current = createTensor4D("input", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto current = createTensor("input", {1, 64, 32, 32}, DataType::FLOAT, 1);
 
     // Chain of 10 ReLU operations
     for(int i = 0; i < 10; ++i)
@@ -1169,7 +1161,7 @@ TEST(TestGraphSerialization, DeserializeMalformedDataTypesGracefully)
     originalGraph.set_name("malformed_test");
     originalGraph.set_compute_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 16, 8, 8}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 16, 8, 8}, DataType::FLOAT, 1);
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     originalGraph.pointwise(x, pwAttrs);
@@ -1195,7 +1187,7 @@ TEST(TestGraphSerialization, PassByValueTensorSerialization)
     graph.set_name("pass_by_value_test");
     graph.set_compute_data_type(DataType::FLOAT);
 
-    auto x = createTensor4D("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
 
     // Create a scalar pass-by-value tensor
     auto alpha = std::make_shared<TensorAttributes>(2.0f);
@@ -1237,7 +1229,7 @@ TEST(TestGraphSerialization, TensorLikeSerialization)
     graph.set_name("tensor_like_test");
     graph.set_compute_data_type(DataType::FLOAT);
 
-    auto original = createTensor4D("original", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto original = createTensor("original", {1, 64, 32, 32}, DataType::FLOAT, 1);
 
     // Create a tensor_like copy
     auto copy = Graph::tensor_like(original, "copy_tensor");
