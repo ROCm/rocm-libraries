@@ -82,49 +82,6 @@ public:
         return hipdnn_data_sdk::data_objects::CreateMatmulAttributes(
             builder, get_a()->get_uid(), get_b()->get_uid(), get_c()->get_uid());
     }
-
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
-    {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    MatmulAttributes& setInput(InputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-    MatmulAttributes& setInput(InputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
-
-    MatmulAttributes& setOutput(OutputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-    MatmulAttributes& setOutput(OutputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
-    }
 };
 
 typedef MatmulAttributes Matmul_attributes;

@@ -35,7 +35,7 @@
 
 #include <common/CommonGraphs.hpp>
 
-TEST_CASE("AssignComputeIndex", "[kernel-graph]")
+TEST_CASE("AssignIndexExpressions creates Assign nodes", "[kernel-graph]")
 {
     using namespace rocRoller;
     using namespace KernelGraph;
@@ -56,9 +56,8 @@ TEST_CASE("AssignComputeIndex", "[kernel-graph]")
         std::make_shared<AddLDS>(params, context.get()),
         std::make_shared<LowerLinear>(context.get()),
         std::make_shared<LowerTile>(params, context.get()),
-        std::make_shared<AddComputeIndex>(),
+        std::make_shared<AssignIndexExpressions>(context.get(), example.getCommand()),
         std::make_shared<UpdateWavefrontParameters>(params),
-        std::make_shared<AssignComputeIndex>(context.get(), example.getCommand()),
     };
 
     for(auto const& xform : transforms)
@@ -66,13 +65,30 @@ TEST_CASE("AssignComputeIndex", "[kernel-graph]")
         graph = graph.transform(xform);
     }
 
-    // search ComputeIndex operations
-    auto isComputeIndexPredicate
-        = [&graph](int x) { return graph.control.get<ComputeIndex>(x).has_value(); };
-    auto candidates
-        = graph.control.findNodes(*graph.control.roots().begin(), isComputeIndexPredicate)
+    // Verify that there are Assign nodes that compute offsets and strides
+    auto isAssignPredicate = [&graph](int x) { return graph.control.get<Assign>(x).has_value(); };
+    auto assignCandidates
+        = graph.control.findNodes(*graph.control.roots().begin(), isAssignPredicate)
+              .to<std::vector>();
+    CHECK(!assignCandidates.empty());
+
+    // Verify that load/store operations have connections to coordinate graph
+    auto isLoadStorePredicate = [&graph](int x) {
+        return graph.control.get<LoadTiled>(x).has_value()
+               || graph.control.get<StoreTiled>(x).has_value()
+               || graph.control.get<LoadLDSTile>(x).has_value()
+               || graph.control.get<StoreLDSTile>(x).has_value();
+    };
+    auto loadStoreCandidates
+        = graph.control.findNodes(*graph.control.roots().begin(), isLoadStorePredicate)
               .to<std::vector>();
 
-    // no ComputeIndex operations should be left
-    CHECK(candidates.size() == 0);
+    for(auto const& tag : loadStoreCandidates)
+    {
+        // Each load/store operation should have coordinate connections
+        auto conns = graph.mapper.getConnections(tag);
+
+        // Operations should have connections to coordinate graph nodes
+        CHECK(!conns.empty());
+    }
 }
