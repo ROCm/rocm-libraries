@@ -50,7 +50,7 @@ namespace rocsparse
         int row = blockIdx.x * blockDim.y + threadIdx.y;
         if(bsr_mask_ptr != nullptr)
         {
-            row = bsr_mask_ptr[row] - idx_base;
+            row = (row < size_of_mask) ? bsr_mask_ptr[row] - idx_base : mb;
         }
 
         if((row < mb) && (local_j < block_size))
@@ -149,17 +149,6 @@ namespace rocsparse
         I row_begin = bsr_row_ptr[row] - idx_base;
         I row_end   = (bsr_end_ptr == nullptr) ? (bsr_row_ptr[row + 1] - idx_base)
                                                : (bsr_end_ptr[row] - idx_base);
-
-#if 0
-    // Each thread block processes a single BSR row
-    J row = bsr_mask_ptr[hipBlockIdx_x] - idx_base;
-
-
-
-    // BSR row entry and exit point
-    I row_begin = bsr_row_ptr[row] - idx_base;
-    I row_end   = bsr_end_ptr[row] - idx_base;
-#endif
 
         // BSR block row accumulator
         T sum = static_cast<T>(0);
@@ -422,6 +411,10 @@ namespace rocsparse
                 dim3 const nThreads_solver(nthreads_per_halfwarp, nhalfwarps_per_block, 1);
                 dim3 const nBlocks_solver((size - 1) / nhalfwarps_per_block + 1, 1, 1);
 
+                std::cout << "size: " << size << " mb: " << mb << " size_of_mask: " << size_of_mask
+                          << std::endl;
+
+                std::cout << "nBlocks_solver.x: " << nBlocks_solver.x << std::endl;
                 if(rocsparse_direction_row == dir)
                 {
                     THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
