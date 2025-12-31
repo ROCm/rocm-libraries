@@ -574,6 +574,38 @@ public:
         return checkNoDuplicateTensorIdsImpl(allTensors);
     }
 
+    // Returns the tensor with the given UID, or nullptr if not found.
+    std::shared_ptr<TensorAttributes> getTensor(int64_t uid) const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid() && tensor->get_uid() == uid)
+            {
+                return tensor;
+            }
+        }
+        return nullptr;
+    }
+
+    // Returns the tensor with the given name, or nullptr if not found.
+    std::shared_ptr<TensorAttributes> getTensor(const std::string& name) const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->get_name() == name)
+            {
+                return tensor;
+            }
+        }
+        return nullptr;
+    }
+
     Error topologicallySortGraph()
     {
         size_t nodeCount = _sub_nodes.size();

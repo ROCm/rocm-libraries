@@ -3298,3 +3298,75 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_NE(biasUid, 400);
     EXPECT_NE(biasUid, 500);
 }
+
+TEST_F(TestGraph, GetTensorByUidReturnsTensor)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(42)
+        .set_name("X")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(99);
+
+    // Get tensor by UID
+    auto foundX = graph.getTensor(42);
+    ASSERT_NE(foundX, nullptr);
+    EXPECT_EQ(foundX->get_uid(), 42);
+    EXPECT_EQ(foundX->get_name(), "X");
+    EXPECT_EQ(foundX, x);
+
+    auto foundY = graph.getTensor(99);
+    ASSERT_NE(foundY, nullptr);
+    EXPECT_EQ(foundY->get_uid(), 99);
+    EXPECT_EQ(foundY, y);
+
+    // Non-existent UID returns nullptr
+    auto notFound = graph.getTensor(999);
+    EXPECT_EQ(notFound, nullptr);
+}
+
+TEST_F(TestGraph, GetTensorByNameReturnsTensor)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputTensor")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+
+    // Get tensor by name
+    auto foundX = graph.getTensor("InputTensor");
+    ASSERT_NE(foundX, nullptr);
+    EXPECT_EQ(foundX->get_name(), "InputTensor");
+    EXPECT_EQ(foundX, x);
+
+    // Output tensor has auto-generated name
+    auto foundY = graph.getTensor("PointwiseNode::OUT_0");
+    ASSERT_NE(foundY, nullptr);
+    EXPECT_EQ(foundY, y);
+
+    // Non-existent name returns nullptr
+    auto notFound = graph.getTensor("NonExistentTensor");
+    EXPECT_EQ(notFound, nullptr);
+}

@@ -51,8 +51,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t k = 8, r = 3, s = 3;
     constexpr int64_t u = 1, v = 1, padH = 1, padW = 1, dilH = 1, dilW = 1;
 
+    // Set names on tensors so we can retrieve them after deserialization
     auto xAttrOrig = createTensor({n, c, h, w}, inputType, layout);
     auto wAttrOrig = createTensor({k, c, r, s}, inputType, layout);
+    xAttrOrig->set_name("x");
+    wAttrOrig->set_name("w");
 
     utilities::Tensor<InputType> xTensor(xAttrOrig->get_dim(), layout);
     utilities::Tensor<InputType> wTensor(wAttrOrig->get_dim(), layout);
@@ -73,6 +76,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_dilation({dilH, dilW});
 
     auto yAttrOrig = originalGraph.conv_fprop(xAttrOrig, wAttrOrig, convAttrs);
+    yAttrOrig->set_name("y");
     yAttrOrig->set_output(true);
 
     HIPDNN_FE_CHECK(originalGraph.validate());
@@ -82,6 +86,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(originalGraph.build_plans());
 
     utilities::Tensor<InputType> yOriginal(yAttrOrig->get_dim(), layout);
+    yOriginal.fillWithValue(static_cast<InputType>(0.0f));
 
     executeConvFpropGraph(
         originalGraph, handle, xAttrOrig, wAttrOrig, yAttrOrig, xTensor, wTensor, yOriginal);
@@ -104,14 +109,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(jsonGraph.check_support());
     HIPDNN_FE_CHECK(jsonGraph.build_plans());
 
-    auto xAttrJson = createTensor({n, c, h, w}, inputType, layout);
-    auto wAttrJson = createTensor({k, c, r, s}, inputType, layout);
-    auto yAttrJson = createTensor(yAttrOrig->get_dim(), inputType, layout);
-    xAttrJson->set_uid(xAttrOrig->get_uid());
-    wAttrJson->set_uid(wAttrOrig->get_uid());
-    yAttrJson->set_uid(yAttrOrig->get_uid());
+    auto xAttrJson = jsonGraph.getTensor("x");
+    auto wAttrJson = jsonGraph.getTensor("w");
+    auto yAttrJson = jsonGraph.getTensor("y");
 
-    utilities::Tensor<InputType> yJson(yAttrOrig->get_dim(), layout);
+    utilities::Tensor<InputType> yJson(yAttrJson->get_dim(), layout);
+    yJson.fillWithValue(static_cast<InputType>(0.0f));
 
     executeConvFpropGraph(
         jsonGraph, handle, xAttrJson, wAttrJson, yAttrJson, xTensor, wTensor, yJson);
@@ -138,15 +141,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(binaryGraph.check_support());
     HIPDNN_FE_CHECK(binaryGraph.build_plans());
 
-    auto xAttrBin = createTensor({n, c, h, w}, inputType, layout);
-    auto wAttrBin = createTensor({k, c, r, s}, inputType, layout);
-    auto yAttrBin = createTensor(yAttrOrig->get_dim(), inputType, layout);
-    xAttrBin->set_uid(xAttrOrig->get_uid());
-    wAttrBin->set_uid(wAttrOrig->get_uid());
-    yAttrBin->set_uid(yAttrOrig->get_uid());
+    auto xAttrBin = binaryGraph.getTensor("x");
+    auto wAttrBin = binaryGraph.getTensor("w");
+    auto yAttrBin = binaryGraph.getTensor("y");
 
-    utilities::Tensor<InputType> yBinary(yAttrOrig->get_dim(), layout);
-
+    utilities::Tensor<InputType> yBinary(yAttrBin->get_dim(), layout);
+    yBinary.fillWithValue(static_cast<InputType>(0.0f));
     executeConvFpropGraph(
         binaryGraph, handle, xAttrBin, wAttrBin, yAttrBin, xTensor, wTensor, yBinary);
     std::cout << "Binary-deserialized graph execution complete.\n";
