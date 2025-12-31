@@ -46,19 +46,6 @@
 #include <type_traits>
 #include <vector>
 
-constexpr const char* get_block_sort_method_name(rocprim::block_sort_algorithm alg)
-{
-    switch(alg)
-    {
-        case rocprim::block_sort_algorithm::merge_sort: return "merge_sort";
-        case rocprim::block_sort_algorithm::bitonic_sort: return "bitonic_sort";
-        case rocprim::block_sort_algorithm::stable_merge_sort:
-            return "stable_merge_sort";
-            // Not using `default: ...` because it kills effectiveness of -Wswitch
-    }
-    return "unknown_algorithm";
-}
-
 template<typename Config>
 auto config_name()
 {
