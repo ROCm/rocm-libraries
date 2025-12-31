@@ -107,17 +107,17 @@ TEST(TestBatchnormFwdInferenceWithVarianceSignatureKey, CreateFromNodeAndTensorM
     double epsilon = 1e-5;
 
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              dims,
-                                                              TensorLayout::NHWC,
-                                                              epsilon);
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             dims,
+                                                             TensorLayout::NHWC,
+                                                             epsilon);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormFwdInferenceWithVarianceSignatureKey keyFromNode(graphWrap.getNode(0),
-                                                               graphWrap.getTensorMap());
+                                                              graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

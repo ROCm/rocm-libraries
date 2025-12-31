@@ -46,29 +46,29 @@ TEST_F(TestBatchnormFwdInferenceWithVariancePlan, ExecutePlan)
     double epsilon = 1e-5;
 
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              dims,
-                                                              TensorLayout::NHWC,
-                                                              epsilon);
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             dims,
+                                                             TensorLayout::NHWC,
+                                                             epsilon);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdWithVarianceTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
-    BatchnormFwdWithVarianceTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
+    BatchnormFwdWithVarianceTensorBundle directTensorBundle(
+        node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes
         = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
-    BatchnormFwdInferenceWithVarianceParams params(
-        *tensorMap.at(attributes.x_tensor_uid()),
-        *tensorMap.at(attributes.y_tensor_uid()),
-        *tensorMap.at(attributes.scale_tensor_uid()),
-        *tensorMap.at(attributes.bias_tensor_uid()),
-        *tensorMap.at(attributes.mean_tensor_uid()),
-        *tensorMap.at(attributes.variance_tensor_uid()),
-        epsilon);
+    BatchnormFwdInferenceWithVarianceParams params(*tensorMap.at(attributes.x_tensor_uid()),
+                                                   *tensorMap.at(attributes.y_tensor_uid()),
+                                                   *tensorMap.at(attributes.scale_tensor_uid()),
+                                                   *tensorMap.at(attributes.bias_tensor_uid()),
+                                                   *tensorMap.at(attributes.mean_tensor_uid()),
+                                                   *tensorMap.at(attributes.variance_tensor_uid()),
+                                                   epsilon);
 
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
@@ -88,15 +88,14 @@ TEST_F(TestBatchnormFwdInferenceWithVariancePlan, ExecutePlan)
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
-                                                       *shallowScaleTensor,
-                                                       *shallowBiasTensor,
-                                                       *shallowMeanTensor,
-                                                       *shallowVarianceTensor,
-                                                       *shallowYTensor,
-                                                       epsilon);
+                                                      *shallowScaleTensor,
+                                                      *shallowBiasTensor,
+                                                      *shallowMeanTensor,
+                                                      *shallowVarianceTensor,
+                                                      *shallowYTensor,
+                                                      epsilon);
 
-    BatchnormFwdWithVariancePlan<float, float, float, float, float> fwdPlan(
-        std::move(params));
+    BatchnormFwdWithVariancePlan<float, float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -111,26 +110,25 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanBuilder, PlanConstruction)
     double epsilon = 1e-5;
 
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              dims,
-                                                              TensorLayout::NHWC,
-                                                              epsilon);
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             dims,
+                                                             TensorLayout::NHWC,
+                                                             epsilon);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT>
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool result = dynamic_cast<
-                      BatchnormFwdWithVariancePlan<float, float, float, float, float>*>(
+    bool result = dynamic_cast<BatchnormFwdWithVariancePlan<float, float, float, float, float>*>(
                       builtPlan.get())
                   != nullptr;
     EXPECT_TRUE(result);
@@ -142,30 +140,30 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanBuilder, IsApplicable)
     double epsilon = 1e-5;
 
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              DataType::FLOAT,
-                                                              dims,
-                                                              TensorLayout::NHWC,
-                                                              epsilon);
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             DataType::FLOAT,
+                                                             dims,
+                                                             TensorLayout::NHWC,
+                                                             epsilon);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT>
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
     BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
-                                                  DataType::HALF,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT,
-                                                  DataType::FLOAT>
+                                                 DataType::HALF,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));

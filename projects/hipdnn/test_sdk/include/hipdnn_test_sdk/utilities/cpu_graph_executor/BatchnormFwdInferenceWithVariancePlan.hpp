@@ -137,7 +137,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->variance_tensor_uid(), MeanVarianceDataTypeEnum);
+        CHECK_TENSOR_TYPE(
+            tensorMap, nodeAttributes->variance_tensor_uid(), MeanVarianceDataTypeEnum);
 
         return true;
     }

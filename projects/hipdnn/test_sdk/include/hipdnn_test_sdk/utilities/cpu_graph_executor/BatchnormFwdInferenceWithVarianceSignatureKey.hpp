@@ -14,8 +14,8 @@ namespace hipdnn_test_sdk::utilities
 
 struct BatchnormFwdInferenceWithVarianceSignatureKey
 {
-    const hipdnn_sdk::data_objects::NodeAttributes nodeType =
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceWithVarianceAttributes;
+    const hipdnn_sdk::data_objects::NodeAttributes nodeType
+        = hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceWithVarianceAttributes;
     hipdnn_sdk::data_objects::DataType xDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
@@ -176,8 +176,9 @@ struct fmt::formatter<hipdnn_test_sdk::utilities::BatchnormFwdInferenceWithVaria
     }
 
     template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::BatchnormFwdInferenceWithVarianceSignatureKey& key,
-                FormatContext& ctx) const
+    auto
+        format(const hipdnn_test_sdk::utilities::BatchnormFwdInferenceWithVarianceSignatureKey& key,
+               FormatContext& ctx) const
     {
         return fmt::format_to(
             ctx.out(),

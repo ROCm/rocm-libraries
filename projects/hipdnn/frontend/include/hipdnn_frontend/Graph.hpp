@@ -798,7 +798,7 @@ public:
         if(attributes.get_name().empty())
         {
             attributes.set_name("BatchnormInferenceWithVariance_"
-                               + std::to_string(_sub_nodes.size()));
+                                + std::to_string(_sub_nodes.size()));
         }
 
         auto y = outputTensor(attributes.get_name() + "::Y");

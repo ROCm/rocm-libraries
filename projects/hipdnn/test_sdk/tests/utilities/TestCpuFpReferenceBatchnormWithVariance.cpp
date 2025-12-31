@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cmath>
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
@@ -11,7 +12,6 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <cmath>
 #include <limits>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -127,8 +127,10 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceMixedPrecision, BatchnormFwdInferenc
     Tensor<float> varianceTensor({1, 3});
 
     inputTensor.fillWithRandomValues(-1.0_h, 1.0_h, 123);
-    scaleTensor.fillWithRandomValues(staticCast<hip_bfloat16>(0.5f), staticCast<hip_bfloat16>(1.5f), 456);
-    biasTensor.fillWithRandomValues(staticCast<hip_bfloat16>(-0.5f), staticCast<hip_bfloat16>(0.5f), 789);
+    scaleTensor.fillWithRandomValues(
+        staticCast<hip_bfloat16>(0.5f), staticCast<hip_bfloat16>(1.5f), 456);
+    biasTensor.fillWithRandomValues(
+        staticCast<hip_bfloat16>(-0.5f), staticCast<hip_bfloat16>(0.5f), 789);
     meanTensor.fillWithRandomValues(-0.2f, 0.2f, 321);
     varianceTensor.fillWithRandomValues(0.5f, 2.0f, 654);
 
@@ -291,8 +293,8 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, ZeroVarianceWithDefaultEpsilon
 
     scaleTensor.setHostValue(2.0, 0, 0);
     biasTensor.setHostValue(3.5, 0, 0);
-    meanTensor.setHostValue(5.0, 0, 0);  // mean = 5
-    varianceTensor.setHostValue(0.0, 0, 0);  // variance = 0
+    meanTensor.setHostValue(5.0, 0, 0); // mean = 5
+    varianceTensor.setHostValue(0.0, 0, 0); // variance = 0
 
     double epsilon = 1e-5;
 
@@ -330,7 +332,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, NearZeroVariance)
     scaleTensor.setHostValue(1.0, 0, 0);
     biasTensor.setHostValue(0.0, 0, 0);
     meanTensor.setHostValue(1.0, 0, 0);
-    varianceTensor.setHostValue(1e-10, 0, 0);  // Very small variance
+    varianceTensor.setHostValue(1e-10, 0, 0); // Very small variance
 
     double epsilon = 1e-5;
 
@@ -366,7 +368,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, VarianceEqualsEpsilon)
     meanTensor.setHostValue(2.5, 0, 0);
 
     double epsilon = 1e-5;
-    varianceTensor.setHostValue(epsilon, 0, 0);  // variance = epsilon
+    varianceTensor.setHostValue(epsilon, 0, 0); // variance = epsilon
 
     // y = 1.0 * ((x - 2.5) / sqrt(1e-5 + 1e-5)) + 0.0
     //   = (x - 2.5) / sqrt(2e-5)
@@ -378,7 +380,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, VarianceEqualsEpsilon)
     // Verify outputs are finite and reasonable
     EXPECT_FALSE(std::isnan(outputTensor.getHostValue(0, 0, 0, 0)));
     EXPECT_FALSE(std::isinf(outputTensor.getHostValue(0, 0, 0, 0)));
-    
+
     // Expected approximate values
     double divisor = std::sqrt(2 * epsilon);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), (1.0 - 2.5) / divisor, 1e-4);
@@ -407,7 +409,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, VeryLargeVariance)
     scaleTensor.setHostValue(1.0, 0, 0);
     biasTensor.setHostValue(0.0, 0, 0);
     meanTensor.setHostValue(2.5, 0, 0);
-    varianceTensor.setHostValue(100.0, 0, 0);  // Large variance
+    varianceTensor.setHostValue(100.0, 0, 0); // Large variance
 
     double epsilon = 1e-5;
 
@@ -415,7 +417,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, VeryLargeVariance)
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, epsilon);
 
     // With large variance, normalized outputs should be close to 0
-    auto tolerance = 0.2;  // Loose tolerance for small values
+    auto tolerance = 0.2; // Loose tolerance for small values
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), -0.15, tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), -0.05, tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 0), 0.05, tolerance);
@@ -448,7 +450,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, MinimalEpsilon)
     meanTensor.setHostValue(2.5, 0, 0);
     varianceTensor.setHostValue(1.25, 0, 0);
 
-    double epsilon = 1e-8;  // Minimal epsilon
+    double epsilon = 1e-8; // Minimal epsilon
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, epsilon);
@@ -478,9 +480,9 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, LargeEpsilon)
     scaleTensor.setHostValue(1.0, 0, 0);
     biasTensor.setHostValue(0.0, 0, 0);
     meanTensor.setHostValue(2.5, 0, 0);
-    varianceTensor.setHostValue(0.01, 0, 0);  // Small variance
+    varianceTensor.setHostValue(0.01, 0, 0); // Small variance
 
-    double epsilon = 1e-2;  // Large epsilon (dominates small variance)
+    double epsilon = 1e-2; // Large epsilon (dominates small variance)
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, epsilon);
@@ -521,9 +523,9 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, EpsilonSensitivity)
 
     // Larger epsilon should produce smaller absolute output magnitude
     // Since divisor = sqrt(variance + epsilon) increases with epsilon
-    EXPECT_GT(std::abs(outputs[0]), std::abs(outputs[1]));  // 1e-8 > 1e-5
-    EXPECT_GT(std::abs(outputs[1]), std::abs(outputs[2]));  // 1e-5 > 1e-3
-    EXPECT_GT(std::abs(outputs[2]), std::abs(outputs[3]));  // 1e-3 > 1e-2
+    EXPECT_GT(std::abs(outputs[0]), std::abs(outputs[1])); // 1e-8 > 1e-5
+    EXPECT_GT(std::abs(outputs[1]), std::abs(outputs[2])); // 1e-5 > 1e-3
+    EXPECT_GT(std::abs(outputs[2]), std::abs(outputs[3])); // 1e-3 > 1e-2
 }
 
 // ============================================================================
@@ -552,7 +554,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, NumericalLimitsWithLargerEpsil
     meanTensor.setHostValue(2.5f, 0, 0);
     varianceTensor.setHostValue(1.25f, 0, 0);
 
-    double epsilon = 1e-4;  // Larger epsilon for FP16
+    double epsilon = 1e-4; // Larger epsilon for FP16
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, epsilon);
@@ -584,7 +586,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceBfp16, NumericalLimitsWithLargerEpsi
     meanTensor.setHostValue(2.5f, 0, 0);
     varianceTensor.setHostValue(1.25f, 0, 0);
 
-    double epsilon = 1e-4;  // Appropriate epsilon for BFP16
+    double epsilon = 1e-4; // Appropriate epsilon for BFP16
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, epsilon);
@@ -611,7 +613,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, ScaleZero)
     Tensor<float> varianceTensor({1, 1});
 
     inputTensor.fillWithRandomValues(-1.0f, 1.0f, 123);
-    scaleTensor.setHostValue(0.0f, 0, 0);  // Scale = 0
+    scaleTensor.setHostValue(0.0f, 0, 0); // Scale = 0
     biasTensor.setHostValue(5.0f, 0, 0);
     meanTensor.setHostValue(0.0f, 0, 0);
     varianceTensor.setHostValue(1.0f, 0, 0);
@@ -644,7 +646,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, BiasZero)
     inputTensor.setHostValue(4.0f, 0, 0, 1, 1);
 
     scaleTensor.setHostValue(2.0f, 0, 0);
-    biasTensor.setHostValue(0.0f, 0, 0);  // Bias = 0
+    biasTensor.setHostValue(0.0f, 0, 0); // Bias = 0
     meanTensor.setHostValue(2.5f, 0, 0);
     varianceTensor.setHostValue(1.25f, 0, 0);
 
@@ -677,9 +679,9 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, UnitScaleZeroBias)
     scaleTensor.setHostValue(1.0f, 0, 0);
     biasTensor.setHostValue(0.0f, 0, 0);
     meanTensor.setHostValue(2.5f, 0, 0);
-    varianceTensor.setHostValue(1.0f, 0, 0);  // Unit variance
+    varianceTensor.setHostValue(1.0f, 0, 0); // Unit variance
 
-    double epsilon = 0.0;  // No epsilon for pure standardization test
+    double epsilon = 0.0; // No epsilon for pure standardization test
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, epsilon);

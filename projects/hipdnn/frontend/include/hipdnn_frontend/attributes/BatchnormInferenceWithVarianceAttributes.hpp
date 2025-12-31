@@ -81,7 +81,8 @@ public:
         return setInput(InputNames::X, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    BatchnormInferenceWithVarianceAttributes& set_mean(const std::shared_ptr<TensorAttributes>& value)
+    BatchnormInferenceWithVarianceAttributes&
+        set_mean(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::MEAN, value);
     }
@@ -91,17 +92,20 @@ public:
         return setInput(InputNames::MEAN, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    BatchnormInferenceWithVarianceAttributes& set_variance(const std::shared_ptr<TensorAttributes>& value)
+    BatchnormInferenceWithVarianceAttributes&
+        set_variance(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::VARIANCE, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    BatchnormInferenceWithVarianceAttributes& set_variance(std::shared_ptr<TensorAttributes>&& value)
+    BatchnormInferenceWithVarianceAttributes&
+        set_variance(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::VARIANCE, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    BatchnormInferenceWithVarianceAttributes& set_scale(const std::shared_ptr<TensorAttributes>& value)
+    BatchnormInferenceWithVarianceAttributes&
+        set_scale(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::SCALE, value);
     }
@@ -111,7 +115,8 @@ public:
         return setInput(InputNames::SCALE, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    BatchnormInferenceWithVarianceAttributes& set_bias(const std::shared_ptr<TensorAttributes>& value)
+    BatchnormInferenceWithVarianceAttributes&
+        set_bias(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::BIAS, value);
     }
@@ -131,7 +136,8 @@ public:
         return setOutput(OutputNames::Y, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    BatchnormInferenceWithVarianceAttributes& set_epsilon(const std::shared_ptr<TensorAttributes>& value)
+    BatchnormInferenceWithVarianceAttributes&
+        set_epsilon(const std::shared_ptr<TensorAttributes>& value)
     {
         epsilon = value;
         return *this;

@@ -44,8 +44,8 @@ struct BatchnormFwdWithVarianceTensorBundle : public hipdnn_test_sdk::utilities:
         unsigned int seed)
         : hipdnn_test_sdk::utilities::GraphTensorBundle(tensorMap)
     {
-        const auto& attributes
-            = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes>();
+        const auto& attributes = node.attributesAs<
+            hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes>();
 
         randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);

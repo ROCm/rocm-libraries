@@ -223,16 +223,15 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     return graph;
 }
 
-inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildBatchnormFwdInferenceWithVarianceGraph(
-        hipdnn_sdk::data_objects::DataType inputDataType,
-        hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-        hipdnn_sdk::data_objects::DataType meanVarianceDataType,
-        hipdnn_sdk::data_objects::DataType computeDataType,
-        const std::vector<int64_t>& dims,
-        const hipdnn_sdk::utilities::TensorLayout& layout,
-        double epsilon,
-        bool isOutputVirtual = false)
+inline std::shared_ptr<hipdnn_frontend::graph::Graph> buildBatchnormFwdInferenceWithVarianceGraph(
+    hipdnn_sdk::data_objects::DataType inputDataType,
+    hipdnn_sdk::data_objects::DataType scaleBiasDataType,
+    hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+    hipdnn_sdk::data_objects::DataType computeDataType,
+    const std::vector<int64_t>& dims,
+    const hipdnn_sdk::utilities::TensorLayout& layout,
+    double epsilon,
+    bool isOutputVirtual = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormFwdInferenceWithVarianceTest");

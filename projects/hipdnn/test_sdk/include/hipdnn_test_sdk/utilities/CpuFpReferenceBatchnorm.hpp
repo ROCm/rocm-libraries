@@ -30,11 +30,20 @@ public:
                      const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
                      hipdnn_sdk::utilities::TensorBase<YDataType>& y)
     {
-        fwdInferenceImpl<XDataType, ScaleBiasDataType, MeanVarianceDataType, YDataType, ComputeDataType>(
-            x, scale, bias, estimatedMean, invVariance, y, 0.0,
-            [](ComputeDataType elemStd, ComputeDataType invVar, ComputeDataType) {
-                return elemStd * invVar;
-            });
+        fwdInferenceImpl<XDataType,
+                         ScaleBiasDataType,
+                         MeanVarianceDataType,
+                         YDataType,
+                         ComputeDataType>(x,
+                                          scale,
+                                          bias,
+                                          estimatedMean,
+                                          invVariance,
+                                          y,
+                                          0.0,
+                                          [](ComputeDataType elemStd,
+                                             ComputeDataType invVar,
+                                             ComputeDataType) { return elemStd * invVar; });
     }
 
     template <class XDataType,
@@ -42,17 +51,27 @@ public:
               class MeanVarianceDataType,
               class YDataType,
               class ComputeDataType = MeanVarianceDataType>
-    static void
-        fwdInferenceWithVariance(const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
-                                 const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
-                                 const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
-                                 const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
-                                 const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& variance,
-                                 hipdnn_sdk::utilities::TensorBase<YDataType>& y,
-                                 double epsilon)
+    static void fwdInferenceWithVariance(
+        const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
+        const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+        const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
+        const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& variance,
+        hipdnn_sdk::utilities::TensorBase<YDataType>& y,
+        double epsilon)
     {
-        fwdInferenceImpl<XDataType, ScaleBiasDataType, MeanVarianceDataType, YDataType, ComputeDataType>(
-            x, scale, bias, estimatedMean, variance, y, epsilon,
+        fwdInferenceImpl<XDataType,
+                         ScaleBiasDataType,
+                         MeanVarianceDataType,
+                         YDataType,
+                         ComputeDataType>(
+            x,
+            scale,
+            bias,
+            estimatedMean,
+            variance,
+            y,
+            epsilon,
             [](ComputeDataType elemStd, ComputeDataType var, ComputeDataType eps) {
                 return elemStd / sqrtInternal(var + eps);
             });
