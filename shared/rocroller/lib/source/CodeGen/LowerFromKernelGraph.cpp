@@ -730,11 +730,6 @@ namespace rocRoller
                 co_yield m_context->mem()->barrier(srcs);
             }
 
-            Generator<Instruction> operator()(int tag, ComputeIndex const& ci)
-            {
-                co_yield Instruction::Comment(concatenate("ComputeIndex ", tag));
-            }
-
             Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)
             {
                 rocRoller::Log::getLogger()->debug(

@@ -44,12 +44,7 @@ endif()
 
 project( rocfft-clients-tests LANGUAGES CXX )
 
-set(CMAKE_CXX_STANDARD 20)
-
-include(CheckIncludeFileCXX)
-check_include_file_cxx("scope" HAVE_SCOPE_HEADER)
-check_include_file_cxx("experimental/scope" HAVE_EXPERIMENTAL_SCOPE_HEADER)
-
+set(CMAKE_CXX_STANDARD 17)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -112,6 +107,10 @@ if (NOT WIN32)
   target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
   target_link_options( rocfft-test PRIVATE -fgpu-rdc )
 endif()
+
+find_package( Boost REQUIRED )
+set( Boost_DEBUG ON )
+set( Boost_DETAILED_FAILURE_MSG ON )
 
 option( BUILD_FFTW "Download and build FFTW" OFF )
 
@@ -238,16 +237,8 @@ else()
   include_directories(${FFTW_INCLUDE_DIRS})
 endif()
 
-if(HAVE_SCOPE_HEADER OR HAVE_EXPERIMENTAL_SCOPE_HEADER )
-  target_compile_definitions(rocfft-test PRIVATE HAVE_SCOPE_EXIT)
-else()
-  find_package( Boost REQUIRED )
-  set( Boost_DEBUG ON )
-  set( Boost_DETAILED_FAILURE_MSG ON )
-endif()
-
-
 set( rocfft-test_include_dirs
+  $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   ${ROCM_CLANG_ROOT}/include

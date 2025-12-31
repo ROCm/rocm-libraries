@@ -4,7 +4,7 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
@@ -127,50 +127,42 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_0(const std::shared_ptr<TensorAttributes>& input0)
     {
-        inputs[InputNames::IN_0] = input0;
-        return *this;
+        return setInput(InputNames::IN_0, input0);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_0(std::shared_ptr<TensorAttributes>&& input0)
     {
-        inputs[InputNames::IN_0] = std::move(input0);
-        return *this;
+        return setInput(InputNames::IN_0, std::move(input0));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_1(const std::shared_ptr<TensorAttributes>& input1)
     {
-        inputs[InputNames::IN_1] = input1;
-        return *this;
+        return setInput(InputNames::IN_1, input1);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_1(std::shared_ptr<TensorAttributes>&& input1)
     {
-        inputs[InputNames::IN_1] = std::move(input1);
-        return *this;
+        return setInput(InputNames::IN_1, std::move(input1));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_2(const std::shared_ptr<TensorAttributes>& input2)
     {
-        inputs[InputNames::IN_2] = input2;
-        return *this;
+        return setInput(InputNames::IN_2, input2);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_input_2(std::shared_ptr<TensorAttributes>&& input2)
     {
-        inputs[InputNames::IN_2] = std::move(input2);
-        return *this;
+        return setInput(InputNames::IN_2, std::move(input2));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_output_0(const std::shared_ptr<TensorAttributes>& output0)
     {
-        outputs[OutputNames::OUT_0] = output0;
-        return *this;
+        return setOutput(OutputNames::OUT_0, output0);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_output_0(std::shared_ptr<TensorAttributes>&& output0)
     {
-        outputs[OutputNames::OUT_0] = std::move(output0);
-        return *this;
+        return setOutput(OutputNames::OUT_0, std::move(output0));
     }
 
     enum class InputNames
@@ -223,26 +215,6 @@ public:
             swish_beta,
             elu_alpha,
             softplus_beta);
-    }
-
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
-    {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
     }
 };
 typedef PointwiseAttributes Pointwise_attributes;
