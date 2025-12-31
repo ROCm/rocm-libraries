@@ -411,10 +411,6 @@ namespace rocsparse
                 dim3 const nThreads_solver(nthreads_per_halfwarp, nhalfwarps_per_block, 1);
                 dim3 const nBlocks_solver((size - 1) / nhalfwarps_per_block + 1, 1, 1);
 
-                std::cout << "size: " << size << " mb: " << mb << " size_of_mask: " << size_of_mask
-                          << std::endl;
-
-                std::cout << "nBlocks_solver.x: " << nBlocks_solver.x << std::endl;
                 if(rocsparse_direction_row == dir)
                 {
                     THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
