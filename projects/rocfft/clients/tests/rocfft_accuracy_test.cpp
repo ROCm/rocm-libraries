@@ -34,7 +34,7 @@
 #include "../../shared/subprocess.h"
 #include "rocfft/rocfft.h"
 
-extern std::string mp_launch;
+extern std::vector<std::string> mp_launch_argv;
 
 extern last_cpu_fft_cache last_cpu_fft_data;
 
@@ -107,23 +107,12 @@ TEST_P(accuracy_test, vs_fftw)
     }
     case fft_params::fft_mp_lib_mpi:
     {
-        // Multi-proc FFT.
-        // Split launcher into tokens since the first one is the exe
-        // and the remainder is the start of its argv
-        boost::escaped_list_separator<char>                   sep('\\', ' ', '\"');
-        boost::tokenizer<boost::escaped_list_separator<char>> tokenizer(mp_launch, sep);
-        std::string                                           exe;
-        std::vector<std::string>                              argv;
-        for(auto t : tokenizer)
-        {
-            if(t.empty())
-                continue;
+        if(mp_launch_argv.empty())
+            GTEST_FAIL() << "Required multi-process launch command was omitted";
 
-            if(exe.empty())
-                exe = t;
-            else
-                argv.push_back(t);
-        }
+        // Multi-proc FFT.
+        std::string              exe = mp_launch_argv.front();
+        std::vector<std::string> argv(mp_launch_argv.begin() + 1, mp_launch_argv.end());
         // append test token and ask for accuracy test
         argv.push_back("--token");
         argv.push_back(testcase_token);
