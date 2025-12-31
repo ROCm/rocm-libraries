@@ -160,53 +160,6 @@ public:
         set_y(tensorMap.at(outputsJson.at("y_tensor_uid").get<int64_t>()));
     }
 #endif
-
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
-    {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    BatchnormInferenceAttributes& setInput(InputNames name,
-                                           const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-    BatchnormInferenceAttributes& setInput(InputNames name,
-                                           std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
-
-    BatchnormInferenceAttributes& setOutput(OutputNames name,
-                                            const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-    BatchnormInferenceAttributes& setOutput(OutputNames name,
-                                            std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
-    }
 };
 typedef BatchnormInferenceAttributes Batchnorm_inference_attributes;
 } // namespace hipdnn_frontend::graph

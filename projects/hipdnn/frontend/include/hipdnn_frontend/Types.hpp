@@ -86,6 +86,7 @@ enum class DataType
     DOUBLE = 4,
     UINT8 = 5,
     INT32 = 6,
+    INT8 = 7,
 };
 typedef DataType DataType_t; // NOLINT(readability-identifier-naming)
 
@@ -121,6 +122,10 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, int32_t>)
     {
         return DataType::INT32;
+    }
+    else if constexpr(std::is_same_v<T, int8_t>)
+    {
+        return DataType::INT8;
     }
     else
     {
@@ -171,6 +176,8 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::UINT8;
     case DataType::INT32:
         return hipdnn_data_sdk::data_objects::DataType::INT32;
+    case DataType::INT8:
+        return hipdnn_data_sdk::data_objects::DataType::INT8;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -192,6 +199,8 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::UINT8;
     case hipdnn_data_sdk::data_objects::DataType::INT32:
         return hipdnn_frontend::DataType::INT32;
+    case hipdnn_data_sdk::data_objects::DataType::INT8:
+        return hipdnn_frontend::DataType::INT8;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -432,6 +441,8 @@ inline const char* to_string(const DataType& type)
         return "uint8";
     case DataType::INT32:
         return "int32";
+    case DataType::INT8:
+        return "int8";
     default:
         return "unknown";
     }

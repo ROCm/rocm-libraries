@@ -156,6 +156,7 @@ namespace rocsparse_clients
         static constexpr const char* const gfx1100 = "gfx1100";
         static constexpr const char* const gfx1101 = "gfx1101";
         static constexpr const char* const gfx1102 = "gfx1102";
+        static constexpr const char* const gfx1150 = "gfx1150";
         static constexpr const char* const gfx1151 = "gfx1151";
         static constexpr const char* const gfx1152 = "gfx1152";
         static constexpr const char* const gfx1153 = "gfx1153";
