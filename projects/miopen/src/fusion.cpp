@@ -498,32 +498,6 @@ TensorDescriptor FusionPlanDescriptor::FusionPlanDescriptor::DeriveOutputDescrip
     return o_desc;
 }
 
-miopenStatus_t FusionPlanDescriptor::GetWorkspaceSizeImmed(const Handle& handle,
-                                                           size_t& workSpaceSize,
-                                                           miopenConvFwdAlgorithm_t /*algo*/)
-{
-    workSpaceSize = 0;
-    for(auto&& op : op_map)
-    {
-        if(op->kind() == miopenFusionOpConvForward)
-        {
-            auto& conv_op = dynamic_cast<ConvForwardOpDescriptor&>(*op);
-            TensorDescriptor opd;
-            conv_op.GetOutputDesc(opd);
-            const auto ctx     = ExecutionContext{&handle};
-            const auto problem = conv::ProblemDescription{conv_op.input_desc,
-                                                          conv_op.filter_desc,
-                                                          opd,
-                                                          conv_op.base_desc,
-                                                          conv::Direction::Forward};
-            const auto tmp_sz  = conv_op.base_desc.GetWorkSpaceSize(ctx, problem);
-            if(tmp_sz > workSpaceSize)
-                workSpaceSize = tmp_sz;
-        }
-    }
-    return miopenStatusSuccess;
-}
-
 miopenStatus_t FusionPlanDescriptor::GetConvAlgos(int reqAlgoCount,
                                                   int& retAlgoCount,
                                                   miopenConvFwdAlgorithm_t* ptrAlgos)
@@ -981,24 +955,52 @@ std::vector<miopenConvSolution_t> GetSolutions(const FusionContext& ctx,
 
 } // namespace
 
+miopenStatus_t FusionPlanDescriptor::GetWorkspaceSizeImmed(const Handle& handle,
+                                                           size_t& workSpaceSize,
+                                                           miopenConvFwdAlgorithm_t /*algo*/)
+{
+
+    if(!compiled_invoker)
+    {
+        MIOPEN_THROW(
+            miopenStatusBadParm,
+            "GetWorkspaceSizeImmed was called, but The Fusion Plan was not compiled successfully");
+    }
+
+    workSpaceSize = 0;
+
+    const auto ctx             = FusionContext{handle};
+    const auto& fusion_problem = FusionDescription{this};
+
+    GetAllFusionSolvers().FindById(compiled_invoker->first, [&](auto solver) {
+        workSpaceSize = solver.GetWorkspaceSize(ctx, fusion_problem);
+    });
+
+    return miopenStatusSuccess;
+}
+
 miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
 {
-    std::vector<Allocator::ManageDataPtr> invoke_bufs;
-    miopen::OperatorArgs params;
+    // reset any previously compiled invoker
+    compiled_invoker = std::nullopt;
 
     const auto& fusion_problem = FusionDescription{this};
-    std::vector<Solution> find_results;
 
     const auto network_config = fusion_problem.MakeNetworkConfig();
-    auto invoker = handle.GetInvoker(network_config, std::nullopt, AlgorithmName{"fusion"});
 
-    if(invoker)
+    // fast path: check cache
+    if(auto cached_invoker =
+           handle.GetInvoker(network_config, std::nullopt, AlgorithmName{"fusion"}))
     {
-        invokers.push_back(*invoker);
+        auto id_str = handle.GetFound1_0SolverId(network_config, AlgorithmName{"fusion"});
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        compiled_invoker = std::make_pair(solver::Id(*id_str), std::move(*cached_invoker));
         return miopenStatusSuccess;
     }
 
-    {
+    std::vector<Solution> find_results = [&]() {
+        std::vector<Solution> find_results;
+
         FindMode findMode(solver::Primitive::Fusion);
         auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
@@ -1009,8 +1011,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
 
             if(fallback)
             {
-                auto fallback_failed = true;
-                bool found           = false;
+                bool found = false;
 
                 GetAllFusionSolvers().Foreach([&](auto solver) {
                     if(found || !solver.IsApplicable(ctx, fusion_problem))
@@ -1021,14 +1022,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
                     // Return negative values as is, avoid DIV/0.
                     const auto time = wti <= 0.0f ? wti : (10.f / wti);
                     sols.push_back({time, 0, id.Value(), miopenConvolutionAlgoDirect});
-                    fallback_failed = false;
                 });
-
-                if(fallback_failed)
-                {
-                    MIOPEN_LOG_I("No supported fusion solvers found");
-                    return miopenStatusUnsupportedOp;
-                }
             }
 
             // override the normal find with immed mode with env var
@@ -1063,12 +1057,16 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         }
         else
         {
+            std::vector<Allocator::ManageDataPtr> invoke_bufs;
+            miopen::OperatorArgs params;
+
             find_results = Find(handle, [&]() {
                 return AllocateBuffersAndMakeFusionInvokeParams(
                     handle, fusion_problem, invoke_bufs, params, *this);
             });
         }
-    }
+        return find_results;
+    }();
 
     for(const auto& result : find_results)
     {
@@ -1079,8 +1077,8 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
            algorithm != static_cast<miopenConvAlgorithm_t>(*conv_fwd_algo))
             continue;
 
-        const auto id = result.GetSolver();
-        invoker       = result.GetInvoker();
+        const auto id                  = result.GetSolver();
+        std::optional<Invoker> invoker = result.GetInvoker();
 
         if(!invoker)
             invoker = handle.GetInvoker(network_config, id);
@@ -1091,19 +1089,23 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
             continue;
         }
 
+        // add to cache
         handle.RegisterInvoker(*invoker, network_config, id.ToString());
-        invokers.push_back(std::move(*invoker));
+        handle.SetAsFound1_0(network_config, AlgorithmName{"fusion"}, id.ToString());
+
+        compiled_invoker = std::make_pair(id, std::move(*invoker));
+
         MIOPEN_LOG_I2(miopen::ConvolutionAlgoToString(algorithm));
+
+        break;
     }
 
-    if(invokers.empty())
+    if(!compiled_invoker)
     {
         MIOPEN_LOG_I("No supported fusion solvers found");
         return miopenStatusUnsupportedOp;
     }
 
-    handle.SetAsFound1_0(
-        network_config, AlgorithmName{"fusion"}, find_results.front().GetSolver().ToString());
     return miopenStatusSuccess;
 }
 
@@ -1137,14 +1139,14 @@ miopenStatus_t FusionPlanDescriptor::Execute(const Handle& handle,
     {
         MIOPEN_THROW(miopenStatusBadParm, "The input descriptors dont match.");
     }
-    if(invokers.empty())
+    if(!compiled_invoker)
     {
         MIOPEN_THROW(miopenStatusBadParm, "The Fusion Plan was not compiled successfully");
     }
 
     const auto plan_params = fusion::FusionInvokeParams{
         op_args, inputDesc, input, outputDesc, output, false, workspace, workspace_size};
-    invokers[0](handle, plan_params);
+    (compiled_invoker->second)(handle, plan_params);
 
     return miopenStatusSuccess;
 }
