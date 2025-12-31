@@ -5,6 +5,10 @@ set(SOURCES
     tablegen.cpp
     GenIsa.cpp
     GenRocisaHwMapping.cpp
+    GenPatterns.cpp
+    # Pattern parser sources (needed for GenPatterns)
+    ../../src/ir/asm/IRLexer.cpp
+    ../../src/ir/asm/PatternParser.cpp
 )
 
 add_executable(tablegen "${SOURCES}")
@@ -14,6 +18,7 @@ target_link_libraries(tablegen PRIVATE gfxisa)
 target_include_directories(tablegen PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/ir/asm"  # For IRLexer.hpp
 )
 
 # Define output directory for generated files
@@ -33,6 +38,10 @@ foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
     list(APPEND HARDWARE_YAML_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/${arch}.yaml")
 endforeach()
 
+# Add pattern-generated files
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PeepholePatterns.inc")
+set(PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Dialect/Transforms/PeepholePatterns.pattern")
+
 # Custom command to run tablegen and generate .inc files
 # Using $<TARGET_FILE:tablegen> allows CMake to:
 # 1. Know the exact executable path
@@ -43,8 +52,8 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/rocisa"
     COMMAND $<TARGET_FILE:tablegen> "${TABLEGEN_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware"
-    DEPENDS $<TARGET_FILE:tablegen> ${HARDWARE_YAML_FILES}
-    COMMENT "Generating ISA definition files with tablegen..."
+    DEPENDS $<TARGET_FILE:tablegen> ${HARDWARE_YAML_FILES} ${PATTERN_FILE}
+    COMMENT "Generating ISA definitions and pattern matchers with tablegen..."
     VERBATIM
 )
 

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -267,6 +267,15 @@ namespace stinkytofu
 
     struct VALU : GfxInstDef
     {
+    };
+
+    // Commutative VALU instructions (add, mul, min, max, and, or, xor, etc.)
+    struct CommutativeVALU : VALU
+    {
+        CommutativeVALU()
+        {
+            hwInstDesc.flags.set(IF_Commutative);
+        }
     };
 
     struct SCmp : GfxInstDef

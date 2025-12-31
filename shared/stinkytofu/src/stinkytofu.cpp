@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "ErrorHandling.hpp"
 #include "ir/asm/IRParser.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
@@ -57,6 +58,22 @@ namespace stinkytofu
         if(function)
         {
             function->deleteAllBasicBlocks();
+        }
+    }
+
+    void PassContext::setGemmTileConfig(const GemmTileConfig& config)
+    {
+        gemmConfig = config;
+        // Automatically compute WavefrontSize from architecture
+        // WavefrontSize is stored separately as it's derived, not configured
+        if(gemmConfig.arch[0] != 0)
+        {
+            wavefrontSize
+                = getWaveFrontSize(gemmConfig.arch[0], gemmConfig.arch[1], gemmConfig.arch[2]);
+        }
+        else
+        {
+            STINKY_UNREACHABLE("Invalid architecture, unable to compute wavefront size");
         }
     }
 
@@ -252,18 +269,17 @@ namespace stinkytofu
                                       uint32_t           nGRM,
                                       uint32_t           numWaves)
     {
-        StinkyKernelInfo kr;
-        kr.arch   = arch;
-        kr.TileA0 = ta0;
-        kr.TileB0 = tb0;
-        kr.TileM0 = tm0;
-        kr.NumGRA = nGRA;
-        kr.NumGRB = nGRB;
-        kr.NumGRM = nGRM;
-        // Automatically determine wavefront size based on architecture
-        kr.WavefrontSize = getWaveFrontSize(arch[0], arch[1], arch[2]);
-        kr.NumWaves      = numWaves;
-        passCtx.addKernelInfo(kr);
+        GemmTileConfig config;
+        config.arch     = arch;
+        config.TileA0   = ta0;
+        config.TileB0   = tb0;
+        config.TileM0   = tm0;
+        config.NumGRA   = nGRA;
+        config.NumGRB   = nGRB;
+        config.NumGRM   = nGRM;
+        config.NumWaves = numWaves;
+        // WavefrontSize is automatically computed by setGemmTileConfig from arch
+        passCtx.setGemmTileConfig(config);
     }
 
     void PassManager::setOptConfig(const StinkyOptInfo& opt)
@@ -351,19 +367,17 @@ namespace stinkytofu
         passCtx = std::make_unique<PassContext>();
 
         // Set up kernel configuration
-        StinkyKernelInfo kernelInfo;
-        kernelInfo.arch   = arch;
-        kernelInfo.TileA0 = 0;
-        kernelInfo.TileB0 = 0;
-        kernelInfo.TileM0 = 0;
-        kernelInfo.NumGRA = 0;
-        kernelInfo.NumGRB = 0;
-        kernelInfo.NumGRM = 0;
-        // Get WavefrontSize from hardware configuration based on architecture
-        kernelInfo.WavefrontSize = getWaveFrontSize(arch[0], arch[1], arch[2]);
-        kernelInfo.NumWaves      = 0;
-
-        passCtx->addKernelInfo(kernelInfo);
+        GemmTileConfig config;
+        config.arch     = arch;
+        config.TileA0   = 0;
+        config.TileB0   = 0;
+        config.TileM0   = 0;
+        config.NumGRA   = 0;
+        config.NumGRB   = 0;
+        config.NumGRM   = 0;
+        config.NumWaves = 0;
+        // WavefrontSize is automatically computed by setGemmTileConfig from arch
+        passCtx->setGemmTileConfig(config);
 
         // Get the Function from PassContext
         Function& func = passCtx->getFunction();

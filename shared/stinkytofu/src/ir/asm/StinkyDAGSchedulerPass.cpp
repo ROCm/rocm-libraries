@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -262,12 +262,12 @@ namespace
 
     std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx)
     {
-        if(passCtx.getKernelInfo().arch[0] == 12 && passCtx.getKernelInfo().arch[1] == 5)
+        if(passCtx.getGemmTileConfig().arch[0] == 12 && passCtx.getGemmTileConfig().arch[1] == 5)
         {
             PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
             return std::make_unique<CDNA5ReadyQueue>(passCtx);
         }
-        else if(passCtx.getKernelInfo().arch[0] >= 9)
+        else if(passCtx.getGemmTileConfig().arch[0] >= 9)
         {
             PASS_DEBUG(std::cerr << "Using CDNA3ReadyQueue for scheduling\n");
             return std::make_unique<CDNA3ReadyQueue>(passCtx);

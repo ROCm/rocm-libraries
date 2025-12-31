@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,6 +48,23 @@ namespace stinkytofu
         PASSCTX_EMPTY = 1,
     };
 
+    /// GEMM-specific tile configuration
+    /// This configuration is specific to GEMM kernels and their tiling strategy
+    /// Note: WavefrontSize is NOT included here as it's derived from architecture,
+    ///       not a user-configurable parameter. Use getWaveFrontSize(arch) to query it.
+    struct GemmTileConfig
+    {
+        std::array<int, 3> arch{0, 0, 0}; ///< GPU architecture [gfx, major, minor]
+        uint32_t           TileA0; ///< Tile size for A dimension 0
+        uint32_t           TileB0; ///< Tile size for B dimension 0
+        uint32_t           TileM0; ///< Tile size for M dimension 0
+        uint32_t           NumGRA; ///< Number of global read A
+        uint32_t           NumGRB; ///< Number of global read B
+        uint32_t           NumGRM; ///< Number of global read M
+        uint32_t           NumWaves; ///< Number of wavefronts
+    };
+
+    // Backwards compatibility: old structure with WavefrontSize
     struct StinkyKernelInfo
     {
         std::array<int, 3> arch{0, 0, 0};
@@ -57,15 +74,99 @@ namespace stinkytofu
         uint32_t           NumGRA;
         uint32_t           NumGRB;
         uint32_t           NumGRM;
-        uint32_t           WavefrontSize;
+        uint32_t           WavefrontSize; ///< @deprecated Derived from arch, don't set manually
         uint32_t           NumWaves;
+
+        // Convert to new structure (ignores WavefrontSize)
+        GemmTileConfig toGemmTileConfig() const
+        {
+            GemmTileConfig config;
+            config.arch     = arch;
+            config.TileA0   = TileA0;
+            config.TileB0   = TileB0;
+            config.TileM0   = TileM0;
+            config.NumGRA   = NumGRA;
+            config.NumGRB   = NumGRB;
+            config.NumGRM   = NumGRM;
+            config.NumWaves = NumWaves;
+            return config;
+        }
+
+        // Convert from new structure (WavefrontSize provided separately)
+        static StinkyKernelInfo fromGemmTileConfig(const GemmTileConfig& config,
+                                                   uint32_t              wavefrontSize)
+        {
+            StinkyKernelInfo info;
+            info.arch          = config.arch;
+            info.TileA0        = config.TileA0;
+            info.TileB0        = config.TileB0;
+            info.TileM0        = config.TileM0;
+            info.NumGRA        = config.NumGRA;
+            info.NumGRB        = config.NumGRB;
+            info.NumGRM        = config.NumGRM;
+            info.WavefrontSize = wavefrontSize;
+            info.NumWaves      = config.NumWaves;
+            return info;
+        }
     };
 
+    /// Pass-specific feature configuration
+    /// Categorizes optimization behaviors into semantics, properties, and features
+    struct PassFeatureConfig
+    {
+        /// Barrier semantics and unrolling behavior
+        /// These are code structure PROPERTIES (not optional features)
+        struct BarrierConfig
+        {
+            bool unrollMovableBarrier = false; ///< Whether GEMM barriers can be moved during unroll
+        };
+
+        /// Loop structure and unrolling properties
+        /// These are code structure PROPERTIES (not optional features)
+        struct LoopConfig
+        {
+            bool unrollGemm = false; ///< Whether GEMM loops are unrolled
+        };
+
+        /// DAG scheduler feature switches
+        /// These are OPTIONAL FEATURES that can be enabled/disabled
+        struct DagFeatures
+        {
+            bool distributeGlobalRead = false; ///< Enable global read distribution optimization
+        };
+
+        BarrierConfig barrierConfig;
+        LoopConfig    loopConfig;
+        DagFeatures   dagFeatures;
+    };
+
+    // Backwards compatibility alias (deprecated)
+    // Legacy flat structure for old code
     struct StinkyOptInfo
     {
         bool unrollGemmMovableBarrier = false;
         bool unrollGemm               = false;
         bool distributeGlobalRead     = false;
+
+        // Convert to new structure
+        PassFeatureConfig toPassFeatureConfig() const
+        {
+            PassFeatureConfig config;
+            config.barrierConfig.unrollMovableBarrier = unrollGemmMovableBarrier;
+            config.loopConfig.unrollGemm              = unrollGemm;
+            config.dagFeatures.distributeGlobalRead   = distributeGlobalRead;
+            return config;
+        }
+
+        // Convert from new structure
+        static StinkyOptInfo fromPassFeatureConfig(const PassFeatureConfig& config)
+        {
+            StinkyOptInfo info;
+            info.unrollGemmMovableBarrier = config.barrierConfig.unrollMovableBarrier;
+            info.unrollGemm               = config.loopConfig.unrollGemm;
+            info.distributeGlobalRead     = config.dagFeatures.distributeGlobalRead;
+            return info;
+        }
     };
 
     class IRBase : public IntrusiveListNode<IRBase>
@@ -595,9 +696,10 @@ namespace stinkytofu
     // essential services and data during IR transformation and analysis.
     class PassContext
     {
-        AnalysisManager  analysisMgr;
-        StinkyKernelInfo kernel;
-        StinkyOptInfo    optInfo;
+        AnalysisManager   analysisMgr;
+        GemmTileConfig    gemmConfig;
+        PassFeatureConfig passConfig;
+        uint32_t          wavefrontSize = 0; ///< Computed from gemmConfig.arch
 
         // Function holds BasicBlocks which contain IRLists.
         // This is the primary IR container for the pass infrastructure.
@@ -637,24 +739,85 @@ namespace stinkytofu
             return analysisMgr;
         }
 
-        void addKernelInfo(StinkyKernelInfo kernelCfg)
+        // ========== New API (preferred) ==========
+
+        void setGemmTileConfig(const GemmTileConfig& config);
+
+        const GemmTileConfig& getGemmTileConfig() const
         {
-            kernel = kernelCfg;
+            return gemmConfig;
         }
 
-        const StinkyKernelInfo& getKernelInfo() const
+        /// Get wavefront size (derived from architecture, not user-configurable)
+        uint32_t getWavefrontSize() const
         {
-            return kernel;
+            return wavefrontSize;
         }
 
+        void setPassFeatureConfig(const PassFeatureConfig& config)
+        {
+            passConfig = config;
+        }
+
+        const PassFeatureConfig& getPassFeatureConfig() const
+        {
+            return passConfig;
+        }
+
+        // ========== Backwards Compatibility API (deprecated) ==========
+
+        // @deprecated Use setGemmTileConfig() instead
+        void addKernelInfo(const GemmTileConfig& kernelCfg)
+        {
+            setGemmTileConfig(kernelCfg);
+        }
+
+        // @deprecated Use setGemmTileConfig() instead - accepts legacy StinkyKernelInfo
+        void addKernelInfo(const StinkyKernelInfo& kernelCfg)
+        {
+            setGemmTileConfig(kernelCfg.toGemmTileConfig());
+        }
+
+        // @deprecated Use getGemmTileConfig() instead - returns legacy format with WavefrontSize
+        StinkyKernelInfo getKernelInfo() const
+        {
+            return StinkyKernelInfo::fromGemmTileConfig(gemmConfig, wavefrontSize);
+        }
+
+        // @deprecated Use getGemmTileConfig() instead
+        const GemmTileConfig& getGemmConfig() const
+        {
+            return gemmConfig;
+        }
+
+        // @deprecated Use setPassFeatureConfig() instead
+        void setOptInfo(const PassFeatureConfig& opt)
+        {
+            passConfig = opt;
+        }
+
+        // @deprecated Use setPassFeatureConfig() with conversion
         void setOptInfo(const StinkyOptInfo& opt)
         {
-            optInfo = opt;
+            passConfig = opt.toPassFeatureConfig();
         }
 
-        const StinkyOptInfo& getOptInfo() const
+        // @deprecated Use getPassFeatureConfig() instead
+        const PassFeatureConfig& getOptInfo() const
         {
-            return optInfo;
+            return passConfig;
+        }
+
+        // @deprecated Use getPassFeatureConfig() instead
+        const PassFeatureConfig& getPassConfig() const
+        {
+            return passConfig;
+        }
+
+        // @deprecated Legacy accessor for old code
+        StinkyOptInfo getOptInfoLegacy() const
+        {
+            return StinkyOptInfo::fromPassFeatureConfig(passConfig);
         }
 
         /// Set global BasicBlock filter for all StinkyInstPass instances.

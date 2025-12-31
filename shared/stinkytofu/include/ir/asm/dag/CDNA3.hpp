@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -209,7 +209,8 @@ namespace
             return;
         }
 
-        if(getPassContext().getOptInfo().distributeGlobalRead && isGlobalMemLoad(*node->inst))
+        if(getPassContext().getPassFeatureConfig().dagFeatures.distributeGlobalRead
+           && isGlobalMemLoad(*node->inst))
         {
             globalReadQueue.push(node);
             return;
@@ -233,7 +234,7 @@ namespace
     void CDNA3ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd)
     {
         // For for loop only optimization
-        if(getPassContext().getOptInfo().unrollGemm == false)
+        if(getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false)
             return;
 
         mfmaIssueConfig.latency = 0;
@@ -253,7 +254,7 @@ namespace
     void CDNA3ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd)
     {
         // For for loop only optimization
-        if(getPassContext().getOptInfo().unrollGemm == false)
+        if(getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false)
             return;
 
         mfmaIssueConfig.totalIssuedCycles     = 0;

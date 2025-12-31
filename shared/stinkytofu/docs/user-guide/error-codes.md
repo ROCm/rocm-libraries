@@ -4,28 +4,28 @@ This document describes the error codes used throughout the StinkyTofu library.
 
 ## StinkyErrorCode
 
-Error codes for `StinkyIRConverter` operations and IR conversion functions.
+Error codes for 'StinkyIRConverter' operations and IR conversion functions.
 
-```cpp
+'''cpp
 enum class StinkyErrorCode : int
 {
     SUCCESS       = 0,  // Operation completed successfully
     PASSCTX_EMPTY = 1,  // PassContext is invalid or empty
 };
-```
+'''
 
 ### Error Code Descriptions
 
 | Code | Value | Description |
 |------|-------|-------------|
-| `StinkyErrorCode::SUCCESS` | 0 | Operation completed successfully |
-| `StinkyErrorCode::PASSCTX_EMPTY` | 1 | PassContext is invalid or empty. This typically occurs when trying to use a PassContext that hasn't been properly initialized or has been cleaned up. |
+| 'StinkyErrorCode::SUCCESS' | 0 | Operation completed successfully |
+| 'StinkyErrorCode::PASSCTX_EMPTY' | 1 | PassContext is invalid or empty. This typically occurs when trying to use a PassContext that hasn't been properly initialized or has been cleaned up. |
 
 ### Usage
 
 #### Checking Return Values
 
-```cpp
+'''cpp
 StinkyErrorCode result = StinkyIRConverter::populateFunctionFromString(irText, irlist, passCtx, arch);
 if(result != StinkyErrorCode::SUCCESS) {
     // Handle error
@@ -33,21 +33,21 @@ if(result != StinkyErrorCode::SUCCESS) {
         std::cerr << "PassContext is empty or invalid\n";
     }
 }
-```
+'''
 
 #### Converting to int
 
 If you need to convert the error code to an integer (e.g., for logging):
 
-```cpp
+'''cpp
 StinkyErrorCode result = /* ... */;
 int errorValue = static_cast<int>(result);
 std::cerr << "Error code: " << errorValue << "\n";
-```
+'''
 
 ### Functions That Return StinkyErrorCode
 
-- `StinkyIRConverter::populateFunctionFromString()` - Returns error codes when populating an IRList from a string
+- 'StinkyIRConverter::populateFunctionFromString()' - Returns error codes when populating an IRList from a string
 
 ### Error Handling Best Practices
 
@@ -58,7 +58,7 @@ std::cerr << "Error code: " << errorValue << "\n";
 
 ### Example: Complete Error Handling
 
-```cpp
+'''cpp
 #include "stinkytofu.hpp"
 
 using namespace stinkytofu;
@@ -112,9 +112,9 @@ int processIR(const std::string& irText) {
 
     return 0;
 }
-```
+'''
 
 ## Future Error Codes
 
-As the library evolves, additional error codes may be added to `StinkyErrorCode`. Always check the return value against `SUCCESS` rather than assuming any non-zero value is an error, as error codes may be expanded in the future.
+As the library evolves, additional error codes may be added to 'StinkyErrorCode'. Always check the return value against 'SUCCESS' rather than assuming any non-zero value is an error, as error codes may be expanded in the future.
 

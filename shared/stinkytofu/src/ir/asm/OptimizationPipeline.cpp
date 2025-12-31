@@ -1,0 +1,328 @@
+/* ************************************************************************
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+#include "ir/asm/OptimizationPipeline.hpp"
+#include "ir/asm/DeadCodeEliminationPass.hpp"
+#include "ir/asm/DuplicateEliminationPass.hpp"
+#include "ir/asm/PeepholeOptimizationPass.hpp"
+
+#include <iostream>
+
+namespace stinkytofu
+{
+    PipelineConfig PipelineConfig::fromProfile(PipelineProfile profile, OptLevel optLevel)
+    {
+        PipelineConfig config;
+        config.profile  = profile;
+        config.optLevel = optLevel;
+
+        switch(profile)
+        {
+        case PipelineProfile::OptimizationOnly:
+            // General optimization passes (no scheduling or waitcnt)
+            // Can be used for any scenario that only needs optimization
+            config.enablePeephole      = (optLevel >= OptLevel::O1);
+            config.enableDCE           = (optLevel >= OptLevel::O2);
+            config.enableDuplicateElim = (optLevel >= OptLevel::O3);
+
+            // No scheduling or waitcnt
+            config.enableCFGBuilder       = false;
+            config.enableDAGScheduler     = false;
+            config.enableScheduleLastLRs  = false;
+            config.enableScheduleFirstLRs = false;
+            config.enableWaitCnt          = false;
+
+            // Iterations based on opt level
+            config.optimizationIterations = (optLevel == OptLevel::O0)   ? 1
+                                            : (optLevel == OptLevel::O1) ? 1
+                                            : (optLevel == OptLevel::O2) ? 3
+                                                                         : 5;
+            break;
+
+        case PipelineProfile::FullPipeline:
+            // Full production pipeline
+            config.enablePeephole      = (optLevel >= OptLevel::O1);
+            config.enableDCE           = (optLevel >= OptLevel::O2);
+            config.enableDuplicateElim = (optLevel >= OptLevel::O3);
+
+            // Enable scheduling passes
+            config.enableCFGBuilder       = true;
+            config.enableDAGScheduler     = true;
+            config.enableScheduleLastLRs  = true;
+            config.enableScheduleFirstLRs = false;
+
+            // Enable waitcnt
+            config.enableWaitCnt = true;
+            config.waitCntMode   = WaitCntMode::Unroll;
+
+            // Fewer iterations for full pipeline (slower)
+            config.optimizationIterations = (optLevel >= OptLevel::O3) ? 3 : 1;
+            break;
+
+        case PipelineProfile::Custom:
+            // Leave everything as default, user will customize
+            break;
+        }
+
+        return config;
+    }
+
+    PipelineConfig PipelineConfig::forProductionKernel(OptLevel level)
+    {
+        return fromProfile(PipelineProfile::FullPipeline, level);
+    }
+
+    void OptimizationPipeline::runOptimizationPasses(Function&             func,
+                                                     const PipelineConfig& config,
+                                                     PassContext&          ctx)
+    {
+        if(config.verbose)
+        {
+            std::cout << "Running optimization passes (O" << static_cast<int>(config.optLevel)
+                      << ", " << config.optimizationIterations << " iterations)" << std::endl;
+        }
+
+        for(int iter = 0; iter < config.optimizationIterations; iter++)
+        {
+            if(config.verbose && config.optimizationIterations > 1)
+            {
+                std::cout << "  Iteration " << (iter + 1) << "/" << config.optimizationIterations
+                          << std::endl;
+            }
+
+            // Run passes in standard order
+            if(config.enablePeephole)
+            {
+                if(config.verbose)
+                    std::cout << "    - PeepholeOptimization" << std::endl;
+                auto pass = createPeepholeOptimizationPass();
+                pass->run(func, ctx);
+            }
+
+            if(config.enableDuplicateElim)
+            {
+                if(config.verbose)
+                    std::cout << "    - DuplicateElimination" << std::endl;
+                auto pass = createDuplicateEliminationPass();
+                pass->run(func, ctx);
+            }
+
+            if(config.enableDCE)
+            {
+                if(config.verbose)
+                    std::cout << "    - DeadCodeElimination" << std::endl;
+                auto pass = createDeadCodeEliminationPass();
+                pass->run(func, ctx);
+            }
+        }
+    }
+
+    void OptimizationPipeline::run(Function& func, const PipelineConfig& config, PassContext& ctx)
+    {
+        // ========== Apply Configuration to PassContext ==========
+        // Apply GEMM tile configuration if provided, or set default arch
+        // Note: WavefrontSize is automatically computed from arch by setGemmTileConfig
+        if(config.gemmTileConfig)
+        {
+            ctx.setGemmTileConfig(*config.gemmTileConfig);
+        }
+        else
+        {
+            // Set default architecture (gfx942) for passes that need it
+            // This is needed for non-GEMM optimizations that still use arch-specific patterns
+            GemmTileConfig defaultConfig;
+            defaultConfig.arch     = {9, 4, 2}; // gfx942
+            defaultConfig.TileA0   = 0;
+            defaultConfig.TileB0   = 0;
+            defaultConfig.TileM0   = 0;
+            defaultConfig.NumGRA   = 0;
+            defaultConfig.NumGRB   = 0;
+            defaultConfig.NumGRM   = 0;
+            defaultConfig.NumWaves = 1;
+            ctx.setGemmTileConfig(defaultConfig);
+        }
+
+        // Apply pass feature configuration directly (already in correct format)
+        ctx.setPassFeatureConfig(config.passFeatureConfig);
+
+        // Apply basic block filter
+        ctx.setBasicBlockFilter(config.basicBlockFilter);
+
+        if(config.verbose)
+        {
+            std::cout << "\n========== OptimizationPipeline ==========\n";
+            std::cout << "Profile: "
+                      << (config.profile == PipelineProfile::OptimizationOnly ? "OptimizationOnly"
+                          : config.profile == PipelineProfile::FullPipeline   ? "FullPipeline"
+                                                                              : "Custom")
+                      << std::endl;
+        }
+
+        // ========== Phase 0: Custom Passes (Before) ==========
+        if(!config.beforeAnalysisPasses.empty() || !config.beforePasses.empty())
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 0: Custom Passes (Before Built-in Pipeline)" << std::endl;
+
+            // Register analysis passes first
+            for(size_t i = 0; i < config.beforeAnalysisPasses.size(); ++i)
+            {
+                if(config.verbose)
+                    std::cout << "  - [Analysis] " << config.beforeAnalysisPasses[i]->getName()
+                              << std::endl;
+                ctx.getAnalysisManager().registerAnalysisPass(
+                    std::move(config.beforeAnalysisPasses[i]));
+            }
+            config.beforeAnalysisPasses.clear();
+
+            // Then run transformation passes
+            for(size_t i = 0; i < config.beforePasses.size(); ++i)
+            {
+                if(config.verbose)
+                    std::cout << "  - [Transform] " << config.beforePasses[i]->getName()
+                              << std::endl;
+                config.beforePasses[i]->run(func, ctx);
+            }
+        }
+
+        // ========== Phase 1: CFG Building ==========
+        if(config.enableCFGBuilder)
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 1: Building Control Flow Graph" << std::endl;
+            auto pass = createCFGBuilderPass();
+            pass->run(func, ctx);
+        }
+
+        // ========== Phase 2: Scheduling ==========
+        if(config.enableDAGScheduler || config.enableScheduleFirstLRs)
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 2: Instruction Scheduling" << std::endl;
+
+            if(config.enableScheduleFirstLRs)
+            {
+                if(config.verbose)
+                    std::cout << "  - ScheduleFirstLRs" << std::endl;
+                auto pass = createScheduleFirstLRsPass();
+                pass->run(func, ctx);
+            }
+
+            if(config.enableDAGScheduler)
+            {
+                if(config.verbose)
+                    std::cout << "  - DAGScheduler" << std::endl;
+                auto pass = createStinkyDAGSchedulerPass();
+                pass->run(func, ctx);
+            }
+
+            if(config.enableScheduleLastLRs)
+            {
+                if(config.verbose)
+                    std::cout << "  - ScheduleLastLRs" << std::endl;
+                auto pass = createScheduleLastLRsPass();
+                pass->run(func, ctx);
+            }
+        }
+
+        // ========== Phase 3: Optimization ==========
+        if(config.enablePeephole || config.enableDCE || config.enableDuplicateElim)
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 3: Optimization" << std::endl;
+            runOptimizationPasses(func, config, ctx);
+        }
+
+        // ========== Phase 4: WaitCnt Insertion ==========
+        if(config.enableWaitCnt)
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 4: WaitCnt Insertion ("
+                          << (config.waitCntMode == PipelineConfig::WaitCntMode::Conservative
+                                  ? "Conservative"
+                              : config.waitCntMode == PipelineConfig::WaitCntMode::Minimal
+                                  ? "Minimal"
+                              : config.waitCntMode == PipelineConfig::WaitCntMode::Unroll
+                                  ? "Unroll"
+                                  : "Custom")
+                          << ")" << std::endl;
+
+            std::unique_ptr<Pass> waitCntPass;
+            switch(config.waitCntMode)
+            {
+            case PipelineConfig::WaitCntMode::Conservative:
+                waitCntPass = createStinkyConservativeWaitCntPass();
+                break;
+            case PipelineConfig::WaitCntMode::Minimal:
+                waitCntPass = createStinkyMinimalWaitCntPass();
+                break;
+            case PipelineConfig::WaitCntMode::Unroll:
+                waitCntPass = createStinkyUnrollWaitCntPass();
+                break;
+            case PipelineConfig::WaitCntMode::Custom:
+                if(config.customWaitCnt)
+                    waitCntPass = createStinkyCustomWaitCntPass(*config.customWaitCnt);
+                else
+                    waitCntPass = createStinkyConservativeWaitCntPass(); // Fallback
+                break;
+            }
+
+            if(waitCntPass)
+            {
+                waitCntPass->run(func, ctx);
+            }
+        }
+
+        // ========== Phase 5: Custom Passes (After) ==========
+        if(!config.afterPasses.empty() || !config.afterAnalysisPasses.empty())
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 5: Custom Passes (After Built-in Pipeline)" << std::endl;
+
+            // Register analysis passes first
+            for(size_t i = 0; i < config.afterAnalysisPasses.size(); ++i)
+            {
+                if(config.verbose)
+                    std::cout << "  - [Analysis] " << config.afterAnalysisPasses[i]->getName()
+                              << std::endl;
+                ctx.getAnalysisManager().registerAnalysisPass(
+                    std::move(config.afterAnalysisPasses[i]));
+            }
+            config.afterAnalysisPasses.clear();
+
+            // Then run transformation passes
+            for(size_t i = 0; i < config.afterPasses.size(); ++i)
+            {
+                if(config.verbose)
+                    std::cout << "  - [Transform] " << config.afterPasses[i]->getName()
+                              << std::endl;
+                config.afterPasses[i]->run(func, ctx);
+            }
+        }
+
+        if(config.verbose)
+        {
+            std::cout << "\n========== Pipeline Complete ==========\n" << std::endl;
+        }
+    }
+
+} // namespace stinkytofu

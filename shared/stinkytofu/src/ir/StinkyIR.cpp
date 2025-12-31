@@ -21,10 +21,9 @@
  *
  * ************************************************************************ */
 
-#include "StinkyIR.hpp"
-#include "StinkyTofu.hpp"
+#include "ir/StinkyIR.hpp"
+#include "StinkyBuilder.hpp"
 #include <cmath>
-#include <stdexcept>
 
 namespace stinkytofu
 {
@@ -72,7 +71,7 @@ namespace stinkytofu
     // Division Functions
     // ============================================================================
 
-    std::vector<StinkyInstruction*>
+    Expected<std::vector<StinkyInstruction*>>
         StinkyIR::vectorStaticDivideAndRemainder(StinkyTofu&                  builder,
                                                  uint32_t                     qReg,
                                                  uint32_t                     rReg,
@@ -112,9 +111,10 @@ namespace stinkytofu
         else
         {
             // Non-power of 2: use magic number algorithm
+            assert(tmpVgpr.size() >= 2 && "tmpVgpr must have at least 2 registers");
             if(tmpVgpr.size() < 2)
             {
-                throw std::runtime_error(
+                return Expected<std::vector<StinkyInstruction*>>::Error(
                     "vectorStaticDivideAndRemainder: tmpVgpr must have at least 2 registers");
             }
 
@@ -174,7 +174,7 @@ namespace stinkytofu
         return result;
     }
 
-    std::vector<StinkyInstruction*>
+    Expected<std::vector<StinkyInstruction*>>
         StinkyIR::vectorStaticDivide(StinkyTofu&                  builder,
                                      uint32_t                     qReg,
                                      uint32_t                     dReg,
@@ -251,7 +251,7 @@ namespace stinkytofu
         return result;
     }
 
-    std::vector<StinkyInstruction*>
+    Expected<std::vector<StinkyInstruction*>>
         StinkyIR::scalarStaticDivideAndRemainder(StinkyTofu&                  builder,
                                                  uint32_t                     qReg,
                                                  uint32_t                     rReg,
@@ -284,9 +284,10 @@ namespace stinkytofu
         }
         else
         {
+            assert(tmpSgpr.size() >= 2 && "tmpSgpr must have at least 2 registers");
             if(tmpSgpr.size() < 2)
             {
-                throw std::runtime_error(
+                return Expected<std::vector<StinkyInstruction*>>::Error(
                     "scalarStaticDivideAndRemainder: tmpSgpr must have at least 2 registers");
             }
 
@@ -346,7 +347,7 @@ namespace stinkytofu
     // Multiplication Functions
     // ============================================================================
 
-    std::vector<StinkyInstruction*>
+    Expected<std::vector<StinkyInstruction*>>
         StinkyIR::vectorStaticMultiply(StinkyTofu&                  builder,
                                        uint32_t                     productReg,
                                        uint32_t                     operandReg,
@@ -366,9 +367,10 @@ namespace stinkytofu
         }
         else
         {
+            assert(!tmpSgpr.empty() && "tmpSgpr required for large multipliers");
             if(tmpSgpr.empty())
             {
-                throw std::runtime_error(
+                return Expected<std::vector<StinkyInstruction*>>::Error(
                     "vectorStaticMultiply: tmpSgpr required for large multipliers");
             }
             auto inst = st.SMovB32(sgpr(tmpSgpr[0]), imm(multiplier), comment);
@@ -562,12 +564,13 @@ namespace stinkytofu
         return result;
     }
 
-    std::vector<StinkyInstruction*> StinkyIR::BranchIfZeroTyped(StinkyTofu&        builder,
-                                                                uint32_t           sgprName,
-                                                                const std::string& dataType,
-                                                                uint32_t           tmpVgpr,
-                                                                const std::string& label,
-                                                                const std::string& comment)
+    Expected<std::vector<StinkyInstruction*>>
+        StinkyIR::BranchIfZeroTyped(StinkyTofu&        builder,
+                                    uint32_t           sgprName,
+                                    const std::string& dataType,
+                                    uint32_t           tmpVgpr,
+                                    const std::string& label,
+                                    const std::string& comment)
     {
         std::vector<StinkyInstruction*> result;
         StinkyTofu&                     st = builder;
@@ -613,18 +616,20 @@ namespace stinkytofu
         }
         else
         {
-            throw std::runtime_error("Unsupported data type for BranchIfZeroTyped: " + dataType
-                                     + ". Supported types: i32, i64, f32, f64");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "Unsupported data type for BranchIfZeroTyped: " + dataType
+                + ". Supported types: i32, i64, f32, f64");
         }
 
         return result;
     }
 
-    std::vector<StinkyInstruction*> StinkyIR::BranchIfNotZeroTyped(StinkyTofu&        builder,
-                                                                   uint32_t           sgprName,
-                                                                   const std::string& dataType,
-                                                                   const std::string& label,
-                                                                   const std::string& comment)
+    Expected<std::vector<StinkyInstruction*>>
+        StinkyIR::BranchIfNotZeroTyped(StinkyTofu&        builder,
+                                       uint32_t           sgprName,
+                                       const std::string& dataType,
+                                       const std::string& label,
+                                       const std::string& comment)
     {
         std::vector<StinkyInstruction*> result;
         StinkyTofu&                     st = builder;
@@ -670,8 +675,9 @@ namespace stinkytofu
         }
         else
         {
-            throw std::runtime_error("Unsupported data type for BranchIfNotZeroTyped: " + dataType
-                                     + ". Supported types: i32, i64, f32, f64");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "Unsupported data type for BranchIfNotZeroTyped: " + dataType
+                + ". Supported types: i32, i64, f32, f64");
         }
 
         return result;
@@ -681,15 +687,16 @@ namespace stinkytofu
     // Casting Functions (f_cast.hpp)
     // ============================================================================
 
-    std::vector<StinkyInstruction*> StinkyIR::VSaturateCastInt(StinkyTofu&        builder,
-                                                               uint32_t           valueReg,
-                                                               uint32_t           tmpVgpr,
-                                                               uint32_t           tmpSgpr,
-                                                               int32_t            lowerBound,
-                                                               int32_t            upperBound,
-                                                               const std::string& saturateType,
-                                                               bool               initGpr,
-                                                               const std::string& comment)
+    Expected<std::vector<StinkyInstruction*>>
+        StinkyIR::VSaturateCastInt(StinkyTofu&        builder,
+                                   uint32_t           valueReg,
+                                   uint32_t           tmpVgpr,
+                                   uint32_t           tmpSgpr,
+                                   int32_t            lowerBound,
+                                   int32_t            upperBound,
+                                   const std::string& saturateType,
+                                   bool               initGpr,
+                                   const std::string& comment)
     {
         std::vector<StinkyInstruction*> result;
         StinkyTofu&                     st = builder;
@@ -738,7 +745,7 @@ namespace stinkytofu
         {
             // Lower bound only: would use v_max_i32
             // NOTE: v_max_i32 is not yet implemented in StinkyTofu
-            throw std::runtime_error(
+            return Expected<std::vector<StinkyInstruction*>>::Error(
                 "VSaturateCastInt with saturateType='lower' requires v_max_i32 instruction "
                 "which is not yet implemented in StinkyTofu. Use 'normal' or 'upper' instead.");
         }
@@ -748,8 +755,9 @@ namespace stinkytofu
         }
         else
         {
-            throw std::runtime_error("Invalid saturateType: " + saturateType
-                                     + ". Supported types: 'normal', 'upper', 'lower', 'none'");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "Invalid saturateType: " + saturateType
+                + ". Supported types: 'normal', 'upper', 'lower', 'none'");
         }
 
         return result;
@@ -759,21 +767,22 @@ namespace stinkytofu
     // Memory & Synchronization Functions (functions.hpp)
     // ============================================================================
 
-    std::vector<StinkyInstruction*> StinkyIR::DSInit(StinkyTofu&        builder,
-                                                     uint32_t           tmpVgprStart,
-                                                     uint32_t           serialVgpr,
-                                                     uint32_t           numThreads,
-                                                     uint32_t           ldsNumElements,
-                                                     int32_t            initValue,
-                                                     const std::string& comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyIR::DSInit(StinkyTofu&        builder,
+                                                               uint32_t           tmpVgprStart,
+                                                               uint32_t           serialVgpr,
+                                                               uint32_t           numThreads,
+                                                               uint32_t           ldsNumElements,
+                                                               int32_t            initValue,
+                                                               const std::string& comment)
     {
         std::vector<StinkyInstruction*> result;
         StinkyTofu&                     st = builder;
 
+        assert(tmpVgprStart + 1 < 256 && "DSInit requires 2 consecutive VGPRs");
         if(tmpVgprStart + 1 >= 256)
         {
-            throw std::runtime_error(
-                "DSInit requires 2 consecutive VGPRs starting at tmpVgprStart");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "DSInit requires 2 consecutive VGPRs starting at tmpVgprStart (max: 254)");
         }
 
         uint32_t tmpValueReg = tmpVgprStart; // VGPR for init value
@@ -809,12 +818,12 @@ namespace stinkytofu
             // Note: In the original rocisa code, offset is passed via DSModifiers
             // In StinkyTofu, we need to add offset to address or use instruction with offset
             // For simplicity, if offset is needed, we'd add it to the address register first
-            // But DSWriteB32 in StinkyTofu appears to only take addr and src
+            // But DSStoreB32 in StinkyTofu appears to only take addr and src
 
             if(i == 0)
             {
                 // First write: use address as-is
-                inst = st.DSWriteB32(vgpr(tmpAddrReg),
+                inst = st.DSStoreB32(vgpr(tmpAddrReg),
                                      vgpr(tmpValueReg),
                                      "LDS[addr] = " + std::to_string(initValue));
                 result.insert(result.end(), inst.begin(), inst.end());
@@ -829,7 +838,7 @@ namespace stinkytofu
                                   "addr += " + std::to_string(numThreads * 4));
                 result.insert(result.end(), inst.begin(), inst.end());
 
-                inst = st.DSWriteB32(vgpr(tmpAddrReg),
+                inst = st.DSStoreB32(vgpr(tmpAddrReg),
                                      vgpr(tmpValueReg),
                                      "LDS[addr+" + std::to_string(offset)
                                          + "] = " + std::to_string(initValue));
@@ -873,12 +882,13 @@ namespace stinkytofu
         return kernArgOffset;
     }
 
-    std::vector<StinkyInstruction*> ArgumentLoader::loadKernArg(uint32_t           dstSgpr,
-                                                                uint32_t           srcAddr,
-                                                                int                dword,
-                                                                bool               writeSgpr,
-                                                                std::optional<int> sgprOffset,
-                                                                const std::string& comment)
+    Expected<std::vector<StinkyInstruction*>>
+        ArgumentLoader::loadKernArg(uint32_t           dstSgpr,
+                                    uint32_t           srcAddr,
+                                    int                dword,
+                                    bool               writeSgpr,
+                                    std::optional<int> sgprOffset,
+                                    const std::string& comment)
     {
         std::vector<StinkyInstruction*> result;
         int                             size = dword * 4;
@@ -918,9 +928,9 @@ namespace stinkytofu
                     sgpr(dstSgpr, dword), sgpr(srcAddr, 2), offsetToUse, finalComment);
                 break;
             default:
-                throw std::invalid_argument("Invalid dword size for loadKernArg: "
-                                            + std::to_string(dword)
-                                            + ". Valid values: 1, 2, 4, 8, 16");
+                return Expected<std::vector<StinkyInstruction*>>::Error(
+                    "Invalid dword size for loadKernArg: " + std::to_string(dword)
+                    + ". Valid values: 1, 2, 4, 8, 16");
             }
 
             result.insert(result.end(), inst.begin(), inst.end());
@@ -935,10 +945,8 @@ namespace stinkytofu
         return result;
     }
 
-    std::vector<StinkyInstruction*> ArgumentLoader::loadAllKernArg(uint32_t sgprStartIndex,
-                                                                   uint32_t srcAddr,
-                                                                   int      numSgprToLoad,
-                                                                   int      numSgprPreload)
+    Expected<std::vector<StinkyInstruction*>> ArgumentLoader::loadAllKernArg(
+        uint32_t sgprStartIndex, uint32_t srcAddr, int numSgprToLoad, int numSgprPreload)
     {
         std::vector<StinkyInstruction*> result;
 
@@ -1011,8 +1019,8 @@ namespace stinkytofu
                                                 kernArgOffsetStr);
                         break;
                     default:
-                        throw std::invalid_argument("Invalid SGPR size in loadAllKernArg: "
-                                                    + std::to_string(i));
+                        return Expected<std::vector<StinkyInstruction*>>::Error(
+                            "Invalid SGPR size in loadAllKernArg: " + std::to_string(i));
                     }
 
                     result.insert(result.end(), inst.begin(), inst.end());
@@ -1029,4 +1037,743 @@ namespace stinkytofu
         return result;
     }
 
+    // ========================================================================
+    // Activation Magic Numbers (from Activation.py)
+    // ========================================================================
+
+    namespace
+    {
+        // Union to convert hex bit pattern to float
+        union FloatUnion
+        {
+            uint32_t u;
+            float    f;
+            constexpr FloatUnion(uint32_t bits)
+                : u(bits)
+            {
+            }
+        };
+
+        // All magic numbers from ActivationMagicNumbers in Activation.py
+        constexpr uint32_t FloatGeluK0Bits   = 0x3F4C422A; // 0.797884583
+        constexpr uint32_t FloatGeluK1Bits   = 0x3D372713; // 0.044715
+        constexpr uint32_t Float16GeluK1Bits = 0x29B9; // 0.044715 (f16)
+        constexpr uint32_t FloatDGeluK0Bits  = 0x3D5B33B3; // 0.0535161
+        constexpr uint32_t FloatDGeluK1Bits  = 0x3ECC4220; // 0.398942
+        constexpr uint32_t FloatDGeluK2Bits  = 0x3D12220C; // 0.035677
+        constexpr uint32_t FloatDGeluK3Bits  = 0x3F4C4231; // 0.797885
+
+        // log2(e) = 1.442695040888963 for exp implementation
+        constexpr uint32_t Log2EBits = 0x3FB8AA3B; // 1.442695040888963
+
+        // Getter functions
+        inline float getFloatGeluK0()
+        {
+            return FloatUnion(FloatGeluK0Bits).f;
+        }
+        inline float getFloatGeluK1()
+        {
+            return FloatUnion(FloatGeluK1Bits).f;
+        }
+        inline float getFloat16GeluK1()
+        {
+            return FloatUnion(Float16GeluK1Bits).f;
+        }
+        inline float getFloatDGeluK0()
+        {
+            return FloatUnion(FloatDGeluK0Bits).f;
+        }
+        inline float getFloatDGeluK1()
+        {
+            return FloatUnion(FloatDGeluK1Bits).f;
+        }
+        inline float getFloatDGeluK2()
+        {
+            return FloatUnion(FloatDGeluK2Bits).f;
+        }
+        inline float getFloatDGeluK3()
+        {
+            return FloatUnion(FloatDGeluK3Bits).f;
+        }
+        inline float getLog2E()
+        {
+            return FloatUnion(Log2EBits).f;
+        }
+    }
+
+    // ========================================================================
+    // Activation Helper Functions
+    // ========================================================================
+
+    // exp(x) = 2^(x * log2(e))
+    // Modifies vgprInOut in place
+    static void expF32InPlace(StinkyTofu&                      builder,
+                              uint32_t                         vgprInOut,
+                              std::vector<StinkyInstruction*>& result)
+    {
+        // Step 1: x = x * log2(e)
+        auto inst
+            = builder.VMulF32(vgpr(vgprInOut), imm(getLog2E()), vgpr(vgprInOut), "x * log2(e)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: x = 2^x
+        inst = builder.VExpF32(vgpr(vgprInOut), vgpr(vgprInOut), "2^x");
+        result.insert(result.end(), inst.begin(), inst.end());
+    }
+
+    static void expF16InPlace(StinkyTofu&                      builder,
+                              uint32_t                         vgprInOut,
+                              std::vector<StinkyInstruction*>& result)
+    {
+        // Step 1: x = x * log2(e)
+        auto inst
+            = builder.VMulF16(vgpr(vgprInOut), imm(getLog2E()), vgpr(vgprInOut), "x * log2(e)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: x = 2^x
+        inst = builder.VExpF16(vgpr(vgprInOut), vgpr(vgprInOut), "2^x");
+        result.insert(result.end(), inst.begin(), inst.end());
+    }
+
+    // tanh(x) = 1 - 2/(exp(2x) + 1)
+    // Modifies vgprInOut in place
+    static void tanhF32InPlace(StinkyTofu&                      builder,
+                               uint32_t                         vgprInOut,
+                               std::vector<StinkyInstruction*>& result)
+    {
+        // Step 1: x = 2 * x
+        auto inst = builder.VMulF32(vgpr(vgprInOut), imm(2.0), vgpr(vgprInOut), "2 * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: x = exp(x)
+        expF32InPlace(builder, vgprInOut, result);
+
+        // Step 3: x = 1.0 + x  (now x = exp(2x) + 1)
+        inst = builder.VAddF32(vgpr(vgprInOut), imm(1.0), vgpr(vgprInOut), "1 + exp(2x)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 4: x = 1/x
+        inst = builder.VRcpF32(vgpr(vgprInOut), vgpr(vgprInOut), "1 / (1 + exp(2x))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 5: x = -2*x + 1  (final tanh)
+        inst = builder.VFmaF32(
+            vgpr(vgprInOut), imm(-2.0), vgpr(vgprInOut), imm(1.0), "tanh(x) = 1 - 2/(exp(2x) + 1)");
+        result.insert(result.end(), inst.begin(), inst.end());
+    }
+
+    static void tanhF16InPlace(StinkyTofu&                      builder,
+                               uint32_t                         vgprInOut,
+                               std::vector<StinkyInstruction*>& result)
+    {
+        // Step 1: x = 2 * x
+        auto inst = builder.VMulF16(vgpr(vgprInOut), imm(2.0), vgpr(vgprInOut), "2 * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: x = exp(x)
+        expF16InPlace(builder, vgprInOut, result);
+
+        // Step 3: x = 1.0 + x  (now x = exp(2x) + 1)
+        inst = builder.VAddF16(vgpr(vgprInOut), imm(1.0), vgpr(vgprInOut), "1 + exp(2x)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 4: x = 1/x
+        inst = builder.VRcpF16(vgpr(vgprInOut), vgpr(vgprInOut), "1 / (1 + exp(2x))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 5: x = -2*x + 1  (final tanh)
+        inst = builder.VFmaF16(
+            vgpr(vgprInOut), imm(-2.0), vgpr(vgprInOut), imm(1.0), "tanh(x) = 1 - 2/(exp(2x) + 1)");
+        result.insert(result.end(), inst.begin(), inst.end());
+    }
+
+    // ========================================================================
+    // Activation Functions
+    // ========================================================================
+
+    // ReLU: max(0, x)
+    std::vector<StinkyInstruction*>
+        StinkyIR::reluF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut)
+    {
+        auto result = builder.VMaxF16(vgpr(vgprOut), vgpr(vgprIn), imm(0.0), "x = max(0, x)");
+        return result;
+    }
+
+    std::vector<StinkyInstruction*>
+        StinkyIR::reluF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut)
+    {
+        auto result = builder.VMaxF32(vgpr(vgprOut), vgpr(vgprIn), imm(0.0), "x = max(0, x)");
+        return result;
+    }
+
+    std::vector<StinkyInstruction*>
+        StinkyIR::reluF64(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut)
+    {
+        auto result = builder.VMaxF64(vgpr(vgprOut, 2), vgpr(vgprIn, 2), imm(0.0), "x = max(0, x)");
+        return result;
+    }
+
+    std::vector<StinkyInstruction*>
+        StinkyIR::reluI32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut)
+    {
+        auto result = builder.VMaxI32(vgpr(vgprOut), vgpr(vgprIn), imm(0), "x = max(0, x)");
+        return result;
+    }
+
+    // Leaky ReLU: x >= 0 ? x : alpha * x
+    // Uses conditional mask to select between x and alpha*x based on sign
+    std::vector<StinkyInstruction*> StinkyIR::leakyReluF16(StinkyTofu&    builder,
+                                                           uint32_t       vgprIn,
+                                                           uint32_t       vgprOut,
+                                                           StinkyRegister alpha)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // tmp = alpha * x
+        auto inst = builder.VMulF16(vgpr(vgprOut), alpha, vgpr(vgprIn), "tmp = alpha * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // cmp = (x >= 0) -> sets VCC
+        inst = builder.VCmpGEF16(vcc(), vgpr(vgprIn), imm(0.0), "x >= 0 ?");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = cmp ? x : tmp (if x >= 0 use x, else use alpha*x)
+        inst = builder.VCndMaskB32(
+            vgpr(vgprOut), vgpr(vgprOut), vgpr(vgprIn), "select x if >= 0, else alpha*x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*> StinkyIR::leakyReluF32(StinkyTofu&    builder,
+                                                           uint32_t       vgprIn,
+                                                           uint32_t       vgprOut,
+                                                           StinkyRegister alpha)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // tmp = alpha * x
+        auto inst = builder.VMulF32(vgpr(vgprOut), alpha, vgpr(vgprIn), "tmp = alpha * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // cmp = (x >= 0) -> sets VCC
+        inst = builder.VCmpGEF32(vcc(), vgpr(vgprIn), imm(0.0), "x >= 0 ?");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = cmp ? x : tmp (if x >= 0 use x, else use alpha*x)
+        inst = builder.VCndMaskB32(
+            vgpr(vgprOut), vgpr(vgprOut), vgpr(vgprIn), "select x if >= 0, else alpha*x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    // GELU: 0.5 * x * (1 + tanh(k0 * x * (1 + k1 * x * x)))
+    std::vector<StinkyInstruction*>
+        StinkyIR::geluF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // tmp = x * x
+        auto inst = builder.VMulF32(vgpr(tmpVgpr), vgpr(vgprIn), vgpr(vgprIn), "x * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = x^2 * k1 + 1 (FMA)
+        inst = builder.VFmaF32(
+            vgpr(tmpVgpr), vgpr(tmpVgpr), imm(getFloatGeluK1()), imm(1.0), "x^2 * k1 + 1");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = x * (x^2 * k1 + 1)
+        inst = builder.VMulF32(vgpr(tmpVgpr), vgpr(vgprIn), vgpr(tmpVgpr), "x * (x^2 * k1 + 1)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = k0 * x * (x^2 * k1 + 1)
+        inst = builder.VMulF32(
+            vgpr(tmpVgpr), imm(getFloatGeluK0()), vgpr(tmpVgpr), "k0 * x * (x^2 * k1 + 1)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = tanh(tmp)
+        tanhF32InPlace(builder, tmpVgpr, result);
+
+        // tmp = 1 + tanh(...)
+        inst = builder.VAddF32(vgpr(tmpVgpr), imm(1.0), vgpr(tmpVgpr), "1 + tanh(...)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = x * (1 + tanh(...))
+        inst = builder.VMulF32(vgpr(tmpVgpr), vgpr(vgprIn), vgpr(tmpVgpr), "x * (1 + tanh(...))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = 0.5 * tmp
+        inst = builder.VMulF32(vgpr(vgprOut), imm(0.5), vgpr(tmpVgpr), "0.5 * x * (1 + tanh(...))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*>
+        StinkyIR::geluF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // tmp = x * x
+        auto inst = builder.VMulF16(vgpr(tmpVgpr), vgpr(vgprIn), vgpr(vgprIn), "x * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = x^2 * k1 + 1 (FMA)
+        inst = builder.VFmaF16(
+            vgpr(tmpVgpr), vgpr(tmpVgpr), imm(getFloatGeluK1()), imm(1.0), "x^2 * k1 + 1");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = x * (x^2 * k1 + 1)
+        inst = builder.VMulF16(vgpr(tmpVgpr), vgpr(vgprIn), vgpr(tmpVgpr), "x * (x^2 * k1 + 1)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = k0 * x * (x^2 * k1 + 1) - using exact bit pattern
+        inst = builder.VMulF16(
+            vgpr(tmpVgpr), imm(getFloatGeluK0()), vgpr(tmpVgpr), "k0 * x * (x^2 * k1 + 1)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = tanh(tmp)
+        tanhF16InPlace(builder, tmpVgpr, result);
+
+        // tmp = 1 + tanh(...)
+        inst = builder.VAddF16(vgpr(tmpVgpr), imm(1.0), vgpr(tmpVgpr), "1 + tanh(...)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // tmp = x * (1 + tanh(...))
+        inst = builder.VMulF16(vgpr(tmpVgpr), vgpr(vgprIn), vgpr(tmpVgpr), "x * (1 + tanh(...))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = 0.5 * tmp
+        inst = builder.VMulF16(vgpr(vgprOut), imm(0.5), vgpr(tmpVgpr), "0.5 * x * (1 + tanh(...))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    // Sigmoid: 1 / (1 + exp(-x))
+    std::vector<StinkyInstruction*> StinkyIR::sigmoidF32(StinkyTofu& builder,
+                                                         uint32_t    vgprIn,
+                                                         uint32_t    vgprOut,
+                                                         uint32_t    tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // out = -x
+        auto inst = builder.VMulF32(vgpr(vgprOut), imm(-1.0), vgpr(vgprIn), "-x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = exp(-x)
+        expF32InPlace(builder, vgprOut, result);
+
+        // out = 1 + exp(-x)
+        inst = builder.VAddF32(vgpr(vgprOut), imm(1.0), vgpr(vgprOut), "1 + exp(-x)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = 1 / (1 + exp(-x))
+        inst = builder.VRcpF32(vgpr(vgprOut), vgpr(vgprOut), "1 / (1 + exp(-x))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*> StinkyIR::sigmoidF16(StinkyTofu& builder,
+                                                         uint32_t    vgprIn,
+                                                         uint32_t    vgprOut,
+                                                         uint32_t    tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // out = -x
+        auto inst = builder.VMulF16(vgpr(vgprOut), imm(-1.0), vgpr(vgprIn), "-x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = exp(-x)
+        expF16InPlace(builder, vgprOut, result);
+
+        // out = 1 + exp(-x)
+        inst = builder.VAddF16(vgpr(vgprOut), imm(1.0), vgpr(vgprOut), "1 + exp(-x)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // out = 1 / (1 + exp(-x))
+        inst = builder.VRcpF16(vgpr(vgprOut), vgpr(vgprOut), "1 / (1 + exp(-x))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    // Abs: abs(x) - TODO: Implement proper abs with VOP3 modifiers
+    std::vector<StinkyInstruction*>
+        StinkyIR::absF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut)
+    {
+        // Placeholder: use AND with bitmask to clear sign bit
+        auto result
+            = builder.VAndB32(vgpr(vgprOut), imm(0x7FFF7FFF), vgpr(vgprIn), "abs(x) via and");
+        return result;
+    }
+
+    std::vector<StinkyInstruction*>
+        StinkyIR::absF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut)
+    {
+        // Placeholder: use AND with bitmask to clear sign bit
+        auto result
+            = builder.VAndB32(vgpr(vgprOut), imm(0x7FFFFFFF), vgpr(vgprIn), "abs(x) via and");
+        return result;
+    }
+
+    // Clamp: max(alpha, min(x, beta))
+    // Python order: first min, then max (matches Activation.py line 913-914)
+    std::vector<StinkyInstruction*> StinkyIR::clampF16(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister alpha,
+                                                       StinkyRegister beta)
+    {
+        std::vector<StinkyInstruction*> result;
+        // Step 1: min(x, beta)
+        auto inst = builder.VMinF16(vgpr(vgprOut), beta, vgpr(vgprIn), "min(x, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+        // Step 2: max(alpha, min(x, beta))
+        inst = builder.VMaxF16(vgpr(vgprOut), alpha, vgpr(vgprOut), "max(alpha, min(x, beta))");
+        result.insert(result.end(), inst.begin(), inst.end());
+        return result;
+    }
+
+    std::vector<StinkyInstruction*> StinkyIR::clampF32(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister alpha,
+                                                       StinkyRegister beta)
+    {
+        std::vector<StinkyInstruction*> result;
+        // Step 1: min(x, beta)
+        auto inst = builder.VMinF32(vgpr(vgprOut), beta, vgpr(vgprIn), "min(x, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+        // Step 2: max(alpha, min(x, beta))
+        inst = builder.VMaxF32(vgpr(vgprOut), alpha, vgpr(vgprOut), "max(alpha, min(x, beta))");
+        result.insert(result.end(), inst.begin(), inst.end());
+        return result;
+    }
+
+    // Silu (Swish-1): x * sigmoid(x)
+    std::vector<StinkyInstruction*>
+        StinkyIR::siluF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: tmp = sigmoid(x)
+        auto sigmoid_result = sigmoidF16(builder, vgprIn, tmpVgpr, tmpVgpr);
+        result.insert(result.end(), sigmoid_result.begin(), sigmoid_result.end());
+
+        // Step 2: out = x * sigmoid(x)
+        auto inst = builder.VMulF16(vgpr(vgprOut), vgpr(vgprIn), vgpr(tmpVgpr), "x * sigmoid(x)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*>
+        StinkyIR::siluF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: tmp = sigmoid(x)
+        auto sigmoid_result = sigmoidF32(builder, vgprIn, tmpVgpr, tmpVgpr);
+        result.insert(result.end(), sigmoid_result.begin(), sigmoid_result.end());
+
+        // Step 2: out = x * sigmoid(x)
+        auto inst = builder.VMulF32(vgpr(vgprOut), vgpr(vgprIn), vgpr(tmpVgpr), "x * sigmoid(x)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    // Swish: x * sigmoid(beta * x)
+    std::vector<StinkyInstruction*> StinkyIR::swishF16(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister beta,
+                                                       uint32_t       tmpVgpr1,
+                                                       uint32_t       tmpVgpr2)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: tmp1 = x * beta
+        auto inst = builder.VMulF16(vgpr(tmpVgpr1), vgpr(vgprIn), beta, "x * beta");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: tmp2 = sigmoid(x * beta)
+        auto sigmoid_result = sigmoidF16(builder, tmpVgpr1, tmpVgpr2, tmpVgpr2);
+        result.insert(result.end(), sigmoid_result.begin(), sigmoid_result.end());
+
+        // Step 3: out = x * sigmoid(x * beta)
+        inst
+            = builder.VMulF16(vgpr(vgprOut), vgpr(vgprIn), vgpr(tmpVgpr2), "x * sigmoid(x * beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*> StinkyIR::swishF32(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister beta,
+                                                       uint32_t       tmpVgpr1,
+                                                       uint32_t       tmpVgpr2)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: tmp1 = x * beta
+        auto inst = builder.VMulF32(vgpr(tmpVgpr1), vgpr(vgprIn), beta, "x * beta");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: tmp2 = sigmoid(x * beta)
+        auto sigmoid_result = sigmoidF32(builder, tmpVgpr1, tmpVgpr2, tmpVgpr2);
+        result.insert(result.end(), sigmoid_result.begin(), sigmoid_result.end());
+
+        // Step 3: out = x * sigmoid(x * beta)
+        inst
+            = builder.VMulF32(vgpr(vgprOut), vgpr(vgprIn), vgpr(tmpVgpr2), "x * sigmoid(x * beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    // Clipped ReLU: if x > alpha: min(x, beta) else: min(0, beta)
+    std::vector<StinkyInstruction*> StinkyIR::clippedReluF32(StinkyTofu&    builder,
+                                                             uint32_t       vgprIn,
+                                                             uint32_t       vgprOut,
+                                                             StinkyRegister alpha,
+                                                             StinkyRegister beta,
+                                                             uint32_t       tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: cmp = (x > alpha) -> sets VCC
+        auto inst = builder.VCmpGTF32(vcc(), vgpr(vgprIn), alpha, "x > alpha ?");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: tmp1 = min(x, beta)
+        inst = builder.VMinF32(vgpr(vgprOut), beta, vgpr(vgprIn), "min(x, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 3: tmp2 = min(0, beta)
+        inst = builder.VMinF32(vgpr(tmpVgpr), beta, imm(0.0), "min(0, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 4: out = cmp ? tmp1 : tmp2
+        inst = builder.VCndMaskB32(vgpr(vgprOut),
+                                   vgpr(tmpVgpr),
+                                   vgpr(vgprOut),
+                                   "select min(x,beta) if x>alpha, else min(0,beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*> StinkyIR::clippedReluF16(StinkyTofu&    builder,
+                                                             uint32_t       vgprIn,
+                                                             uint32_t       vgprOut,
+                                                             StinkyRegister alpha,
+                                                             StinkyRegister beta,
+                                                             uint32_t       tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: cmp = (x > alpha) -> sets VCC
+        auto inst = builder.VCmpGTF16(vcc(), vgpr(vgprIn), alpha, "x > alpha ?");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: tmp1 = min(x, beta)
+        inst = builder.VMinF16(vgpr(vgprOut), beta, vgpr(vgprIn), "min(x, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 3: tmp2 = min(0, beta)
+        inst = builder.VMinF16(vgpr(tmpVgpr), beta, imm(0.0), "min(0, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 4: out = cmp ? tmp1 : tmp2
+        inst = builder.VCndMaskB32(vgpr(vgprOut),
+                                   vgpr(tmpVgpr),
+                                   vgpr(vgprOut),
+                                   "select min(x,beta) if x>alpha, else min(0,beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*> StinkyIR::clippedReluF64(StinkyTofu&    builder,
+                                                             uint32_t       vgprIn,
+                                                             uint32_t       vgprOut,
+                                                             StinkyRegister alpha,
+                                                             StinkyRegister beta,
+                                                             uint32_t       tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: cmp = (x > alpha) -> sets VCC
+        auto inst = builder.VCmpGTF64(vcc(), vgpr(vgprIn, 2), alpha, "x > alpha ?");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: tmp1 = min(x, beta)
+        inst = builder.VMinF64(vgpr(vgprOut, 2), beta, vgpr(vgprIn, 2), "min(x, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 3: tmp2 = min(0, beta)
+        inst = builder.VMinF64(vgpr(tmpVgpr, 2), beta, imm(0.0), "min(0, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 4: out = cmp ? tmp1 : tmp2 (need two VCndMask for f64, low and high)
+        inst = builder.VCndMaskB32(vgpr(vgprOut),
+                                   vgpr(tmpVgpr),
+                                   vgpr(vgprOut),
+                                   "select min(x,beta) if x>alpha, else min(0,beta) [low]");
+        result.insert(result.end(), inst.begin(), inst.end());
+        inst = builder.VCndMaskB32(vgpr(vgprOut + 1),
+                                   vgpr(tmpVgpr + 1),
+                                   vgpr(vgprOut + 1),
+                                   "select min(x,beta) if x>alpha, else min(0,beta) [high]");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    std::vector<StinkyInstruction*> StinkyIR::clippedReluI32(StinkyTofu&    builder,
+                                                             uint32_t       vgprIn,
+                                                             uint32_t       vgprOut,
+                                                             StinkyRegister alpha,
+                                                             StinkyRegister beta,
+                                                             uint32_t       tmpVgpr)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: cmp = (x > alpha) -> sets VCC
+        auto inst = builder.VCmpGTI32(vcc(), vgpr(vgprIn), alpha, "x > alpha ?");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: tmp1 = min(x, beta)
+        inst = builder.VMinI32(vgpr(vgprOut), beta, vgpr(vgprIn), "min(x, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 3: tmp2 = min(0, beta)
+        inst = builder.VMinI32(vgpr(tmpVgpr), beta, imm(0), "min(0, beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 4: out = cmp ? tmp1 : tmp2
+        inst = builder.VCndMaskB32(vgpr(vgprOut),
+                                   vgpr(tmpVgpr),
+                                   vgpr(vgprOut),
+                                   "select min(x,beta) if x>alpha, else min(0,beta)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
+
+    // DGelu (Gradient of GELU): 0.5 * tanh(xx) + x1 * (4 / (exp(-xx) + exp(xx))^2) + 0.5
+    // Python: lines 787-850 (f32 only)
+    std::vector<StinkyInstruction*> StinkyIR::dgeluF32(StinkyTofu& builder,
+                                                       uint32_t    vgprIn,
+                                                       uint32_t    vgprOut,
+                                                       uint32_t    tmpVgpr1,
+                                                       uint32_t    tmpVgpr2,
+                                                       uint32_t    tmpVgpr3)
+    {
+        std::vector<StinkyInstruction*> result;
+
+        // Step 1: tmp1 = x * x
+        auto inst = builder.VMulF32(vgpr(tmpVgpr1), vgpr(vgprIn), vgpr(vgprIn), "tmp1 = x * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 2: tmp1 = x * x * x = x^3
+        inst = builder.VMulF32(vgpr(tmpVgpr1), vgpr(tmpVgpr1), vgpr(vgprIn), "tmp1 = x^3");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 3: tmp2 = 0.398942 * x (FloatDGeluK1)
+        inst = builder.VMulF32(
+            vgpr(tmpVgpr2), imm(getFloatDGeluK1()), vgpr(vgprIn), "tmp2 = 0.398942 * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 4: tmp2 = 0.0535161 * x^3 + tmp2 (FloatDGeluK0)
+        inst = builder.VFmaF32(vgpr(tmpVgpr2),
+                               imm(getFloatDGeluK0()),
+                               vgpr(tmpVgpr1),
+                               vgpr(tmpVgpr2),
+                               "tmp2 = 0.0535161 * x^3 + tmp2");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 5: tmp3 = 0.797885 * x (FloatDGeluK3)
+        inst = builder.VMulF32(
+            vgpr(tmpVgpr3), imm(getFloatDGeluK3()), vgpr(vgprIn), "tmp3 = 0.797885 * x");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 6: tmp1 = 0.035677 * x^3 + tmp3 (FloatDGeluK2)  [tmp1 = xx]
+        inst = builder.VFmaF32(vgpr(tmpVgpr1),
+                               imm(getFloatDGeluK2()),
+                               vgpr(tmpVgpr1),
+                               vgpr(tmpVgpr3),
+                               "tmp1 = 0.035677 * x^3 + tmp3 = xx");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 7: tmp3 = exp(xx), preserving tmp1
+        inst = builder.VMovB32(vgpr(tmpVgpr3), vgpr(tmpVgpr1), "copy xx to tmp3");
+        result.insert(result.end(), inst.begin(), inst.end());
+        expF32InPlace(builder, tmpVgpr3, result); // tmp3 = exp(xx)
+
+        // Step 8: tmp1 = -xx
+        inst = builder.VMulF32(vgpr(tmpVgpr1), imm(-1.0), vgpr(tmpVgpr1), "tmp1 = -xx");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 9: tmp1 = exp(-xx)
+        expF32InPlace(builder, tmpVgpr1, result);
+
+        // Step 10: out = exp(xx) + exp(-exp(xx))
+        inst = builder.VAddF32(
+            vgpr(vgprOut), vgpr(tmpVgpr3), vgpr(tmpVgpr1), "out = exp(xx) + exp(-xx)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 11: tmp1 = exp(xx) - exp(-exp(xx))
+        inst = builder.VSubF32(
+            vgpr(tmpVgpr1), vgpr(tmpVgpr3), vgpr(tmpVgpr1), "tmp1 = exp(xx) - exp(-xx)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 12: tmp3 = 1 / out
+        inst = builder.VRcpF32(vgpr(tmpVgpr3), vgpr(vgprOut), "tmp3 = 1 / (exp(xx) + exp(-xx))");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 13: tmp3 = tmp1 * tmp3 = tanh(xx)
+        inst = builder.VMulF32(vgpr(tmpVgpr3), vgpr(tmpVgpr1), vgpr(tmpVgpr3), "tmp3 = tanh(xx)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 14: tmp1 = 0.5 * tmp3
+        inst = builder.VMulF32(vgpr(tmpVgpr1), imm(0.5), vgpr(tmpVgpr3), "tmp1 = 0.5 * tanh(xx)");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 15: out = out * out
+        inst = builder.VMulF32(
+            vgpr(vgprOut), vgpr(vgprOut), vgpr(vgprOut), "out = (exp(xx) + exp(-xx))^2");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 16: out = 1 / out = 1 / (exp(xx) + exp(-xx))^2
+        inst = builder.VRcpF32(vgpr(vgprOut), vgpr(vgprOut), "out = 1 / (exp(xx) + exp(-xx))^2");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 17: out = 4 * out
+        inst = builder.VMulF32(
+            vgpr(vgprOut), imm(4.0), vgpr(vgprOut), "out = 4 / (exp(xx) + exp(-xx))^2");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 18: out = out * tmp2 + tmp1
+        inst = builder.VFmaF32(vgpr(vgprOut),
+                               vgpr(vgprOut),
+                               vgpr(tmpVgpr2),
+                               vgpr(tmpVgpr1),
+                               "out = x1 * (4/(exp + exp)^2) + 0.5*tanh");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        // Step 19: out = out + 0.5
+        inst = builder.VAddF32(vgpr(vgprOut), imm(0.5), vgpr(vgprOut), "out = out + 0.5");
+        result.insert(result.end(), inst.begin(), inst.end());
+
+        return result;
+    }
 } // namespace stinkytofu

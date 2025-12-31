@@ -60,7 +60,15 @@ configure_file(include/Config.h.in include/Config/Config.h)
 # => MSVC: /GR- /EHs-c-
 set(STINKYTOFU_SOURCE_FILES
     stinkytofu.cpp
+    StinkyBuilder.cpp
+    ir/StinkyIR.cpp
+    ir/Operation.cpp
+    ir/operations/Activation.cpp
     ir/asm/CFGBuilderPass.cpp
+    ir/asm/PeepholeOptimizationPass.cpp
+    ir/asm/DeadCodeEliminationPass.cpp
+    ir/asm/DuplicateEliminationPass.cpp
+    ir/asm/OptimizationPipeline.cpp
     ir/asm/ScheduleLastLRsPass.cpp
     ir/asm/StinkyDAGSchedulerPass.cpp
     ir/asm/StinkyConfigurableWaitCntPass.cpp
@@ -71,6 +79,7 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/StinkySignature.cpp
     ir/asm/IRLexer.cpp
     ir/asm/IRParser.cpp
+    ir/asm/PatternParser.cpp
     hardware/ArchHelper.cpp
 )
 
@@ -105,6 +114,12 @@ if(STINKYTOFU_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# Option to build examples
+# option(STINKYTOFU_BUILD_EXAMPLES "Build StinkyTofu examples" ON)
+# if(STINKYTOFU_BUILD_EXAMPLES)
+#     add_subdirectory(examples)
+# endif()
 
 # Option to build Python bindings
 option(STINKYTOFU_BUILD_PYTHON "Build StinkyTofu Python bindings" ON)
