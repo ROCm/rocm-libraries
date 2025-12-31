@@ -578,7 +578,7 @@ using custom_i8_i16 = common::custom_type<int8_t, int16_t>;
 PRIMBENCH_REGISTER_TYPE(custom_i8_i16, "custom<i8,i16>")
 
 using custom_i64_f64 = common::custom_type<int64_t, double>;
-PRIMBENCH_REGISTER_TYPE(custom_i64_f64, "custom<i64,double>")
+PRIMBENCH_REGISTER_TYPE(custom_i64_f64, "custom<i64,f64>")
 
 using custom_f32_i16 = common::custom_type<float, int16_t>;
 PRIMBENCH_REGISTER_TYPE(custom_f32_i16, "custom<f32,i16>")
