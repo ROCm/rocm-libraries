@@ -96,15 +96,15 @@ _hipdnn_data_sdk_process_dependency(
 add_library(hipdnn_data_sdk INTERFACE)
 
 # Add includes from dependency targets
-hipdnn_add_dependency_includes(flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(spdlog::spdlog_header_only)
-hipdnn_add_dependency_includes(nlohmann_json::nlohmann_json)
+hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
+hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
+hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 
 if (fmt_FOUND)
-    message(STATUS "fmt library found, using system fmt")
-    hipdnn_add_dependency_includes(fmt::fmt COMPILE_DEFINITION SPDLOG_FMT_EXTERNAL)
+    message(STATUS "Found fmt: using system fmt")
+    hipdnn_add_dependency_includes(hipdnn_data_sdk fmt::fmt COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
 else()
-    message(STATUS "fmt library not found, using bundled fmt from spdlog")
+    message(STATUS "Not found fmt: using bundled fmt from spdlog")
 endif()
 target_compile_definitions(hipdnn_data_sdk INTERFACE FMT_HEADER_ONLY)
 

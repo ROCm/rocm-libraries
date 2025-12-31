@@ -56,22 +56,33 @@ endfunction()
 
 # Extract and use include directories from dependency targets instead of linking
 # Function to add include directories and optional compile definitions from dependency targets
-function(hipdnn_add_dependency_includes TARGET_NAME)
+function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
     # Parse optional arguments
     set(options "")
-    set(oneValueArgs COMPILE_DEFINITION)
-    set(multiValueArgs "")
+    set(oneValueArgs "")
+    set(multiValueArgs COMPILE_DEFINITIONS)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-    if(TARGET ${TARGET_NAME})
-        get_target_property(_dep_includes ${TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
+    # Validate required parameters
+    if(NOT TARGET ${TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Target '${TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    if(NOT TARGET ${HEADER_LIB_TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Header library target '${HEADER_LIB_TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    if(TARGET ${HEADER_LIB_TARGET_NAME})
+        get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
         if(_dep_includes)
-            message(VERBOSE "hipdnn_data_sdk adding includes from ${TARGET_NAME}: ${_dep_includes}")
-            target_include_directories(hipdnn_data_sdk SYSTEM INTERFACE ${_dep_includes})
+            message(VERBOSE "${TARGET_NAME} adding includes from ${HEADER_LIB_TARGET_NAME}: ${_dep_includes}")
+            target_include_directories(${TARGET_NAME} SYSTEM INTERFACE ${_dep_includes})
         endif()
 
-        if(ARG_COMPILE_DEFINITION)
-            target_compile_definitions(hipdnn_data_sdk INTERFACE ${ARG_COMPILE_DEFINITION})
+        if(ARG_COMPILE_DEFINITIONS)
+            target_compile_definitions(${TARGET_NAME} INTERFACE ${ARG_COMPILE_DEFINITIONS})
         endif()
     endif()
 endfunction()
