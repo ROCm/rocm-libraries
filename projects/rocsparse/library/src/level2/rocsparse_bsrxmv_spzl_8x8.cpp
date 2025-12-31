@@ -50,7 +50,7 @@ namespace rocsparse
         int row = blockIdx.x * blockDim.y + threadIdx.y;
         if(bsr_mask_ptr != nullptr)
         {
-            row = bsr_mask_ptr[row] - idx_base;
+            row = (row < size_of_mask) ? bsr_mask_ptr[row] - idx_base : mb;
         }
 
         if((row < mb) && (local_j < block_size))
@@ -178,7 +178,7 @@ namespace rocsparse
 
         if(bsr_mask_ptr != nullptr)
         {
-            row = (row < size_of_mask) ? bsr_mask_ptr[row] - idx_base : mb;
+            row = bsr_mask_ptr[row] - idx_base;
         }
 
         // BSR row entry and exit point
