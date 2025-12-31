@@ -14,9 +14,7 @@
 namespace miopen_legacy_plugin
 {
 
-// ============================================
-// Type Configuration Helper Functions
-// ============================================
+// --- Type Configuration Helpers ---
 
 std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
 {
@@ -24,7 +22,6 @@ std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowed
     types.reserve(VALID.size());
     for(const auto& config : VALID)
     {
-        // Add if not already present (handles duplicates if any)
         if(std::find(types.begin(), types.end(), config.io) == types.end())
         {
             types.push_back(config.io);
@@ -61,9 +58,7 @@ std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowed
     return types;
 }
 
-// ============================================
-// Tensor Descriptor Implementation
-// ============================================
+// --- Tensor Descriptor Implementation ---
 
 BatchnormTensorDescriptor::BatchnormTensorDescriptor(
     const hipdnn_data_sdk::data_objects::TensorAttributes* attr)
@@ -78,14 +73,10 @@ bool BatchnormTensorDescriptor::isPacked() const
     return hipdnn_data_sdk::utilities::isTensorPacked(dims, strides);
 }
 
-// ============================================
-// Validation Utilities Implementation
-// ============================================
+// --- Validation Utilities ---
 
 namespace validators
 {
-
-// Layout and Dimension Validators
 
 void validateDimensionCount(size_t numDims)
 {
@@ -148,7 +139,7 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
                 "Batchnorm implementation supports only NCHW and NHWC layouts for 4D tensors.");
         }
     }
-    else // numDims == 5
+    else
     {
         const auto layoutNcdhw = hipdnn_data_sdk::utilities::TensorLayout::NCDHW;
         const auto layoutNdhwc = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
@@ -169,20 +160,13 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
         return;
     }
 
-    // Helper lambda to check if a tensor has degenerate dimensions (all dims are 1).
-    // Degenerate tensors like [1,1,1,1] with strides [1,1,1,1] are layout-agnostic
-    // because memory layout is irrelevant when there's only one element.
+    // Degenerate tensors (all dims=1) are layout-agnostic
     auto isDegenerate = [](const BatchnormTensorDescriptor& tensor) {
         return std::all_of(
             tensor.dims.begin(), tensor.dims.end(), [](int64_t d) { return d == 1; });
     };
 
-    // Find the first non-degenerate tensor to use as the layout reference.
-    // We cannot use degenerate tensors as reference because their stride order
-    // (e.g., [3,2,1,0] from strides [1,1,1,1]) is ambiguous and defaults to NCHW
-    // regardless of the actual intended layout.
-    // Note: Tensor order is unpredictable (from unordered_map iteration), so we
-    // search for ANY non-degenerate tensor - they all must have the same layout anyway.
+    // Use first non-degenerate tensor as layout reference (degenerate stride order is ambiguous)
     int64_t referenceIndex = -1;
     for(size_t i = 0; i < tensors.size(); ++i)
     {
@@ -208,8 +192,6 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
         }
     }
 }
-
-// Data Type Validators
 
 void validateDataTypeIsSupported(
     hipdnn_data_sdk::data_objects::DataType dataType,
@@ -273,8 +255,6 @@ void validateFixedDataType(
     }
 }
 
-// Shape Validators
-
 void validateConsistentShapes(
     const std::vector<int64_t>& tensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -315,27 +295,30 @@ void validateSpatialDimensions(const std::vector<int64_t>& ioDims)
     }
 }
 
+void validatePeerStatsNotPopulated(const flatbuffers::Vector<int64_t>* peerStatsTensorUid,
+                                   const std::string& errorMessage)
+{
+    if(peerStatsTensorUid != nullptr && !peerStatsTensorUid->empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       errorMessage);
+    }
+}
+
 } // namespace validators
 
-// ============================================
-// Component Validators (Orchestrate Atomic Validators)
-// ============================================
+// --- Component Validators ---
 
 void checkTensorLayoutsAndDimsSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    // Convert Flatbuffer attributes to lightweight descriptors (single access per tensor)
-    // Skip pass-by-value tensors (scalars like epsilon, momentum) since:
-    // 1. They have no meaningful layout/dimensions to validate
-    // 2. Their data type is implicitly validated by MIOpen (always FP32)
-    // 3. value_type != NONE indicates a scalar with embedded value
+    // Skip scalars (epsilon, momentum) - their type is validated by MIOpen
     std::vector<BatchnormTensorDescriptor> tensors;
     tensors.reserve(tensorMap.size());
 
     for(const auto& [id, attr] : tensorMap)
     {
-        // Skip pass-by-value tensors (epsilon, momentum, etc.)
         if(attr->value_type() != hipdnn_data_sdk::data_objects::TensorValue::NONE)
         {
             continue;
@@ -343,10 +326,9 @@ void checkTensorLayoutsAndDimsSupported(
         tensors.emplace_back(attr);
     }
 
-    // Run validations in logical order
-    validators::validateConsistentDimensions(tensors); // Must all be 4D or all 5D
-    validators::validatePackedTensors(tensors); // Must be contiguous
-    validators::validateConsistentLayouts(tensors); // Must have same layout (NCHW, NHWC, etc.)
+    validators::validateConsistentDimensions(tensors);
+    validators::validatePackedTensors(tensors);
+    validators::validateConsistentLayouts(tensors);
 }
 
 void checkTensorDataTypesSupported(
@@ -356,7 +338,6 @@ void checkTensorDataTypesSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    // Validate IO tensors using bn_type_configs (single source of truth)
     validators::validateConsistentDataTypes(
         ioTensorIds,
         tensorMap,
@@ -365,11 +346,9 @@ void checkTensorDataTypesSupported(
         "dy, and dx tensors.",
         "All IO tensors for batchnorm must have the same data type.");
 
-    // Validate affine tensors using bn_type_configs
     const auto allowedAffineTypes = bn_type_configs::getAllowedAffineTypes();
     if(allowedAffineTypes.size() == 1)
     {
-        // Currently only one affine type allowed (FLOAT), use fixed validation
         validators::validateFixedDataType(affineTensorIds,
                                           tensorMap,
                                           allowedAffineTypes[0],
@@ -378,7 +357,6 @@ void checkTensorDataTypesSupported(
     }
     else
     {
-        // Future: Multiple affine types allowed, use consistent validation
         validators::validateConsistentDataTypes(
             affineTensorIds,
             tensorMap,
@@ -387,11 +365,9 @@ void checkTensorDataTypesSupported(
             "All affine tensors for batchnorm must have the same data type.");
     }
 
-    // Validate stat tensors using bn_type_configs
     const auto allowedStatTypes = bn_type_configs::getAllowedStatTypes();
     if(allowedStatTypes.size() == 1)
     {
-        // Currently only one stat type allowed (FLOAT), use fixed validation
         validators::validateFixedDataType(statTensorIds,
                                           tensorMap,
                                           allowedStatTypes[0],
@@ -400,7 +376,6 @@ void checkTensorDataTypesSupported(
     }
     else
     {
-        // Future: Multiple stat types allowed, use consistent validation
         validators::validateConsistentDataTypes(
             statTensorIds,
             tensorMap,
@@ -425,15 +400,12 @@ void checkTensorShapesSupported(
             "At least one IO tensor must be provided for batchnorm.");
     }
 
-    // Cache first IO tensor's dims
     const auto& ioTensorAttr = miopen_utils::findTensorAttributes(tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioTensorAttr.dims()->begin(), ioTensorAttr.dims()->end());
 
-    // Validate all IO tensors have same shape
     validators::validateConsistentShapes(
         ioTensorIds, tensorMap, ioDims, "All IO tensors for batchnorm must have the same shape.");
 
-    // Validate derived shapes
     const auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(ioDims);
     validators::validateConsistentShapes(affineTensorIds,
                                          tensorMap,
@@ -446,16 +418,13 @@ void checkTensorShapesSupported(
                                          "Mean and variance tensors for batchnorm must have shape "
                                          "derived from IO tensor shape.");
 
-    // Training-specific validation
     if(isTraining)
     {
         validators::validateSpatialDimensions(ioDims);
     }
 }
 
-// ============================================
-// High-Level Configuration Validators
-// ============================================
+// --- High-Level Configuration Validators ---
 
 namespace
 {
@@ -495,6 +464,10 @@ void checkBatchnormTensorConfigSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
+    validators::validatePeerStatsNotPopulated(
+        bnAttr.peer_stats_tensor_uid(),
+        "Batchnorm forward training does not support peer statistics");
+
     std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
     std::vector<int64_t> affineTensorIds = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
@@ -516,6 +489,9 @@ void checkBatchnormTensorConfigSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
+    validators::validatePeerStatsNotPopulated(
+        bnBwdAttr.peer_stats_tensor_uid(), "Batchnorm backward does not support peer statistics");
+
     std::vector<int64_t> ioTensorIds
         = {bnBwdAttr.x_tensor_uid(), bnBwdAttr.dy_tensor_uid(), bnBwdAttr.dx_tensor_uid()};
     std::vector<int64_t> affineTensorIds = {
@@ -541,12 +517,14 @@ void checkBatchnormTensorConfigSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    // Validate activation mode first (defense in depth - catch unsupported modes early)
     checkBatchnormBwdActivationModeSupported(actAttr);
 
-    std::vector<int64_t> ioTensorIds = {bnBwdAttr.x_tensor_uid(),
-                                        actAttr.in_1_tensor_uid().value(), // dy
-                                        bnBwdAttr.dx_tensor_uid()};
+    validators::validatePeerStatsNotPopulated(
+        bnBwdAttr.peer_stats_tensor_uid(),
+        "Batchnorm backward fusion does not support peer statistics");
+
+    std::vector<int64_t> ioTensorIds
+        = {bnBwdAttr.x_tensor_uid(), actAttr.in_1_tensor_uid().value(), bnBwdAttr.dx_tensor_uid()};
     std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
                                             bnBwdAttr.dscale_tensor_uid(),
                                             bnBwdAttr.dbias_tensor_uid(),
@@ -565,9 +543,7 @@ void checkBatchnormTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, tensorMap, true);
 }
 
-// ============================================
-// Activation Mode Validators
-// ============================================
+// --- Activation Mode Validators ---
 
 namespace
 {
@@ -575,12 +551,10 @@ namespace
 void checkBatchnormActivationModeSupported(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
 {
-    // MIOpen currently only supports miopenActivationPASTHRU, miopenActivationRELU,
-    // miopenActivationCLIPPEDRELU and miopenActivationCLAMP for batchnorm fusions
+    // MIOpen supports: PASSTHRU, RELU, CLIPPEDREU, CLAMP (no Leaky ReLU)
 
     if(activAttr.operation() == hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY)
     {
-        // miopenActivationPASTHRU
         return;
     }
 
@@ -588,10 +562,6 @@ void checkBatchnormActivationModeSupported(
        == (isBwd ? hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD
                  : hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD))
     {
-        // miopenActivationRELU - Standard ReLU (no parameters)
-        // miopenActivationCLIPPEDRELU - Clipped ReLU (relu_upper_clip only)
-        // miopenActivationCLAMP - CLAMP (relu_lower_clip + relu_upper_clip)
-        // miopenActivationLEAKYRELU - Leaky ReLU is not supported!
         if(!activAttr.relu_lower_clip_slope())
         {
             return;

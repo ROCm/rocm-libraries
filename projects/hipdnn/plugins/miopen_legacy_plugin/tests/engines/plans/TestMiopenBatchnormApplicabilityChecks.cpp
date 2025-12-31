@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -15,9 +16,7 @@ using namespace miopen_legacy_plugin;
 namespace
 {
 
-// ============================================================================
-// Configuration Data Structs
-// ============================================================================
+// --- Configuration Data Structs ---
 
 struct TensorConfig
 {
@@ -32,11 +31,9 @@ struct TensorConfig
     double passedValue = 0.0;
 };
 
-// ============================================================================
-// Tensor UID Constants (Following Existing Pattern)
-// ============================================================================
+// --- Tensor UID Constants ---
 
-// Common UIDs across all batchnorm operations
+// Common UIDs for all batchnorm operations
 struct BnCommonTensorIds
 {
     [[maybe_unused]] static constexpr int64_t X = 1;
@@ -48,7 +45,7 @@ struct BnCommonTensorIds
     [[maybe_unused]] static constexpr int64_t INV_VARIANCE = 7;
 };
 
-// Backward-specific UIDs
+// Backward-specific
 struct BnBackwardTensorIds : BnCommonTensorIds
 {
     [[maybe_unused]] static constexpr int64_t DY = 8;
@@ -57,14 +54,14 @@ struct BnBackwardTensorIds : BnCommonTensorIds
     [[maybe_unused]] static constexpr int64_t DBIAS = 11;
 };
 
-// Fused operation UIDs (virtual tensors)
+// Fused operations (virtual tensors)
 struct BnFusedTensorIds : BnBackwardTensorIds
 {
     [[maybe_unused]] static constexpr int64_t BN_Y_VIRTUAL = 12;
     [[maybe_unused]] static constexpr int64_t DX_DRELU_VIRTUAL = 13;
 };
 
-// Training UIDs (extending common pattern)
+// Training-specific
 struct BnTrainingTensorIds : BnCommonTensorIds
 {
     [[maybe_unused]] static constexpr int64_t PREV_RUNNING_MEAN = 8;
@@ -74,11 +71,7 @@ struct BnTrainingTensorIds : BnCommonTensorIds
     [[maybe_unused]] static constexpr int64_t NEXT_RUNNING_VARIANCE = 12;
 };
 
-// ============================================================================
-// Tensor Role Classification
-// ============================================================================
-
-// Tensor roles for semantic validation (orthogonal to UIDs)
+// --- Tensor Role Classification ---
 enum class TensorRole
 {
     IO, // Input/output tensors (x, y, dx, dy)
@@ -87,68 +80,16 @@ enum class TensorRole
     SCALAR // Pass-by-value scalars (epsilon, momentum)
 };
 
-// ============================================================================
-// Canonical Tensor Layout Database
-// ============================================================================
+// --- Canonical Tensor Layout Database ---
+using hipdnn_data_sdk::utilities::TensorLayout;
 
 namespace canonical_layouts
 {
 
-// Layout type enum
-enum class Layout
+// Test-specific: naming helper (uses TensorLayout.name!)
+inline std::string generateName(const std::vector<int64_t>& dims, const TensorLayout& layout)
 {
-    NCHW, // 4D: [N, C, H, W]
-    NHWC, // 4D: [N, H, W, C]
-    NCDHW, // 5D: [N, C, D, H, W]
-    NDHWC // 5D: [N, D, H, W, C]
-};
-
-// Helper to convert layout to string
-inline std::string toString(Layout layout)
-{
-    switch(layout)
-    {
-    case Layout::NCHW:
-        return "NCHW";
-    case Layout::NHWC:
-        return "NHWC";
-    case Layout::NCDHW:
-        return "NCDHW";
-    case Layout::NDHWC:
-        return "NDHWC";
-    default:
-        return "Unknown";
-    }
-}
-
-// Helper to get stride order for a layout
-inline std::vector<int64_t> getStrideOrder(Layout layout)
-{
-    switch(layout)
-    {
-    case Layout::NCHW:
-        return {3, 2, 1, 0}; // NCHW stride order
-    case Layout::NHWC:
-        return {3, 0, 2, 1}; // NHWC stride order
-    case Layout::NCDHW:
-        return {4, 3, 2, 1, 0}; // NCDHW stride order
-    case Layout::NDHWC:
-        return {4, 0, 3, 2, 1}; // NDHWC stride order
-    default:
-        return {};
-    }
-}
-
-// Helper to generate strides from dims + layout
-inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dims, Layout layout)
-{
-    return hipdnn_data_sdk::utilities::generateStrides(dims, getStrideOrder(layout));
-}
-
-// Helper to generate descriptive name
-inline std::string generateName(const std::vector<int64_t>& dims, Layout layout)
-{
-    std::string name = toString(layout);
+    std::string name = layout.name; // Reuse production name!
     for(auto dim : dims)
     {
         name += "_" + std::to_string(dim);
@@ -161,31 +102,31 @@ namespace shapes
 {
 // 4D shapes for inference/backward (larger spatial dimensions)
 inline const std::vector<std::vector<int64_t>> INFERENCE_4D = {
-    {1, 3, 56, 56}, // Small
-    {1, 3, 112, 112}, // Medium
-    {1, 3, 224, 224}, // Large (canonical)
-    {2, 3, 224, 224}, // Multi-batch
-    {1, 16, 224, 224}, // More channels
+    {1, 3, 56, 56},
+    {1, 3, 112, 112},
+    {1, 3, 224, 224},
+    {2, 3, 224, 224},
+    {1, 16, 224, 224},
 };
 
 // 4D shapes for training (sufficient spatial: B×S > 1)
 inline const std::vector<std::vector<int64_t>> TRAINING_4D = {
-    {1, 3, 14, 14}, // Canonical training size
-    {2, 3, 14, 14}, // Multi-batch
-    {1, 3, 28, 28}, // Larger spatial
+    {1, 3, 14, 14},
+    {2, 3, 14, 14},
+    {1, 3, 28, 28},
 };
 
 // 5D shapes for inference/backward
 inline const std::vector<std::vector<int64_t>> INFERENCE_5D = {
-    {1, 3, 16, 224, 224}, // Canonical
-    {1, 4, 16, 224, 224}, // Different channels
-    {1, 3, 8, 112, 112}, // Smaller spatial
+    {1, 3, 16, 224, 224},
+    {1, 4, 16, 224, 224},
+    {1, 3, 8, 112, 112},
 };
 
 // 5D shapes for training (sufficient spatial: B×S > 1)
 inline const std::vector<std::vector<int64_t>> TRAINING_5D = {
-    {1, 4, 16, 14, 14}, // Canonical training size
-    {1, 3, 16, 14, 14}, // Different channels
+    {1, 4, 16, 14, 14},
+    {1, 3, 16, 14, 14},
 };
 
 // Edge case shapes for specific test scenarios
@@ -194,23 +135,45 @@ inline const std::vector<int64_t> INSUFFICIENT_SPATIAL_4D = {1, 3, 1, 1};
 inline const std::vector<int64_t> DIFFERENT_CHANNELS_4D = {1, 5, 224, 224};
 } // namespace shapes
 
-// 4D Layout types
-inline const std::vector<Layout> LAYOUTS_4D = {Layout::NCHW, Layout::NHWC};
+// Test-specific: iteration arrays (use struct pointers or references)
+inline const std::vector<const TensorLayout*> LAYOUTS_4D
+    = {&TensorLayout::NCHW, &TensorLayout::NHWC};
 
-// 5D Layout types
-inline const std::vector<Layout> LAYOUTS_5D = {Layout::NCDHW, Layout::NDHWC};
+inline const std::vector<const TensorLayout*> LAYOUTS_5D
+    = {&TensorLayout::NCDHW, &TensorLayout::NDHWC};
+
+namespace type_configs
+{
+using DT = hipdnn_data_sdk::data_objects::DataType;
+
+// All invalid type configurations that should be REJECTED
+// Documents what type combinations are NOT supported by MIOpen
+inline const std::vector<BnTensorTypes> INVALID_ALL = {
+    // Invalid IO type (IO must be FLOAT/HALF/BFLOAT16)
+    {DT::UINT8, DT::FLOAT, DT::FLOAT}, // IO=UINT8 (unsupported)
+
+    // Invalid affine types (scale/bias must be FLOAT)
+    {DT::HALF, DT::HALF, DT::FLOAT}, // IO=HALF, Affine=HALF
+    {DT::BFLOAT16, DT::HALF, DT::FLOAT}, // IO=BFLOAT16, Affine=HALF
+    {DT::BFLOAT16, DT::BFLOAT16, DT::FLOAT}, // IO=BFLOAT16, Affine=BFLOAT16
+
+    // Invalid stat types (mean/variance must be FLOAT)
+    {DT::HALF, DT::FLOAT, DT::HALF}, // IO=HALF, Stat=HALF
+    {DT::BFLOAT16, DT::FLOAT, DT::HALF}, // IO=BFLOAT16, Stat=HALF
+    {DT::BFLOAT16, DT::FLOAT, DT::BFLOAT16}, // IO=BFLOAT16, Stat=BFLOAT16
+
+    // Both affine and stat invalid (must be FLOAT)
+    {DT::HALF, DT::HALF, DT::HALF}, // All HALF
+    {DT::BFLOAT16, DT::BFLOAT16, DT::BFLOAT16}, // All BFLOAT16
+    {DT::BFLOAT16, DT::HALF, DT::HALF}, // Mixed invalid
+};
+} // namespace type_configs
 
 } // namespace canonical_layouts
 
-// ============================================================================
-// Fluent Builder for Tensor Configuration
-// ============================================================================
-
-// Type-safe fluent builder for TensorConfig construction
 class TensorConfigBuilder
 {
 public:
-    // Accept int64_t directly (works with UID structs)
     TensorConfigBuilder(int64_t uid, const std::string& name, TensorRole role)
         : _config{uid,
                   name,
@@ -271,14 +234,11 @@ public:
 
 private:
     TensorConfig _config;
-    [[maybe_unused]] TensorRole _role; // Stored for potential future validation
+    [[maybe_unused]] TensorRole _role;
 };
 
-// ============================================================================
-// Factory Helper Functions for Common Tensor Patterns
-// ============================================================================
+// --- Factory Helpers ---
 
-/// Create an IO tensor (input/output) with specified parameters
 inline TensorConfig createIoTensor(int64_t uid,
                                    const std::string& name,
                                    hipdnn_data_sdk::data_objects::DataType dt,
@@ -298,7 +258,6 @@ inline TensorConfig createIoTensor(int64_t uid,
     return builder.build();
 }
 
-/// Create an affine tensor (scale/bias) with derived dimensions
 [[maybe_unused]] inline TensorConfig createAffineTensor(int64_t uid,
                                                         const std::string& name,
                                                         hipdnn_data_sdk::data_objects::DataType dt,
@@ -312,7 +271,6 @@ inline TensorConfig createIoTensor(int64_t uid,
         .build();
 }
 
-/// Create a stat tensor (mean/variance) with derived dimensions
 [[maybe_unused]] inline TensorConfig createStatTensor(int64_t uid,
                                                       const std::string& name,
                                                       hipdnn_data_sdk::data_objects::DataType dt,
@@ -326,84 +284,75 @@ inline TensorConfig createIoTensor(int64_t uid,
         .build();
 }
 
-/// Create a scalar tensor (pass-by-value)
 [[maybe_unused]] inline TensorConfig
     createScalarTensor(int64_t uid, const std::string& name, double value)
 {
     return TensorConfigBuilder(uid, name, TensorRole::SCALAR).asScalar(value).build();
 }
 
-// ============================================================================
-// Reusable Tensor Set Factories (High-Level Composition)
-// ============================================================================
+// --- Reusable Tensor Set Factories ---
 
-/// Create IO tensor pair (x, y) with same type
 inline std::vector<TensorConfig> createIoTensorPair(const BnTensorTypes& types,
                                                     const std::vector<int64_t>& dims,
-                                                    canonical_layouts::Layout layout,
+                                                    const TensorLayout& layout,
                                                     int64_t xUid = BnCommonTensorIds::X,
                                                     int64_t yUid = BnCommonTensorIds::Y)
 {
-    auto strides = canonical_layouts::generateStrides(dims, layout);
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
     return {createIoTensor(xUid, "x", types.io, dims, strides),
             createIoTensor(yUid, "y", types.io, dims, strides)};
 }
 
-/// Create affine tensor pair (scale, bias) with derived dims
 inline std::vector<TensorConfig> createAffineTensorPair(const BnTensorTypes& types,
                                                         const std::vector<int64_t>& baseDims,
-                                                        canonical_layouts::Layout layout,
+                                                        const TensorLayout& layout,
                                                         int64_t scaleUid = BnCommonTensorIds::SCALE,
                                                         int64_t biasUid = BnCommonTensorIds::BIAS)
 {
     auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(baseDims);
-    auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, layout.strideOrder);
     return {createAffineTensor(scaleUid, "scale", types.affine, derivedDims, derivedStrides),
             createAffineTensor(biasUid, "bias", types.affine, derivedDims, derivedStrides)};
 }
 
-/// Create stat tensor pair (mean, invVariance) with derived dims
 inline std::vector<TensorConfig> createStatTensorPair(const BnTensorTypes& types,
                                                       const std::vector<int64_t>& baseDims,
-                                                      canonical_layouts::Layout layout,
+                                                      const TensorLayout& layout,
                                                       int64_t meanUid = BnCommonTensorIds::MEAN,
                                                       int64_t invVarianceUid
                                                       = BnCommonTensorIds::INV_VARIANCE)
 {
     auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(baseDims);
-    auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, layout.strideOrder);
     return {
         createStatTensor(meanUid, "mean", types.stat, derivedDims, derivedStrides),
         createStatTensor(invVarianceUid, "inv_variance", types.stat, derivedDims, derivedStrides)};
 }
 
-/// Create complete batchnorm inference tensor set
 inline std::vector<TensorConfig> createBatchnormInferenceTensors(const BnTensorTypes& types,
                                                                  const std::vector<int64_t>& dims,
-                                                                 canonical_layouts::Layout layout)
+                                                                 const TensorLayout& layout)
 {
     using UIDs = BnCommonTensorIds;
     std::vector<TensorConfig> configs;
 
-    // IO tensors
     auto io = createIoTensorPair(types, dims, layout, UIDs::X, UIDs::Y);
     configs.insert(configs.end(), io.begin(), io.end());
 
-    // Affine tensors
     auto affine = createAffineTensorPair(types, dims, layout, UIDs::SCALE, UIDs::BIAS);
     configs.insert(configs.end(), affine.begin(), affine.end());
 
-    // Stat tensors
     auto stat = createStatTensorPair(types, dims, layout, UIDs::MEAN, UIDs::INV_VARIANCE);
     configs.insert(configs.end(), stat.begin(), stat.end());
 
     return configs;
 }
 
-/// Create complete batchnorm training tensor set (with optional mean/variance outputs)
 inline std::vector<TensorConfig> createBatchnormTrainingTensors(const BnTensorTypes& types,
                                                                 const std::vector<int64_t>& dims,
-                                                                canonical_layouts::Layout layout,
+                                                                const TensorLayout& layout,
                                                                 bool includeMeanOutput = false,
                                                                 bool includeInvVarianceOutput
                                                                 = false)
@@ -411,22 +360,19 @@ inline std::vector<TensorConfig> createBatchnormTrainingTensors(const BnTensorTy
     using UIDs = BnTrainingTensorIds;
     std::vector<TensorConfig> configs;
 
-    // IO tensors
     auto io = createIoTensorPair(types, dims, layout, UIDs::X, UIDs::Y);
     configs.insert(configs.end(), io.begin(), io.end());
 
-    // Affine tensors
     auto affine = createAffineTensorPair(types, dims, layout, UIDs::SCALE, UIDs::BIAS);
     configs.insert(configs.end(), affine.begin(), affine.end());
 
-    // Epsilon scalar
     configs.push_back(createScalarTensor(UIDs::EPSILON, "epsilon", 1e-5));
 
-    // Optional stat outputs
     if(includeMeanOutput || includeInvVarianceOutput)
     {
         auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-        auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
+        auto derivedStrides
+            = hipdnn_data_sdk::utilities::generateStrides(derivedDims, layout.strideOrder);
 
         if(includeMeanOutput)
         {
@@ -443,26 +389,24 @@ inline std::vector<TensorConfig> createBatchnormTrainingTensors(const BnTensorTy
     return configs;
 }
 
-/// Create complete batchnorm backward tensor set (with optional mean/variance inputs)
 inline std::vector<TensorConfig> createBatchnormBackwardTensors(const BnTensorTypes& types,
                                                                 const std::vector<int64_t>& dims,
-                                                                canonical_layouts::Layout layout,
+                                                                const TensorLayout& layout,
                                                                 bool includeMeanInput = false,
                                                                 bool includeInvVarianceInput
                                                                 = false)
 {
     using UIDs = BnBackwardTensorIds;
     std::vector<TensorConfig> configs;
-    auto strides = canonical_layouts::generateStrides(dims, layout);
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
-    // IO tensors (x, dy, dx)
     configs.push_back(createIoTensor(UIDs::X, "x", types.io, dims, strides));
     configs.push_back(createIoTensor(UIDs::DY, "dy", types.io, dims, strides));
     configs.push_back(createIoTensor(UIDs::DX, "dx", types.io, dims, strides));
 
-    // Affine tensors (scale, dscale, dbias)
     auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, layout.strideOrder);
     configs.push_back(
         createAffineTensor(UIDs::SCALE, "scale", types.affine, derivedDims, derivedStrides));
     configs.push_back(
@@ -470,7 +414,6 @@ inline std::vector<TensorConfig> createBatchnormBackwardTensors(const BnTensorTy
     configs.push_back(
         createAffineTensor(UIDs::DBIAS, "dbias", types.affine, derivedDims, derivedStrides));
 
-    // Optional stat inputs
     if(includeMeanInput)
     {
         configs.push_back(
@@ -485,15 +428,15 @@ inline std::vector<TensorConfig> createBatchnormBackwardTensors(const BnTensorTy
     return configs;
 }
 
-/// Create complete fused batchnorm backward tensor set (inference + activation + backward)
 inline std::vector<TensorConfig> createBatchnormFusedBackwardTensors(
-    const BnTensorTypes& types, const std::vector<int64_t>& dims, canonical_layouts::Layout layout)
+    const BnTensorTypes& types, const std::vector<int64_t>& dims, const TensorLayout& layout)
 {
     using UIDs = BnFusedTensorIds;
     std::vector<TensorConfig> configs;
-    auto strides = canonical_layouts::generateStrides(dims, layout);
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
     auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = canonical_layouts::generateStrides(derivedDims, layout);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, layout.strideOrder);
 
     // Forward inputs (x, scale, bias, mean, invVariance)
     configs.push_back(createIoTensor(UIDs::X, "x", types.io, dims, strides));
@@ -524,48 +467,8 @@ inline std::vector<TensorConfig> createBatchnormFusedBackwardTensors(
     return configs;
 }
 
-// ============================================================================
-// Property-Based Test Generator (Cartesian Product)
-// ============================================================================
+// --- BnTensorTypes Helpers ---
 
-/// Generate all combinations of test parameters using Cartesian product
-/// Example: generateTestCombinations(generator, shapes, layouts, types)
-///   - Calls generator(shape1, layout1, type1), generator(shape1, layout1, type2), etc.
-///   - Returns vector of all generated test cases
-template <typename GeneratorFunc, typename... Containers>
-auto generateTestCombinations(GeneratorFunc&& generator, const Containers&... containers)
-{
-    using ResultType = decltype(generator(std::declval<typename Containers::value_type>()...));
-    std::vector<ResultType> results;
-
-    // Recursive lambda for generating combinations
-    auto generateRecursive = [&](auto&& self, auto&&... items) {
-        if constexpr(sizeof...(items) == sizeof...(Containers))
-        {
-            // Base case: all parameters selected, invoke generator
-            results.push_back(generator(std::forward<decltype(items)>(items)...));
-        }
-        else
-        {
-            // Recursive case: iterate over next container
-            constexpr size_t INDEX = sizeof...(items);
-            const auto& currentContainer = std::get<INDEX>(std::tie(containers...));
-            for(const auto& item : currentContainer)
-            {
-                self(self, std::forward<decltype(items)>(items)..., item);
-            }
-        }
-    };
-
-    generateRecursive(generateRecursive);
-    return results;
-}
-
-// ============================================================================
-// BnTensorTypes Helper Functions
-// ============================================================================
-
-/// Converts data type enum to string for test naming
 inline std::string dataTypeToString(hipdnn_data_sdk::data_objects::DataType dt)
 {
     using DT = hipdnn_data_sdk::data_objects::DataType;
@@ -582,14 +485,12 @@ inline std::string dataTypeToString(hipdnn_data_sdk::data_objects::DataType dt)
     }
 }
 
-/// Returns a descriptive string for BnTensorTypes for test naming
 inline std::string toString(const BnTensorTypes& types)
 {
     return "IO_" + dataTypeToString(types.io) + "_Affine_" + dataTypeToString(types.affine)
            + "_Stat_" + dataTypeToString(types.stat);
 }
 
-/// Converts activation mode enum to string for test naming
 inline std::string activationModeToString(hipdnn_data_sdk::data_objects::PointwiseMode mode)
 {
     using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
@@ -610,11 +511,8 @@ inline std::string activationModeToString(hipdnn_data_sdk::data_objects::Pointwi
     }
 }
 
-// ============================================================================
-// Test Case Structs - Layer 1: Atomic Validators
-// ============================================================================
+// --- Test Case Structs: Layer 1 (Atomic Validators) ---
 
-// For validators::validateDimensionCount
 struct DimensionCountTestCase
 {
     std::string name;
@@ -627,7 +525,6 @@ struct DimensionCountTestCase
     }
 };
 
-// For validators::validateSupportedLayout
 struct SupportedLayoutTestCase
 {
     std::string name;
@@ -641,7 +538,6 @@ struct SupportedLayoutTestCase
     }
 };
 
-// For validators::validateConsistentDimensions, validatePackedTensors, validateConsistentLayouts
 struct TensorDescriptorListTestCase
 {
     std::string name;
@@ -655,7 +551,6 @@ struct TensorDescriptorListTestCase
     }
 };
 
-// For validators::validateDataTypeIsSupported
 struct DataTypeIsSupportedTestCase
 {
     std::string name;
@@ -669,7 +564,6 @@ struct DataTypeIsSupportedTestCase
     }
 };
 
-// For validators::validateConsistentDataTypes
 struct ConsistentDataTypesTestCase
 {
     std::string name;
@@ -684,7 +578,6 @@ struct ConsistentDataTypesTestCase
     }
 };
 
-// For validators::validateFixedDataType
 struct FixedDataTypeTestCase
 {
     std::string name;
@@ -699,7 +592,6 @@ struct FixedDataTypeTestCase
     }
 };
 
-// For validators::validateConsistentShapes
 struct ConsistentShapesTestCase
 {
     std::string name;
@@ -714,7 +606,6 @@ struct ConsistentShapesTestCase
     }
 };
 
-// For validators::validateSpatialDimensions
 struct SpatialDimensionsTestCase
 {
     std::string name;
@@ -727,11 +618,8 @@ struct SpatialDimensionsTestCase
     }
 };
 
-// ============================================================================
-// Test Case Structs - Layer 2: Component Validators
-// ============================================================================
+// --- Test Case Structs: Layer 2 (Component Validators) ---
 
-// For checkTensorLayoutsAndDimsSupported
 struct TensorLayoutsAndDimsTestCase
 {
     std::string name;
@@ -744,7 +632,6 @@ struct TensorLayoutsAndDimsTestCase
     }
 };
 
-// For checkTensorDataTypesSupported
 struct TensorDataTypesComponentTestCase
 {
     std::string name;
@@ -760,7 +647,6 @@ struct TensorDataTypesComponentTestCase
     }
 };
 
-// For checkTensorShapesSupported
 struct TensorShapesComponentTestCase
 {
     std::string name;
@@ -777,11 +663,8 @@ struct TensorShapesComponentTestCase
     }
 };
 
-// ============================================================================
-// Test Case Structs - Layer 3: High-Level Validators
-// ============================================================================
+// --- Test Case Structs: Layer 3 (High-Level Validators) ---
 
-// For checkBatchnormTensorConfigSupported (BatchnormInferenceAttributes)
 struct BatchnormInferenceConfigTestCase
 {
     std::string name;
@@ -800,7 +683,6 @@ struct BatchnormInferenceConfigTestCase
     }
 };
 
-// For checkBatchnormTensorConfigSupported (BatchnormAttributes)
 struct BatchnormTrainingConfigTestCase
 {
     std::string name;
@@ -820,7 +702,6 @@ struct BatchnormTrainingConfigTestCase
     }
 };
 
-// For checkBatchnormTensorConfigSupported (BatchnormBackwardAttributes)
 struct BatchnormBackwardConfigTestCase
 {
     std::string name;
@@ -841,7 +722,6 @@ struct BatchnormBackwardConfigTestCase
     }
 };
 
-// For checkBatchnormTensorConfigSupported (Fused: BatchnormInferenceAttributes + PointwiseAttributes + BatchnormBackwardAttributes)
 struct BatchnormFusedBackwardConfigTestCase
 {
     std::string name;
@@ -867,8 +747,6 @@ struct BatchnormFusedBackwardConfigTestCase
     }
 };
 
-// For checkBatchnormFwdActivationModeSupported
-// For checkBatchnormBwdActivationModeSupported
 struct ActivationModeTestCase
 {
     std::string name;
@@ -884,11 +762,8 @@ struct ActivationModeTestCase
     }
 };
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
+// --- Helper Functions ---
 
-// Helper to build a minimal graph and return a tensorMap for testing
 std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*> buildTensorMap(
     flatbuffers::FlatBufferBuilder& builder,
     const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>&
@@ -919,7 +794,6 @@ std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttribute
     return tensorMap;
 }
 
-// Helper to build tensorMap from TensorConfig test data
 auto buildTensorMapFromConfigs(const std::vector<TensorConfig>& configs)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -961,11 +835,8 @@ auto buildTensorMapFromConfigs(const std::vector<TensorConfig>& configs)
     return std::make_pair(std::move(builder), std::move(tensorMap));
 }
 
-// ============================================================================
-// Generic Graph Builders for High-Level Tests
-// ============================================================================
+// --- Graph Builders ---
 
-// Builder 1: Batchnorm Inference Graph
 inline flatbuffers::FlatBufferBuilder
     buildBatchnormInferenceGraph(const std::vector<TensorConfig>& configs,
                                  int64_t xUid,
@@ -1019,7 +890,6 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-// Builder 2: Batchnorm Training (Forward) Graph
 inline flatbuffers::FlatBufferBuilder
     buildBatchnormTrainingGraph(const std::vector<TensorConfig>& configs,
                                 int64_t xUid,
@@ -1070,17 +940,17 @@ inline flatbuffers::FlatBufferBuilder
     // Create BatchnormAttributes (training mode) with specified UIDs
     auto bnAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(
         builder,
-        xUid, // x_tensor_uid
-        scaleUid, // scale_tensor_uid
-        biasUid, // bias_tensor_uid
-        epsilonUid, // epsilon_tensor_uid
-        0, // peer_stats_tensor_uid (not used)
+        xUid,
+        scaleUid,
+        biasUid,
+        epsilonUid,
+        0, // peer_stats_tensor_uid
         flatbuffers::nullopt, // prev_running_mean_tensor_uid
         flatbuffers::nullopt, // prev_running_variance_tensor_uid
         flatbuffers::nullopt, // momentum_tensor_uid
-        yUid, // y_tensor_uid
-        meanUid, // mean_tensor_uid (optional output)
-        invVarianceUid, // inv_variance_tensor_uid (optional output)
+        yUid,
+        meanUid,
+        invVarianceUid,
         flatbuffers::nullopt, // next_running_mean_tensor_uid
         flatbuffers::nullopt // next_running_variance_tensor_uid
     );
@@ -1108,7 +978,6 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-// Builder 3: Batchnorm Backward Graph
 inline flatbuffers::FlatBufferBuilder
     buildBatchnormBackwardGraph(const std::vector<TensorConfig>& configs,
                                 int64_t xUid,
@@ -1141,16 +1010,15 @@ inline flatbuffers::FlatBufferBuilder
     // Create BatchnormBackwardAttributes with specified UIDs
     auto bnBwdAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
         builder,
-        dyUid, // dy_tensor_uid
-        xUid, // x_tensor_uid
-        meanUid, // mean_tensor_uid (optional)
-        invVarianceUid, // inv_variance_tensor_uid (optional)
-        scaleUid, // scale_tensor_uid
+        dyUid,
+        xUid,
+        meanUid,
+        invVarianceUid,
+        scaleUid,
         flatbuffers::Offset<flatbuffers::Vector<int64_t>>(), // peer_stats_tensor_uid
-        dxUid, // dx_tensor_uid
-        dscaleUid, // dscale_tensor_uid
-        dbiasUid // dbias_tensor_uid
-    );
+        dxUid,
+        dscaleUid,
+        dbiasUid);
 
     // Create node
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
@@ -1175,7 +1043,6 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-// Builder 4: Fused Batchnorm Inference + Activation + Batchnorm Backward Graph
 inline flatbuffers::FlatBufferBuilder
     buildBatchnormFusedBackwardGraph(const std::vector<TensorConfig>& configs,
                                      int64_t xUid,
@@ -1230,11 +1097,10 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // relu_upper_clip
         flatbuffers::nullopt, // relu_lower_clip_slope
         flatbuffers::nullopt, // axis_tensor_uid
-        bnYVirtualUid, // in_0_tensor_uid (virtual BN_Y)
-        flatbuffers::Optional<int64_t>(dyUid), // in_1_tensor_uid (dy gradient)
+        bnYVirtualUid,
+        flatbuffers::Optional<int64_t>(dyUid),
         flatbuffers::nullopt, // in_2_tensor_uid
-        dxDreluVirtualUid // out_0_tensor_uid (virtual DX_drelu)
-    );
+        dxDreluVirtualUid);
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
         builder,
         "activation_bwd",
@@ -1245,12 +1111,12 @@ inline flatbuffers::FlatBufferBuilder
     // Node 2: Batchnorm Backward
     auto bnBwdAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
         builder,
-        dxDreluVirtualUid, // dy_tensor_uid (virtual DX_drelu)
-        xUid, // x_tensor_uid
+        dxDreluVirtualUid,
+        xUid,
         flatbuffers::Optional<int64_t>(meanUid),
         flatbuffers::Optional<int64_t>(invVarianceUid),
         scaleUid,
-        flatbuffers::Offset<flatbuffers::Vector<int64_t>>(),
+        flatbuffers::Offset<flatbuffers::Vector<int64_t>>(), // peer_stats_tensor_uid
         dxUid,
         dscaleUid,
         dbiasUid);
@@ -1275,12 +1141,9 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-// ============================================================================
-// Test Data Providers - Layer 1: Atomic Validators
-// ============================================================================
+// --- Test Data Providers: Layer 1 (Atomic Validators) ---
 
-// Test data for validators::validateDimensionCount
-// Validates that only 4D and 5D tensors are supported
+// Only 4D and 5D tensors work with batchnorm
 inline std::vector<DimensionCountTestCase> getValidateDimensionCountTestCases()
 {
     return {
@@ -1296,8 +1159,7 @@ inline std::vector<DimensionCountTestCase> getValidateDimensionCountTestCases()
     };
 }
 
-// Test data for validators::validateSupportedLayout
-// Validates that only NCHW/NHWC (4D) and NCDHW/NDHWC (5D) layouts are supported
+// Only NCHW/NHWC (4D) and NCDHW/NDHWC (5D) layouts are supported
 inline std::vector<SupportedLayoutTestCase> getValidateSupportedLayoutTestCases()
 {
     return {
@@ -1319,16 +1181,17 @@ inline std::vector<SupportedLayoutTestCase> getValidateSupportedLayoutTestCases(
     };
 }
 
-// Test data for validators::validateConsistentDimensions
-// Validates that all tensors have the same number of dimensions
+// All tensors must have the same number of dimensions
 inline std::vector<TensorDescriptorListTestCase> getValidateConsistentDimensionsTestCases()
 {
     using namespace canonical_layouts;
 
     auto dims4D = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto dims5D = shapes::INFERENCE_5D[0]; // {1, 3, 16, 224, 224}
-    auto strides4D = generateStrides(dims4D, Layout::NCHW);
-    auto strides5D = generateStrides(dims5D, Layout::NCDHW);
+    auto strides4D
+        = hipdnn_data_sdk::utilities::generateStrides(dims4D, TensorLayout::NCHW.strideOrder);
+    auto strides5D
+        = hipdnn_data_sdk::utilities::generateStrides(dims5D, TensorLayout::NCDHW.strideOrder);
 
     return {
         // Happy paths - consistent dimensions
@@ -1346,17 +1209,19 @@ inline std::vector<TensorDescriptorListTestCase> getValidateConsistentDimensions
     };
 }
 
-// Test data for validators::validatePackedTensors
-// Validates that all tensors are packed (contiguous in memory)
+// All tensors must be packed (contiguous in memory)
 inline std::vector<TensorDescriptorListTestCase> getValidatePackedTensorsTestCases()
 {
     using namespace canonical_layouts;
 
     auto dims4D = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto dims5D = shapes::INFERENCE_5D[0]; // {1, 3, 16, 224, 224}
-    auto nchwStrides = generateStrides(dims4D, Layout::NCHW);
-    auto nhwcStrides = generateStrides(dims4D, Layout::NHWC);
-    auto ncdhwStrides = generateStrides(dims5D, Layout::NCDHW);
+    auto nchwStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims4D, TensorLayout::NCHW.strideOrder);
+    auto nhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims4D, TensorLayout::NHWC.strideOrder);
+    auto ncdhwStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims5D, TensorLayout::NCDHW.strideOrder);
 
     return {
         // Happy paths - packed tensors
@@ -1372,19 +1237,23 @@ inline std::vector<TensorDescriptorListTestCase> getValidatePackedTensorsTestCas
     };
 }
 
-// Test data for validators::validateConsistentLayouts
-// Validates that all tensors have the same layout (stride order)
+// All tensors must have the same layout
 inline std::vector<TensorDescriptorListTestCase> getValidateConsistentLayoutsTestCases()
 {
     using namespace canonical_layouts;
 
     auto dims4D = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto dims5D = shapes::INFERENCE_5D[0]; // {1, 3, 16, 224, 224}
-    auto nchwStrides = generateStrides(dims4D, Layout::NCHW);
-    auto nhwcStrides = generateStrides(dims4D, Layout::NHWC);
-    auto ncdhwStrides = generateStrides(dims5D, Layout::NCDHW);
-    auto ndhwcStrides = generateStrides(dims5D, Layout::NDHWC);
-    auto degenerateStrides = generateStrides(shapes::DEGENERATE_4D, Layout::NCHW);
+    auto nchwStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims4D, TensorLayout::NCHW.strideOrder);
+    auto nhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims4D, TensorLayout::NHWC.strideOrder);
+    auto ncdhwStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims5D, TensorLayout::NCDHW.strideOrder);
+    auto ndhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims5D, TensorLayout::NDHWC.strideOrder);
+    auto degenerateStrides = hipdnn_data_sdk::utilities::generateStrides(
+        shapes::DEGENERATE_4D, TensorLayout::NCHW.strideOrder);
 
     return {
         // Happy paths - consistent layouts
@@ -1402,8 +1271,6 @@ inline std::vector<TensorDescriptorListTestCase> getValidateConsistentLayoutsTes
     };
 }
 
-// Test data for validators::validateDataTypeIsSupported
-// Validates that a data type is in the allowed list
 inline std::vector<DataTypeIsSupportedTestCase> getValidateDataTypeIsSupportedTestCases()
 {
     using DT = hipdnn_data_sdk::data_objects::DataType;
@@ -1421,8 +1288,7 @@ inline std::vector<DataTypeIsSupportedTestCase> getValidateDataTypeIsSupportedTe
     };
 }
 
-// Test data for validators::validateSpatialDimensions
-// Validates that B × S > 1 for training (where B=batch, S=spatial product)
+// Training requires B × S > 1 (batch × spatial product)
 inline std::vector<SpatialDimensionsTestCase> getValidateSpatialDimensionsTestCases()
 {
     using namespace canonical_layouts;
@@ -1445,17 +1311,15 @@ inline std::vector<SpatialDimensionsTestCase> getValidateSpatialDimensionsTestCa
     };
 }
 
-// Test data for validators::validateConsistentDataTypes
-// Tests the atomic validator in isolation - validates that a group of tensors all have
-// the same data type from an allowed list. This is a generic utility function.
-// The actual IO/scale/stat type differentiation is tested in checkTensorDataTypesSupported.
+// Validates a group of tensors all have the same data type from allowed list
 inline std::vector<ConsistentDataTypesTestCase> getValidateConsistentDataTypesTestCases()
 {
     using namespace canonical_layouts;
     using DT = hipdnn_data_sdk::data_objects::DataType;
 
     const auto& testDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
-    auto testStrides = generateStrides(testDims, Layout::NCHW);
+    auto testStrides
+        = hipdnn_data_sdk::utilities::generateStrides(testDims, TensorLayout::NCHW.strideOrder);
 
     return {
         // Happy paths - consistent types
@@ -1493,10 +1357,7 @@ inline std::vector<ConsistentDataTypesTestCase> getValidateConsistentDataTypesTe
     };
 }
 
-// Test data for validators::validateFixedDataType
-// Tests the atomic validator in isolation - validates that all specified tensors
-// have a specific required data type. This is a generic utility function used
-// to enforce that scale/bias/stat tensors must be FLOAT in batchnorm validation.
+// Validates all specified tensors have a specific required data type
 inline std::vector<FixedDataTypeTestCase> getValidateFixedDataTypeTestCases()
 {
     using namespace canonical_layouts;
@@ -1504,7 +1365,8 @@ inline std::vector<FixedDataTypeTestCase> getValidateFixedDataTypeTestCases()
 
     auto derivedDims
         = hipdnn_data_sdk::utilities::getDerivedShape(shapes::INFERENCE_4D[2]); // {1, 3, 1, 1}
-    auto derivedStrides = generateStrides(derivedDims, Layout::NCHW);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, TensorLayout::NCHW.strideOrder);
 
     return {
         // Happy paths - matching types
@@ -1545,23 +1407,24 @@ inline std::vector<FixedDataTypeTestCase> getValidateFixedDataTypeTestCases()
     };
 }
 
-// Test data for validators::validateConsistentShapes
-// Tests the atomic validator in isolation - validates that all specified tensors
-// have the same shape. This is a generic utility function used to ensure IO tensors
-// match and affine/stat tensors match the derived shape in batchnorm validation.
+// Validates all tensors have the same shape
 inline std::vector<ConsistentShapesTestCase> getValidateConsistentShapesTestCases()
 {
     using namespace canonical_layouts;
     using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto canonicalDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
-    auto canonicalStrides = generateStrides(canonicalDims, Layout::NCHW);
+    auto canonicalStrides = hipdnn_data_sdk::utilities::generateStrides(
+        canonicalDims, TensorLayout::NCHW.strideOrder);
     auto mediumDims = shapes::INFERENCE_4D[1]; // {1, 3, 112, 112}
-    auto mediumStrides = generateStrides(mediumDims, Layout::NCHW);
+    auto mediumStrides
+        = hipdnn_data_sdk::utilities::generateStrides(mediumDims, TensorLayout::NCHW.strideOrder);
     auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(canonicalDims); // {1, 3, 1, 1}
-    auto derivedStrides = generateStrides(derivedDims, Layout::NCHW);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, TensorLayout::NCHW.strideOrder);
     auto differentChannelsDims = shapes::DIFFERENT_CHANNELS_4D; // {1, 5, 224, 224}
-    auto differentChannelsStrides = generateStrides(differentChannelsDims, Layout::NCHW);
+    auto differentChannelsStrides = hipdnn_data_sdk::utilities::generateStrides(
+        differentChannelsDims, TensorLayout::NCHW.strideOrder);
 
     return {
         // Happy paths - matching shapes
@@ -1602,12 +1465,8 @@ inline std::vector<ConsistentShapesTestCase> getValidateConsistentShapesTestCase
     };
 }
 
-// ============================================================================
-// Test Data Providers - Layer 2: Component Validators
-// ============================================================================
+// --- Test Data Providers: Layer 2 (Component Validators) ---
 
-// Test data for checkTensorLayoutsAndDimsSupported
-// Validates layouts, dimensions, and packed status for all tensors
 inline std::vector<TensorLayoutsAndDimsTestCase> getCheckTensorLayoutsAndDimsSupportedTestCases()
 {
     using namespace canonical_layouts;
@@ -1615,10 +1474,14 @@ inline std::vector<TensorLayoutsAndDimsTestCase> getCheckTensorLayoutsAndDimsSup
 
     auto dims4D = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
     auto dims5D = shapes::INFERENCE_5D[0]; // {1, 3, 16, 224, 224}
-    auto nchwStrides = generateStrides(dims4D, Layout::NCHW);
-    auto nhwcStrides = generateStrides(dims4D, Layout::NHWC);
-    auto ncdhwStrides = generateStrides(dims5D, Layout::NCDHW);
-    auto ndhwcStrides = generateStrides(dims5D, Layout::NDHWC);
+    auto nchwStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims4D, TensorLayout::NCHW.strideOrder);
+    auto nhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims4D, TensorLayout::NHWC.strideOrder);
+    auto ncdhwStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims5D, TensorLayout::NCDHW.strideOrder);
+    auto ndhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims5D, TensorLayout::NDHWC.strideOrder);
 
     return {
         // Happy paths - valid layouts and dimensions
@@ -1644,17 +1507,18 @@ inline std::vector<TensorLayoutsAndDimsTestCase> getCheckTensorLayoutsAndDimsSup
     };
 }
 
-// Test data for checkTensorDataTypesSupported
-// Validates IO tensors (FLOAT/HALF/BFLOAT16), affine tensors (FLOAT), stat tensors (FLOAT)
+// IO: FLOAT/HALF/BFLOAT16, Affine: FLOAT, Stat: FLOAT
 inline std::vector<TensorDataTypesComponentTestCase> getCheckTensorDataTypesSupportedTestCases()
 {
     using namespace canonical_layouts;
     using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto ioDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
-    auto ioStrides = generateStrides(ioDims, Layout::NCHW);
+    auto ioStrides
+        = hipdnn_data_sdk::utilities::generateStrides(ioDims, TensorLayout::NCHW.strideOrder);
     auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(ioDims); // {1, 3, 1, 1}
-    auto derivedStrides = generateStrides(derivedDims, Layout::NCHW);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, TensorLayout::NCHW.strideOrder);
 
     return {
         // Happy paths - valid IO data types (FLOAT, HALF, BFLOAT16) with FLOAT affine/stat
@@ -1706,32 +1570,38 @@ inline std::vector<TensorDataTypesComponentTestCase> getCheckTensorDataTypesSupp
     };
 }
 
-// Test data for checkTensorShapesSupported
-// Validates IO tensors have same shape, affine/stat have derived shape
+// IO tensors match, affine/stat have derived shape
 inline std::vector<TensorShapesComponentTestCase> getCheckTensorShapesSupportedTestCases()
 {
     using namespace canonical_layouts;
     using DT = hipdnn_data_sdk::data_objects::DataType;
 
     auto inferenceDims = shapes::INFERENCE_4D[2]; // {1, 3, 224, 224}
-    auto inferenceStrides = generateStrides(inferenceDims, Layout::NCHW);
+    auto inferenceStrides = hipdnn_data_sdk::utilities::generateStrides(
+        inferenceDims, TensorLayout::NCHW.strideOrder);
     auto trainingDims = shapes::INFERENCE_4D[3]; // {2, 3, 224, 224}
-    auto trainingStrides = generateStrides(trainingDims, Layout::NCHW);
+    auto trainingStrides
+        = hipdnn_data_sdk::utilities::generateStrides(trainingDims, TensorLayout::NCHW.strideOrder);
     auto mediumDims = shapes::INFERENCE_4D[1]; // {1, 3, 112, 112}
-    auto mediumStrides = generateStrides(mediumDims, Layout::NCHW);
+    auto mediumStrides
+        = hipdnn_data_sdk::utilities::generateStrides(mediumDims, TensorLayout::NCHW.strideOrder);
     auto insufficientDims = shapes::INSUFFICIENT_SPATIAL_4D; // {1, 3, 1, 1}
-    auto insufficientStrides = generateStrides(insufficientDims, Layout::NCHW);
+    auto insufficientStrides = hipdnn_data_sdk::utilities::generateStrides(
+        insufficientDims, TensorLayout::NCHW.strideOrder);
 
     auto derivedDimsInference
         = hipdnn_data_sdk::utilities::getDerivedShape(inferenceDims); // {1, 3, 1, 1}
-    auto derivedStridesInference = generateStrides(derivedDimsInference, Layout::NCHW);
+    auto derivedStridesInference = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDimsInference, TensorLayout::NCHW.strideOrder);
     auto derivedDimsTraining
         = hipdnn_data_sdk::utilities::getDerivedShape(trainingDims); // {1, 3, 1, 1}
-    auto derivedStridesTraining = generateStrides(derivedDimsTraining, Layout::NCHW);
+    auto derivedStridesTraining = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDimsTraining, TensorLayout::NCHW.strideOrder);
 
     auto wrongChannelDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(
         shapes::DIFFERENT_CHANNELS_4D); // {1, 5, 1, 1}
-    auto wrongChannelDerivedStrides = generateStrides(wrongChannelDerivedDims, Layout::NCHW);
+    auto wrongChannelDerivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        wrongChannelDerivedDims, TensorLayout::NCHW.strideOrder);
 
     return {
         // Happy paths - valid shapes for inference
@@ -1790,12 +1660,8 @@ inline std::vector<TensorShapesComponentTestCase> getCheckTensorShapesSupportedT
     };
 }
 
-// ============================================================================
-// Test Data Providers - Layer 3: High-Level Validators
-// ============================================================================
+// --- Test Data Providers: Layer 3 (High-Level Validators) ---
 
-// Test data for checkBatchnormTensorConfigSupported(BatchnormInferenceAttributes&, ...)
-// Tests inference path with all layouts and data types
 inline std::vector<BatchnormInferenceConfigTestCase>
     getCheckBatchnormInferenceConfigSupportedTestCases()
 {
@@ -1808,14 +1674,14 @@ inline std::vector<BatchnormInferenceConfigTestCase>
     // Happy paths - all shapes × all 4D layouts × all valid type configurations
     for(const auto& dims : shapes::INFERENCE_4D)
     {
-        for(const auto& layout : LAYOUTS_4D)
+        for(const auto* layout : LAYOUTS_4D)
         {
             for(const auto& typeConfig : bn_type_configs::VALID)
             {
                 cases.push_back(
-                    {"AcceptsInference_" + generateName(dims, layout) + "_" + toString(typeConfig),
+                    {"AcceptsInference_" + generateName(dims, *layout) + "_" + toString(typeConfig),
                      true,
-                     createBatchnormInferenceTensors(typeConfig, dims, layout),
+                     createBatchnormInferenceTensors(typeConfig, dims, *layout),
                      UIDs::X,
                      UIDs::Y,
                      UIDs::SCALE,
@@ -1829,14 +1695,14 @@ inline std::vector<BatchnormInferenceConfigTestCase>
     // Happy paths - 5D shapes × 5D layouts × all valid type configurations
     for(const auto& dims : shapes::INFERENCE_5D)
     {
-        for(const auto& layout : LAYOUTS_5D)
+        for(const auto* layout : LAYOUTS_5D)
         {
             for(const auto& typeConfig : bn_type_configs::VALID)
             {
                 cases.push_back(
-                    {"AcceptsInference_" + generateName(dims, layout) + "_" + toString(typeConfig),
+                    {"AcceptsInference_" + generateName(dims, *layout) + "_" + toString(typeConfig),
                      true,
-                     createBatchnormInferenceTensors(typeConfig, dims, layout),
+                     createBatchnormInferenceTensors(typeConfig, dims, *layout),
                      UIDs::X,
                      UIDs::Y,
                      UIDs::SCALE,
@@ -1847,24 +1713,30 @@ inline std::vector<BatchnormInferenceConfigTestCase>
         }
     }
 
-    // Unhappy paths - invalid IO data type
+    // Unhappy paths - all invalid type configurations
     auto sampleDims = shapes::INFERENCE_4D[0];
-    BnTensorTypes invalidType = {DT::UINT8, DT::FLOAT, DT::FLOAT};
-    cases.push_back({"RejectsInference_InvalidIoDataType",
-                     false,
-                     createBatchnormInferenceTensors(invalidType, sampleDims, Layout::NCHW),
-                     UIDs::X,
-                     UIDs::Y,
-                     UIDs::SCALE,
-                     UIDs::BIAS,
-                     UIDs::MEAN,
-                     UIDs::INV_VARIANCE});
+    for(const auto& invalidConfig : type_configs::INVALID_ALL)
+    {
+        cases.push_back(
+            {"RejectsInference_" + toString(invalidConfig),
+             false,
+             createBatchnormInferenceTensors(invalidConfig, sampleDims, TensorLayout::NCHW),
+             UIDs::X,
+             UIDs::Y,
+             UIDs::SCALE,
+             UIDs::BIAS,
+             UIDs::MEAN,
+             UIDs::INV_VARIANCE});
+    }
 
     // Unhappy paths - mixed layouts (x is NCHW, y is NHWC)
-    auto nchwStrides = generateStrides(sampleDims, Layout::NCHW);
-    auto nhwcStrides = generateStrides(sampleDims, Layout::NHWC);
+    auto nchwStrides
+        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NCHW.strideOrder);
+    auto nhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NHWC.strideOrder);
     auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
-    auto sampleDerivedStrides = generateStrides(sampleDerivedDims, Layout::NCHW);
+    auto sampleDerivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        sampleDerivedDims, TensorLayout::NCHW.strideOrder);
 
     std::vector<TensorConfig> mixedLayoutConfigs
         = {{UIDs::X, "x", DT::FLOAT, sampleDims, nchwStrides, ""},
@@ -1891,8 +1763,6 @@ inline std::vector<BatchnormInferenceConfigTestCase>
     return cases;
 }
 
-// Test data for checkBatchnormTensorConfigSupported(BatchnormAttributes&, ...)
-// Tests forward training path with all layouts and data types
 inline std::vector<BatchnormTrainingConfigTestCase>
     getCheckBatchnormTrainingConfigSupportedTestCases()
 {
@@ -1911,14 +1781,14 @@ inline std::vector<BatchnormTrainingConfigTestCase>
     {
         for(const auto& dims : shapes::TRAINING_4D)
         {
-            for(const auto& layout : LAYOUTS_4D)
+            for(const auto* layout : LAYOUTS_4D)
             {
                 // With mean/variance
                 cases.push_back(
-                    {"AcceptsTraining_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsTraining_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithMeanVar",
                      true,
-                     createBatchnormTrainingTensors(typeConfig, dims, layout, true, true),
+                     createBatchnormTrainingTensors(typeConfig, dims, *layout, true, true),
                      UIDs::X,
                      UIDs::Y,
                      UIDs::SCALE,
@@ -1928,10 +1798,10 @@ inline std::vector<BatchnormTrainingConfigTestCase>
                      flatbuffers::Optional<int64_t>(UIDs::INV_VARIANCE)});
                 // Without mean/variance
                 cases.push_back(
-                    {"AcceptsTraining_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsTraining_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithoutMeanVar",
                      true,
-                     createBatchnormTrainingTensors(typeConfig, dims, layout, false, false),
+                     createBatchnormTrainingTensors(typeConfig, dims, *layout, false, false),
                      UIDs::X,
                      UIDs::Y,
                      UIDs::SCALE,
@@ -1948,14 +1818,14 @@ inline std::vector<BatchnormTrainingConfigTestCase>
     {
         for(const auto& dims : shapes::TRAINING_5D)
         {
-            for(const auto& layout : LAYOUTS_5D)
+            for(const auto* layout : LAYOUTS_5D)
             {
                 // With mean/variance
                 cases.push_back(
-                    {"AcceptsTraining_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsTraining_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithMeanVar",
                      true,
-                     createBatchnormTrainingTensors(typeConfig, dims, layout, true, true),
+                     createBatchnormTrainingTensors(typeConfig, dims, *layout, true, true),
                      UIDs::X,
                      UIDs::Y,
                      UIDs::SCALE,
@@ -1965,10 +1835,10 @@ inline std::vector<BatchnormTrainingConfigTestCase>
                      flatbuffers::Optional<int64_t>(UIDs::INV_VARIANCE)});
                 // Without mean/variance
                 cases.push_back(
-                    {"AcceptsTraining_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsTraining_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithoutMeanVar",
                      true,
-                     createBatchnormTrainingTensors(typeConfig, dims, layout, false, false),
+                     createBatchnormTrainingTensors(typeConfig, dims, *layout, false, false),
                      UIDs::X,
                      UIDs::Y,
                      UIDs::SCALE,
@@ -1991,7 +1861,7 @@ inline std::vector<BatchnormTrainingConfigTestCase>
                      false,
                      createBatchnormTrainingTensors(bn_type_configs::ALL_FLOAT,
                                                     shapes::INSUFFICIENT_SPATIAL_4D,
-                                                    Layout::NCHW,
+                                                    TensorLayout::NCHW,
                                                     false,
                                                     false),
                      UIDs::X,
@@ -2003,9 +1873,11 @@ inline std::vector<BatchnormTrainingConfigTestCase>
                      flatbuffers::nullopt});
 
     // Unhappy paths - invalid IO data type (UINT8 instead of FLOAT)
-    auto sampleTrainingStrides = generateStrides(sampleTrainingDims, Layout::NCHW);
+    auto sampleTrainingStrides = hipdnn_data_sdk::utilities::generateStrides(
+        sampleTrainingDims, TensorLayout::NCHW.strideOrder);
     auto derivedTrainingDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleTrainingDims);
-    auto derivedTrainingStrides = generateStrides(derivedTrainingDims, Layout::NCHW);
+    auto derivedTrainingStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedTrainingDims, TensorLayout::NCHW.strideOrder);
 
     std::vector<TensorConfig> invalidTypeConfigs = {
         {UIDs::X, "x", DT::UINT8, sampleTrainingDims, sampleTrainingStrides, "", false, false, 0.0},
@@ -2082,11 +1954,46 @@ inline std::vector<BatchnormTrainingConfigTestCase>
                      flatbuffers::nullopt,
                      flatbuffers::nullopt});
 
+    // Unhappy paths - all invalid type configurations
+    for(const auto& invalidConfig : type_configs::INVALID_ALL)
+    {
+        const bool hasInvalidStatType = (invalidConfig.stat != DT::FLOAT);
+
+        // Always test with mean/variance outputs (validates all types)
+        cases.push_back({"RejectsTraining_" + toString(invalidConfig) + "_WithMeanVar",
+                         false,
+                         createBatchnormTrainingTensors(
+                             invalidConfig, sampleTrainingDims, TensorLayout::NCHW, true, true),
+                         UIDs::X,
+                         UIDs::Y,
+                         UIDs::SCALE,
+                         UIDs::BIAS,
+                         UIDs::EPSILON,
+                         flatbuffers::Optional<int64_t>(UIDs::MEAN),
+                         flatbuffers::Optional<int64_t>(UIDs::INV_VARIANCE)});
+
+        // Only test without mean/variance if stat type is valid (FLOAT)
+        // (Can't validate stat type if no stat tensors exist)
+        if(!hasInvalidStatType)
+        {
+            cases.push_back(
+                {"RejectsTraining_" + toString(invalidConfig) + "_NoMeanVar",
+                 false,
+                 createBatchnormTrainingTensors(
+                     invalidConfig, sampleTrainingDims, TensorLayout::NCHW, false, false),
+                 UIDs::X,
+                 UIDs::Y,
+                 UIDs::SCALE,
+                 UIDs::BIAS,
+                 UIDs::EPSILON,
+                 flatbuffers::nullopt,
+                 flatbuffers::nullopt});
+        }
+    }
+
     return cases;
 }
 
-// Test data for checkBatchnormTensorConfigSupported(BatchnormBackwardAttributes&, ...)
-// Tests backward path with all layouts, with/without optional mean/variance
 inline std::vector<BatchnormBackwardConfigTestCase>
     getCheckBatchnormBackwardConfigSupportedTestCases()
 {
@@ -2099,16 +2006,16 @@ inline std::vector<BatchnormBackwardConfigTestCase>
     // Happy paths - all inference shapes × all 4D layouts × all valid type configs × 2 variants
     for(const auto& dims : shapes::INFERENCE_4D)
     {
-        for(const auto& layout : LAYOUTS_4D)
+        for(const auto* layout : LAYOUTS_4D)
         {
             for(const auto& typeConfig : bn_type_configs::VALID)
             {
                 // With optionals
                 cases.push_back(
-                    {"AcceptsBackward_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsBackward_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithOptionals",
                      true,
-                     createBatchnormBackwardTensors(typeConfig, dims, layout, true, true),
+                     createBatchnormBackwardTensors(typeConfig, dims, *layout, true, true),
                      UIDs::X,
                      UIDs::DY,
                      UIDs::DX,
@@ -2119,10 +2026,10 @@ inline std::vector<BatchnormBackwardConfigTestCase>
                      flatbuffers::Optional<int64_t>(UIDs::INV_VARIANCE)});
                 // Without optionals
                 cases.push_back(
-                    {"AcceptsBackward_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsBackward_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithoutOptionals",
                      true,
-                     createBatchnormBackwardTensors(typeConfig, dims, layout, false, false),
+                     createBatchnormBackwardTensors(typeConfig, dims, *layout, false, false),
                      UIDs::X,
                      UIDs::DY,
                      UIDs::DX,
@@ -2138,16 +2045,16 @@ inline std::vector<BatchnormBackwardConfigTestCase>
     // Happy paths - 5D inference shapes × 5D layouts × all valid type configs
     for(const auto& dims : shapes::INFERENCE_5D)
     {
-        for(const auto& layout : LAYOUTS_5D)
+        for(const auto* layout : LAYOUTS_5D)
         {
             for(const auto& typeConfig : bn_type_configs::VALID)
             {
                 // With optionals
                 cases.push_back(
-                    {"AcceptsBackward_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsBackward_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithOptionals",
                      true,
-                     createBatchnormBackwardTensors(typeConfig, dims, layout, true, true),
+                     createBatchnormBackwardTensors(typeConfig, dims, *layout, true, true),
                      UIDs::X,
                      UIDs::DY,
                      UIDs::DX,
@@ -2158,10 +2065,10 @@ inline std::vector<BatchnormBackwardConfigTestCase>
                      flatbuffers::Optional<int64_t>(UIDs::INV_VARIANCE)});
                 // Without optionals
                 cases.push_back(
-                    {"AcceptsBackward_" + generateName(dims, layout) + "_" + toString(typeConfig)
+                    {"AcceptsBackward_" + generateName(dims, *layout) + "_" + toString(typeConfig)
                          + "_WithoutOptionals",
                      true,
-                     createBatchnormBackwardTensors(typeConfig, dims, layout, false, false),
+                     createBatchnormBackwardTensors(typeConfig, dims, *layout, false, false),
                      UIDs::X,
                      UIDs::DY,
                      UIDs::DX,
@@ -2174,42 +2081,54 @@ inline std::vector<BatchnormBackwardConfigTestCase>
         }
     }
 
-    // Unhappy paths - invalid affine data type (must be FLOAT, not HALF)
-    // Create custom config with invalid affine type
+    // Unhappy paths - all invalid type configurations
     auto sampleDims = shapes::INFERENCE_4D[0];
-    auto sampleStrides = generateStrides(sampleDims, Layout::NCHW);
-    auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
-    auto sampleDerivedStrides = generateStrides(sampleDerivedDims, Layout::NCHW);
+    for(const auto& invalidConfig : type_configs::INVALID_ALL)
+    {
+        const bool hasInvalidStatType = (invalidConfig.stat != DT::FLOAT);
 
-    std::vector<TensorConfig> invalidAffineConfigs = {
-        {UIDs::X, "x", DT::FLOAT, sampleDims, sampleStrides, ""},
-        {UIDs::DY, "dy", DT::FLOAT, sampleDims, sampleStrides, ""},
-        {UIDs::DX, "dx", DT::FLOAT, sampleDims, sampleStrides, ""},
-        {UIDs::SCALE, "scale", DT::HALF, sampleDerivedDims, sampleDerivedStrides, ""}, // Invalid!
-        {UIDs::DSCALE, "dscale", DT::HALF, sampleDerivedDims, sampleDerivedStrides, ""},
-        {UIDs::DBIAS, "dbias", DT::HALF, sampleDerivedDims, sampleDerivedStrides, ""},
-        {UIDs::MEAN, "mean", DT::FLOAT, sampleDerivedDims, sampleDerivedStrides, ""},
-        {UIDs::INV_VARIANCE,
-         "inv_variance",
-         DT::FLOAT,
-         sampleDerivedDims,
-         sampleDerivedStrides,
-         ""}};
-    cases.push_back({"RejectsBackward_InvalidAffineDataType",
-                     false,
-                     invalidAffineConfigs,
-                     UIDs::X,
-                     UIDs::DY,
-                     UIDs::DX,
-                     UIDs::SCALE,
-                     UIDs::DSCALE,
-                     UIDs::DBIAS,
-                     flatbuffers::Optional<int64_t>(UIDs::MEAN),
-                     flatbuffers::Optional<int64_t>(UIDs::INV_VARIANCE)});
+        // Always test with mean/variance inputs (validates all types)
+        cases.push_back({"RejectsBackward_" + toString(invalidConfig) + "_WithMeanVar",
+                         false,
+                         createBatchnormBackwardTensors(
+                             invalidConfig, sampleDims, TensorLayout::NCHW, true, true),
+                         UIDs::X,
+                         UIDs::DY,
+                         UIDs::DX,
+                         UIDs::SCALE,
+                         UIDs::DSCALE,
+                         UIDs::DBIAS,
+                         flatbuffers::Optional<int64_t>(UIDs::MEAN),
+                         flatbuffers::Optional<int64_t>(UIDs::INV_VARIANCE)});
+
+        // Only test without mean/variance if stat type is valid (FLOAT)
+        // (Can't validate stat type if no stat tensors exist)
+        if(!hasInvalidStatType)
+        {
+            cases.push_back({"RejectsBackward_" + toString(invalidConfig) + "_NoMeanVar",
+                             false,
+                             createBatchnormBackwardTensors(
+                                 invalidConfig, sampleDims, TensorLayout::NCHW, false, false),
+                             UIDs::X,
+                             UIDs::DY,
+                             UIDs::DX,
+                             UIDs::SCALE,
+                             UIDs::DSCALE,
+                             UIDs::DBIAS,
+                             flatbuffers::nullopt,
+                             flatbuffers::nullopt});
+        }
+    }
 
     // Unhappy paths - inconsistent IO shapes
+    auto sampleStrides
+        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NCHW.strideOrder);
+    auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
+    auto sampleDerivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        sampleDerivedDims, TensorLayout::NCHW.strideOrder);
     auto mediumDims = shapes::INFERENCE_4D[1]; // {1, 3, 112, 112}
-    auto mediumStrides = generateStrides(mediumDims, Layout::NCHW);
+    auto mediumStrides
+        = hipdnn_data_sdk::utilities::generateStrides(mediumDims, TensorLayout::NCHW.strideOrder);
 
     std::vector<TensorConfig> inconsistentShapes
         = {{UIDs::X, "x", DT::FLOAT, sampleDims, sampleStrides, ""},
@@ -2258,8 +2177,6 @@ inline std::vector<BatchnormBackwardConfigTestCase>
     return cases;
 }
 
-// Test data for checkBatchnormTensorConfigSupported(Fused: BatchnormInferenceAttributes + PointwiseAttributes + BatchnormBackwardAttributes)
-// Tests fused backward path (inference + activation + backward) with all layouts
 inline std::vector<BatchnormFusedBackwardConfigTestCase>
     getCheckBatchnormFusedBackwardConfigSupportedTestCases()
 {
@@ -2276,17 +2193,17 @@ inline std::vector<BatchnormFusedBackwardConfigTestCase>
     // Happy paths - all inference shapes × all 4D layouts × all valid type configs × all supported activations
     for(const auto& dims : shapes::INFERENCE_4D)
     {
-        for(const auto& layout : LAYOUTS_4D)
+        for(const auto* layout : LAYOUTS_4D)
         {
             for(const auto& typeConfig : bn_type_configs::VALID)
             {
                 for(const auto& activMode : supportedBwdActivations)
                 {
-                    cases.push_back({"AcceptsFused_" + generateName(dims, layout) + "_"
+                    cases.push_back({"AcceptsFused_" + generateName(dims, *layout) + "_"
                                          + toString(typeConfig) + "_"
                                          + activationModeToString(activMode),
                                      true,
-                                     createBatchnormFusedBackwardTensors(typeConfig, dims, layout),
+                                     createBatchnormFusedBackwardTensors(typeConfig, dims, *layout),
                                      UIDs::X,
                                      UIDs::SCALE,
                                      UIDs::BIAS,
@@ -2307,17 +2224,17 @@ inline std::vector<BatchnormFusedBackwardConfigTestCase>
     // Happy paths - 5D inference shapes × 5D layouts × all valid type configs × all supported activations
     for(const auto& dims : shapes::INFERENCE_5D)
     {
-        for(const auto& layout : LAYOUTS_5D)
+        for(const auto* layout : LAYOUTS_5D)
         {
             for(const auto& typeConfig : bn_type_configs::VALID)
             {
                 for(const auto& activMode : supportedBwdActivations)
                 {
-                    cases.push_back({"AcceptsFused_" + generateName(dims, layout) + "_"
+                    cases.push_back({"AcceptsFused_" + generateName(dims, *layout) + "_"
                                          + toString(typeConfig) + "_"
                                          + activationModeToString(activMode),
                                      true,
-                                     createBatchnormFusedBackwardTensors(typeConfig, dims, layout),
+                                     createBatchnormFusedBackwardTensors(typeConfig, dims, *layout),
                                      UIDs::X,
                                      UIDs::SCALE,
                                      UIDs::BIAS,
@@ -2335,47 +2252,36 @@ inline std::vector<BatchnormFusedBackwardConfigTestCase>
         }
     }
 
-    // Unhappy paths - invalid data type (create custom config with UINT8)
+    // Unhappy paths - all invalid type configurations
     auto sampleDims = shapes::INFERENCE_4D[0];
-    auto sampleStrides = generateStrides(sampleDims, Layout::NCHW);
-    auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
-    auto sampleDerivedStrides = generateStrides(sampleDerivedDims, Layout::NCHW);
-
-    std::vector<TensorConfig> invalidTypeConfigs
-        = {{UIDs::X, "x", DT::UINT8, sampleDims, sampleStrides, ""},
-           {UIDs::SCALE, "scale", DT::FLOAT, sampleDerivedDims, sampleDerivedStrides, ""},
-           {UIDs::BIAS, "bias", DT::FLOAT, sampleDerivedDims, sampleDerivedStrides, ""},
-           {UIDs::MEAN, "mean", DT::FLOAT, sampleDerivedDims, sampleDerivedStrides, ""},
-           {UIDs::INV_VARIANCE,
-            "inv_variance",
-            DT::FLOAT,
-            sampleDerivedDims,
-            sampleDerivedStrides,
-            ""},
-           {UIDs::DY, "dy", DT::UINT8, sampleDims, sampleStrides, ""},
-           {UIDs::DX, "dx", DT::UINT8, sampleDims, sampleStrides, ""},
-           {UIDs::DSCALE, "dscale", DT::FLOAT, sampleDerivedDims, sampleDerivedStrides, ""},
-           {UIDs::DBIAS, "dbias", DT::FLOAT, sampleDerivedDims, sampleDerivedStrides, ""},
-           {UIDs::BN_Y_VIRTUAL, "BN_Y", DT::UINT8, sampleDims, sampleStrides, "", true},
-           {UIDs::DX_DRELU_VIRTUAL, "DX_drelu", DT::UINT8, sampleDims, sampleStrides, "", true}};
-    cases.push_back({"RejectsFused_InvalidDataType",
-                     false,
-                     invalidTypeConfigs,
-                     BnFusedTensorIds::X,
-                     BnFusedTensorIds::SCALE,
-                     BnFusedTensorIds::BIAS,
-                     BnFusedTensorIds::MEAN,
-                     BnFusedTensorIds::INV_VARIANCE,
-                     BnFusedTensorIds::DY,
-                     BnFusedTensorIds::DX,
-                     BnFusedTensorIds::DSCALE,
-                     BnFusedTensorIds::DBIAS,
-                     BnFusedTensorIds::BN_Y_VIRTUAL,
-                     BnFusedTensorIds::DX_DRELU_VIRTUAL,
-                     PM::RELU_BWD});
+    for(const auto& invalidConfig : type_configs::INVALID_ALL)
+    {
+        cases.push_back(
+            {"RejectsFused_" + toString(invalidConfig),
+             false,
+             createBatchnormFusedBackwardTensors(invalidConfig, sampleDims, TensorLayout::NCHW),
+             UIDs::X,
+             UIDs::SCALE,
+             UIDs::BIAS,
+             UIDs::MEAN,
+             UIDs::INV_VARIANCE,
+             UIDs::DY,
+             UIDs::DX,
+             UIDs::DSCALE,
+             UIDs::DBIAS,
+             UIDs::BN_Y_VIRTUAL,
+             UIDs::DX_DRELU_VIRTUAL,
+             PM::RELU_BWD});
+    }
 
     // Unhappy paths - mixed layouts
-    auto nhwcStrides = generateStrides(sampleDims, Layout::NHWC);
+    auto sampleStrides
+        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NCHW.strideOrder);
+    auto sampleDerivedDims = hipdnn_data_sdk::utilities::getDerivedShape(sampleDims);
+    auto sampleDerivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        sampleDerivedDims, TensorLayout::NCHW.strideOrder);
+    auto nhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NHWC.strideOrder);
 
     std::vector<TensorConfig> mixedLayoutConfigs
         = {{UIDs::X, "x", DT::FLOAT, sampleDims, sampleStrides, ""},
@@ -2411,64 +2317,62 @@ inline std::vector<BatchnormFusedBackwardConfigTestCase>
                      PM::RELU_BWD});
 
     // Unhappy paths - unsupported activation: SIGMOID_BWD
-    cases.push_back(
-        {"RejectsFused_UnsupportedActivation_SigmoidBwd",
-         false,
-         createBatchnormFusedBackwardTensors(bn_type_configs::ALL_FLOAT, sampleDims, Layout::NCHW),
-         BnFusedTensorIds::X,
-         BnFusedTensorIds::SCALE,
-         BnFusedTensorIds::BIAS,
-         BnFusedTensorIds::MEAN,
-         BnFusedTensorIds::INV_VARIANCE,
-         BnFusedTensorIds::DY,
-         BnFusedTensorIds::DX,
-         BnFusedTensorIds::DSCALE,
-         BnFusedTensorIds::DBIAS,
-         BnFusedTensorIds::BN_Y_VIRTUAL,
-         BnFusedTensorIds::DX_DRELU_VIRTUAL,
-         PM::SIGMOID_BWD});
+    cases.push_back({"RejectsFused_UnsupportedActivation_SigmoidBwd",
+                     false,
+                     createBatchnormFusedBackwardTensors(
+                         bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW),
+                     BnFusedTensorIds::X,
+                     BnFusedTensorIds::SCALE,
+                     BnFusedTensorIds::BIAS,
+                     BnFusedTensorIds::MEAN,
+                     BnFusedTensorIds::INV_VARIANCE,
+                     BnFusedTensorIds::DY,
+                     BnFusedTensorIds::DX,
+                     BnFusedTensorIds::DSCALE,
+                     BnFusedTensorIds::DBIAS,
+                     BnFusedTensorIds::BN_Y_VIRTUAL,
+                     BnFusedTensorIds::DX_DRELU_VIRTUAL,
+                     PM::SIGMOID_BWD});
 
     // Unhappy paths - unsupported activation: TANH_BWD
-    cases.push_back(
-        {"RejectsFused_UnsupportedActivation_TanhBwd",
-         false,
-         createBatchnormFusedBackwardTensors(bn_type_configs::ALL_FLOAT, sampleDims, Layout::NCHW),
-         BnFusedTensorIds::X,
-         BnFusedTensorIds::SCALE,
-         BnFusedTensorIds::BIAS,
-         BnFusedTensorIds::MEAN,
-         BnFusedTensorIds::INV_VARIANCE,
-         BnFusedTensorIds::DY,
-         BnFusedTensorIds::DX,
-         BnFusedTensorIds::DSCALE,
-         BnFusedTensorIds::DBIAS,
-         BnFusedTensorIds::BN_Y_VIRTUAL,
-         BnFusedTensorIds::DX_DRELU_VIRTUAL,
-         PM::TANH_BWD});
+    cases.push_back({"RejectsFused_UnsupportedActivation_TanhBwd",
+                     false,
+                     createBatchnormFusedBackwardTensors(
+                         bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW),
+                     BnFusedTensorIds::X,
+                     BnFusedTensorIds::SCALE,
+                     BnFusedTensorIds::BIAS,
+                     BnFusedTensorIds::MEAN,
+                     BnFusedTensorIds::INV_VARIANCE,
+                     BnFusedTensorIds::DY,
+                     BnFusedTensorIds::DX,
+                     BnFusedTensorIds::DSCALE,
+                     BnFusedTensorIds::DBIAS,
+                     BnFusedTensorIds::BN_Y_VIRTUAL,
+                     BnFusedTensorIds::DX_DRELU_VIRTUAL,
+                     PM::TANH_BWD});
 
     // Unhappy paths - unsupported activation: RELU_FWD (wrong direction)
-    cases.push_back(
-        {"RejectsFused_UnsupportedActivation_ReluFwdInBwdContext",
-         false,
-         createBatchnormFusedBackwardTensors(bn_type_configs::ALL_FLOAT, sampleDims, Layout::NCHW),
-         BnFusedTensorIds::X,
-         BnFusedTensorIds::SCALE,
-         BnFusedTensorIds::BIAS,
-         BnFusedTensorIds::MEAN,
-         BnFusedTensorIds::INV_VARIANCE,
-         BnFusedTensorIds::DY,
-         BnFusedTensorIds::DX,
-         BnFusedTensorIds::DSCALE,
-         BnFusedTensorIds::DBIAS,
-         BnFusedTensorIds::BN_Y_VIRTUAL,
-         BnFusedTensorIds::DX_DRELU_VIRTUAL,
-         PM::RELU_FWD});
+    cases.push_back({"RejectsFused_UnsupportedActivation_ReluFwdInBwdContext",
+                     false,
+                     createBatchnormFusedBackwardTensors(
+                         bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW),
+                     BnFusedTensorIds::X,
+                     BnFusedTensorIds::SCALE,
+                     BnFusedTensorIds::BIAS,
+                     BnFusedTensorIds::MEAN,
+                     BnFusedTensorIds::INV_VARIANCE,
+                     BnFusedTensorIds::DY,
+                     BnFusedTensorIds::DX,
+                     BnFusedTensorIds::DSCALE,
+                     BnFusedTensorIds::DBIAS,
+                     BnFusedTensorIds::BN_Y_VIRTUAL,
+                     BnFusedTensorIds::DX_DRELU_VIRTUAL,
+                     PM::RELU_FWD});
 
     return cases;
 }
 
-// Test data for checkBatchnormFwdActivationModeSupported
-// Validates supported activation modes for forward batchnorm fusion
 inline std::vector<ActivationModeTestCase> getCheckBatchnormFwdActivationModeSupportedTestCases()
 {
     return {
@@ -2526,8 +2430,6 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormFwdActivationModeSup
     };
 }
 
-// Test data for checkBatchnormBwdActivationModeSupported
-// Validates supported activation modes for backward batchnorm fusion
 inline std::vector<ActivationModeTestCase> getCheckBatchnormBwdActivationModeSupportedTestCases()
 {
     return {
@@ -2587,9 +2489,7 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormBwdActivationModeSup
 
 } // namespace
 
-// ============================================================================
-// Test Classes - Layer 1: Atomic Validator Tests
-// ============================================================================
+// --- Test Classes: Layer 1 (Atomic Validators) ---
 
 class TestValidateDimensionCount : public ::testing::TestWithParam<DimensionCountTestCase>
 {
@@ -2915,9 +2815,10 @@ INSTANTIATE_TEST_SUITE_P(AllCases,
                          TestValidateSpatialDimensions,
                          testing::ValuesIn(getValidateSpatialDimensionsTestCases()));
 
-// ============================================================================
-// Test Classes - Layer 2: Component Validator Tests
-// ============================================================================
+// Note: validatePeerStatsNotPopulated is tested through integration tests below
+// (RejectsBatchnormFwdTrainingWithPeerStats, RejectsBatchnormBackwardWithPeerStats)
+
+// --- Test Classes: Layer 2 (Component Validators) ---
 
 class TestCheckTensorLayoutsAndDimsSupported
     : public ::testing::TestWithParam<TensorLayoutsAndDimsTestCase>
@@ -3009,9 +2910,7 @@ INSTANTIATE_TEST_SUITE_P(AllCases,
                          TestCheckTensorShapesSupported,
                          testing::ValuesIn(getCheckTensorShapesSupportedTestCases()));
 
-// ============================================================================
-// Test Classes - Layer 3: High-Level Configuration Validator Tests
-// ============================================================================
+// --- Test Classes: Layer 3 (High-Level Configuration Validators) ---
 
 class TestCheckBatchnormInferenceConfigSupported
     : public ::testing::TestWithParam<BatchnormInferenceConfigTestCase>
@@ -3265,3 +3164,164 @@ TEST_P(TestCheckBatchnormBwdActivationModeSupported, ValidatesCorrectly)
 INSTANTIATE_TEST_SUITE_P(AllCases,
                          TestCheckBatchnormBwdActivationModeSupported,
                          testing::ValuesIn(getCheckBatchnormBwdActivationModeSupportedTestCases()));
+
+// --- Integration Tests: Peer Stats Validation ---
+
+TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormFwdTrainingWithPeerStats)
+{
+    using namespace canonical_layouts;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
+    using UIDs = BnTrainingTensorIds;
+
+    // Create valid tensor configs
+    const auto& dims = shapes::TRAINING_4D[0];
+    auto configs = createBatchnormTrainingTensors(
+        bn_type_configs::ALL_FLOAT, dims, TensorLayout::NCHW, false, false);
+
+    flatbuffers::FlatBufferBuilder builder;
+
+    // Build tensor attributes
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    for(const auto& cfg : configs)
+    {
+        if(cfg.isPassByValue)
+        {
+            hipdnn_data_sdk::data_objects::Float64Value floatValue(cfg.passedValue);
+            auto valueOffset = builder.CreateStruct(floatValue).Union();
+            tensorOffsets.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                cfg.uid,
+                cfg.name.c_str(),
+                cfg.dataType,
+                &cfg.strides,
+                &cfg.dims,
+                cfg.isVirtual,
+                hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
+                valueOffset));
+        }
+        else
+        {
+            tensorOffsets.push_back(
+                hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                            cfg.uid,
+                                                                            cfg.name.c_str(),
+                                                                            cfg.dataType,
+                                                                            &cfg.strides,
+                                                                            &cfg.dims,
+                                                                            cfg.isVirtual));
+        }
+    }
+
+    // Create peer_stats_tensor_uid with populated values (should be rejected)
+    std::vector<int64_t> peerStatsUids = {100, 101, 102};
+    auto peerStatsOffset = builder.CreateVector(peerStatsUids);
+
+    // Create BatchnormAttributes WITH peer_stats populated
+    auto bnAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormAttributes(
+        builder,
+        UIDs::X,
+        UIDs::SCALE,
+        UIDs::BIAS,
+        UIDs::EPSILON,
+        peerStatsOffset, // peer_stats populated - should be rejected
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        UIDs::Y,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt);
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "batchnorm_training",
+        DT::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+        bnAttrs.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder, "test_graph", DT::FLOAT, DT::HALF, DT::BFLOAT16, &tensorOffsets, &nodes);
+
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_BatchnormAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    // Should throw because peer_stats is populated
+    EXPECT_THROW(
+        { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormBackwardWithPeerStats)
+{
+    using namespace canonical_layouts;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
+    using UIDs = BnBackwardTensorIds;
+
+    // Create valid tensor configs
+    const auto& dims = shapes::INFERENCE_4D[0];
+    auto configs = createBatchnormBackwardTensors(
+        bn_type_configs::ALL_FLOAT, dims, TensorLayout::NCHW, false, false);
+
+    flatbuffers::FlatBufferBuilder builder;
+
+    // Build tensor attributes
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    tensorOffsets.reserve(configs.size());
+    for(const auto& cfg : configs)
+    {
+        tensorOffsets.push_back(
+            hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                        cfg.uid,
+                                                                        cfg.name.c_str(),
+                                                                        cfg.dataType,
+                                                                        &cfg.strides,
+                                                                        &cfg.dims,
+                                                                        cfg.isVirtual));
+    }
+
+    // Create peer_stats_tensor_uid with populated values (should be rejected)
+    std::vector<int64_t> peerStatsUids = {200, 201};
+    auto peerStatsOffset = builder.CreateVector(peerStatsUids);
+
+    // Create BatchnormBackwardAttributes WITH peer_stats populated
+    auto bnBwdAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
+        builder,
+        UIDs::DY,
+        UIDs::X,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        UIDs::SCALE,
+        peerStatsOffset, // peer_stats populated - should be rejected
+        UIDs::DX,
+        UIDs::DSCALE,
+        UIDs::DBIAS);
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "batchnorm_backward",
+        DT::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+        bnBwdAttrs.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder, "test_graph", DT::FLOAT, DT::HALF, DT::BFLOAT16, &tensorOffsets, &nodes);
+
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    // Should throw because peer_stats is populated
+    EXPECT_THROW(
+        { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+        hipdnn_plugin_sdk::HipdnnPluginException);
+}

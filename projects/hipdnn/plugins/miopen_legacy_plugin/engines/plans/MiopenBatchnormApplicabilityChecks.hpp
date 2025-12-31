@@ -16,9 +16,7 @@
 namespace miopen_legacy_plugin
 {
 
-// ============================================================================
-// Tensor Descriptor Value Object
-// ============================================================================
+// --- Tensor Descriptor Value Object ---
 
 struct BatchnormTensorDescriptor
 {
@@ -35,14 +33,10 @@ struct BatchnormTensorDescriptor
     bool isPacked() const;
 };
 
-// ============================================================================
-// Validation Utilities Namespace
-// ============================================================================
+// --- Validation Utilities ---
 
 namespace validators
 {
-
-// Layout and Dimension Validators
 void validateDimensionCount(size_t numDims);
 
 void validateConsistentDimensions(const std::vector<BatchnormTensorDescriptor>& tensors);
@@ -53,7 +47,6 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
 
 void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& tensors);
 
-// Data Type Validators
 void validateDataTypeIsSupported(
     hipdnn_data_sdk::data_objects::DataType dataType,
     const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
@@ -74,7 +67,6 @@ void validateFixedDataType(
     hipdnn_data_sdk::data_objects::DataType expectedType,
     const std::string& errorMessage);
 
-// Shape Validators
 void validateConsistentShapes(
     const std::vector<int64_t>& tensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -86,9 +78,7 @@ void validateSpatialDimensions(const std::vector<int64_t>& ioDims);
 
 } // namespace validators
 
-// ============================================================================
-// Component Validators (Orchestrate Atomic Validators)
-// ============================================================================
+// --- Component Validators ---
 
 void checkTensorLayoutsAndDimsSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -109,9 +99,7 @@ void checkTensorShapesSupported(
         tensorMap,
     bool isTraining);
 
-// ============================================================================
-// High-Level Configuration Validators
-// ============================================================================
+// --- High-Level Configuration Validators ---
 
 void checkBatchnormTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
@@ -141,59 +129,30 @@ void checkBatchnormFwdActivationModeSupported(
 void checkBatchnormBwdActivationModeSupported(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
 
-// ============================================================================
-// Batchnorm Type Configuration - Single Source of Truth
-// ============================================================================
+// --- Batchnorm Type Configuration ---
 
-/// Specifies data types for different tensor roles in batchnorm operations.
-///
-/// Current MIOpen Requirements (as of v6.x):
-/// - IO tensors: Must all be the same type (FLOAT, HALF, or BFLOAT16)
-/// - Affine tensors (scale, bias): Must be FLOAT
-/// - Stat tensors (mean, variance): Must be FLOAT
-///
-/// When MIOpen support changes, update BnTypeConfigs::VALID array.
+// MIOpen v6.x requirements:
+// - IO tensors: same type (FLOAT, HALF, or BFLOAT16)
+// - Affine/Stat tensors: FLOAT only
 struct BnTensorTypes
 {
-    hipdnn_data_sdk::data_objects::DataType io; ///< Type for IO tensors (x, y, dx, dy)
-    hipdnn_data_sdk::data_objects::DataType
-        affine; ///< Type for affine (scale, bias, dscale, dbias)
-    hipdnn_data_sdk::data_objects::DataType stat; ///< Type for stat (mean, variance)
+    hipdnn_data_sdk::data_objects::DataType io;
+    hipdnn_data_sdk::data_objects::DataType affine;
+    hipdnn_data_sdk::data_objects::DataType stat;
 };
 
-/// Canonical batchnorm type configurations matching MIOpen requirements.
-/// This is the SINGLE SOURCE OF TRUTH for supported type combinations.
 namespace bn_type_configs
 {
 using DT = hipdnn_data_sdk::data_objects::DataType;
 
-// ========================================================================
-// Valid Configurations (per MIOpen v6.x specification)
-// ========================================================================
-
-/// IO=FLOAT, Affine=FLOAT, Stat=FLOAT (baseline)
 inline constexpr BnTensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT};
-
-/// IO=HALF, Affine=FLOAT, Stat=FLOAT (mixed precision with FP16)
 inline constexpr BnTensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT};
-
-/// IO=BFLOAT16, Affine=FLOAT, Stat=FLOAT (mixed precision with BF16)
 inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT};
 
-/// All currently supported type configurations
 inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
 
-// ========================================================================
-// Helper Functions for Validation
-// ========================================================================
-
-/// Returns all allowed IO data types from VALID configurations
 std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
-
-/// Returns all allowed affine data types from VALID configurations
 std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
-
-/// Returns all allowed stat data types from VALID configurations
 std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
 
 } // namespace bn_type_configs
