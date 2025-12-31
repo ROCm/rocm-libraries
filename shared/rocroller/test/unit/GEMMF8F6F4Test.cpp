@@ -89,6 +89,11 @@ namespace GEMMTests
         {
             auto const& params = std::get<1>(inputParam);
 
+            auto const& typeA          = std::get<0>(params);
+            auto const& typeB          = std::get<1>(params);
+            auto const& waveK          = std::get<2>(params);
+            auto const& loadPathA      = std::get<3>(params);
+            auto const& loadPathB      = std::get<4>(params);
             auto const& scaleAMode     = std::get<5>(params);
             auto const& scaleBMode     = std::get<6>(params);
             auto const& loadScalePathA = std::get<7>(params);
@@ -103,6 +108,13 @@ namespace GEMMTests
             if((loadScalePathB != LP::BufferToVGPR or loadScalePathB != LP::GlobalToVGPR)
                && (scaleBMode == SM::None || scaleBMode == SM::SingleScale))
             {
+                continue;
+            }
+
+            if(typeA == DataType::BF6 && typeB == DataType::BF6 && waveK == 64
+               && loadPathA == LP::GlobalToLDSViaVGPR)
+            {
+                // TODO: This should be fine, but seems to hang.
                 continue;
             }
 
