@@ -16,6 +16,7 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_backend
 {
@@ -559,6 +560,27 @@ hipdnnEnginePluginExecutionContext_t EngineExecutionContextWrapper::get() const
     }
 
     return _executionContext;
+}
+
+std::string EnginePluginResourceManager::toString() const
+{
+    if(!_pm)
+    {
+        return "EnginePluginResourceManager: {loadedPlugins=0}";
+    }
+
+    auto loadedPlugins = _pm->getLoadedPluginFiles();
+
+    std::vector<std::string> pluginPathStrings;
+    pluginPathStrings.reserve(loadedPlugins.size());
+    for(const auto& path : loadedPlugins)
+    {
+        pluginPathStrings.push_back(path.string());
+    }
+
+    return fmt::format("EnginePluginResourceManager: {{loadedPlugins={}, loadedPluginPaths=[{}]}}",
+                       loadedPlugins.size(),
+                       fmt::join(pluginPathStrings, ", "));
 }
 
 } // namespace plugin
