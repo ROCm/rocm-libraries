@@ -146,26 +146,6 @@ namespace rocRoller
             }
         };
 
-        template <typename IO, typename Context>
-        struct MappingTraits<KernelGraph::Connections::ComputeIndex, IO, Context>
-        {
-            using iot = IOTraits<IO>;
-
-            static void mapping(IO& io, KernelGraph::Connections::ComputeIndex& x, Context& ctx)
-            {
-                iot::mapRequired(io, "argument", x.argument);
-                iot::mapRequired(io, "index", x.index);
-            }
-
-            static void mapping(IO& io, KernelGraph::Connections::ComputeIndex& x)
-            {
-                AssertFatal((std::same_as<EmptyContext, Context>));
-
-                Context ctx;
-                mapping(io, x, ctx);
-            }
-        };
-
         static_assert(CNamedVariant<KernelGraph::Connections::ConnectionSpec>);
 
         template <typename IO, typename Context>
