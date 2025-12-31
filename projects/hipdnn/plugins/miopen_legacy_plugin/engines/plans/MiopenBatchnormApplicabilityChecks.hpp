@@ -5,6 +5,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
@@ -49,14 +50,14 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
 
 void validateDataTypeIsSupported(
     hipdnn_data_sdk::data_objects::DataType dataType,
-    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& errorMessage);
 
 void validateConsistentDataTypes(
     const std::vector<int64_t>& tensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap,
-    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& typeErrorMessage,
     const std::string& consistencyErrorMessage);
 
@@ -151,9 +152,9 @@ inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT
 
 inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
 
-std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
-std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
-std::vector<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
 
 } // namespace bn_type_configs
 

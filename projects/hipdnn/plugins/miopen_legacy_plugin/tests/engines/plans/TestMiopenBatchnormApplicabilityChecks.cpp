@@ -556,7 +556,7 @@ struct DataTypeIsSupportedTestCase
     std::string name;
     bool shouldPass;
     hipdnn_data_sdk::data_objects::DataType dataType;
-    std::vector<hipdnn_data_sdk::data_objects::DataType> allowedTypes;
+    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedTypes;
 
     friend std::ostream& operator<<(std::ostream& os, const DataTypeIsSupportedTestCase& tc)
     {
@@ -570,7 +570,7 @@ struct ConsistentDataTypesTestCase
     bool shouldPass;
     std::vector<TensorConfig> tensorConfigs;
     std::vector<int64_t> tensorIds;
-    std::vector<hipdnn_data_sdk::data_objects::DataType> allowedTypes;
+    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedTypes;
 
     friend std::ostream& operator<<(std::ostream& os, const ConsistentDataTypesTestCase& tc)
     {
@@ -1274,7 +1274,7 @@ inline std::vector<TensorDescriptorListTestCase> getValidateConsistentLayoutsTes
 inline std::vector<DataTypeIsSupportedTestCase> getValidateDataTypeIsSupportedTestCases()
 {
     using DT = hipdnn_data_sdk::data_objects::DataType;
-    std::vector<DT> ioTypes = {DT::FLOAT, DT::HALF, DT::BFLOAT16};
+    std::unordered_set<DT> ioTypes = {DT::FLOAT, DT::HALF, DT::BFLOAT16};
 
     return {
         // Happy paths - supported types

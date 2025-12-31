@@ -16,44 +16,32 @@ namespace miopen_legacy_plugin
 
 // --- Type Configuration Helpers ---
 
-std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
 {
-    std::vector<hipdnn_data_sdk::data_objects::DataType> types;
-    types.reserve(VALID.size());
+    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
-        if(std::find(types.begin(), types.end(), config.io) == types.end())
-        {
-            types.push_back(config.io);
-        }
+        types.insert(config.io);
     }
     return types;
 }
 
-std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedAffineTypes()
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedAffineTypes()
 {
-    std::vector<hipdnn_data_sdk::data_objects::DataType> types;
-    types.reserve(VALID.size());
+    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
-        if(std::find(types.begin(), types.end(), config.affine) == types.end())
-        {
-            types.push_back(config.affine);
-        }
+        types.insert(config.affine);
     }
     return types;
 }
 
-std::vector<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedStatTypes()
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedStatTypes()
 {
-    std::vector<hipdnn_data_sdk::data_objects::DataType> types;
-    types.reserve(VALID.size());
+    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
-        if(std::find(types.begin(), types.end(), config.stat) == types.end())
-        {
-            types.push_back(config.stat);
-        }
+        types.insert(config.stat);
     }
     return types;
 }
@@ -195,15 +183,12 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
 
 void validateDataTypeIsSupported(
     hipdnn_data_sdk::data_objects::DataType dataType,
-    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& errorMessage)
 {
-    for(const auto& allowedType : allowedTypes)
+    if(allowedTypes.count(dataType) > 0)
     {
-        if(dataType == allowedType)
-        {
-            return;
-        }
+        return;
     }
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, errorMessage);
 }
@@ -212,7 +197,7 @@ void validateConsistentDataTypes(
     const std::vector<int64_t>& tensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap,
-    const std::vector<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
     const std::string& typeErrorMessage,
     const std::string& consistencyErrorMessage)
 {
@@ -351,7 +336,7 @@ void checkTensorDataTypesSupported(
     {
         validators::validateFixedDataType(affineTensorIds,
                                           tensorMap,
-                                          allowedAffineTypes[0],
+                                          *allowedAffineTypes.begin(),
                                           "Batchnorm implementation supports only FLOAT data type "
                                           "for scale and bias tensors.");
     }
@@ -370,7 +355,7 @@ void checkTensorDataTypesSupported(
     {
         validators::validateFixedDataType(statTensorIds,
                                           tensorMap,
-                                          allowedStatTypes[0],
+                                          *allowedStatTypes.begin(),
                                           "Batchnorm implementation supports only FLOAT data type "
                                           "for mean and variance tensors.");
     }
