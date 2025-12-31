@@ -30,39 +30,32 @@ public:
                      const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
                      hipdnn_sdk::utilities::TensorBase<YDataType>& y)
     {
-        if(x.dims().size() < 2)
-        {
-            throw std::runtime_error(
-                "Batchnorm inference requires at least 2D tensor (batch and channel).");
-        }
+        fwdInferenceImpl<XDataType, ScaleBiasDataType, MeanVarianceDataType, YDataType, ComputeDataType>(
+            x, scale, bias, estimatedMean, invVariance, y, 0.0,
+            [](ComputeDataType elemStd, ComputeDataType invVar, ComputeDataType) {
+                return elemStd * invVar;
+            });
+    }
 
-        auto batchnormFwdInferenceFunc = [&](const std::vector<int64_t>& indices) {
-            auto cidx = indices[1];
-            auto mean = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
-                estimatedMean.getHostValue(0, cidx));
-            auto invVarianceValue = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
-                invVariance.getHostValue(0, cidx));
-
-            //There is some extra casting in here to deal with double -> float implicit casts.
-            auto inVal
-                = hipdnn_sdk::utilities::staticCast<ComputeDataType>(x.getHostValue(indices));
-            ComputeDataType elemStd = inVal - mean;
-            ComputeDataType inhat = elemStd * invVarianceValue;
-
-            y.setHostValue(
-                hipdnn_sdk::utilities::staticCast<YDataType>(
-                    (hipdnn_sdk::utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx))
-                     * inhat)
-                    + hipdnn_sdk::utilities::staticCast<ComputeDataType>(
-                        bias.getHostValue(0, cidx))),
-                indices);
-        };
-
-        // Iterate all indices in parallel
-        auto parallelFunc = makeParallelTensorFunctor(batchnormFwdInferenceFunc, x.dims());
-        parallelFunc(std::thread::hardware_concurrency());
-
-        y.memory().markHostModified(); // Mark y memory as modified on host
+    template <class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType,
+              class YDataType,
+              class ComputeDataType = MeanVarianceDataType>
+    static void
+        fwdInferenceWithVariance(const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
+                                 const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+                                 const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+                                 const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
+                                 const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& variance,
+                                 hipdnn_sdk::utilities::TensorBase<YDataType>& y,
+                                 double epsilon)
+    {
+        fwdInferenceImpl<XDataType, ScaleBiasDataType, MeanVarianceDataType, YDataType, ComputeDataType>(
+            x, scale, bias, estimatedMean, variance, y, epsilon,
+            [](ComputeDataType elemStd, ComputeDataType var, ComputeDataType eps) {
+                return elemStd / sqrtInternal(var + eps);
+            });
     }
 
     template <class XDataType,
@@ -313,6 +306,59 @@ public:
     }
 
 private:
+    template <class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType,
+              class YDataType,
+              class ComputeDataType,
+              typename NormOp>
+    static void fwdInferenceImpl(
+        const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
+        const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+        const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
+        const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& meanVarianceInput,
+        hipdnn_sdk::utilities::TensorBase<YDataType>& y,
+        double epsilon,
+        NormOp normOp)
+    {
+        if(x.dims().size() < 2)
+        {
+            throw std::runtime_error(
+                "Batchnorm inference requires at least 2D tensor (batch and channel).");
+        }
+
+        auto epsilonCompute = hipdnn_sdk::utilities::staticCast<ComputeDataType>(epsilon);
+
+        auto batchnormFwdInferenceFunc = [&](const std::vector<int64_t>& indices) {
+            auto cidx = indices[1];
+            auto mean = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                estimatedMean.getHostValue(0, cidx));
+            auto meanVarianceValue = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                meanVarianceInput.getHostValue(0, cidx));
+
+            // There is some extra casting in here to deal with double -> float implicit casts.
+            auto inVal
+                = hipdnn_sdk::utilities::staticCast<ComputeDataType>(x.getHostValue(indices));
+            ComputeDataType elemStd = inVal - mean;
+            ComputeDataType inhat = normOp(elemStd, meanVarianceValue, epsilonCompute);
+
+            y.setHostValue(
+                hipdnn_sdk::utilities::staticCast<YDataType>(
+                    (hipdnn_sdk::utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx))
+                     * inhat)
+                    + hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                        bias.getHostValue(0, cidx))),
+                indices);
+        };
+
+        // Iterate all indices in parallel
+        auto parallelFunc = makeParallelTensorFunctor(batchnormFwdInferenceFunc, x.dims());
+        parallelFunc(std::thread::hardware_concurrency());
+
+        y.memory().markHostModified(); // Mark y memory as modified on host
+    }
+
     static int64_t calculateElementsPerChannel(const std::vector<int64_t>& dims)
     {
         if(dims.size() < 2)

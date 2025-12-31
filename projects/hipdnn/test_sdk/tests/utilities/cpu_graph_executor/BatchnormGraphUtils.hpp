@@ -223,6 +223,87 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     return graph;
 }
 
+inline std::shared_ptr<hipdnn_frontend::graph::Graph>
+    buildBatchnormFwdInferenceWithVarianceGraph(
+        hipdnn_sdk::data_objects::DataType inputDataType,
+        hipdnn_sdk::data_objects::DataType scaleBiasDataType,
+        hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+        hipdnn_sdk::data_objects::DataType computeDataType,
+        const std::vector<int64_t>& dims,
+        const hipdnn_sdk::utilities::TensorLayout& layout,
+        double epsilon,
+        bool isOutputVirtual = false)
+{
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_name("BatchnormFwdInferenceWithVarianceTest");
+
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims, layout.strideOrder);
+
+    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
+
+    int64_t uid = 1;
+    auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "x", hipdnn_frontend::fromSdkType(inputDataType), dims, strides);
+    xAttr.set_uid(uid++);
+    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+
+    auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "scale", hipdnn_frontend::fromSdkType(scaleBiasDataType), derivedDims, derivedStrides);
+    scaleAttr.set_uid(uid++);
+    auto scaleTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
+
+    auto biasAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "bias", hipdnn_frontend::fromSdkType(scaleBiasDataType), derivedDims, derivedStrides);
+    biasAttr.set_uid(uid++);
+    auto biasTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
+
+    auto meanAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "mean", hipdnn_frontend::fromSdkType(meanVarianceDataType), derivedDims, derivedStrides);
+    meanAttr.set_uid(uid++);
+    auto meanTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(meanAttr));
+
+    auto varianceAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "variance",
+        hipdnn_frontend::fromSdkType(meanVarianceDataType),
+        derivedDims,
+        derivedStrides);
+    varianceAttr.set_uid(uid++);
+    auto varianceTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(varianceAttr));
+
+    auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    epsilonTensor->set_uid(uid++)
+        .set_name("EpsilonTensor")
+        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_dim({1})
+        .set_stride({1})
+        .set_value(epsilon);
+
+    hipdnn_frontend::graph::BatchnormInferenceWithVarianceAttributes bnAttrs;
+    bnAttrs.set_name("batchnorm_fwd_inference_with_variance");
+    bnAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
+    bnAttrs.set_epsilon(epsilonTensor);
+
+    auto yTensorAttr = graph->batchnorm_inference_with_variance(
+        xTensorAttr, meanTensorAttr, varianceTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
+
+    if(!yTensorAttr->has_uid())
+    {
+        yTensorAttr->set_uid(uid++);
+    }
+    yTensorAttr->set_name("Y");
+    yTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(inputDataType));
+    yTensorAttr->set_dim(dims);
+    yTensorAttr->set_stride(strides);
+    yTensorAttr->set_is_virtual(isOutputVirtual);
+
+    return graph;
+}
+
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>

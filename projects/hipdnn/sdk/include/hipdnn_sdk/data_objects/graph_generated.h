@@ -16,6 +16,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "batchnorm_attributes_generated.h"
 #include "batchnorm_backward_attributes_generated.h"
 #include "batchnorm_inference_attributes_generated.h"
+#include "batchnorm_inference_with_variance_attributes_generated.h"
 #include "convolution_bwd_attributes_generated.h"
 #include "convolution_fwd_attributes_generated.h"
 #include "convolution_wrw_attributes_generated.h"
@@ -42,20 +43,22 @@ bool operator!=(const GraphT &lhs, const GraphT &rhs);
 enum class NodeAttributes : uint8_t {
   NONE = 0,
   BatchnormInferenceAttributes = 1,
-  PointwiseAttributes = 2,
-  BatchnormBackwardAttributes = 3,
-  BatchnormAttributes = 4,
-  ConvolutionFwdAttributes = 5,
-  ConvolutionBwdAttributes = 6,
-  ConvolutionWrwAttributes = 7,
+  BatchnormInferenceWithVarianceAttributes = 2,
+  PointwiseAttributes = 3,
+  BatchnormBackwardAttributes = 4,
+  BatchnormAttributes = 5,
+  ConvolutionFwdAttributes = 6,
+  ConvolutionBwdAttributes = 7,
+  ConvolutionWrwAttributes = 8,
   MIN = NONE,
   MAX = ConvolutionWrwAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[8] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[9] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
+    NodeAttributes::BatchnormInferenceWithVarianceAttributes,
     NodeAttributes::PointwiseAttributes,
     NodeAttributes::BatchnormBackwardAttributes,
     NodeAttributes::BatchnormAttributes,
@@ -67,9 +70,10 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[8] {
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[9] = {
+  static const char * const names[10] = {
     "NONE",
     "BatchnormInferenceAttributes",
+    "BatchnormInferenceWithVarianceAttributes",
     "PointwiseAttributes",
     "BatchnormBackwardAttributes",
     "BatchnormAttributes",
@@ -93,6 +97,10 @@ template<typename T> struct NodeAttributesTraits {
 
 template<> struct NodeAttributesTraits<hipdnn_sdk::data_objects::BatchnormInferenceAttributes> {
   static const NodeAttributes enum_value = NodeAttributes::BatchnormInferenceAttributes;
+};
+
+template<> struct NodeAttributesTraits<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::BatchnormInferenceWithVarianceAttributes;
 };
 
 template<> struct NodeAttributesTraits<hipdnn_sdk::data_objects::PointwiseAttributes> {
@@ -125,6 +133,10 @@ template<typename T> struct NodeAttributesUnionTraits {
 
 template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::BatchnormInferenceAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::BatchnormInferenceAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::BatchnormInferenceWithVarianceAttributes;
 };
 
 template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::PointwiseAttributesT> {
@@ -189,6 +201,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::BatchnormInferenceAttributes ?
       reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceAttributesT *>(value) : nullptr;
   }
+  hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *AsBatchnormInferenceWithVarianceAttributes() {
+    return type == NodeAttributes::BatchnormInferenceWithVarianceAttributes ?
+      reinterpret_cast<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *AsBatchnormInferenceWithVarianceAttributes() const {
+    return type == NodeAttributes::BatchnormInferenceWithVarianceAttributes ?
+      reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *>(value) : nullptr;
+  }
   hipdnn_sdk::data_objects::PointwiseAttributesT *AsPointwiseAttributes() {
     return type == NodeAttributes::PointwiseAttributes ?
       reinterpret_cast<hipdnn_sdk::data_objects::PointwiseAttributesT *>(value) : nullptr;
@@ -249,6 +269,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::BatchnormInferenceAttributes: {
       return *(reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::BatchnormInferenceWithVarianceAttributes: {
+      return *(reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *>(rhs.value));
     }
     case NodeAttributes::PointwiseAttributes: {
       return *(reinterpret_cast<const hipdnn_sdk::data_objects::PointwiseAttributesT *>(lhs.value)) ==
@@ -325,6 +349,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_sdk::data_objects::BatchnormInferenceAttributes *attributes_as_BatchnormInferenceAttributes() const {
     return attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes ? static_cast<const hipdnn_sdk::data_objects::BatchnormInferenceAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes *attributes_as_BatchnormInferenceWithVarianceAttributes() const {
+    return attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceWithVarianceAttributes ? static_cast<const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes *>(attributes()) : nullptr;
+  }
   const hipdnn_sdk::data_objects::PointwiseAttributes *attributes_as_PointwiseAttributes() const {
     return attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes ? static_cast<const hipdnn_sdk::data_objects::PointwiseAttributes *>(attributes()) : nullptr;
   }
@@ -363,6 +390,10 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
 
 template<> inline const hipdnn_sdk::data_objects::BatchnormInferenceAttributes *Node::attributes_as<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>() const {
   return attributes_as_BatchnormInferenceAttributes();
+}
+
+template<> inline const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes *Node::attributes_as<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes>() const {
+  return attributes_as_BatchnormInferenceWithVarianceAttributes();
 }
 
 template<> inline const hipdnn_sdk::data_objects::PointwiseAttributes *Node::attributes_as<hipdnn_sdk::data_objects::PointwiseAttributes>() const {
@@ -737,6 +768,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::BatchnormInferenceWithVarianceAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     case NodeAttributes::PointwiseAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::PointwiseAttributes *>(obj);
       return verifier.VerifyTable(ptr);
@@ -784,6 +819,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::BatchnormInferenceWithVarianceAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     case NodeAttributes::PointwiseAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::PointwiseAttributes *>(obj);
       return ptr->UnPack(resolver);
@@ -819,6 +858,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceAttributesT *>(value);
       return CreateBatchnormInferenceAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::BatchnormInferenceWithVarianceAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *>(value);
+      return CreateBatchnormInferenceWithVarianceAttributes(_fbb, ptr, _rehasher).Union();
+    }
     case NodeAttributes::PointwiseAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::PointwiseAttributesT *>(value);
       return CreatePointwiseAttributes(_fbb, ptr, _rehasher).Union();
@@ -851,6 +894,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
   switch (type) {
     case NodeAttributes::BatchnormInferenceAttributes: {
       value = new hipdnn_sdk::data_objects::BatchnormInferenceAttributesT(*reinterpret_cast<hipdnn_sdk::data_objects::BatchnormInferenceAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::BatchnormInferenceWithVarianceAttributes: {
+      value = new hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT(*reinterpret_cast<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *>(u.value));
       break;
     }
     case NodeAttributes::PointwiseAttributes: {
@@ -886,6 +933,11 @@ inline void NodeAttributesUnion::Reset() {
   switch (type) {
     case NodeAttributes::BatchnormInferenceAttributes: {
       auto ptr = reinterpret_cast<hipdnn_sdk::data_objects::BatchnormInferenceAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::BatchnormInferenceWithVarianceAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_sdk::data_objects::BatchnormInferenceWithVarianceAttributesT *>(value);
       delete ptr;
       break;
     }

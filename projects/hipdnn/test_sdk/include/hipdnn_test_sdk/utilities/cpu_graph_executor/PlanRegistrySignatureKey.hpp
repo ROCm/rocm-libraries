@@ -8,6 +8,7 @@
 
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormTrainSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionFwdSignatureKey.hpp>
@@ -29,6 +30,7 @@ namespace hipdnn_test_sdk::utilities
  *
 */
 using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
+                                              BatchnormFwdInferenceWithVarianceSignatureKey,
                                               BatchnormBwdSignatureKey,
                                               BatchnormTrainSignatureKey,
                                               ConvolutionFwdSignatureKey,

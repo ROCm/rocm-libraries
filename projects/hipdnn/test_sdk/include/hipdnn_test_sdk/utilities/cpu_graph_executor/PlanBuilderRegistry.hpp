@@ -8,6 +8,7 @@
 
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceWithVariancePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormTrainPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
