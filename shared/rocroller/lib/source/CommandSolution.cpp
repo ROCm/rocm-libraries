@@ -343,6 +343,10 @@ namespace rocRoller
 
         std::vector<KernelGraph::GraphTransformPtr> transforms;
 
+        bool applyScheduleMultiplyAndLDS = m_commandParameters->prefetch
+                                           && m_commandParameters->prefetchMixMemOps
+                                           && m_commandParameters->prefetchLDSFactor == 1;
+
         transforms.push_back(std::make_shared<KernelGraph::IdentifyParallelDimensions>());
 
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
@@ -441,10 +445,12 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
-        transforms.push_back(std::make_shared<KernelGraph::RemoveImplicitScheduling>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::RemoveImplicitScheduling>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
-        transforms.push_back(std::make_shared<KernelGraph::ScheduleMultiplyAndLDS>());
+        if(applyScheduleMultiplyAndLDS)
+            transforms.push_back(std::make_shared<KernelGraph::ScheduleMultiplyAndLDS>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::OrderExchangeNodes>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
