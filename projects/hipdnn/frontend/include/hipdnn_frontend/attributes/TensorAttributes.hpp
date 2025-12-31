@@ -307,7 +307,6 @@ public:
             set_is_virtual(json.at("virtual").get<bool>());
         }
 
-        // Deserialize pass-by-value
         if(json.contains("value_type") && json.contains("value"))
         {
             auto valueType
@@ -321,9 +320,6 @@ public:
                 set_value(json.at("value").get<double>());
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::Float16Value:
-                // Note: SDK usually serializes half as float in JSON for readability
-                // We'll trust set_value to handle type conversions or assume exact match if possible
-                // Here we cast to float for now as JSON doesn't have native half
                 set_value(static_cast<half>(json.at("value").get<float>()));
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value:

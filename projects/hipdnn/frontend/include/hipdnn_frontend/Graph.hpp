@@ -557,7 +557,7 @@ public:
     }
 
     /// Assigns UIDs to tensors that don't already have them.
-    /// This must be called before serialize() if build_operation_graph() has not been called.
+    /// It's recommended to call build_operation_graph() instead.
     void assignTensorUids()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
