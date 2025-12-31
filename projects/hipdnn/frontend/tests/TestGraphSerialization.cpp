@@ -44,6 +44,12 @@ std::shared_ptr<TensorAttributes>
     return tensor;
 }
 
+// This must be called before serialize()
+void prepareGraphForSerialization(Graph& graph)
+{
+    graph.assignTensorUids();
+}
+
 //==============================================================================
 // Basic JSON Serialization Tests
 //==============================================================================
@@ -76,6 +82,9 @@ TEST(TestGraphSerialization, SerializeDeserializeJson)
 
     graph.conv_fprop(x, w, convAttrs);
 
+    // Prepare graph for serialization (assigns UIDs to output tensors)
+    prepareGraphForSerialization(graph);
+
     // Serialize to JSON
     nlohmann::json json;
     graph.serialize(json);
@@ -93,6 +102,8 @@ TEST(TestGraphSerialization, SerializeDeserializeJson)
     EXPECT_EQ(newGraph.get_compute_data_type(), DataType::FLOAT);
 
     // We can re-serialize and compare
+    prepareGraphForSerialization(newGraph);
+
     nlohmann::json newJson;
     newGraph.serialize(newJson);
 
@@ -119,6 +130,8 @@ TEST(TestGraphSerialization, SerializeDeserializeBinary)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
 
     graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
 
     std::vector<uint8_t> binaryData;
     graph.serialize(binaryData);
@@ -151,6 +164,8 @@ TEST(TestGraphSerialization, GraphAttributesPreserved)
     pwAttrs.set_mode(PointwiseMode::IDENTITY);
     graph.pointwise(x, pwAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -175,6 +190,8 @@ TEST(TestGraphSerialization, PreferredEngineIdPreserved)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -185,6 +202,8 @@ TEST(TestGraphSerialization, PreferredEngineIdPreserved)
     newGraph.deserialize(json);
 
     // Re-serialize to verify the value was restored
+    prepareGraphForSerialization(newGraph);
+
     nlohmann::json newJson;
     newGraph.serialize(newJson);
     EXPECT_TRUE(newJson.contains("preferred_engine_id"));
@@ -201,6 +220,8 @@ TEST(TestGraphSerialization, VersionInfoPresent)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::ABS);
     graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
 
     nlohmann::json json;
     graph.serialize(json);
@@ -230,6 +251,8 @@ TEST(TestGraphSerialization, TensorAttributesPreserved)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
 
     nlohmann::json json;
     graph.serialize(json);
@@ -274,6 +297,8 @@ TEST(TestGraphSerialization, VirtualTensorsSerialized)
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(convOut, reluAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -313,6 +338,8 @@ TEST(TestGraphSerialization, ConvFpropNodeSerialization)
 
     graph.conv_fprop(x, w, convAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -320,6 +347,8 @@ TEST(TestGraphSerialization, ConvFpropNodeSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -343,6 +372,8 @@ TEST(TestGraphSerialization, ConvDgradNodeSerialization)
 
     graph.conv_dgrad(dy, w, dgradAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -350,6 +381,8 @@ TEST(TestGraphSerialization, ConvDgradNodeSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -372,6 +405,8 @@ TEST(TestGraphSerialization, ConvWgradNodeSerialization)
 
     graph.conv_wgrad(dy, x, wgradAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -379,6 +414,8 @@ TEST(TestGraphSerialization, ConvWgradNodeSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -408,6 +445,8 @@ TEST(TestGraphSerialization, BatchnormNodeSerialization)
 
     graph.batchnorm(x, scale, bias, bnAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -415,6 +454,8 @@ TEST(TestGraphSerialization, BatchnormNodeSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -439,6 +480,8 @@ TEST(TestGraphSerialization, BatchnormInferenceNodeSerialization)
 
     graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnInfAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -446,6 +489,8 @@ TEST(TestGraphSerialization, BatchnormInferenceNodeSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -471,6 +516,8 @@ TEST(TestGraphSerialization, BatchnormBackwardNodeSerialization)
 
     graph.batchnorm_backward(dy, x, scale, bnBwdAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -478,6 +525,8 @@ TEST(TestGraphSerialization, BatchnormBackwardNodeSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -512,6 +561,8 @@ TEST(TestGraphSerialization, UnaryPointwiseSerialization)
         pwAttrs.set_mode(mode);
         graph.pointwise(x, pwAttrs);
 
+        prepareGraphForSerialization(graph);
+
         nlohmann::json json;
         auto err = graph.serialize(json);
         EXPECT_EQ(err.get_code(), ErrorCode::OK) << "Failed for mode: " << static_cast<int>(mode);
@@ -520,6 +571,8 @@ TEST(TestGraphSerialization, UnaryPointwiseSerialization)
         err = newGraph.deserialize(json);
         EXPECT_EQ(err.get_code(), ErrorCode::OK)
             << "Deserialize failed for mode: " << static_cast<int>(mode);
+
+        prepareGraphForSerialization(newGraph);
 
         nlohmann::json newJson;
         newGraph.serialize(newJson);
@@ -549,6 +602,8 @@ TEST(TestGraphSerialization, BinaryPointwiseSerialization)
         pwAttrs.set_mode(mode);
         graph.pointwise(x, y, pwAttrs);
 
+        prepareGraphForSerialization(graph);
+
         nlohmann::json json;
         auto err = graph.serialize(json);
         EXPECT_EQ(err.get_code(), ErrorCode::OK) << "Failed for mode: " << static_cast<int>(mode);
@@ -557,6 +612,8 @@ TEST(TestGraphSerialization, BinaryPointwiseSerialization)
         err = newGraph.deserialize(json);
         EXPECT_EQ(err.get_code(), ErrorCode::OK)
             << "Deserialize failed for mode: " << static_cast<int>(mode);
+
+        prepareGraphForSerialization(newGraph);
 
         nlohmann::json newJson;
         newGraph.serialize(newJson);
@@ -579,6 +636,8 @@ TEST(TestGraphSerialization, TernaryPointwiseSerialization)
     pwAttrs.set_mode(PointwiseMode::BINARY_SELECT);
     graph.pointwise(condition, x, y, pwAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -587,6 +646,8 @@ TEST(TestGraphSerialization, TernaryPointwiseSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -606,11 +667,15 @@ TEST(TestGraphSerialization, PointwiseWithExtraAttributes)
     pwAttrs.set_elu_alpha(1.0f);
     graph.pointwise(x, pwAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -641,6 +706,8 @@ TEST(TestGraphSerialization, ConvReluFusionSerialization)
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(convOut, reluAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -649,6 +716,8 @@ TEST(TestGraphSerialization, ConvReluFusionSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -684,6 +753,8 @@ TEST(TestGraphSerialization, ConvBiasReluFusionSerialization)
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(biasOut, reluAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -691,6 +762,8 @@ TEST(TestGraphSerialization, ConvBiasReluFusionSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -735,6 +808,8 @@ TEST(TestGraphSerialization, ResidualBlockSerialization)
     relu2Attrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(addOut, relu2Attrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -742,6 +817,8 @@ TEST(TestGraphSerialization, ResidualBlockSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -766,6 +843,8 @@ TEST(TestGraphSerialization, HalfPrecisionSerialization)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -787,6 +866,8 @@ TEST(TestGraphSerialization, BFloat16Serialization)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
 
     nlohmann::json json;
     graph.serialize(json);
@@ -821,6 +902,8 @@ TEST(TestGraphSerialization, BinarySerializationRoundTrip)
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(convOut, reluAttrs);
 
+    prepareGraphForSerialization(graph);
+
     // Serialize to binary
     std::vector<uint8_t> binaryData;
     auto err = graph.serialize(binaryData);
@@ -838,6 +921,8 @@ TEST(TestGraphSerialization, BinarySerializationRoundTrip)
     EXPECT_EQ(newGraph.get_io_data_type(), DataType::FLOAT);
 
     // Re-serialize to verify
+    prepareGraphForSerialization(newGraph);
+
     std::vector<uint8_t> newBinaryData;
     newGraph.serialize(newBinaryData);
     EXPECT_FALSE(newBinaryData.empty());
@@ -855,6 +940,8 @@ TEST(TestGraphSerialization, BinaryVsJsonConsistency)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
 
     // Serialize to JSON
     nlohmann::json json;
@@ -893,11 +980,15 @@ TEST(TestGraphSerialization, LargeDimensionsSerialization)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -927,11 +1018,15 @@ TEST(TestGraphSerialization, SingleElementTensorSerialization)
     pwAttrs.set_mode(PointwiseMode::ABS);
     graph.pointwise(x, pwAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -965,6 +1060,8 @@ TEST(TestGraphSerialization, MultipleIndependentBranches)
     addAttrs.set_mode(PointwiseMode::ADD);
     graph.pointwise(branch1, branch2, addAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -972,6 +1069,8 @@ TEST(TestGraphSerialization, MultipleIndependentBranches)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -998,6 +1097,8 @@ TEST(TestGraphSerialization, DeepChainSerialization)
         current = graph.pointwise(current, reluAttrs);
     }
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -1005,6 +1106,8 @@ TEST(TestGraphSerialization, DeepChainSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -1025,6 +1128,8 @@ TEST(TestGraphSerialization, UniqueUidsPreserved)
     PointwiseAttributes addAttrs;
     addAttrs.set_mode(PointwiseMode::ADD);
     graph.pointwise(x, y, addAttrs);
+
+    prepareGraphForSerialization(graph);
 
     nlohmann::json json;
     graph.serialize(json);
@@ -1069,6 +1174,8 @@ TEST(TestGraphSerialization, DeserializeMalformedDataTypesGracefully)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     originalGraph.pointwise(x, pwAttrs);
 
+    prepareGraphForSerialization(originalGraph);
+
     nlohmann::json json;
     originalGraph.serialize(json);
 
@@ -1099,6 +1206,8 @@ TEST(TestGraphSerialization, PassByValueTensorSerialization)
     mulAttrs.set_mode(PointwiseMode::MUL);
     graph.pointwise(x, alpha, mulAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -1109,6 +1218,8 @@ TEST(TestGraphSerialization, PassByValueTensorSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);
@@ -1136,6 +1247,8 @@ TEST(TestGraphSerialization, TensorLikeSerialization)
     addAttrs.set_mode(PointwiseMode::ADD);
     graph.pointwise(original, copy, addAttrs);
 
+    prepareGraphForSerialization(graph);
+
     nlohmann::json json;
     graph.serialize(json);
 
@@ -1144,6 +1257,8 @@ TEST(TestGraphSerialization, TensorLikeSerialization)
 
     Graph newGraph;
     newGraph.deserialize(json);
+
+    prepareGraphForSerialization(newGraph);
 
     nlohmann::json newJson;
     newGraph.serialize(newJson);

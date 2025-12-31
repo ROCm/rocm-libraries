@@ -365,6 +365,44 @@ private:
         return {graphInputs, allNodeOutputs};
     }
 
+    flatbuffers::DetachedBuffer buildFlatbufferOperationGraphConst() const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        flatbuffers::FlatBufferBuilder builder;
+
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+            tensorAttributes;
+        for(auto& tensor : allTensors)
+        {
+            if(tensor)
+            {
+                tensorAttributes.emplace_back(tensor->pack_attributes(builder));
+            }
+        }
+
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        for(auto& node : _sub_nodes)
+        {
+            if(node)
+            {
+                nodes.emplace_back(node->pack_node(builder));
+            }
+        }
+        auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+            builder,
+            graph_attributes.get_name().c_str(),
+            toSdkType(graph_attributes.get_compute_data_type()),
+            toSdkType(graph_attributes.get_intermediate_data_type()),
+            toSdkType(graph_attributes.get_io_data_type()),
+            &tensorAttributes,
+            &nodes);
+
+        builder.Finish(graph);
+        return builder.Release();
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -394,6 +432,16 @@ public:
         HIPDNN_CHECK_ERROR(validateSubtree());
 
         return {ErrorCode::OK, ""};
+    }
+
+    /// Assigns UIDs to tensors that don't already have them.
+    /// This must be called before serialize() if build_operation_graph() has not been called.
+    void assignTensorUids()
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+        auto usedIds = getUsedIds(allTensors);
+        populateHipdnnTensorIds(allTensors, usedIds);
     }
 
     Error checkNoDuplicateTensorIds()
@@ -435,46 +483,11 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    flatbuffers::DetachedBuffer buildFlatbufferOperationGraph() const
+    flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
+        assignTensorUids();
 
-        auto usedIds = getUsedIds(allTensors);
-
-        populateHipdnnTensorIds(allTensors, usedIds);
-
-        flatbuffers::FlatBufferBuilder builder;
-
-        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-            tensorAttributes;
-        for(auto& tensor : allTensors)
-        {
-            if(tensor)
-            {
-                tensorAttributes.emplace_back(tensor->pack_attributes(builder));
-            }
-        }
-
-        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-        for(auto& node : _sub_nodes)
-        {
-            if(node)
-            {
-                nodes.emplace_back(node->pack_node(builder));
-            }
-        }
-        auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
-            builder,
-            graph_attributes.get_name().c_str(),
-            toSdkType(graph_attributes.get_compute_data_type()),
-            toSdkType(graph_attributes.get_intermediate_data_type()),
-            toSdkType(graph_attributes.get_io_data_type()),
-            &tensorAttributes,
-            &nodes);
-
-        builder.Finish(graph);
-        return builder.Release();
+        return buildFlatbufferOperationGraphConst();
     }
 
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
@@ -565,7 +578,8 @@ public:
 
     Error serialize(nlohmann::json& j) const
     {
-        auto buffer = buildFlatbufferOperationGraph();
+        // User must call build_operation_graph first to populate UIDs
+        auto buffer = buildFlatbufferOperationGraphConst();
         auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
 
         // Convert SDK Graph to JSON using existing SDK utility
@@ -584,9 +598,8 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    Error deserialize(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    Error deserialize([[maybe_unused]] hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
-        (void)handle;
         nlohmann::json j = nlohmann::json::from_ubjson(data);
         return deserialize(j);
     }
