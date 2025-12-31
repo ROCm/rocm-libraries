@@ -202,26 +202,6 @@ TEST(TestGraphSerialization, PreferredEngineIdPreserved)
     EXPECT_EQ(newJson["preferred_engine_id"], 42);
 }
 
-TEST(TestGraphSerialization, VersionInfoPresent)
-{
-    Graph graph;
-    graph.set_name("version_test");
-    graph.set_compute_data_type(DataType::FLOAT);
-
-    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
-    PointwiseAttributes pwAttrs;
-    pwAttrs.set_mode(PointwiseMode::ABS);
-    graph.pointwise(x, pwAttrs);
-
-    prepareGraphForSerialization(graph);
-
-    nlohmann::json json;
-    graph.serialize(json);
-
-    EXPECT_TRUE(json.contains("hipdnn_frontend_version"));
-    EXPECT_TRUE(json.contains("json_version"));
-}
-
 //==============================================================================
 // Tensor Attribute Tests
 //==============================================================================
@@ -1175,6 +1155,84 @@ TEST(TestGraphSerialization, DeserializeMalformedDataTypesGracefully)
     Graph newGraph;
     auto err = newGraph.deserialize(json);
     EXPECT_EQ(err.get_code(), ErrorCode::OK);
+}
+
+TEST(TestGraphSerialization, DeserializeMissingTensorUidReturnsError)
+{
+    // Create a JSON with a node that references a tensor UID that doesn't exist
+    nlohmann::json json;
+    json["name"] = "missing_tensor_test";
+    json["compute_data_type"] = "float";
+
+    // Add tensors with UIDs 1 and 2 (input and output)
+    json["tensors"] = nlohmann::json::array();
+    nlohmann::json inputTensor;
+    inputTensor["uid"] = 1;
+    inputTensor["name"] = "x";
+    inputTensor["dims"] = {1, 16, 8, 8};
+    inputTensor["strides"] = {1024, 64, 8, 1};
+    inputTensor["data_type"] = "float";
+    json["tensors"].push_back(inputTensor);
+
+    nlohmann::json outputTensor;
+    outputTensor["uid"] = 2;
+    outputTensor["name"] = "y";
+    outputTensor["dims"] = {1, 16, 8, 8};
+    outputTensor["strides"] = {1024, 64, 8, 1};
+    outputTensor["data_type"] = "float";
+    json["tensors"].push_back(outputTensor);
+
+    // Add a properly formed node that references UID 999 which doesn't exist
+    json["nodes"] = nlohmann::json::array();
+    nlohmann::json node;
+    node["type"] = "PointwiseAttributes";
+    node["inputs"] = nlohmann::json::object();
+    node["inputs"]["operation"] = "relu_fwd";
+    node["inputs"]["relu_lower_clip"] = nullptr;
+    node["inputs"]["relu_upper_clip"] = nullptr;
+    node["inputs"]["relu_lower_clip_slope"] = nullptr;
+    node["inputs"]["swish_beta"] = nullptr;
+    node["inputs"]["elu_alpha"] = nullptr;
+    node["inputs"]["softplus_beta"] = nullptr;
+    node["inputs"]["axis_tensor_uid"] = nullptr;
+    node["inputs"]["in_0_tensor_uid"] = 999; // This UID doesn't exist!
+    node["inputs"]["in_1_tensor_uid"] = nullptr;
+    node["inputs"]["in_2_tensor_uid"] = nullptr;
+    node["outputs"] = nlohmann::json::object();
+    node["outputs"]["out_0_tensor_uid"] = 2;
+    json["nodes"].push_back(node);
+
+    Graph graph;
+    auto err = graph.deserialize(json);
+
+    // Should return an error about missing tensor
+    EXPECT_EQ(err.get_code(), ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(err.get_message().find("missing tensor") != std::string::npos
+                || err.get_message().find("invalid reference") != std::string::npos);
+}
+
+TEST(TestGraphSerialization, DeserializeMalformedJsonReturnsError)
+{
+    // Test that malformed JSON (missing required fields) returns an error
+    nlohmann::json json;
+    json["name"] = "malformed_test";
+    json["compute_data_type"] = "float";
+    json["tensors"] = nlohmann::json::array();
+    json["nodes"] = nlohmann::json::array();
+
+    // Node missing required "inputs" object
+    nlohmann::json badNode;
+    badNode["type"] = "PointwiseAttributes";
+    // Missing "inputs" and "outputs" - should throw json::out_of_range
+    json["nodes"].push_back(badNode);
+
+    Graph graph;
+    auto err = graph.deserialize(json);
+
+    // Should return an error about malformed JSON
+    EXPECT_EQ(err.get_code(), ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(err.get_message().find("malformed JSON") != std::string::npos
+                || err.get_message().find("Deserialization failed") != std::string::npos);
 }
 
 //==============================================================================

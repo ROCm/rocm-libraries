@@ -405,6 +405,126 @@ private:
         return builder.Release();
     }
 
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    Error deserializeImpl(const nlohmann::json& j)
+    {
+        // 1. Basic Graph Attributes
+        if(j.contains("name"))
+        {
+            set_name(j["name"].get<std::string>());
+        }
+        if(j.contains("compute_data_type"))
+        {
+            set_compute_data_type(
+                fromSdkType(j["compute_data_type"].get<hipdnn_data_sdk::data_objects::DataType>()));
+        }
+        if(j.contains("intermediate_data_type"))
+        {
+            set_intermediate_data_type(fromSdkType(
+                j["intermediate_data_type"].get<hipdnn_data_sdk::data_objects::DataType>()));
+        }
+        if(j.contains("io_data_type"))
+        {
+            set_io_data_type(
+                fromSdkType(j["io_data_type"].get<hipdnn_data_sdk::data_objects::DataType>()));
+        }
+
+        if(j.contains("preferred_engine_id"))
+        {
+            _preferredEngineId = j["preferred_engine_id"].get<int64_t>();
+        }
+
+        // 2. Tensors
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
+        if(j.contains("tensors"))
+        {
+            for(const auto& tJson : j["tensors"])
+            {
+                auto tensor = std::make_shared<TensorAttributes>();
+                tensor->deserialize(tJson);
+                if(tensor->has_uid())
+                {
+                    tensorMap[tensor->get_uid()] = tensor;
+                }
+            }
+        }
+
+        // 3. Nodes
+        if(j.contains("nodes"))
+        {
+            for(const auto& nJson : j["nodes"])
+            {
+                // SDK Json serialization uses "type" enum
+                auto type = nJson.at("type").get<hipdnn_data_sdk::data_objects::NodeAttributes>();
+
+                switch(type)
+                {
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+                {
+                    BatchnormAttributes attr;
+                    attr.deserialize(nJson, tensorMap);
+                    _sub_nodes.emplace_back(
+                        std::make_shared<BatchnormNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+                {
+                    BatchnormBackwardAttributes attr;
+                    attr.deserialize(nJson, tensorMap);
+                    _sub_nodes.emplace_back(
+                        std::make_shared<BatchnormBackwardNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+                {
+                    BatchnormInferenceAttributes attr;
+                    attr.deserialize(nJson, tensorMap);
+                    _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNode>(
+                        std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+                {
+                    ConvFpropAttributes attr;
+                    attr.deserialize(nJson, tensorMap);
+                    _sub_nodes.emplace_back(
+                        std::make_shared<ConvolutionFpropNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+                {
+                    ConvDgradAttributes attr;
+                    attr.deserialize(nJson, tensorMap);
+                    _sub_nodes.emplace_back(
+                        std::make_shared<ConvolutionDgradNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+                {
+                    ConvWgradAttributes attr;
+                    attr.deserialize(nJson, tensorMap);
+                    _sub_nodes.emplace_back(
+                        std::make_shared<ConvolutionWgradNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+                {
+                    PointwiseAttributes attr;
+                    attr.deserialize(nJson, tensorMap);
+                    _sub_nodes.emplace_back(
+                        std::make_shared<PointwiseNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                default:
+                    return {ErrorCode::INVALID_VALUE, "Unsupported node type in deserialization"};
+                }
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+#endif
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -566,6 +686,7 @@ public:
     }
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    // User must call build_operation_graph() before serialize() to populate UIDs
     Error serialize(std::vector<uint8_t>& data) const
     {
         nlohmann::json j;
@@ -580,148 +701,56 @@ public:
 
     Error serialize(nlohmann::json& j) const
     {
-        // User must call build_operation_graph first to populate UIDs
         auto buffer = buildFlatbufferOperationGraphConst();
         auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
 
-        // Convert SDK Graph to JSON using existing SDK utility
         j = *sdkGraph;
 
-        // Add frontend specific properties
         if(_preferredEngineId.has_value())
         {
             j["preferred_engine_id"] = _preferredEngineId.value();
         }
 
-        // Probably needed for versioning
-        j["hipdnn_frontend_version"] = 1; // Placeholder
-        j["json_version"] = "1.0";
+        // Might need to add versioning info later
 
         return {ErrorCode::OK, ""};
     }
 
     Error deserialize([[maybe_unused]] hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
-        nlohmann::json j = nlohmann::json::from_ubjson(data);
-        return deserialize(j);
+        try
+        {
+            nlohmann::json j = nlohmann::json::from_ubjson(data);
+            return deserialize(j);
+        }
+        catch(const nlohmann::json::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Failed to parse binary data: ") + e.what()};
+        }
     }
 
     Error deserialize(const nlohmann::json& j)
     {
-        // 1. Basic Graph Attributes
-        if(j.contains("name"))
+        try
         {
-            set_name(j["name"].get<std::string>());
+            return deserializeImpl(j);
         }
-        if(j.contains("compute_data_type"))
+        catch(const std::out_of_range& e)
         {
-            set_compute_data_type(
-                fromSdkType(j["compute_data_type"].get<hipdnn_data_sdk::data_objects::DataType>()));
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Deserialization failed - missing tensor or invalid reference: ")
+                        + e.what()};
         }
-        if(j.contains("intermediate_data_type"))
+        catch(const nlohmann::json::exception& e)
         {
-            set_intermediate_data_type(fromSdkType(
-                j["intermediate_data_type"].get<hipdnn_data_sdk::data_objects::DataType>()));
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Deserialization failed - malformed JSON: ") + e.what()};
         }
-        if(j.contains("io_data_type"))
+        catch(const std::exception& e)
         {
-            set_io_data_type(
-                fromSdkType(j["io_data_type"].get<hipdnn_data_sdk::data_objects::DataType>()));
+            return {ErrorCode::INVALID_VALUE, std::string("Deserialization failed: ") + e.what()};
         }
-
-        if(j.contains("preferred_engine_id"))
-        {
-            _preferredEngineId = j["preferred_engine_id"].get<int64_t>();
-        }
-
-        // 2. Tensors
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-        if(j.contains("tensors"))
-        {
-            for(const auto& tJson : j["tensors"])
-            {
-                auto tensor = std::make_shared<TensorAttributes>();
-                tensor->deserialize(tJson);
-                if(tensor->has_uid())
-                {
-                    tensorMap[tensor->get_uid()] = tensor;
-                }
-            }
-        }
-
-        // 3. Nodes
-        if(j.contains("nodes"))
-        {
-            for(const auto& nJson : j["nodes"])
-            {
-                // SDK Json serialization uses "type" enum
-                auto type = nJson.at("type").get<hipdnn_data_sdk::data_objects::NodeAttributes>();
-
-                switch(type)
-                {
-                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                {
-                    BatchnormAttributes attr;
-                    attr.deserialize(nJson, tensorMap);
-                    _sub_nodes.emplace_back(
-                        std::make_shared<BatchnormNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-                {
-                    BatchnormBackwardAttributes attr;
-                    attr.deserialize(nJson, tensorMap);
-                    _sub_nodes.emplace_back(
-                        std::make_shared<BatchnormBackwardNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                {
-                    BatchnormInferenceAttributes attr;
-                    attr.deserialize(nJson, tensorMap);
-                    _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNode>(
-                        std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-                {
-                    ConvFpropAttributes attr;
-                    attr.deserialize(nJson, tensorMap);
-                    _sub_nodes.emplace_back(
-                        std::make_shared<ConvolutionFpropNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-                {
-                    ConvDgradAttributes attr;
-                    attr.deserialize(nJson, tensorMap);
-                    _sub_nodes.emplace_back(
-                        std::make_shared<ConvolutionDgradNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-                {
-                    ConvWgradAttributes attr;
-                    attr.deserialize(nJson, tensorMap);
-                    _sub_nodes.emplace_back(
-                        std::make_shared<ConvolutionWgradNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
-                {
-                    PointwiseAttributes attr;
-                    attr.deserialize(nJson, tensorMap);
-                    _sub_nodes.emplace_back(
-                        std::make_shared<PointwiseNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                default:
-                    return {ErrorCode::INVALID_VALUE, "Unsupported node type in deserialization"};
-                }
-            }
-        }
-
-        return {ErrorCode::OK, ""};
     }
 #endif
 
