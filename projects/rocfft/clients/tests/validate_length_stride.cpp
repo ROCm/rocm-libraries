@@ -46,6 +46,16 @@ inline auto generate_length_stride()
         {{12, 2, 2, 2}, {7, 37, 43, 3}},
         // invalid due to collision for (1, 0, 0, 0, 3) and (0, 4, 1, 1, 0):
         {{2, 5, 4, 6, 4}, {750, 201, 16, 17, 29}},
+        // 8-dimensional cases
+        // invalid nondegenerate
+        {{5, 5, 5, 5, 5, 5, 5, 5},
+         {32, 5 * 32, 25 * 32, 125 * 32, 503, 5 * 503, 25 * 503, 125 * 503}},
+        // invalid degenerate
+        {{4, 4, 4, 5, 4, 4, 4, 4},
+         {32, 8 * 32, 64 * 32, 512 * 32, 129, 8 * 129, 64 * 129, 512 * 129}},
+        // valid
+        {{4, 4, 4, 4, 4, 4, 4, 4},
+         {32, 8 * 32, 64 * 32, 512 * 32, 129, 8 * 129, 64 * 129, 512 * 129}},
     };
 
     return vals;
@@ -117,17 +127,38 @@ TEST_P(valid_length_stride, direct_comparison)
     auto test_val = array_valid(length, stride, verbose);
     auto end      = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Execution time: " << duration.count() << " us" << std::endl;
 
     if(verbose)
     {
         std::cout << "test value is:      " << (test_val ? "valid" : "invalid") << "\n";
     }
 
-    auto ref_val = direct_validity_test(length, stride, verbose);
+    start             = std::chrono::high_resolution_clock::now();
+    auto ref_val      = direct_validity_test(length, stride, verbose);
+    end               = std::chrono::high_resolution_clock::now();
+    auto ref_duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     if(verbose)
     {
         std::cout << "reference value is: " << (ref_val ? "valid" : "invalid") << "\n";
+        if(ref_duration.count() < duration.count())
+            std::cout << "============================== WARNING =============================="
+                      << std::endl;
+        std::cout << "Test execution time (" << duration.count() << " us) is ";
+        if(ref_duration.count() < duration.count())
+            std::cout << "larger than ";
+        else if(ref_duration.count() == duration.count())
+            std::cout << "equal to ";
+        else
+        {
+            std::cout << 100.0 * static_cast<double>(duration.count())
+                             / static_cast<double>(ref_duration.count())
+                      << " % of ";
+        }
+        std::cout << "the reference execution time (" << ref_duration.count() << " us)."
+                  << std::endl;
+        if(ref_duration.count() < duration.count())
+            std::cout << "========================== END OF WARNING ==========================="
+                      << std::endl;
     }
 
     EXPECT_EQ(test_val, ref_val);
