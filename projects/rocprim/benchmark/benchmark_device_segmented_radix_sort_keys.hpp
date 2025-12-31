@@ -97,7 +97,6 @@ struct device_segmented_radix_sort_keys_benchmark : public primbench::benchmark_
                      .add("lvl", "device")
                      .add("algo", "device_segmented_radix_sort_keys")
                      .add("key_type", primbench::name<Key>())
-                     .add("value_type", "empty_type")
                      .add("cfg", config_name<Config>());
 
         if(m_segment_counts.size() == 1)
