@@ -5,6 +5,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -14,6 +15,7 @@
 #include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
@@ -794,6 +796,35 @@ public:
 
         _sub_nodes.emplace_back(
             std::make_shared<BatchnormInferenceNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    std::shared_ptr<TensorAttributes>
+        batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
+                                         std::shared_ptr<TensorAttributes> mean,
+                                         std::shared_ptr<TensorAttributes> variance,
+                                         std::shared_ptr<TensorAttributes> scale,
+                                         std::shared_ptr<TensorAttributes> bias,
+                                         BatchnormInferenceAttributesVarianceExt attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BatchnormInferenceVarianceExt_"
+                                + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_mean(std::move(mean));
+        attributes.set_variance(std::move(variance));
+        attributes.set_scale(std::move(scale));
+        attributes.set_bias(std::move(bias));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
+            std::move(attributes), graph_attributes));
 
         return y;
     }
