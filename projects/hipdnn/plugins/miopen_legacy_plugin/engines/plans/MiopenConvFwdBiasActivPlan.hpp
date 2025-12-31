@@ -6,10 +6,10 @@
 #include <memory>
 #include <optional>
 
-#include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
@@ -24,10 +24,10 @@ class ConvFwdBiasActivParams
 {
 public:
     ConvFwdBiasActivParams(
-        const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
+        const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
+        const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
     ConvFwdBiasActivParams(const ConvFwdBiasActivParams&) = delete;
     ConvFwdBiasActivParams& operator=(const ConvFwdBiasActivParams&) = delete;
@@ -76,7 +76,7 @@ public:
 
 private:
     ConvFwdBiasActivParams _params;
-    hipdnn_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t> _fusePlanDesc;
+    hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t> _fusePlanDesc;
     size_t _workspaceSize = 0;
 };
 

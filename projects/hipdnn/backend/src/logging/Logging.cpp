@@ -3,12 +3,12 @@
 
 #include "Logging.hpp"
 
-#include <hipdnn_sdk/logging/ComponentFormatter.hpp>
-#include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
+#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <iostream>
 
-#include <hipdnn_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -43,7 +43,7 @@ void initialize()
         }
 
         // It doesn't need to return if logLevel == off, but it avoids unnecessary initialization
-        if(!hipdnn_sdk::logging::isLoggingEnabled())
+        if(!hipdnn_data_sdk::logging::isLoggingEnabled())
         {
             s_loggingInitialized = true;
             return;
@@ -54,8 +54,8 @@ void initialize()
             spdlog::init_thread_pool(8192, 1);
         }
 
-        std::string logLevel = hipdnn_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
-        std::string logFilePath = hipdnn_sdk::utilities::getEnv("HIPDNN_LOG_FILE");
+        std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+        std::string logFilePath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE");
 
         std::shared_ptr<spdlog::sinks::sink> sharedSink;
         if(!logFilePath.empty())
@@ -73,7 +73,8 @@ void initialize()
         // In spdlog, the formatting is a property of the underlying sink, not the logger.
         // However, we need one destination sink for thread safety because the mutex is attached to the sink.
         // Therefore, we implement a custom formatter to have distinct formatting for the backend, which does not use a callback sink.
-        backendLogger->set_formatter(std::make_unique<hipdnn_sdk::logging::ComponentFormatter>());
+        backendLogger->set_formatter(
+            std::make_unique<hipdnn_data_sdk::logging::ComponentFormatter>());
         spdlog::register_logger(backendLogger);
 
         auto callbackReceiverLogger = std::make_shared<spdlog::async_logger>(

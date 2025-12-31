@@ -5,10 +5,10 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/utilities/Constants.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -16,10 +16,10 @@
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
@@ -198,6 +198,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto savedMeanHostPtr = savedMeanTensor.memory().hostData();
     auto savedInvVarHostPtr = savedInvVarTensor.memory().hostData();
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
@@ -245,8 +247,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
         bool meanValid = statsValidator.allClose(savedMeanRefTensor, savedMeanTensor);
         bool invVarValid = statsValidator.allClose(savedInvVarRefTensor, savedInvVarTensor);
 
-        bool nextMeanValid = false;
-        bool nextVarValid = false;
+        bool nextMeanValid = true;
+        bool nextVarValid = true;
         if(config.useRunningStats)
         {
             nextMeanValid = statsValidator.allClose(nextMeanRefTensor, nextMeanTensor);
@@ -265,6 +267,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
             std::cout << "  next_running_variance: " << (nextVarValid ? "successful" : "failed")
                       << "\n";
         }
+
+        validationPassed = yValid && meanValid && invVarValid && nextMeanValid && nextVarValid;
     }
 
     std::cout << "First 10 activated_y values: ";
@@ -285,6 +289,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nBatch normalization training + activation graph execution complete for "
               << inputType << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -297,9 +302,19 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All batch normalization training + activation runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All batch normalization training + activation runs completed successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout
+            << "One or more batch normalization training + activation runs failed validation.\n";
+        return 1;
+    }
 }
