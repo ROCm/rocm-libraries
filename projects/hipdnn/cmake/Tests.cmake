@@ -36,8 +36,33 @@ set(INTEGRATION_CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated integration 
                                               FORCE
 )
 
+# Builds the test environment list with optional code coverage support
+# ~~~
+# Parameters:
+#   OUT_VAR - The name of the variable to store the result in (will be set in PARENT_SCOPE)
+# ~~~
+function(_build_test_environment_list_internal OUT_VAR)
+    set(ENVIRONMENT_LIST "")
+    if(DEFINED TEST_ENVIRONMENT)
+        set(ENVIRONMENT_LIST ${TEST_ENVIRONMENT})
+    endif()
+
+    if(HIPDNN_ENABLE_COVERAGE)
+        # Ensure coverage report directory exists
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage_report/profraw")
+
+        # For code coverage builds, we want each profraw file to have a unique name.  The %m in the
+        # LLVM_PROFILE_FILE environment variable will auto generate a unique id.
+        list(APPEND ENVIRONMENT_LIST
+             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage_report/profraw/%m.profraw"
+        )
+    endif()
+
+    set(${OUT_VAR} ${ENVIRONMENT_LIST} PARENT_SCOPE)
+endfunction() # _build_test_environment_list_internal
+
 # Creates a custom target to validate test names using a Python script
-function(create_test_name_validation_target)
+function(_create_test_name_validation_target_internal)
     if(Python3_FOUND)
         # Write list of test executables with their paths to a file
         set(TEST_EXECUTABLES_FILE ${CMAKE_BINARY_DIR}/test_executables.txt)
@@ -71,7 +96,7 @@ function(create_test_name_validation_target)
             COMMENT "Skipping test name validation"
         )
     endif() # Python3_FOUND
-endfunction() # create_test_name_validation_target
+endfunction() # _create_test_name_validation_target_internal
 
 # Generic internal function to append tests to check targets
 function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STATUS_MESSAGE)
@@ -94,21 +119,7 @@ function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STAT
     endif()
 
     # Build environment list properly
-    set(ENVIRONMENT_LIST "")
-    if(DEFINED TEST_ENVIRONMENT)
-        set(ENVIRONMENT_LIST ${TEST_ENVIRONMENT})
-    endif()
-
-    if(HIPDNN_ENABLE_COVERAGE)
-        # Ensure coverage report directory exists
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage_report/profraw")
-
-        # For code coverage builds, we want each profraw file to have a unique name.  The %m in the
-        # LLVM_PROFILE_FILE environment variable will auto generate a unique id.
-        list(APPEND ENVIRONMENT_LIST
-             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage_report/profraw/%m.profraw"
-        )
-    endif()
+    _build_test_environment_list_internal(ENVIRONMENT_LIST)
 
     set(NEW_COMMAND "")
     if("${${COMMAND_VAR}}" STREQUAL "")
@@ -133,7 +144,7 @@ function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STAT
     )
 endfunction() # _append_test_to_check_target_internal
 
-# Generic internal function to finalize check targets
+# Generic internal function to finalize DIY check targets
 function(_finalize_check_target_internal TARGET_NAME COMMAND_VAR DEPENDS_VAR)
     add_custom_target(
         ${TARGET_NAME}
@@ -142,42 +153,121 @@ function(_finalize_check_target_internal TARGET_NAME COMMAND_VAR DEPENDS_VAR)
         DEPENDS ${${DEPENDS_VAR}}
         VERBATIM
         COMMENT "Running ${TARGET_NAME}"
+        USES_TERMINAL
     )
-    message(STATUS "Created ${TARGET_NAME} target")
+    message(VERBOSE "Created ${TARGET_NAME} target")
 endfunction() # _finalize_check_target_internal
 
-# Finalizes the custom check target
-function(finalize_custom_check_target)
-    _finalize_check_target_internal("check" "CHECK_COMMAND_GLOBAL" "CHECK_DEPENDS_GLOBAL")
-endfunction() # finalize_custom_check_target
+# Internal function to finalize the DIY unclassified check-old target
+function(_finalize_unclassified_check_target_internal)
+    _finalize_check_target_internal("check-old" "CHECK_COMMAND_GLOBAL" "CHECK_DEPENDS_GLOBAL")
+endfunction() # _finalize_unclassified_check_target_internal
 
-# Finalizes the unit check target
-function(finalize_unit_check_target)
+# Internal function to finalize the DIY unit-check-old target
+function(_finalize_unit_check_target_internal)
     _finalize_check_target_internal(
-        "unit-check" "UNIT_CHECK_COMMAND_GLOBAL" "UNIT_CHECK_DEPENDS_GLOBAL"
+        "unit-check-old" "UNIT_CHECK_COMMAND_GLOBAL" "UNIT_CHECK_DEPENDS_GLOBAL"
     )
-endfunction() # finalize_unit_check_target
+endfunction() # _finalize_unit_check_target_internal
 
-# Finalizes the integration check target
-function(finalize_integration_check_target)
+# Internal function to finalize the DIY integration-check-old target
+function(_finalize_integration_check_target_internal)
     _finalize_check_target_internal(
-        "integration-check" "INTEGRATION_CHECK_COMMAND_GLOBAL" "INTEGRATION_CHECK_DEPENDS_GLOBAL"
+        "integration-check-old" "INTEGRATION_CHECK_COMMAND_GLOBAL"
+        "INTEGRATION_CHECK_DEPENDS_GLOBAL"
     )
-endfunction() # finalize_integration_check_target
+endfunction() # _finalize_integration_check_target_internal
 
 enable_testing() # Cmake wont discover or run tests without this line
 
-# Add a check_ctest target which will run all tests discovered by gtest_discover_tests via ctest.
-add_custom_target(
-    check_ctest COMMAND ${CMAKE_COMMAND} -E env ${TEST_ENVIRONMENT} ${CMAKE_CTEST_COMMAND}
-                        --output-on-failure -C ${CMAKE_CFG_INTDIR}
-    COMMENT "Running tests via ctest"
-)
+# Internal helper function to create a ctest target
+# ~~~
+# Parameters:
+#   TARGET_NAME - Name of the ctest target to create
+#   LABEL - Optional label filter for ctest (empty string for no filter)
+#   VERBOSE - Set to TRUE to add --verbose flag, FALSE otherwise
+#   COMMENT - Comment describing the target
+# ~~~
+function(_add_ctest_target_internal TARGET_NAME LABEL VERBOSE COMMENT)
+    # Build the ctest command
+    set(CTEST_CMD ${CMAKE_COMMAND} -E env ${CTEST_ENV} ${CMAKE_CTEST_COMMAND})
 
-# Internal function to add a GTest target
+    # Add label filter if specified
+    if(NOT "${LABEL}" STREQUAL "")
+        list(APPEND CTEST_CMD -L "${LABEL}")
+    endif()
+
+    # Always add --output-on-failure
+    list(APPEND CTEST_CMD --output-on-failure)
+
+    # Add --verbose if requested
+    if(VERBOSE)
+        list(APPEND CTEST_CMD --verbose)
+    endif()
+
+    # Add configuration
+    list(APPEND CTEST_CMD -C ${CMAKE_CFG_INTDIR})
+
+    # Create the target
+    add_custom_target(${TARGET_NAME} COMMAND ${CTEST_CMD} COMMENT "${COMMENT}" USES_TERMINAL)
+    add_dependencies(${TARGET_NAME} validate_test_names)
+    message(VERBOSE "Created ${TARGET_NAME} target")
+endfunction() # _add_ctest_target_internal
+
+# Internal helper function to create the (new) check targets for running tests via ctest
+function(_create_ctest_targets_internal)
+    # cmake-format: off
+    # Build test environment once for all ctest targets
+    _build_test_environment_list_internal(CTEST_ENV)
+
+    # Regular targets (without --verbose)
+    _add_ctest_target_internal(check_ctest "" FALSE "Running all tests via ctest")
+    _add_ctest_target_internal(unit-check_ctest "unit_test" FALSE "Running unit tests via ctest")
+    _add_ctest_target_internal(integration-check_ctest "integration_test" FALSE "Running integration tests via ctest")
+
+    # Verbose targets (with --verbose)
+    _add_ctest_target_internal(check_ctest-verbose "" TRUE "Running all tests via ctest (verbose)")
+    _add_ctest_target_internal(unit-check_ctest-verbose "unit_test" TRUE "Running unit tests via ctest (verbose)")
+    _add_ctest_target_internal(integration-check_ctest-verbose "integration_test" TRUE "Running integration tests via ctest (verbose)")
+    # cmake-format: on
+endfunction() # create_ctest_targets
+
+# Finalizes and creates all of the test targets
+function(finalize_test_targets)
+    _create_test_name_validation_target_internal()
+
+    _create_ctest_targets_internal()
+
+    _finalize_unclassified_check_target_internal()
+    _finalize_unit_check_target_internal()
+    _finalize_integration_check_target_internal()
+
+    add_dependencies(check-old validate_test_names)
+
+    # cmake-format: off
+    # Create alias test targets without '_ctest' in the name
+    # Regular targets (without --verbose)
+    add_custom_target(check DEPENDS check_ctest COMMENT "Running all tests via ctest")
+    add_custom_target(unit-check DEPENDS unit-check_ctest COMMENT "Running unit tests via ctest")
+    add_custom_target(integration-check DEPENDS integration-check_ctest COMMENT "Running integration tests via ctest")
+    message(STATUS "Created ctest targets: check, unit-check, integration-check")
+    # Verbose targets (with --verbose)
+    add_custom_target(check-verbose DEPENDS check_ctest-verbose COMMENT "Running all tests via ctest (verbose)")
+    add_custom_target(unit-check-verbose DEPENDS unit-check_ctest-verbose COMMENT "Running unit tests via ctest (verbose)")
+    add_custom_target(integration-check-verbose DEPENDS integration-check_ctest-verbose COMMENT "Running integration tests via ctest (verbose)")
+    message(STATUS "Created ctest verbose targets: check-verbose, unit-check-verbose, integration-check-verbose")
+    # cmake-format: on
+endfunction() # finalize_test_targets
+
+# Internal (old) DIY function to add a test target (assumes the test executable is a gtest
+# executable) Still needed for collecting list of test executables in HIPDNN_TEST_TARGETS and
+# setting test-type labels. TODO: Deprecate this funcion and remove manual test collection once new
+# ctest-based method is proven.
 function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     if("${APPEND_FUNCTION_SUFFIX}" STREQUAL "test")
-        _append_test_to_check_target_internal(${TARGET} ${WORKING_DIR} "" "Appending check target")
+        _append_test_to_check_target_internal(
+            ${TARGET} ${WORKING_DIR} "" "Appending unclassified check target"
+        )
     elseif("${APPEND_FUNCTION_SUFFIX}" STREQUAL "unit_test")
         _append_test_to_check_target_internal(
             ${TARGET} ${WORKING_DIR} "UNIT" "Appending unit check target"
@@ -213,14 +303,14 @@ function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # Install test executables to bin directory
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    add_dependencies(check_ctest ${TARGET})
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
+    set_tests_properties(${TARGET} PROPERTIES LABELS ${APPEND_FUNCTION_SUFFIX})
 endfunction() # _add_gtest_target_internal
 
 # Adds a generic test target
-function(add_target_to_check_targets TARGET WORKING_DIR)
+function(add_unclassified_test_target TARGET WORKING_DIR)
     _add_gtest_target_internal(test ${TARGET} ${WORKING_DIR})
-endfunction() # add_target_to_check_targets
+endfunction() # add_unclassified_test_target
 
 # Adds a unit test target
 function(add_unit_test_target TARGET WORKING_DIR)
@@ -232,12 +322,12 @@ function(add_integration_test_target TARGET WORKING_DIR)
     _add_gtest_target_internal(integration_test ${TARGET} ${WORKING_DIR})
 endfunction() # add_integration_test_target
 
-# Define the CTest installation directory
-set(HIPDNN_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/hipdnn")
-
 # Install CTest configuration files for direct test execution This should be called once at the end
 # of the main CMakeLists.txt after all tests are registered
 function(install_hipdnn_ctest_files)
+    # Define the CTest installation directory
+    set(HIPDNN_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/hipdnn")
+
     # Generate a new CTestTestfile.cmake that references installed test executables
     set(INSTALLED_CTEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
 

@@ -406,56 +406,75 @@ namespace TensileLite
             size_t      loop_count   = count / pruneDimSize;
             if(pruneDimSize % 4 != 0)
                 throw std::runtime_error("prune dimension size must be multiple of 4.");
-            auto getPruneIndex = [](PruneSparseMode pruneMode, size_t* index1, size_t* index2) {
-                if(pruneMode == PruneSparseMode::PruneRandom)
-                    pruneMode = static_cast<PruneSparseMode>(
-                        rand() % (static_cast<int>(PruneSparseMode::MaxPruneMode) - 1) + 1);
-                switch(pruneMode)
-                {
-                case PruneSparseMode::PruneXX00:
-                    *index1 = 2;
-                    *index2 = 3;
-                    break;
-                case PruneSparseMode::PruneX0X0:
-                    *index1 = 1;
-                    *index2 = 3;
-                    break;
-                case PruneSparseMode::Prune0XX0:
-                    *index1 = 0;
-                    *index2 = 3;
-                    break;
-                case PruneSparseMode::PruneX00X:
-                    *index1 = 1;
-                    *index2 = 2;
-                    break;
-                case PruneSparseMode::Prune0X0X:
-                    *index1 = 0;
-                    *index2 = 2;
-                    break;
-                case PruneSparseMode::Prune00XX:
-                    *index1 = 0;
-                    *index2 = 1;
-                    break;
-                default:
-                    throw std::runtime_error("prune mode is not allowed.");
-                    break;
-                }
-            };
-#pragma omp parallel for
-            for(size_t loop = 0; loop < loop_count; loop++)
+            switch(mode)
             {
-                std::vector<size_t> coord(tensor.dimensions(), 0);
-                CoordNumberedExclude(
-                    loop, coord.begin(), coord.end(), sizes.begin(), sizes.end(), pruneDim);
-                for(size_t pruneDimIdx = 0; pruneDimIdx < pruneDimSize;
-                    pruneDimIdx += 4) //traverse along pruneDim
+            case PruneSparseMode::PruneXX00:
+            case PruneSparseMode::PruneX0X0:
+            case PruneSparseMode::Prune0XX0:
+            case PruneSparseMode::PruneX00X:
+            case PruneSparseMode::Prune0X0X:
+            case PruneSparseMode::Prune00XX:
+            case PruneSparseMode::PruneRandom:
+                break;
+            default:
+                throw std::runtime_error("prune mode is not allowed.");
+                break;
+            }
+
+            constexpr std::array<uint8_t, static_cast<uint32_t>(PruneSparseMode::MaxPruneMode)>
+                pruneMask = [] {
+                    std::array<uint8_t, static_cast<uint32_t>(PruneSparseMode::MaxPruneMode)> m{};
+                    m[static_cast<uint32_t>(PruneSparseMode::PruneXX00)] = 0x3;
+                    m[static_cast<uint32_t>(PruneSparseMode::PruneX0X0)] = 0x5;
+                    m[static_cast<uint32_t>(PruneSparseMode::Prune0XX0)] = 0x6;
+                    m[static_cast<uint32_t>(PruneSparseMode::PruneX00X)] = 0x9;
+                    m[static_cast<uint32_t>(PruneSparseMode::Prune0X0X)] = 0xA;
+                    m[static_cast<uint32_t>(PruneSparseMode::Prune00XX)] = 0xC;
+                    return m;
+                }();
+
+#pragma omp parallel
+            {
+                std::random_device                      rd;
+                std::mt19937                            rng(rd());
+                std::uniform_int_distribution<uint32_t> dist(
+                    1, static_cast<uint32_t>(PruneSparseMode::MaxPruneMode) - 1);
+
+#pragma omp for schedule(static)
+                for(size_t loop = 0; loop < loop_count; loop++)
                 {
-                    size_t pruneIdx1, pruneIdx2;
-                    getPruneIndex(mode, &pruneIdx1, &pruneIdx2);
-                    coord[pruneDim]            = pruneDimIdx + pruneIdx1;
-                    array[tensor.index(coord)] = static_cast<T>(0);
-                    coord[pruneDim]            = pruneDimIdx + pruneIdx2;
-                    array[tensor.index(coord)] = static_cast<T>(0);
+                    std::vector<size_t> coord(tensor.dimensions(), 0);
+                    CoordNumberedExclude(
+                        loop, coord.begin(), coord.end(), sizes.begin(), sizes.end(), pruneDim);
+                    for(size_t pruneDimIdx = 0; pruneDimIdx < pruneDimSize;
+                        pruneDimIdx += 4) //traverse along pruneDim
+                    {
+                        uint32_t umode = static_cast<uint32_t>(mode);
+                        if(umode == static_cast<uint32_t>(PruneSparseMode::PruneRandom))
+                            umode = dist(rng);
+
+                        uint32_t mask_ = pruneMask[umode];
+
+                        coord[pruneDim] = pruneDimIdx;
+                        uint32_t bit    = (mask_) & 0x1u;
+                        if(!bit)
+                            array[tensor.index(coord)] = T{};
+
+                        coord[pruneDim] = pruneDimIdx + 1;
+                        bit             = (mask_ >> 1) & 0x1u;
+                        if(!bit)
+                            array[tensor.index(coord)] = T{};
+
+                        coord[pruneDim] = pruneDimIdx + 2;
+                        bit             = (mask_ >> 2) & 0x1u;
+                        if(!bit)
+                            array[tensor.index(coord)] = T{};
+
+                        coord[pruneDim] = pruneDimIdx + 3;
+                        bit             = (mask_ >> 3) & 0x1u;
+                        if(!bit)
+                            array[tensor.index(coord)] = T{};
+                    }
                 }
             }
         }
@@ -479,93 +498,91 @@ namespace TensileLite
             if(dimSize % 4 != 0)
                 throw std::runtime_error("compressed dimension size must be multiple of 4.");
 
-            std::memset((void*)dstCompressed,
-                        0,
-                        TypeInfo<T>::ElementSize * tensorC.totalAllocatedElements());
-            std::memset((void*)dstMeta, 0, tensorMeta.totalLogicalElements());
+            std::memset((void*)dstCompressed, 0, tensorC.totalAllocatedBytes());
+            std::memset((void*)dstMeta, 0, tensorMeta.totalAllocatedBytes());
 
-#pragma omp parallel for
-            for(size_t loop = 0; loop < loop_count; loop++)
+#pragma omp parallel
             {
-                std::vector<size_t> coord(tensor.dimensions());
-                std::vector<size_t> coordC(tensorC.dimensions());
-                std::vector<size_t> coordMeta(tensorMeta.dimensions());
-                CoordNumberedExclude(
-                    loop, coord.begin(), coord.end(), sizes.begin(), sizes.end(), dim);
-                CoordNumberedExclude(
-                    loop, coordC.begin(), coordC.end(), sizesC.begin(), sizesC.end(), dim);
-                //metadata is always a tranpose matrix, so the dimension will always at 0.
-                CoordNumberedExclude(loop,
-                                     coordMeta.begin(),
-                                     coordMeta.end(),
-                                     sizesMeta.begin(),
-                                     sizesMeta.end(),
-                                     0);
-
-                coordMeta[0] = 0;
-
-                for(size_t compressDimIdx = 0; compressDimIdx < dimSize;
-                    compressDimIdx += 4) //traverse along compressdim
+#pragma omp for schedule(static)
+                for(size_t loop = 0; loop < loop_count; loop++)
                 {
-                    size_t metaData    = 0;
-                    size_t metaIdx     = 0;
-                    size_t dstDimCoord = compressDimIdx / 4 * 2;
+                    std::vector<size_t> coord(tensor.dimensions());
+                    std::vector<size_t> coordC(tensorC.dimensions());
+                    std::vector<size_t> coordMeta(tensorMeta.dimensions());
+                    CoordNumberedExclude(
+                        loop, coord.begin(), coord.end(), sizes.begin(), sizes.end(), dim);
+                    CoordNumberedExclude(
+                        loop, coordC.begin(), coordC.end(), sizesC.begin(), sizesC.end(), dim);
+                    //metadata is always a tranpose matrix, so the dimension will always at 0.
+                    CoordNumberedExclude(loop,
+                                         coordMeta.begin(),
+                                         coordMeta.end(),
+                                         sizesMeta.begin(),
+                                         sizesMeta.end(),
+                                         0);
 
-                    for(size_t i = 0; i < 4; i++)
+                    coordMeta[0] = 0;
+
+                    for(size_t compressDimIdx = 0; compressDimIdx < dimSize;
+                        compressDimIdx += 4) //traverse along compressdim
                     {
-                        //src coord
-                        coord[dim] = compressDimIdx + i;
-                        T srcData  = src[tensor.index(coord)];
-                        if(srcData != static_cast<T>(0))
-                        {
-                            if(metaIdx > 2)
-                                throw std::runtime_error("Sparse matrix must contain 2 zero "
-                                                         "elements of each 4 elements.");
+                        uint32_t metaData = 0;
+                        uint32_t metaIdx[2];
 
-                            //dst coord
-                            coordC[dim]                          = dstDimCoord + metaIdx;
-                            dstCompressed[tensorC.index(coordC)] = srcData;
-                            metaData |= i << (2 * metaIdx);
-                            metaIdx++;
+                        size_t dstDimCoord = compressDimIdx / 4 * 2;
+
+                        coord[dim]  = compressDimIdx;
+                        coordC[dim] = dstDimCoord;
+
+                        T srcData[4];
+                        srcData[0] = src[tensor.index(coord)];
+                        coord[dim] = compressDimIdx + 1;
+                        srcData[1] = src[tensor.index(coord)];
+                        coord[dim] = compressDimIdx + 2;
+                        srcData[2] = src[tensor.index(coord)];
+                        coord[dim] = compressDimIdx + 3;
+                        srcData[3] = src[tensor.index(coord)];
+
+                        int nnz = (srcData[0] != T{}) + (srcData[1] != T{}) + (srcData[2] != T{})
+                                  + (srcData[3] != T{});
+                        if(nnz > 2)
+                            throw std::runtime_error("Sparse matrix must contain 2 zero "
+                                                     "elements of each 4 elements.");
+                        //init metadata = 10
+                        metaIdx[0] = 0;
+                        metaIdx[1] = 1;
+
+                        if(srcData[2] != T{})
+                        {
+                            if(srcData[1] != T{})
+                            {
+                                metaIdx[0] = 1;
+                            }
+                            metaIdx[1] = 2; //metadata = 20 or 21
+                        }
+                        if(srcData[3] != T{})
+                        {
+
+                            if(srcData[metaIdx[1]] != T{})
+                            {
+                                metaIdx[0] = metaIdx[1];
+                            }
+                            metaIdx[1] = 3; //metadata = 32 or 31 or 30
                         }
 
-                        if(i == 3 && metaIdx < 2)
-                        {
-                            if(metaIdx == 0) //all zeros
-                            {
-                                coordC[dim]                          = dstDimCoord;
-                                dstCompressed[tensorC.index(coordC)] = static_cast<T>(0);
-                                metaData                             = 0;
-                                metaIdx++;
-                            }
-                            if(metaIdx == 1) //3 zeros at least
-                            {
-                                if(metaData != 3) //last element is zero
-                                {
-                                    coordC[dim]                          = dstDimCoord + metaIdx;
-                                    dstCompressed[tensorC.index(coordC)] = static_cast<T>(0);
-                                    metaData |= i << (2 * metaIdx);
-                                }
-                                else //last element is not zero
-                                {
-                                    coordC[dim]                          = dstDimCoord;
-                                    dstCompressed[tensorC.index(coordC)] = static_cast<T>(0);
-                                    coordC[dim]                          = dstDimCoord + metaIdx;
-                                    dstCompressed[tensorC.index(coordC)] = srcData;
-                                    metaData = (metaData << (2 * metaIdx));
-                                }
-                                metaIdx++;
-                            }
-                        }
+                        dstCompressed[tensorC.index(coordC)] = srcData[metaIdx[0]];
+                        coordC[dim]                          = dstDimCoord + 1;
+                        dstCompressed[tensorC.index(coordC)] = srcData[metaIdx[1]];
+                        metaData                             = metaIdx[0] | (metaIdx[1] << 2);
+                        //meta Data coord
+                        size_t shift4bit = (compressDimIdx / 4 % 2) * 4;
+                        coordMeta[0]     = compressDimIdx / 8;
+                        //calculate flatten index of dstMeta
+                        size_t flattenIdx = CoordFlattenIndex(
+                            coordMeta.begin(), coordMeta.end(), sizesMeta.begin(), sizesMeta.end());
+                        // store metaData to dstMeta
+                        dstMeta[flattenIdx] |= metaData << shift4bit;
                     }
-                    //meta Data coord
-                    size_t shift4bit = (compressDimIdx / 4 % 2) * 4;
-                    coordMeta[0]     = compressDimIdx / 8;
-                    //calculate flatten index of dstMeta
-                    size_t flattenIdx = CoordFlattenIndex(
-                        coordMeta.begin(), coordMeta.end(), sizesMeta.begin(), sizesMeta.end());
-                    // store metaData to dstMeta
-                    dstMeta[flattenIdx] |= metaData << shift4bit;
                 }
             }
         }
@@ -1363,9 +1380,8 @@ namespace TensileLite
                     size_t size  = DataTypeInfo::Get(p.first).elementSize * pUnit.maxElements;
 
                     std::stringstream ss;
-                    ss << "[" << tensorIdx << "]"
-                       << "Failed to allocate gpu input " << it.name << " type("
-                       << DataTypeInfo::Get(p.first).abbrev
+                    ss << "[" << tensorIdx << "]" << "Failed to allocate gpu input " << it.name
+                       << " type(" << DataTypeInfo::Get(p.first).abbrev
                        << "), element size: " << DataTypeInfo::Get(p.first).elementSize
                        << ", element length: " << pUnit.maxElements;
 

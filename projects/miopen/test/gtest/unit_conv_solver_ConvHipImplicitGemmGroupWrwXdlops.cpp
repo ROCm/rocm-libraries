@@ -73,6 +73,10 @@ const auto& GetTestParams()
     return params;
 }
 
+const auto& GetTestParamsFP16() { return GetTestParams<miopenHalf>(); }
+const auto& GetTestParamsBFP16() { return GetTestParams<miopenBFloat16>(); }
+const auto& GetTestParamsFP32() { return GetTestParams<miopenFloat>(); }
+
 } // namespace
 
 // Solver itself supports I8 in isApplicable, but CK returns 0 compatible kernels
@@ -124,19 +128,19 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicabilit
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16,
-                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenTensorNHWC, miopenTensorNCHW),
                                           testing::ValuesIn(GetConvSmokeTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16,
-                         testing::Combine(testing::Values(GetTestParams<miopenBFloat16>()),
+                         testing::Combine(testing::Values(GetTestParamsBFP16()),
                                           testing::Values(miopenTensorNHWC, miopenTensorNCHW),
                                           testing::ValuesIn(GetConvSmokeTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP32,
-                         testing::Combine(testing::Values(GetTestParams<miopenFloat>()),
+                         testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(miopenTensorNHWC, miopenTensorNCHW),
                                           testing::ValuesIn(GetConvSmokeTestCases())));
 
@@ -144,26 +148,26 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16,
-                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenTensorNHWC, miopenTensorNCHW),
                                           testing::ValuesIn(GetConvFullTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16,
-                         testing::Combine(testing::Values(GetTestParams<miopenBFloat16>()),
+                         testing::Combine(testing::Values(GetTestParamsBFP16()),
                                           testing::Values(miopenTensorNHWC, miopenTensorNCHW),
                                           testing::ValuesIn(GetConvFullTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP32,
-                         testing::Combine(testing::Values(GetTestParams<miopenFloat>()),
+                         testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(miopenTensorNHWC, miopenTensorNCHW),
                                           testing::ValuesIn(GetConvFullTestCases())));
 
 // Device applicability tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16,
-                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(GetDevApplicabilityConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(

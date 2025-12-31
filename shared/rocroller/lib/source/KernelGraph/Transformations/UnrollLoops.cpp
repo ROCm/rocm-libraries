@@ -473,8 +473,7 @@ namespace rocRoller
             // Change the loop increment calculation
             // Multiply the increment amount by the unroll amount
             // Find the ForLoopIcrement calculation
-            // TODO: Handle multiple ForLoopIncrement edges that might be in a different
-            // format, such as ones coming from ComputeIndex.
+            // TODO: Handle multiple ForLoopIncrement edges that might be in a different format.
             auto loopIncrement = graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).only();
             AssertFatal(loopIncrement.has_value(), "Should only have 1 loop increment edge");
             auto loopIncrementOp       = graph.control.getNode<Assign>(loopIncrement.value());
@@ -510,7 +509,7 @@ namespace rocRoller
                 for(auto const& body : toConnect)
                 {
                     graph.control.addElement(Body(), {tag}, {body});
-                    for(auto const& op : findComputeIndexCandidates(graph, body))
+                    for(auto const& op : findIndexAssignmentCandidates(graph, body))
                     {
                         auto pendingOp        = op;
                         auto [required, path] = findAllRequiredCoordinates(op, graph);
@@ -830,7 +829,7 @@ namespace rocRoller
                 = graph.control.getOutputNodeIndices<Body>(tailLoop).to<std::vector>();
             for(auto const body : bodies)
             {
-                for(auto const op : findComputeIndexCandidates(graph, body))
+                for(auto const op : findIndexAssignmentCandidates(graph, body))
                 {
                     auto [_, path] = findAllRequiredCoordinates(op, graph);
                     if(path.contains(unrollDimension))
