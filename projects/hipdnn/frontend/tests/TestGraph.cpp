@@ -367,6 +367,50 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
+TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_dim({1, 2, 1, 1});
+
+    auto variance = std::make_shared<TensorAttributes>();
+    variance->set_dim({1, 2, 1, 1});
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 1, 1});
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({1, 2, 1, 1});
+
+    mean->set_dim(derivedDims).set_stride(derivedStrides);
+    variance->set_dim(derivedDims).set_stride(derivedStrides);
+    scale->set_dim(derivedDims).set_stride(derivedStrides);
+    bias->set_dim(derivedDims).set_stride(derivedStrides);
+
+    BatchnormInferenceAttributesVarianceExt attributes;
+    attributes.set_name("BatchnormNodeVariance");
+
+    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, attributes);
+
+    EXPECT_EQ(y->get_name(), "BatchnormNodeVariance::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
 TEST_F(TestGraph, PointwiseNodeCreationSingleInput)
 {
     Graph graph;
@@ -604,6 +648,105 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
     EXPECT_EQ(deserializedBatchnormAttributes->x_tensor_uid, x->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->mean_tensor_uid, mean->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->inv_variance_tensor_uid, invVariance->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->scale_tensor_uid, scale->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->bias_tensor_uid, bias->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->y_tensor_uid, y->get_uid());
+}
+
+TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    graph.set_name("SerializedGraphTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    auto variance = std::make_shared<TensorAttributes>();
+    variance->set_uid(3)
+        .set_name("Variance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    BatchnormInferenceAttributesVarianceExt batchnormAttributes;
+    batchnormAttributes.set_name("BatchnormNodeVariance");
+
+    auto y = graph.batchnorm_inference_variance_ext(
+        x, mean, variance, scale, bias, batchnormAttributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type,
+              hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 6);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*x, tensorLookup[x->get_uid()]);
+    validateTensor(*mean, tensorLookup[mean->get_uid()]);
+    validateTensor(*variance, tensorLookup[variance->get_uid()]);
+    validateTensor(*scale, tensorLookup[scale->get_uid()]);
+    validateTensor(*bias, tensorLookup[bias->get_uid()]);
+    validateTensor(*y, tensorLookup[y->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "BatchnormNodeVariance");
+    EXPECT_EQ(
+        deserializedGraph->nodes[0]->attributes.type,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt);
+    auto deserializedBatchnormAttributes
+        = deserializedGraph->nodes[0]->attributes.AsBatchnormInferenceAttributesVarianceExt();
+    EXPECT_EQ(deserializedBatchnormAttributes->x_tensor_uid, x->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->mean_tensor_uid, mean->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->variance_tensor_uid, variance->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->scale_tensor_uid, scale->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->bias_tensor_uid, bias->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->y_tensor_uid, y->get_uid());
