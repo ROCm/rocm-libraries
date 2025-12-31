@@ -63,3 +63,26 @@ if(WIN32)
         endif()
     endif()
 endif()
+
+# Enable testing and add sample tests
+enable_testing()
+
+# Helper function to add a hipDNN sample test
+function(add_hipdnn_sample_test TARGET_NAME)
+    add_test(NAME sample_${TARGET_NAME} COMMAND ${TARGET_NAME} --verify-cpu)
+    set_tests_properties(sample_${TARGET_NAME} PROPERTIES LABELS "sample_test")
+endfunction()
+
+# Register convolution samples as tests
+add_hipdnn_sample_test(conv_fprop)
+add_hipdnn_sample_test(conv_dgrad)
+add_hipdnn_sample_test(conv_wgrad)
+add_hipdnn_sample_test(fused_conv_fprop_activ)
+add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+
+# Register batchnorm samples as tests
+add_hipdnn_sample_test(bn_training)
+add_hipdnn_sample_test(fused_bn_training_activ)
+add_hipdnn_sample_test(bn_backward)
+add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
+# Note: bn_inference is currently disabled per issue #2459

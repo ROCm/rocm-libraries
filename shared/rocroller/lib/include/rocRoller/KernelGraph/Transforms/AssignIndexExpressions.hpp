@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #pragma once
+#include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
@@ -32,13 +33,14 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Rewrite KernelGraph to add ComputeIndex operations.
+         * @brief Rewrite KernelGraph to add index computation operations.
          *
-         * The ComputeIndex operations are used so that indices do not
-         * need to be completely recalculated everytime when iterating
+         * This transform adds operations to compute memory offsets and
+         * strides for load/store operations, so that indices do not
+         * need to be completely recalculated every time when iterating
          * through a tile of data.
          *
-         * ComputeIndex operations are added before For Loops and
+         * Index computation operations are added before For Loops and
          * calculate the first index in the loop.
          *
          * A new ForLoopIncrement is added to the loop as well to
@@ -48,14 +50,25 @@ namespace rocRoller
          * portion of the Coordinate graph to keep track of the data
          * needed to perform the operations.
          */
-        class AddComputeIndex : public GraphTransform
+        class AssignIndexExpressions : public GraphTransform
         {
         public:
+            AssignIndexExpressions(ContextPtr context, CommandPtr command)
+                : m_context(context)
+                , m_command(command)
+            {
+            }
+
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
-                return "AddComputeIndex";
+                return "AssignIndexExpressions";
             }
+
+        private:
+            ContextPtr m_context;
+            CommandPtr m_command;
         };
+
     }
 }
