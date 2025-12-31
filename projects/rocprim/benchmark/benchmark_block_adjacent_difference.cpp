@@ -38,22 +38,22 @@
 template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
-    BENCHMARK_TYPE(int, 256, false)
+    BENCHMARK_TYPE(int32_t, 256, false)
     BENCHMARK_TYPE(float, 256, false)
     BENCHMARK_TYPE(int8_t, 256, false)
     BENCHMARK_TYPE(rocprim::half, 256, false)
-    BENCHMARK_TYPE(long long, 256, false)
+    BENCHMARK_TYPE(int64_t, 256, false)
     BENCHMARK_TYPE(double, 256, false)
     BENCHMARK_TYPE(rocprim::int128_t, 256, false)
     BENCHMARK_TYPE(rocprim::uint128_t, 256, false)
 
     if(Benchmark::enable_with_tile)
     {
-        BENCHMARK_TYPE(int, 256, true)
+        BENCHMARK_TYPE(int32_t, 256, true)
         BENCHMARK_TYPE(float, 256, true)
         BENCHMARK_TYPE(int8_t, 256, true)
         BENCHMARK_TYPE(rocprim::half, 256, true)
-        BENCHMARK_TYPE(long long, 256, true)
+        BENCHMARK_TYPE(int64_t, 256, true)
         BENCHMARK_TYPE(double, 256, true)
         BENCHMARK_TYPE(rocprim::int128_t, 256, true)
         BENCHMARK_TYPE(rocprim::uint128_t, 256, true)

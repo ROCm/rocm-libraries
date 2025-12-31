@@ -73,13 +73,13 @@
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(KEY_TYPE, VALUE_TYPE)
 
 #define BENCHMARK_TYPES_TUNING(KEY_TYPE)               \
-    BENCHMARK_SELECT_FLAG_TYPE(KEY_TYPE, char)         \
+    BENCHMARK_SELECT_FLAG_TYPE(KEY_TYPE, int8_t)         \
     BENCHMARK_SELECT_PREDICATE_TYPE(KEY_TYPE)          \
     BENCHMARK_UNIQUE_TYPE(KEY_TYPE)                    \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, rocprim::int128_t) \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int64_t)           \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, int)               \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, short)             \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int32_t)               \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int16_t)             \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int8_t)
 
 int main(int argc, char* argv[])
@@ -90,8 +90,8 @@ int main(int argc, char* argv[])
     // Tuned types
     BENCHMARK_TYPES_TUNING(rocprim::int128_t)
     BENCHMARK_TYPES_TUNING(int64_t)
-    BENCHMARK_TYPES_TUNING(int)
-    BENCHMARK_TYPES_TUNING(short)
+    BENCHMARK_TYPES_TUNING(int32_t)
+    BENCHMARK_TYPES_TUNING(int16_t)
     BENCHMARK_TYPES_TUNING(int8_t)
     BENCHMARK_TYPES_TUNING(double)
     BENCHMARK_TYPES_TUNING(float)
@@ -100,13 +100,13 @@ int main(int argc, char* argv[])
     #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
     // Not tuned types
     BENCHMARK_SELECT_FLAG_TYPE(uint8_t, uint8_t)
-    BENCHMARK_SELECT_FLAG_TYPE(rocprim::uint128_t, unsigned char)
+    BENCHMARK_SELECT_FLAG_TYPE(rocprim::uint128_t, uint8_t)
 
     BENCHMARK_SELECT_PREDICATE_TYPE(uint8_t)
     BENCHMARK_SELECT_PREDICATE_TYPE(rocprim::uint128_t)
 
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(uint8_t, uint8_t)
-    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(rocprim::uint128_t, unsigned char)
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(rocprim::uint128_t, uint8_t)
 
     BENCHMARK_UNIQUE_TYPE(uint8_t)
     BENCHMARK_UNIQUE_TYPE(rocprim::uint128_t)
@@ -118,19 +118,19 @@ int main(int argc, char* argv[])
     BENCHMARK_UNIQUE_BY_KEY_TYPE(rocprim::uint128_t, rocprim::int128_t)
 
     // Not tuned custom types
-    BENCHMARK_SELECT_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_UNIQUE_BY_KEY_TYPE(double, custom_double2)
+    BENCHMARK_SELECT_FLAG_TYPE(custom_f64_f64, uint8_t)
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(custom_f64_f64, uint8_t)
+    BENCHMARK_UNIQUE_BY_KEY_TYPE(double, custom_f64_f64)
 
-    BENCHMARK_SELECT_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_UNIQUE_TYPE(custom_int_double)
-    BENCHMARK_UNIQUE_BY_KEY_TYPE(custom_int_double, custom_int_double)
+    BENCHMARK_SELECT_PREDICATE_TYPE(custom_i32_f64)
+    BENCHMARK_UNIQUE_TYPE(custom_i32_f64)
+    BENCHMARK_UNIQUE_BY_KEY_TYPE(custom_i32_f64, custom_i32_f64)
 
-    BENCHMARK_SELECT_FLAG_TYPE(custom_huge_float2_1024, unsigned char)
-    BENCHMARK_SELECT_PREDICATE_TYPE(custom_huge_float2_1024)
-    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(custom_huge_float2_1024, unsigned char)
-    BENCHMARK_UNIQUE_TYPE(custom_huge_float2_1024)
-    BENCHMARK_UNIQUE_BY_KEY_TYPE(custom_huge_float2_1024, custom_huge_float2_1024)
+    BENCHMARK_SELECT_FLAG_TYPE(huge_1024_f32_f32, uint8_t)
+    BENCHMARK_SELECT_PREDICATE_TYPE(huge_1024_f32_f32)
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(huge_1024_f32_f32, uint8_t)
+    BENCHMARK_UNIQUE_TYPE(huge_1024_f32_f32)
+    BENCHMARK_UNIQUE_BY_KEY_TYPE(huge_1024_f32_f32, huge_1024_f32_f32)
     #endif
 #endif
 

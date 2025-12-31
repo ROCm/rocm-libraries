@@ -60,8 +60,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARKS(rocprim::uint128_t)
 
     // Not tuned custom types
-    CREATE_BENCHMARKS(custom_int2)
-    CREATE_BENCHMARKS(custom_longlong_double)
+    CREATE_BENCHMARKS(custom_i32_i32)
+    CREATE_BENCHMARKS(custom_i64_f64)
     #endif
 #endif
 

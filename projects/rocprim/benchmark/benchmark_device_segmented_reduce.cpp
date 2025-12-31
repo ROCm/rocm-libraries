@@ -57,8 +57,8 @@ int main(int argc, char* argv[])
     // Tuned types
     BENCHMARK_TYPE(rocprim::int128_t)
     BENCHMARK_TYPE(int64_t)
-    BENCHMARK_TYPE(int)
-    BENCHMARK_TYPE(short)
+    BENCHMARK_TYPE(int32_t)
+    BENCHMARK_TYPE(int16_t)
     BENCHMARK_TYPE(int8_t)
     BENCHMARK_TYPE(double)
     BENCHMARK_TYPE(float)
@@ -70,8 +70,8 @@ int main(int argc, char* argv[])
     BENCHMARK_TYPE(rocprim::uint128_t)
 
     // Not tuned custom types
-    BENCHMARK_TYPE(custom_float2)
-    BENCHMARK_TYPE(custom_double2)
+    BENCHMARK_TYPE(custom_f32_f32)
+    BENCHMARK_TYPE(custom_f64_f64)
     #endif
 #endif
 

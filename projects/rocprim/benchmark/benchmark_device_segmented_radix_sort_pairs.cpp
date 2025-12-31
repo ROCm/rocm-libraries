@@ -82,8 +82,8 @@ void add_benchmarks(primbench::executor& executor, size_t bytes)
 #define BENCHMARK_TYPES_TUNING(KEY_TYPE)               \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, rocprim::int128_t) \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int64_t)           \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, int)               \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, short)             \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int32_t)               \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int16_t)             \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int8_t)
 
 int main(int argc, char* argv[])
@@ -96,8 +96,8 @@ int main(int argc, char* argv[])
     // Tuned types
     BENCHMARK_TYPES_TUNING(rocprim::int128_t)
     BENCHMARK_TYPES_TUNING(int64_t)
-    BENCHMARK_TYPES_TUNING(int)
-    BENCHMARK_TYPES_TUNING(short)
+    BENCHMARK_TYPES_TUNING(int32_t)
+    BENCHMARK_TYPES_TUNING(int16_t)
     BENCHMARK_TYPES_TUNING(int8_t)
     BENCHMARK_TYPES_TUNING(double)
     BENCHMARK_TYPES_TUNING(float)
@@ -105,15 +105,15 @@ int main(int argc, char* argv[])
 
     #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
     // Not tuned types
-    add_benchmarks<int, float>(executor, bytes);
-    add_benchmarks<long long, double>(executor, bytes);
+    add_benchmarks<int32_t, float>(executor, bytes);
+    add_benchmarks<int64_t, double>(executor, bytes);
     add_benchmarks<uint8_t, uint8_t>(executor, bytes);
     add_benchmarks<rocprim::half, rocprim::half>(executor, bytes);
     add_benchmarks<rocprim::uint128_t, rocprim::uint128_t>(executor, bytes);
 
     // Not tuned custom types
-    add_benchmarks<int, custom_float2>(executor, bytes);
-    add_benchmarks<long long, custom_double2>(executor, bytes);
+    add_benchmarks<int32_t, custom_f32_f32>(executor, bytes);
+    add_benchmarks<int64_t, custom_f64_f64>(executor, bytes);
     #endif
 #endif
 

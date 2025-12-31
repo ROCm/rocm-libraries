@@ -79,8 +79,8 @@ int main(int argc, char* argv[])
     // Tuned types
     add_benchmarks<rocprim::int128_t>(executor, bytes);
     add_benchmarks<int64_t>(executor, bytes);
-    add_benchmarks<int>(executor, bytes);
-    add_benchmarks<short>(executor, bytes);
+    add_benchmarks<int32_t>(executor, bytes);
+    add_benchmarks<int16_t>(executor, bytes);
     add_benchmarks<int8_t>(executor, bytes);
     add_benchmarks<double>(executor, bytes);
     add_benchmarks<float>(executor, bytes);

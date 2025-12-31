@@ -38,7 +38,7 @@
 template<bool AllReduce, bool Segmented>
 void add_benchmarks(primbench::executor& executor)
 {
-    BENCHMARK_TYPE(int)
+    BENCHMARK_TYPE(int32_t)
     BENCHMARK_TYPE(float)
     BENCHMARK_TYPE(double)
     BENCHMARK_TYPE(int8_t)

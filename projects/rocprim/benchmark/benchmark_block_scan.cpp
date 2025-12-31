@@ -39,31 +39,31 @@ template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
     // When block size is less than or equal to warp size
-    BENCHMARK_TYPE(int, 64)
+    BENCHMARK_TYPE(int32_t, 64)
     BENCHMARK_TYPE(float, 64)
     BENCHMARK_TYPE(double, 64)
     BENCHMARK_TYPE(int8_t, 64)
     BENCHMARK_TYPE(uint8_t, 64)
     BENCHMARK_TYPE(rocprim::half, 64)
 
-    BENCHMARK_TYPE(int, 256)
+    BENCHMARK_TYPE(int32_t, 256)
     BENCHMARK_TYPE(float, 256)
     BENCHMARK_TYPE(double, 256)
     BENCHMARK_TYPE(int8_t, 256)
     BENCHMARK_TYPE(uint8_t, 256)
     BENCHMARK_TYPE(rocprim::half, 256)
 
-    CREATE_BENCHMARK(custom_float2, 256, 1)
-    CREATE_BENCHMARK(custom_float2, 256, 4)
-    CREATE_BENCHMARK(custom_float2, 256, 8)
+    CREATE_BENCHMARK(custom_f32_f32, 256, 1)
+    CREATE_BENCHMARK(custom_f32_f32, 256, 4)
+    CREATE_BENCHMARK(custom_f32_f32, 256, 8)
 
     CREATE_BENCHMARK(float2, 256, 1)
     CREATE_BENCHMARK(float2, 256, 4)
     CREATE_BENCHMARK(float2, 256, 8)
 
-    CREATE_BENCHMARK(custom_double2, 256, 1)
-    CREATE_BENCHMARK(custom_double2, 256, 4)
-    CREATE_BENCHMARK(custom_double2, 256, 8)
+    CREATE_BENCHMARK(custom_f64_f64, 256, 1)
+    CREATE_BENCHMARK(custom_f64_f64, 256, 4)
+    CREATE_BENCHMARK(custom_f64_f64, 256, 8)
 
     CREATE_BENCHMARK(double2, 256, 1)
     CREATE_BENCHMARK(double2, 256, 4)

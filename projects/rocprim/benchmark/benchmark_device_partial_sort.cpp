@@ -47,21 +47,21 @@ int main(int argc, char* argv[])
 
     primbench::executor executor(argc, argv, 128 * primbench::MiB, primbench::flags::sync);
 
-    CREATE_BENCHMARK(int)
-    CREATE_BENCHMARK(long long)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int64_t)
     CREATE_BENCHMARK(int8_t)
     CREATE_BENCHMARK(uint8_t)
     CREATE_BENCHMARK(rocprim::half)
-    CREATE_BENCHMARK(short)
+    CREATE_BENCHMARK(int16_t)
     CREATE_BENCHMARK(float)
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    CREATE_BENCHMARK(custom_float2)
-    CREATE_BENCHMARK(custom_double2)
-    CREATE_BENCHMARK(custom_int2)
-    CREATE_BENCHMARK(custom_char_double)
-    CREATE_BENCHMARK(custom_longlong_double)
+    CREATE_BENCHMARK(custom_f32_f32)
+    CREATE_BENCHMARK(custom_f64_f64)
+    CREATE_BENCHMARK(custom_i32_i32)
+    CREATE_BENCHMARK(custom_i8_f64)
+    CREATE_BENCHMARK(custom_i64_f64)
 
     executor.run();
 }

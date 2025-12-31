@@ -58,8 +58,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::uint128_t)
 
     // Not tuned custom types
-    CREATE_BENCHMARK(custom_float2)
-    CREATE_BENCHMARK(custom_double2)
+    CREATE_BENCHMARK(custom_f32_f32)
+    CREATE_BENCHMARK(custom_f64_f64)
     #endif
 #endif
 

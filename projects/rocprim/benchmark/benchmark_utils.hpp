@@ -538,59 +538,62 @@ struct alignas(Alignment) custom_aligned_type
     unsigned char data[Size];
 };
 
-PRIMBENCH_REGISTER_TYPE(int, "int")
-PRIMBENCH_REGISTER_TYPE(char, "char")
-PRIMBENCH_REGISTER_TYPE(short, "short")
-PRIMBENCH_REGISTER_TYPE(long long, "int64_t")
-PRIMBENCH_REGISTER_TYPE(unsigned long long, "unsigned long long")
-PRIMBENCH_REGISTER_TYPE(int8_t, "int8_t")
-PRIMBENCH_REGISTER_TYPE(uint8_t, "uint8_t")
-PRIMBENCH_REGISTER_TYPE(uint16_t, "uint16_t")
-PRIMBENCH_REGISTER_TYPE(uint32_t, "uint32_t")
-PRIMBENCH_REGISTER_TYPE(float, "float")
-PRIMBENCH_REGISTER_TYPE(double, "double")
+PRIMBENCH_REGISTER_TYPE(int8_t, "i8")
+PRIMBENCH_REGISTER_TYPE(int16_t, "i16")
+PRIMBENCH_REGISTER_TYPE(int32_t, "i32")
+PRIMBENCH_REGISTER_TYPE(int64_t, "i64")
 
-// On MSVC `int64_t` and `long long` are the same,
-// resulting in a "multiple definitions" error.
-#ifndef _WIN32
-PRIMBENCH_REGISTER_TYPE(int64_t, "int64_t")
-PRIMBENCH_REGISTER_TYPE(uint64_t, "uint64_t")
-#endif
+PRIMBENCH_REGISTER_TYPE(uint8_t, "u8")
+PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
+PRIMBENCH_REGISTER_TYPE(uint64_t, "u64")
+
+PRIMBENCH_REGISTER_TYPE(float, "f32")
+PRIMBENCH_REGISTER_TYPE(double, "f64")
 
 PRIMBENCH_REGISTER_TYPE(float2, "float2")
 PRIMBENCH_REGISTER_TYPE(float4, "float4")
 PRIMBENCH_REGISTER_TYPE(double2, "double2")
 
-PRIMBENCH_REGISTER_TYPE(rocprim::half, "rocprim::half")
-PRIMBENCH_REGISTER_TYPE(rocprim::bfloat16, "rocprim::bfloat16")
-PRIMBENCH_REGISTER_TYPE(rocprim::empty_type, "empty_type")
-PRIMBENCH_REGISTER_TYPE(rocprim::int128_t, "rocprim::int128_t")
-PRIMBENCH_REGISTER_TYPE(rocprim::uint128_t, "rocprim::uint128_t")
+PRIMBENCH_REGISTER_TYPE(rocprim::half, "half")
+PRIMBENCH_REGISTER_TYPE(rocprim::empty_type, "empty")
+PRIMBENCH_REGISTER_TYPE(rocprim::int128_t, "i128")
+PRIMBENCH_REGISTER_TYPE(rocprim::uint128_t, "u128")
 
-using custom_int2             = common::custom_type<int, int>;
-using custom_float2           = common::custom_type<float, float>;
-using custom_double2          = common::custom_type<double, double>;
-using custom_huge_float2_1024 = common::custom_huge_type<1024, float, float>;
-using custom_huge_float2_2048 = common::custom_huge_type<2048, float, float>;
-using custom_int_double       = common::custom_type<int, double>;
-using custom_char_double      = common::custom_type<char, double>;
-using custom_char_short       = common::custom_type<char, short>;
-using custom_longlong_double  = common::custom_type<long long, double>;
-using custom_float_int16      = common::custom_type<float, int16_t>;
-using copyable_char_double    = common::custom_type_copyable<char, double>;
-using copyable_double2        = common::custom_type_copyable<double, double>;
-using custom_128              = common::custom_type<int64_t, int64_t>;
+using custom_i32_i32 = common::custom_type<int32_t, int32_t>;
+PRIMBENCH_REGISTER_TYPE(custom_i32_i32, "custom<i32,i32>")
 
-PRIMBENCH_REGISTER_TYPE(custom_int2, "common::custom_type<int,int>")
-PRIMBENCH_REGISTER_TYPE(custom_float2, "common::custom_type<float,float>")
-PRIMBENCH_REGISTER_TYPE(custom_double2, "common::custom_type<double,double>")
-PRIMBENCH_REGISTER_TYPE(custom_huge_float2_1024, "common::custom_type<1024,float,float>")
-PRIMBENCH_REGISTER_TYPE(custom_huge_float2_2048, "common::custom_type<2048,float,float>")
-PRIMBENCH_REGISTER_TYPE(custom_int_double, "common::custom_type<int,double>")
-PRIMBENCH_REGISTER_TYPE(custom_char_double, "common::custom_type<char,double>")
-PRIMBENCH_REGISTER_TYPE(custom_char_short, "common::custom_type<char,short>")
-PRIMBENCH_REGISTER_TYPE(custom_longlong_double, "common::custom_type<int64_t,double>")
-PRIMBENCH_REGISTER_TYPE(custom_float_int16, "common::custom_type<float,int16_t>")
-PRIMBENCH_REGISTER_TYPE(copyable_char_double, "common::custom_type_copyable<char,double>")
-PRIMBENCH_REGISTER_TYPE(copyable_double2, "common::custom_type_copyable<double,double>")
-PRIMBENCH_REGISTER_TYPE(custom_128, "custom_128")
+using custom_f32_f32 = common::custom_type<float, float>;
+PRIMBENCH_REGISTER_TYPE(custom_f32_f32, "custom<f32,f32>")
+
+using custom_f64_f64 = common::custom_type<double, double>;
+PRIMBENCH_REGISTER_TYPE(custom_f64_f64, "custom<f64,f64>")
+
+using custom_i32_f64 = common::custom_type<int32_t, double>;
+PRIMBENCH_REGISTER_TYPE(custom_i32_f64, "custom<i32,f64>")
+
+using custom_i8_f64 = common::custom_type<int8_t, double>;
+PRIMBENCH_REGISTER_TYPE(custom_i8_f64, "custom<i8,f64>")
+
+using custom_i8_i16 = common::custom_type<int8_t, int16_t>;
+PRIMBENCH_REGISTER_TYPE(custom_i8_i16, "custom<i8,i16>")
+
+using custom_i64_f64 = common::custom_type<int64_t, double>;
+PRIMBENCH_REGISTER_TYPE(custom_i64_f64, "custom<i64,double>")
+
+using custom_f32_i16 = common::custom_type<float, int16_t>;
+PRIMBENCH_REGISTER_TYPE(custom_f32_i16, "custom<f32,i16>")
+
+using custom_i64_i64 = common::custom_type<int64_t, int64_t>;
+PRIMBENCH_REGISTER_TYPE(custom_i64_i64, "custom<i64,i64>")
+
+using copyable_i8_f64 = common::custom_type_copyable<int8_t, double>;
+PRIMBENCH_REGISTER_TYPE(copyable_i8_f64, "copyable<i8,f64>")
+
+using copyable_f64_f64 = common::custom_type_copyable<double, double>;
+PRIMBENCH_REGISTER_TYPE(copyable_f64_f64, "copyable<f64,f64>")
+
+using huge_1024_f32_f32 = common::custom_huge_type<1024, float, float>;
+PRIMBENCH_REGISTER_TYPE(huge_1024_f32_f32, "huge<1024,f32,f32>")
+
+using huge_2048_f32_f32 = common::custom_huge_type<2048, float, float>;
+PRIMBENCH_REGISTER_TYPE(huge_2048_f32_f32, "huge<2048,f32,f32>")

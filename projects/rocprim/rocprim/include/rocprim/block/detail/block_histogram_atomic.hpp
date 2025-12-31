@@ -59,9 +59,13 @@ public:
                    Counter hist[Bins])
     {
         static_assert(
-            std::is_same<Counter, unsigned int>::value || std::is_same<Counter, int>::value ||
-            std::is_same<Counter, float>::value || std::is_same<Counter, unsigned long long>::value,
-            "Counter must be type that is supported by atomics (float, int, unsigned int, unsigned long long)"
+            std::is_same<Counter, unsigned int>::value ||
+            std::is_same<Counter, int>::value ||
+            std::is_same<Counter, unsigned long>::value ||
+            std::is_same<Counter, unsigned long long>::value ||
+            std::is_same<Counter, float>::value ||
+            std::is_same<Counter, double>::value,
+            "Counter must be type that is supported by atomics (unsigned int, int, unsigned long, unsigned long long, float, double)"
         );
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)

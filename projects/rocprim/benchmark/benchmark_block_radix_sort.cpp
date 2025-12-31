@@ -37,17 +37,17 @@
 template<benchmark_kinds BenchmarkKind>
 void add_benchmarks(primbench::executor& executor)
 {
-    using custom_int_type = common::custom_type<int, int>;
+    using custom_int_type = common::custom_type<int32_t, int32_t>;
 
-    BENCHMARK_TYPE(int, 64, 3)
-    BENCHMARK_TYPE(int, 512, 3)
+    BENCHMARK_TYPE(int32_t, 64, 3)
+    BENCHMARK_TYPE(int32_t, 512, 3)
 
-    BENCHMARK_TYPE(int, 64, 4)
-    BENCHMARK_TYPE(int, 128, 4)
-    BENCHMARK_TYPE(int, 192, 4)
-    BENCHMARK_TYPE(int, 256, 4)
-    BENCHMARK_TYPE(int, 320, 4)
-    BENCHMARK_TYPE(int, 512, 4)
+    BENCHMARK_TYPE(int32_t, 64, 4)
+    BENCHMARK_TYPE(int32_t, 128, 4)
+    BENCHMARK_TYPE(int32_t, 192, 4)
+    BENCHMARK_TYPE(int32_t, 256, 4)
+    BENCHMARK_TYPE(int32_t, 320, 4)
+    BENCHMARK_TYPE(int32_t, 512, 4)
 
     BENCHMARK_TYPE(int8_t, 64, 3)
     BENCHMARK_TYPE(int8_t, 512, 3)
@@ -79,15 +79,15 @@ void add_benchmarks(primbench::executor& executor)
     BENCHMARK_TYPE(rocprim::half, 320, 4)
     BENCHMARK_TYPE(rocprim::half, 512, 4)
 
-    BENCHMARK_TYPE(long long, 64, 3)
-    BENCHMARK_TYPE(long long, 512, 3)
+    BENCHMARK_TYPE(int64_t, 64, 3)
+    BENCHMARK_TYPE(int64_t, 512, 3)
 
-    BENCHMARK_TYPE(long long, 64, 4)
-    BENCHMARK_TYPE(long long, 128, 4)
-    BENCHMARK_TYPE(long long, 192, 4)
-    BENCHMARK_TYPE(long long, 256, 4)
-    BENCHMARK_TYPE(long long, 320, 4)
-    BENCHMARK_TYPE(long long, 512, 4)
+    BENCHMARK_TYPE(int64_t, 64, 4)
+    BENCHMARK_TYPE(int64_t, 128, 4)
+    BENCHMARK_TYPE(int64_t, 192, 4)
+    BENCHMARK_TYPE(int64_t, 256, 4)
+    BENCHMARK_TYPE(int64_t, 320, 4)
+    BENCHMARK_TYPE(int64_t, 512, 4)
 
     BENCHMARK_TYPE(custom_int_type, 64, 3)
     BENCHMARK_TYPE(custom_int_type, 512, 3)

@@ -46,17 +46,17 @@ int main(int argc, char* argv[])
 {
     primbench::executor executor(argc, argv, 512 * primbench::MiB);
 
-    BENCHMARK_TYPE(int, 128)
-    BENCHMARK_TYPE(int, 256)
-    BENCHMARK_TYPE(int, 512)
+    BENCHMARK_TYPE(int32_t, 128)
+    BENCHMARK_TYPE(int32_t, 256)
+    BENCHMARK_TYPE(int32_t, 512)
 
     BENCHMARK_TYPE(uint8_t, 128)
     BENCHMARK_TYPE(uint8_t, 256)
     BENCHMARK_TYPE(uint8_t, 512)
 
-    BENCHMARK_TYPE(long long, 128)
-    BENCHMARK_TYPE(long long, 256)
-    BENCHMARK_TYPE(long long, 512)
+    BENCHMARK_TYPE(int64_t, 128)
+    BENCHMARK_TYPE(int64_t, 256)
+    BENCHMARK_TYPE(int64_t, 512)
 
     BENCHMARK_TYPE(rocprim::int128_t, 128)
     BENCHMARK_TYPE(rocprim::int128_t, 256)

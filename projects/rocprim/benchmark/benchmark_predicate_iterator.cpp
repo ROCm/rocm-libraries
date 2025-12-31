@@ -55,7 +55,7 @@ int main(int argc, char* argv[])
     CREATE_TYPED_BENCHMARK(int16_t)
     CREATE_TYPED_BENCHMARK(int32_t)
     CREATE_TYPED_BENCHMARK(int64_t)
-    CREATE_TYPED_BENCHMARK(custom_128)
+    CREATE_TYPED_BENCHMARK(custom_i64_i64)
     CREATE_TYPED_BENCHMARK(rocprim::int128_t)
     CREATE_TYPED_BENCHMARK(rocprim::uint128_t)
 

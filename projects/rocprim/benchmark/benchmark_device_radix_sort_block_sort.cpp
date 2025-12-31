@@ -45,9 +45,9 @@
 #define CREATE_BENCHMARK_TYPE_TUNING(KeyType)      \
     CREATE_BENCHMARK(KeyType, rocprim::empty_type) \
     CREATE_BENCHMARK(KeyType, rocprim::int128_t)   \
-    CREATE_BENCHMARK(KeyType, long long)           \
-    CREATE_BENCHMARK(KeyType, int)                 \
-    CREATE_BENCHMARK(KeyType, short)               \
+    CREATE_BENCHMARK(KeyType, int64_t)           \
+    CREATE_BENCHMARK(KeyType, int32_t)                 \
+    CREATE_BENCHMARK(KeyType, int16_t)               \
     CREATE_BENCHMARK(KeyType, int8_t)
 
 int main(int argc, char* argv[])
@@ -57,9 +57,9 @@ int main(int argc, char* argv[])
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
     CREATE_BENCHMARK_TYPE_TUNING(rocprim::int128_t)
-    CREATE_BENCHMARK_TYPE_TUNING(long long)
-    CREATE_BENCHMARK_TYPE_TUNING(int)
-    CREATE_BENCHMARK_TYPE_TUNING(short)
+    CREATE_BENCHMARK_TYPE_TUNING(int64_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int32_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int16_t)
     CREATE_BENCHMARK_TYPE_TUNING(int8_t)
     CREATE_BENCHMARK_TYPE_TUNING(double)
     CREATE_BENCHMARK_TYPE_TUNING(float)
@@ -70,16 +70,16 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(uint8_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    CREATE_BENCHMARK(int, float)
-    CREATE_BENCHMARK(long long, double)
+    CREATE_BENCHMARK(int32_t, float)
+    CREATE_BENCHMARK(int64_t, double)
     CREATE_BENCHMARK(uint8_t, uint8_t)
     CREATE_BENCHMARK(rocprim::half, rocprim::half)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 
     // Not tuned custom types
-    CREATE_BENCHMARK(int, custom_float2)
-    CREATE_BENCHMARK(int, custom_char_double)
-    CREATE_BENCHMARK(long long, custom_double2)
+    CREATE_BENCHMARK(int32_t, custom_f32_f32)
+    CREATE_BENCHMARK(int32_t, custom_i8_f64)
+    CREATE_BENCHMARK(int64_t, custom_f64_f64)
     #endif
 #endif
 

@@ -101,8 +101,8 @@ int main(int argc, char* argv[])
     // Tuned types
     BENCHMARK_TYPES_TUNING(rocprim::int128_t)
     BENCHMARK_TYPES_TUNING(int64_t)
-    BENCHMARK_TYPES_TUNING(int)
-    BENCHMARK_TYPES_TUNING(short)
+    BENCHMARK_TYPES_TUNING(int32_t)
+    BENCHMARK_TYPES_TUNING(int16_t)
     BENCHMARK_TYPES_TUNING(int8_t)
     BENCHMARK_TYPES_TUNING(double)
     BENCHMARK_TYPES_TUNING(float)
@@ -126,20 +126,20 @@ int main(int argc, char* argv[])
     BENCHMARK_THREE_WAY_TYPE(rocprim::uint128_t)
 
     // Not tuned custom types
-    BENCHMARK_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_FLAG_TYPE(custom_huge_float2_1024, uint8_t)
+    BENCHMARK_FLAG_TYPE(custom_f64_f64, uint8_t)
+    BENCHMARK_FLAG_TYPE(huge_1024_f32_f32, uint8_t)
 
-    BENCHMARK_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_PREDICATE_TYPE(custom_huge_float2_1024)
+    BENCHMARK_PREDICATE_TYPE(custom_i32_f64)
+    BENCHMARK_PREDICATE_TYPE(huge_1024_f32_f32)
 
-    BENCHMARK_TWO_WAY_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(custom_huge_float2_1024, uint8_t)
+    BENCHMARK_TWO_WAY_FLAG_TYPE(custom_f64_f64, uint8_t)
+    BENCHMARK_TWO_WAY_FLAG_TYPE(huge_1024_f32_f32, uint8_t)
 
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_huge_float2_1024)
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_i32_f64)
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(huge_1024_f32_f32)
 
-    BENCHMARK_THREE_WAY_TYPE(custom_int_double)
-    BENCHMARK_THREE_WAY_TYPE(custom_huge_float2_1024)
+    BENCHMARK_THREE_WAY_TYPE(custom_i32_f64)
+    BENCHMARK_THREE_WAY_TYPE(huge_1024_f32_f32)
     #endif
 #endif
 

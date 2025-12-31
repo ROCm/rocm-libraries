@@ -49,8 +49,8 @@ int main(int argc, char* argv[])
     // Tuned types
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(int64_t)
-    CREATE_BENCHMARK(int)
-    CREATE_BENCHMARK(short)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int16_t)
     CREATE_BENCHMARK(int8_t)
 
     #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
@@ -60,8 +60,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::uint128_t)
 
     // Not tuned custom types
-    CREATE_BENCHMARK(custom_int2)
-    CREATE_BENCHMARK(custom_longlong_double)
+    CREATE_BENCHMARK(custom_i32_i32)
+    CREATE_BENCHMARK(custom_i64_f64)
     #endif
 #endif
 

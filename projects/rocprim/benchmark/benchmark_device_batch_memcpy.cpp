@@ -102,7 +102,7 @@
         CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000)
 #endif //BUILD_NAIVE_BENCHMARK
 
-int32_t main(int32_t argc, char* argv[])
+int main(int argc, char* argv[])
 {
     // Set the number of bytes to 1, because prepare_data() later on calculates it.
     primbench::executor executor(argc, argv, 1);

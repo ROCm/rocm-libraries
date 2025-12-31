@@ -38,13 +38,13 @@
 template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
-    BENCHMARK_TYPE(int, 256)
+    BENCHMARK_TYPE(int32_t, 256)
     BENCHMARK_TYPE(int8_t, 256)
     BENCHMARK_TYPE(rocprim::half, 256)
-    BENCHMARK_TYPE(long long, 256)
-    BENCHMARK_TYPE(custom_float2, 256)
+    BENCHMARK_TYPE(int64_t, 256)
+    BENCHMARK_TYPE(custom_f32_f32, 256)
     BENCHMARK_TYPE(float2, 256)
-    BENCHMARK_TYPE(custom_double2, 256)
+    BENCHMARK_TYPE(custom_f64_f64, 256)
     BENCHMARK_TYPE(double2, 256)
     BENCHMARK_TYPE(float4, 256)
     BENCHMARK_TYPE(rocprim::int128_t, 256)

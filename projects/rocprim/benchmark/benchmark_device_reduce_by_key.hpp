@@ -286,13 +286,13 @@ void add_benchmarks(primbench::executor& executor)
     CREATE_BENCHMARK_TYPES(rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
+    using custom_f32_f32  = common::custom_type<float, float>;
+    using custom_f64_f64 = common::custom_type<double, double>;
 
-    CREATE_BENCHMARK_TYPE(int, custom_float2)
-    CREATE_BENCHMARK_TYPE(int, custom_double2)
+    CREATE_BENCHMARK_TYPE(int, custom_f32_f32)
+    CREATE_BENCHMARK_TYPE(int, custom_f64_f64)
 
-    CREATE_BENCHMARK_TYPE(long long, custom_float2)
-    CREATE_BENCHMARK_TYPE(long long, custom_double2)
+    CREATE_BENCHMARK_TYPE(int64_t, custom_f32_f32)
+    CREATE_BENCHMARK_TYPE(int64_t, custom_f64_f64)
 #endif
 }
