@@ -1,12 +1,12 @@
 # IR Converter - Converting Strings to IRList
 
-StinkyTofu provides the `StinkyIRConverter` class to programmatically convert MLIR-style instruction strings to `IRList` objects.
+StinkyTofu provides the 'StinkyIRConverter' class to programmatically convert MLIR-style instruction strings to 'IRList' objects.
 
 > **Note:** For detailed information about error codes, see [Error Codes](error-codes.md).
 
 ## Basic Usage
 
-```cpp
+'''cpp
 #include "stinkytofu.hpp"
 
 using namespace stinkytofu;
@@ -28,25 +28,25 @@ if(irlist) {
 } else {
     std::cerr << "Conversion failed\n";
 }
-```
+'''
 
 ## Custom Architecture
 
 You can specify a different target architecture:
 
-```cpp
+'''cpp
 // For gfx950
 std::array<int, 3> arch = {9, 5, 0};
 StinkyIRConverter converter(arch);
 
 IRList* irlist = converter.convertToIRList(irText);
-```
+'''
 
 ## Accessing the PassContext
 
-After conversion, you can access the `PassContext` to run optimization passes:
+After conversion, you can access the 'PassContext' to run optimization passes:
 
-```cpp
+'''cpp
 StinkyIRConverter converter;
 IRList* irlist = converter.convertToIRList(irText);
 
@@ -59,13 +59,13 @@ if(irlist) {
         pm.run(*ctx);
     }
 }
-```
+'''
 
 ## Using the Static Method
 
-For more control, use the static `populateFunctionFromString` method:
+For more control, use the static 'populateFunctionFromString' method:
 
-```cpp
+'''cpp
 // Create your own PassContext
 auto ctx = PassContext::create(GfxArchID::gfx942);
 IRList& irlist = ctx->getIRList();
@@ -84,13 +84,13 @@ if(result == StinkyErrorCode::SUCCESS) {
     // Handle error
     std::cerr << "Error: " << static_cast<int>(result) << "\n";
 }
-```
+'''
 
 ## Complete Example
 
 Here's a complete example showing conversion and assembly emission:
 
-```cpp
+'''cpp
 #include "stinkytofu.hpp"
 #include "ir/asm/StinkyAsmEmitter.hpp"
 #include <iostream>
@@ -123,11 +123,11 @@ int main() {
 
     return 0;
 }
-```
+'''
 
 ### Expected Output
 
-```
+'''
 Converted 2 instructions
 
 Generated Assembly:
@@ -138,43 +138,43 @@ Generated Assembly:
 
     ds_read_b128 v[0:3], v[40] // issue=4 latency=52
     ds_read_b128 v[4:7], v[40] // issue=4 latency=52
-```
+'''
 
 ## IR Format
 
 The IR string should follow the MLIR-style StinkyTofu format:
 
-```
+'''
 destRegs = "st.mnemonic"(srcRegs) { attributes }
-```
+'''
 
 ### Examples
 
 **Simple instruction:**
-```
+'''
 v[0] = "st.v_mov_b32"(v1)
-```
+'''
 
 **Multiple destinations:**
-```
+'''
 v[0:3] = "st.ds_load_b128"(v40)
-```
+'''
 
 **With attributes:**
-```
+'''
 v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 52 }
-```
+'''
 
 **Multiple source registers:**
-```
+'''
 acc[0:15] = "st.v_mfma_f32_16x16x16_f16"(v6:7, v22:23, acc0:15)
-```
+'''
 
 ## Error Handling
 
 Always check the return value:
 
-```cpp
+'''cpp
 StinkyIRConverter converter;
 IRList* irlist = converter.convertToIRList(irText);
 
@@ -185,11 +185,11 @@ if(!irlist) {
               << "  - Invalid register format\n";
     return 1;
 }
-```
+'''
 
 For the static method, check the error code:
 
-```cpp
+'''cpp
 StinkyErrorCode result = StinkyIRConverter::populateFunctionFromString(
     irText, irlist, *ctx, arch);
 
@@ -204,13 +204,13 @@ switch(result) {
         std::cerr << "Unknown error\n";
         break;
 }
-```
+'''
 
 ## Integration with Optimization Passes
 
 After converting IR, you can run optimization passes:
 
-```cpp
+'''cpp
 // Convert IR
 StinkyIRConverter converter;
 IRList* irlist = converter.convertToIRList(irText);
@@ -232,20 +232,20 @@ if(irlist) {
         std::cout << optimizedAsm << std::endl;
     }
 }
-```
+'''
 
 ## Thread Safety
 
-`StinkyIRConverter` is not thread-safe. If you need to convert IR in multiple threads, create a separate converter instance for each thread:
+'StinkyIRConverter' is not thread-safe. If you need to convert IR in multiple threads, create a separate converter instance for each thread:
 
-```cpp
+'''cpp
 // In each thread:
 void processIRInThread(const std::string& irText) {
     StinkyIRConverter converter;  // Thread-local instance
     IRList* irlist = converter.convertToIRList(irText);
     // ... process irlist ...
 }
-```
+'''
 
 ## See Also
 

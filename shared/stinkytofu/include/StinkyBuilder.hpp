@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "ErrorHandling.hpp"
+
 // Forward declare stinkytofu namespace types (will be fully defined in .cpp)
 namespace stinkytofu
 {
@@ -230,11 +232,11 @@ namespace stinkytofu
                                                   const StinkyRegister& src2,
                                                   const std::string&    comment = "");
 
-        std::vector<StinkyInstruction*> VFmaMixF32(const StinkyRegister& dst,
-                                                   const StinkyRegister& src0,
-                                                   const StinkyRegister& src1,
-                                                   const StinkyRegister& src2,
-                                                   const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> VFmaMixF32(const StinkyRegister& dst,
+                                                             const StinkyRegister& src0,
+                                                             const StinkyRegister& src1,
+                                                             const StinkyRegister& src2,
+                                                             const std::string&    comment = "");
 
         std::vector<StinkyInstruction*> VMadI32I24(const StinkyRegister& dst,
                                                    const StinkyRegister& src0,
@@ -314,9 +316,9 @@ namespace stinkytofu
                                                 const StinkyRegister& src,
                                                 const std::string&    comment = "");
 
-        std::vector<StinkyInstruction*> VRsqIFlagF32(const StinkyRegister& dst,
-                                                     const StinkyRegister& src,
-                                                     const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> VRsqIFlagF32(const StinkyRegister& dst,
+                                                               const StinkyRegister& src,
+                                                               const std::string&    comment = "");
 
         std::vector<StinkyInstruction*> VRndneF32(const StinkyRegister& dst,
                                                   const StinkyRegister& src,
@@ -942,9 +944,12 @@ namespace stinkytofu
                                                             const StinkyRegister& src1,
                                                             const std::string&    comment = "");
 
-        std::vector<StinkyInstruction*> VCvtBF16toF32(const StinkyRegister& dst,
-                                                      const StinkyRegister& src,
-                                                      const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> VCvtBF16toFP32(const StinkyRegister& dst,
+                                                                 const StinkyRegister& src,
+                                                                 const StinkyRegister* vgprMask
+                                                                 = nullptr,
+                                                                 int                vi      = 0,
+                                                                 const std::string& comment = "");
 
         std::vector<StinkyInstruction*> VCvtPkF32toBF16(const StinkyRegister& dst,
                                                         const StinkyRegister& src0,
@@ -956,85 +961,85 @@ namespace stinkytofu
         // ========================================================================
 
         // DS (LDS) Instructions
-        std::vector<StinkyInstruction*> DSReadU8(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadU8(const StinkyRegister& dst,
                                                  const StinkyRegister& addr,
                                                  const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadI8(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadI8(const StinkyRegister& dst,
                                                  const StinkyRegister& addr,
                                                  const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadU16(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadU16(const StinkyRegister& dst,
                                                   const StinkyRegister& addr,
                                                   const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadI16(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadI16(const StinkyRegister& dst,
                                                   const StinkyRegister& addr,
                                                   const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB32(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB32(const StinkyRegister& dst,
                                                   const StinkyRegister& addr,
                                                   const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB64(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB64(const StinkyRegister& dst,
                                                   const StinkyRegister& addr,
                                                   const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB96(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB96(const StinkyRegister& dst,
                                                   const StinkyRegister& addr,
                                                   const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB128(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB128(const StinkyRegister& dst,
                                                    const StinkyRegister& addr,
                                                    const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadU8D16Hi(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadD16HIU8(const StinkyRegister& dst,
                                                       const StinkyRegister& addr,
                                                       const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadU16D16Hi(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadD16HIU16(const StinkyRegister& dst,
                                                        const StinkyRegister& addr,
                                                        const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB64TrB4(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB64TrB4(const StinkyRegister& dst,
                                                       const StinkyRegister& addr,
                                                       const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB96TrB6(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB96TrB6(const StinkyRegister& dst,
                                                       const StinkyRegister& addr,
                                                       const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB64TrB8(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB64TrB8(const StinkyRegister& dst,
                                                       const StinkyRegister& addr,
                                                       const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSReadB64TrB16(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoadB64TrB16(const StinkyRegister& dst,
                                                        const StinkyRegister& addr,
                                                        const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSRead2B32(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoad2B32(const StinkyRegister& dst,
                                                    const StinkyRegister& addr0,
                                                    const StinkyRegister& addr1,
                                                    const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSRead2B64(const StinkyRegister& dst,
+        std::vector<StinkyInstruction*> DSLoad2B64(const StinkyRegister& dst,
                                                    const StinkyRegister& addr0,
                                                    const StinkyRegister& addr1,
                                                    const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB8(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreB8(const StinkyRegister& addr,
                                                   const StinkyRegister& src,
                                                   const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB16(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreB16(const StinkyRegister& addr,
                                                    const StinkyRegister& src,
                                                    const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB32(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreB32(const StinkyRegister& addr,
                                                    const StinkyRegister& src,
                                                    const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB64(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreB64(const StinkyRegister& addr,
                                                    const StinkyRegister& src,
                                                    const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB96(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreB96(const StinkyRegister& addr,
                                                    const StinkyRegister& src,
                                                    const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB128(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreB128(const StinkyRegister& addr,
                                                     const StinkyRegister& src,
                                                     const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB8D16Hi(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreD16HIB8(const StinkyRegister& addr,
                                                        const StinkyRegister& src,
                                                        const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWriteB16D16Hi(const StinkyRegister& addr,
+        std::vector<StinkyInstruction*> DSStoreD16HIB16(const StinkyRegister& addr,
                                                         const StinkyRegister& src,
                                                         const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWrite2B32(const StinkyRegister& addr0,
+        std::vector<StinkyInstruction*> DSStore2B32(const StinkyRegister& addr0,
                                                     const StinkyRegister& addr1,
                                                     const StinkyRegister& src,
                                                     const std::string&    comment = "");
-        std::vector<StinkyInstruction*> DSWrite2B64(const StinkyRegister& addr0,
+        std::vector<StinkyInstruction*> DSStore2B64(const StinkyRegister& addr0,
                                                     const StinkyRegister& addr1,
                                                     const StinkyRegister& src,
                                                     const std::string&    comment = "");
@@ -1112,14 +1117,14 @@ namespace stinkytofu
         std::vector<StinkyInstruction*> BufferAtomicAddF32(const StinkyRegister& dst,
                                                            const StinkyRegister& src,
                                                            const std::string&    comment = "");
-        std::vector<StinkyInstruction*> BufferAtomicCmpSwap(const StinkyRegister& dst,
-                                                            const StinkyRegister& addr0,
-                                                            const StinkyRegister& addr1,
-                                                            const std::string&    comment = "");
-        std::vector<StinkyInstruction*> BufferAtomicCmpSwapX2(const StinkyRegister& dst,
-                                                              const StinkyRegister& addr0,
-                                                              const StinkyRegister& addr1,
-                                                              const std::string&    comment = "");
+        std::vector<StinkyInstruction*> BufferAtomicCmpswapB32(const StinkyRegister& dst,
+                                                               const StinkyRegister& addr0,
+                                                               const StinkyRegister& addr1,
+                                                               const std::string&    comment = "");
+        std::vector<StinkyInstruction*> BufferAtomicCmpswapB64(const StinkyRegister& dst,
+                                                               const StinkyRegister& addr0,
+                                                               const StinkyRegister& addr1,
+                                                               const std::string&    comment = "");
 
         // Scalar Memory (SMEM) Instructions
         // Scalar Memory Load Instructions (size-based naming, architecture-agnostic)
@@ -1225,10 +1230,10 @@ namespace stinkytofu
         std::vector<StinkyInstruction*> FlatStoreB128(const StinkyRegister& addr,
                                                       const StinkyRegister& src,
                                                       const std::string&    comment = "");
-        std::vector<StinkyInstruction*> FlatAtomicCmpSwap(const StinkyRegister& dst,
-                                                          const StinkyRegister& addr0,
-                                                          const StinkyRegister& addr1,
-                                                          const std::string&    comment = "");
+        std::vector<StinkyInstruction*> FlatAtomicCmpswapB32(const StinkyRegister& dst,
+                                                             const StinkyRegister& addr0,
+                                                             const StinkyRegister& addr1,
+                                                             const std::string&    comment = "");
 
         // ========================================================================
         // Label Creation
@@ -1432,10 +1437,10 @@ namespace stinkytofu
                                                   const StinkyRegister& src1,
                                                   const std::string&    comment = "");
 
-        std::vector<StinkyInstruction*> SMulLOU32(const StinkyRegister& dst,
-                                                  const StinkyRegister& src0,
-                                                  const StinkyRegister& src1,
-                                                  const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> SMulLOU32(const StinkyRegister& dst,
+                                                            const StinkyRegister& src0,
+                                                            const StinkyRegister& src1,
+                                                            const std::string&    comment = "");
 
         std::vector<StinkyInstruction*> SSubI32(const StinkyRegister& dst,
                                                 const StinkyRegister& src0,
@@ -1452,10 +1457,10 @@ namespace stinkytofu
                                                  const StinkyRegister& src1,
                                                  const std::string&    comment = "");
 
-        std::vector<StinkyInstruction*> SSubU64(const StinkyRegister& dst,
-                                                const StinkyRegister& src0,
-                                                const StinkyRegister& src1,
-                                                const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> SSubU64(const StinkyRegister& dst,
+                                                          const StinkyRegister& src0,
+                                                          const StinkyRegister& src1,
+                                                          const std::string&    comment = "");
 
         // ========================================================================
         // Scalar Bitwise Instructions
@@ -1597,17 +1602,17 @@ namespace stinkytofu
         // Scalar Exec Mask Instructions
         // ========================================================================
 
-        std::vector<StinkyInstruction*> SAndSaveExecB32(const StinkyRegister& dst,
-                                                        const StinkyRegister& src,
-                                                        const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> SAndSaveExecB32(const StinkyRegister& dst,
+                                                                  const StinkyRegister& src,
+                                                                  const std::string& comment = "");
 
         std::vector<StinkyInstruction*> SAndSaveExecB64(const StinkyRegister& dst,
                                                         const StinkyRegister& src,
                                                         const std::string&    comment = "");
 
-        std::vector<StinkyInstruction*> SOrSaveExecB32(const StinkyRegister& dst,
-                                                       const StinkyRegister& src,
-                                                       const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> SOrSaveExecB32(const StinkyRegister& dst,
+                                                                 const StinkyRegister& src,
+                                                                 const std::string& comment = "");
 
         std::vector<StinkyInstruction*> SOrSaveExecB64(const StinkyRegister& dst,
                                                        const StinkyRegister& src,
@@ -1668,19 +1673,19 @@ namespace stinkytofu
          * @param comment Optional user comment.
          * @return Vector of created instructions (typically 1).
          */
-        std::vector<StinkyInstruction*> createMFMA(const std::string&    instType,
-                                                   const std::string&    accType,
-                                                   int                   m,
-                                                   int                   n,
-                                                   int                   k,
-                                                   int                   blocks,
-                                                   bool                  mfma1k,
-                                                   const StinkyRegister& acc,
-                                                   const StinkyRegister& a,
-                                                   const StinkyRegister& b,
-                                                   const StinkyRegister* acc2    = nullptr,
-                                                   bool                  neg     = false,
-                                                   const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> createMFMA(const std::string&    instType,
+                                                             const std::string&    accType,
+                                                             int                   m,
+                                                             int                   n,
+                                                             int                   k,
+                                                             int                   blocks,
+                                                             bool                  mfma1k,
+                                                             const StinkyRegister& acc,
+                                                             const StinkyRegister& a,
+                                                             const StinkyRegister& b,
+                                                             const StinkyRegister* acc2 = nullptr,
+                                                             bool                  neg  = false,
+                                                             const std::string&    comment = "");
 
         /**
          * @brief Create an MX format MFMA instruction (with scale factors).
@@ -1707,23 +1712,23 @@ namespace stinkytofu
          * @param comment Optional user comment.
          * @return Vector of created instructions (typically 1).
          */
-        std::vector<StinkyInstruction*> createMXMFMA(const std::string&    instType,
-                                                     const std::string&    accType,
-                                                     const std::string&    mxScaleATypeStr,
-                                                     const std::string&    mxScaleBTypeStr,
-                                                     int                   m,
-                                                     int                   n,
-                                                     int                   k,
-                                                     int                   block,
-                                                     const StinkyRegister& acc,
-                                                     const StinkyRegister& a,
-                                                     const StinkyRegister& b,
-                                                     const StinkyRegister& acc2,
-                                                     const StinkyRegister& mxsa,
-                                                     const StinkyRegister& mxsb,
-                                                     bool                  reuseA  = false,
-                                                     bool                  reuseB  = false,
-                                                     const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> createMXMFMA(const std::string& instType,
+                                                               const std::string& accType,
+                                                               const std::string& mxScaleATypeStr,
+                                                               const std::string& mxScaleBTypeStr,
+                                                               int                m,
+                                                               int                n,
+                                                               int                k,
+                                                               int                block,
+                                                               const StinkyRegister& acc,
+                                                               const StinkyRegister& a,
+                                                               const StinkyRegister& b,
+                                                               const StinkyRegister& acc2,
+                                                               const StinkyRegister& mxsa,
+                                                               const StinkyRegister& mxsb,
+                                                               bool                  reuseA = false,
+                                                               bool                  reuseB = false,
+                                                               const std::string&    comment = "");
 
         /**
          * @brief Create a sparse MFMA instruction.
@@ -1746,19 +1751,19 @@ namespace stinkytofu
          * @param comment Optional user comment.
          * @return Vector of created instructions (typically 1).
          */
-        std::vector<StinkyInstruction*> createSMFMA(const std::string&    instType,
-                                                    const std::string&    accType,
-                                                    int                   m,
-                                                    int                   n,
-                                                    int                   k,
-                                                    int                   blocks,
-                                                    bool                  mfma1k,
-                                                    const StinkyRegister& acc,
-                                                    const StinkyRegister& a,
-                                                    const StinkyRegister& b,
-                                                    const StinkyRegister& metadata,
-                                                    bool                  neg     = false,
-                                                    const std::string&    comment = "");
+        Expected<std::vector<StinkyInstruction*>> createSMFMA(const std::string&    instType,
+                                                              const std::string&    accType,
+                                                              int                   m,
+                                                              int                   n,
+                                                              int                   k,
+                                                              int                   blocks,
+                                                              bool                  mfma1k,
+                                                              const StinkyRegister& acc,
+                                                              const StinkyRegister& a,
+                                                              const StinkyRegister& b,
+                                                              const StinkyRegister& metadata,
+                                                              bool                  neg     = false,
+                                                              const std::string&    comment = "");
 
         // ========================================================================
         // Assembly Directive Factory Functions (similar to VAddU32, etc.)
@@ -1942,12 +1947,72 @@ namespace stinkytofu
         std::vector<StinkyInstruction*> add(const std::vector<StinkyInstruction*>& insts);
 
         /**
+         * @brief Add all instructions from another module to this module.
+         * @param module The module whose instructions to append.
+         */
+        void addModule(const IRListModule& module);
+
+        /**
          * @brief Emit the assembly code for all instructions in this module.
          * @param emitCycleInfo If true, emit cycle information.
          * @param emitComments If true, emit comments.
          * @return Assembly code as string.
          */
         std::string emitAssembly(bool emitCycleInfo = false, bool emitComments = true) const;
+
+        /**
+         * @brief Convert the object to its string representation.
+         *
+         * @return std::string A string representation of the object.
+         */
+        std::string toString() const;
+
+        /**
+         * @brief Remap all virtual registers in this module (in-place)
+         * 
+         * Walks through all instructions in the module and applies register offset
+         * remapping to virtual registers. Modifies the instructions in-place.
+         * 
+         * Use this when you want to modify the original module (single instantiation).
+         * For multiple instantiations, use cloneAndRemap() instead.
+         * 
+         * @param vgprOffset Offset to add to virtual VGPRs
+         * @param sgprOffset Offset to add to virtual SGPRs
+         * 
+         * Example:
+         *   auto module = st.createIRList("kernel");
+         *   module->add(generateTemplateWithVirtuals(st));
+         *   module->remapVirtualRegisters(10, 5);  // Virtual v0→v10, s0→s5
+         */
+        void remapVirtualRegisters(int vgprOffset, int sgprOffset);
+
+        /**
+         * @brief Clone this module and remap virtual registers in the clone
+         * 
+         * Creates a deep copy of all instructions in this module, then applies
+         * register offset remapping to the cloned instructions. The original
+         * module remains unchanged.
+         * 
+         * Use this when you want to instantiate the same template multiple times
+         * with different register allocations (e.g., activation functions).
+         * 
+         * @param vgprOffset Offset to add to virtual VGPRs in the clone
+         * @param sgprOffset Offset to add to virtual SGPRs in the clone
+         * @return New module with remapped registers
+         * 
+         * Example:
+         *   // Generate template once
+         *   auto absTemplate = st.createIRList("abs_template");
+         *   absTemplate->add(generateAbsWithVirtuals(st));
+         *   
+         *   // Instantiate multiple times
+         *   auto inst1 = absTemplate->cloneAndRemap(10, 0);  // v[10:12]
+         *   auto inst2 = absTemplate->cloneAndRemap(20, 0);  // v[20:22]
+         *   auto inst3 = absTemplate->cloneAndRemap(30, 0);  // v[30:32]
+         *   
+         *   // Original template unchanged, can reuse
+         */
+        Expected<std::shared_ptr<IRListModule>> cloneAndRemap(int vgprOffset, int sgprOffset) const;
 
         struct Impl;
 

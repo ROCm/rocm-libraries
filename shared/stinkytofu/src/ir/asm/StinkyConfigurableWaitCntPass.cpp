@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Configurable WaitCnt Pass - Policy-Based Design
  *
@@ -12,8 +12,8 @@
 
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyConfigurableWaitCntPass.hpp"
-#include "support/CFGTraversal.hpp"
 #include "isa/ArchHelper.hpp"
+#include "support/CFGTraversal.hpp"
 
 namespace
 {
@@ -38,14 +38,58 @@ namespace
         int tensorLoadCount  = 0;
         int atomicCount      = 0;
 
+        // Track specific registers with outstanding DS loads (in issue order)
+        std::vector<StinkyRegister> outstandingDSLoads;
+
+        // Track specific registers with outstanding global loads (in issue order)
+        std::vector<StinkyRegister> outstandingGlobalLoads;
+
         void incrementForInst(const StinkyInstruction& inst)
         {
             if(isGlobalMemLoad(inst))
-                globalLoadCount++;
+            {
+                // Track destination registers - remove any previous load to same register
+                for(const auto& destReg : inst.destRegs)
+                {
+                    // Check if this register already has an outstanding load
+                    auto oldSize = outstandingGlobalLoads.size();
+                    outstandingGlobalLoads.erase(
+                        std::remove_if(
+                            outstandingGlobalLoads.begin(),
+                            outstandingGlobalLoads.end(),
+                            [&destReg](const StinkyRegister& r) { return r.isOverlap(destReg); }),
+                        outstandingGlobalLoads.end());
+
+                    // Only increment count if this is a new outstanding load (not a replacement)
+                    if(outstandingGlobalLoads.size() == oldSize)
+                        globalLoadCount++;
+
+                    outstandingGlobalLoads.push_back(destReg);
+                }
+            }
             else if(isGlobalMemStore(inst))
                 globalStoreCount++;
             else if(isDSRead(inst))
-                dsLoadCount++;
+            {
+                // Track destination registers - remove any previous load to same register
+                for(const auto& destReg : inst.destRegs)
+                {
+                    // Check if this register already has an outstanding load
+                    auto oldSize = outstandingDSLoads.size();
+                    outstandingDSLoads.erase(std::remove_if(outstandingDSLoads.begin(),
+                                                            outstandingDSLoads.end(),
+                                                            [&destReg](const StinkyRegister& r) {
+                                                                return r.isOverlap(destReg);
+                                                            }),
+                                             outstandingDSLoads.end());
+
+                    // Only increment count if this is a new outstanding load (not a replacement)
+                    if(outstandingDSLoads.size() == oldSize)
+                        dsLoadCount++;
+
+                    outstandingDSLoads.push_back(destReg);
+                }
+            }
             else if(isDSWrite(inst))
                 dsStoreCount++;
             else if(isTensorLoad(inst))
@@ -56,17 +100,33 @@ namespace
 
         void applyWaitCnt(const SWaitCntData& wait)
         {
-            auto applyCount = [](int8_t waitValue, int& counter) {
-                if(waitValue == WAIT_COMPLETE)
-                    counter = 0;
-                else if(waitValue != WAIT_IGNORE)
-                    counter = std::max(0, counter - waitValue);
-            };
+            auto applyCount
+                = [](int8_t waitValue, int& counter, std::vector<StinkyRegister>& regList) {
+                      if(waitValue == WAIT_COMPLETE)
+                      {
+                          counter = 0;
+                          regList.clear();
+                      }
+                      else if(waitValue != WAIT_IGNORE)
+                      {
+                          int toWait = counter - waitValue;
+                          if(toWait > 0)
+                          {
+                              counter = std::max(0, counter - toWait);
+                              // Remove the oldest 'toWait' registers
+                              if(regList.size() >= (size_t)toWait)
+                                  regList.erase(regList.begin(), regList.begin() + toWait);
+                              else
+                                  regList.clear();
+                          }
+                      }
+                  };
 
-            applyCount(wait.vlcnt, globalLoadCount);
-            applyCount(wait.vscnt, globalStoreCount);
-            applyCount(wait.dlcnt, dsLoadCount);
-            applyCount(wait.dscnt, dsStoreCount);
+            applyCount(wait.vlcnt, globalLoadCount, outstandingGlobalLoads);
+            applyCount(
+                wait.vscnt, globalStoreCount, outstandingGlobalLoads); // Store uses same list
+            applyCount(wait.dlcnt, dsLoadCount, outstandingDSLoads);
+            applyCount(wait.dscnt, dsStoreCount, outstandingDSLoads); // Store uses same list
         }
 
         void applyTensorWaitCnt(const SWaitTensorCntData& wait)
@@ -82,6 +142,186 @@ namespace
             // Check if instruction is atomic (implementation depends on ISA)
             return false; // Placeholder
         }
+
+        // Merge state from another block (for control flow join points)
+        // Strategy:
+        // 1. If counts match and lists differ: prefer the incoming state (loop state over preloop)
+        // 2. If counts differ: clear lists (conservative for diamond CFG)
+        void mergeFrom(const MemoryOperationState& other)
+        {
+            // Save old state before merging
+            int oldDSLoadCount     = dsLoadCount;
+            int oldGlobalLoadCount = globalLoadCount;
+
+            // Take max counts (will be adjusted if we take union of lists)
+            globalStoreCount = std::max(globalStoreCount, other.globalStoreCount);
+            dsStoreCount     = std::max(dsStoreCount, other.dsStoreCount);
+            tensorLoadCount  = std::max(tensorLoadCount, other.tensorLoadCount);
+            atomicCount      = std::max(atomicCount, other.atomicCount);
+
+            // Register list merge strategy:
+            // - If lists are identical: keep them (already done, no action needed)
+            // - If lists differ but counts match: prefer OTHER's list (loop over preloop)
+            // - If counts differ: clear lists (conservative for diamond CFG)
+
+            if(outstandingDSLoads != other.outstandingDSLoads)
+            {
+                // Check if lists contain the same registers (just reordered) or different registers
+                bool sameRegisters = true;
+                if(outstandingDSLoads.size() == other.outstandingDSLoads.size())
+                {
+                    for(const auto& reg : outstandingDSLoads)
+                    {
+                        bool found = false;
+                        for(const auto& otherReg : other.outstandingDSLoads)
+                        {
+                            if(reg.isOverlap(otherReg))
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if(!found)
+                        {
+                            sameRegisters = false;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    sameRegisters = false;
+                }
+
+                if(sameRegisters && oldDSLoadCount == other.dsLoadCount)
+                {
+                    // Same registers, just reordered (preloop + loop case)
+                    // Create canonical ordering by sorting
+                    std::vector<StinkyRegister> merged = other.outstandingDSLoads;
+                    std::sort(merged.begin(), merged.end());
+                    outstandingDSLoads = merged;
+                    dsLoadCount        = std::max(dsLoadCount, other.dsLoadCount);
+                }
+                else
+                {
+                    // Different registers - take UNION for conservative tracking
+                    // This preserves register information across multi-predecessor merges
+                    std::vector<StinkyRegister> unionRegs = outstandingDSLoads;
+                    for(const auto& reg : other.outstandingDSLoads)
+                    {
+                        bool found = false;
+                        for(const auto& existing : outstandingDSLoads)
+                        {
+                            if(reg.isOverlap(existing))
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if(!found)
+                            unionRegs.push_back(reg);
+                    }
+                    std::sort(unionRegs.begin(), unionRegs.end());
+                    outstandingDSLoads = unionRegs;
+                    // Set count to union size (conservative)
+                    dsLoadCount = unionRegs.size();
+                }
+            }
+            else
+            {
+                // Lists are identical, just take max count
+                dsLoadCount = std::max(dsLoadCount, other.dsLoadCount);
+            }
+
+            if(outstandingGlobalLoads != other.outstandingGlobalLoads)
+            {
+                // Check if lists contain the same registers (just reordered) or different registers
+                bool sameRegisters = true;
+                if(outstandingGlobalLoads.size() == other.outstandingGlobalLoads.size())
+                {
+                    for(const auto& reg : outstandingGlobalLoads)
+                    {
+                        bool found = false;
+                        for(const auto& otherReg : other.outstandingGlobalLoads)
+                        {
+                            if(reg.isOverlap(otherReg))
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if(!found)
+                        {
+                            sameRegisters = false;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    sameRegisters = false;
+                }
+
+                if(sameRegisters && oldGlobalLoadCount == other.globalLoadCount)
+                {
+                    // Same registers, just reordered (preloop + loop case)
+                    // Create canonical ordering by sorting
+                    std::vector<StinkyRegister> merged = other.outstandingGlobalLoads;
+                    std::sort(merged.begin(), merged.end());
+                    outstandingGlobalLoads = merged;
+                    globalLoadCount        = std::max(globalLoadCount, other.globalLoadCount);
+                }
+                else
+                {
+                    // Different registers - take UNION for conservative tracking
+                    // This preserves register information across multi-predecessor merges
+                    std::vector<StinkyRegister> unionRegs = outstandingGlobalLoads;
+                    for(const auto& reg : other.outstandingGlobalLoads)
+                    {
+                        bool found = false;
+                        for(const auto& existing : outstandingGlobalLoads)
+                        {
+                            if(reg.isOverlap(existing))
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if(!found)
+                            unionRegs.push_back(reg);
+                    }
+                    std::sort(unionRegs.begin(), unionRegs.end());
+                    outstandingGlobalLoads = unionRegs;
+                    // Set count to union size (conservative)
+                    globalLoadCount = unionRegs.size();
+                }
+            }
+            else
+            {
+                // Lists are identical, just take max count
+                globalLoadCount = std::max(globalLoadCount, other.globalLoadCount);
+            }
+        }
+
+        // Check if state is empty (no outstanding operations)
+        bool isEmpty() const
+        {
+            return globalLoadCount == 0 && globalStoreCount == 0 && dsLoadCount == 0
+                   && dsStoreCount == 0 && tensorLoadCount == 0 && atomicCount == 0;
+        }
+    };
+
+    /**
+     * @brief Stores the wait state at basic block boundaries
+     *
+     * For multi-path analysis, we maintain separate exit states for each
+     * incoming path to preserve precision across the CFG.
+     */
+    struct BasicBlockWaitState
+    {
+        MemoryOperationState              entryState; // Merged for intra-block analysis
+        std::vector<MemoryOperationState> exitStates; // One per incoming path
+        bool                              processed = false;
     };
 
     /**
@@ -144,19 +384,32 @@ namespace
         ConfigurableWaitCntInserter(IRList&              insts,
                                     StinkyInstIRBuilder& irBuilder,
                                     GfxArchID            arch,
-                                    const WaitCntConfig& config = WaitCntConfig::standard())
+                                    const WaitCntConfig& config = WaitCntConfig::standard(),
+                                    const std::vector<MemoryOperationState>* predecessorStates
+                                    = nullptr,
+                                    bool isLoopBlock = false)
             : insts_(insts)
             , irBuilder_(irBuilder)
             , arch_(arch)
             , config_(config)
+            , predecessorStates_(predecessorStates ? *predecessorStates
+                                                   : std::vector<MemoryOperationState>())
+            , originalPredecessorStates_(predecessorStates_) // Save a copy
+            , currentState_() // Will be initialized in Phase 0
+            , isLoopBlock_(isLoopBlock)
         {
         }
 
         /**
          * @brief Main entry point - insert all required waitcnt
+         * @return Exit states (one per incoming path) for precise multi-path tracking
          */
-        void insertWaitCounts()
+        std::vector<MemoryOperationState> insertWaitCounts()
         {
+            // Phase 0: Handle cross-block dependencies from predecessor states
+            // Always call this to initialize currentState_ from predecessorStates_
+            insertCrossBlockDependencyWaitCounts();
+
             // Phase 1: Insert configurable waitcnt before barriers
             insertBarrierWaitCounts();
 
@@ -172,6 +425,375 @@ namespace
             {
                 insertMemoryDependencyWaitCounts();
             }
+
+            // Phase 4: Compute and return exit states (one per path)
+            return computeExitStates();
+        }
+
+        /**
+         * @brief Compute wait requirement for a single predecessor path
+         *
+         * Given a state from one predecessor and an instruction, compute the minimum
+         * wait counts needed before executing that instruction.
+         */
+        WaitCntRequirement computeWaitRequirementForPath(const MemoryOperationState& predState,
+                                                         const StinkyInstruction&    inst)
+        {
+            WaitCntRequirement pathReq;
+
+            // Handle DS loads for this path
+            if(predState.dsLoadCount > 0)
+            {
+                if(!predState.outstandingDSLoads.empty())
+                {
+                    // We have register tracking - compute precise dlcnt
+                    int latestNeededIndex = -1;
+                    for(const auto& srcReg : inst.srcRegs)
+                    {
+                        if(srcReg.dataType != StinkyRegister::Type::Register)
+                            continue;
+                        if(srcReg.reg.type != RegType::V && srcReg.reg.type != RegType::A)
+                            continue;
+
+                        // Check if this source register overlaps with any outstanding load
+                        for(size_t i = 0; i < predState.outstandingDSLoads.size(); ++i)
+                        {
+                            if(srcReg.isOverlap(predState.outstandingDSLoads[i]))
+                            {
+                                latestNeededIndex = std::max(latestNeededIndex, (int)i);
+                            }
+                        }
+                    }
+
+                    if(latestNeededIndex >= 0)
+                    {
+                        // We need to wait for loads up to and including latestNeededIndex
+                        // dlcnt = how many loads can remain outstanding
+                        int remaining
+                            = predState.outstandingDSLoads.size() - (latestNeededIndex + 1);
+                        pathReq.dlcnt = std::max(0, remaining);
+                    }
+                }
+                else
+                {
+                    // Conservative state (count without register list)
+                    // Fall back to wait-all: dlcnt=0
+                    pathReq.dlcnt = 0;
+                }
+            }
+
+            // Handle global loads for this path
+            if(predState.globalLoadCount > 0)
+            {
+                if(!predState.outstandingGlobalLoads.empty())
+                {
+                    // We have register tracking - compute precise vlcnt
+                    int latestNeededIndex = -1;
+                    for(const auto& srcReg : inst.srcRegs)
+                    {
+                        if(srcReg.dataType != StinkyRegister::Type::Register)
+                            continue;
+                        if(srcReg.reg.type != RegType::V && srcReg.reg.type != RegType::A)
+                            continue;
+
+                        // Check if this source register overlaps with any outstanding load
+                        for(size_t i = 0; i < predState.outstandingGlobalLoads.size(); ++i)
+                        {
+                            if(srcReg.isOverlap(predState.outstandingGlobalLoads[i]))
+                            {
+                                latestNeededIndex = std::max(latestNeededIndex, (int)i);
+                            }
+                        }
+                    }
+
+                    if(latestNeededIndex >= 0)
+                    {
+                        // We need to wait for loads up to and including latestNeededIndex
+                        // vlcnt = how many loads can remain outstanding
+                        int remaining
+                            = predState.outstandingGlobalLoads.size() - (latestNeededIndex + 1);
+                        pathReq.vlcnt = std::max(0, remaining);
+                    }
+                }
+                else
+                {
+                    // Conservative state (count without register list)
+                    // Fall back to wait-all: vlcnt=0
+                    pathReq.vlcnt = 0;
+                }
+            }
+
+            // Handle stores (always conservative)
+            if(predState.dsStoreCount > 0)
+                pathReq.dscnt = 0; // Wait for all DS stores
+
+            if(predState.globalStoreCount > 0)
+                pathReq.vscnt = 0; // Wait for all global stores
+
+            return pathReq;
+        }
+
+        /**
+         * @brief Merge all predecessor states into currentState_
+         */
+        void mergePredecessorStates()
+        {
+            currentState_ = MemoryOperationState();
+            bool first    = true;
+            for(const auto& predState : predecessorStates_)
+            {
+                if(first)
+                {
+                    currentState_ = predState;
+                    first         = false;
+                }
+                else
+                {
+                    currentState_.mergeFrom(predState);
+                }
+            }
+        }
+
+        /**
+         * @brief Insert waitcnts for cross-block dependencies using multi-path analysis
+         *
+         * For GPU performance, we need minimal waiting. Multi-path analysis:
+         * 1. Keep predecessor states separate (don't merge early)
+         * 2. For each instruction, compute wait requirement from EACH path
+         * 3. Take minimum (most restrictive) across all paths
+         * 4. After inserting waits, merge predecessor states to create currentState_
+         *
+         * This ensures we only wait as much as the most restrictive path requires.
+         */
+        void insertCrossBlockDependencyWaitCounts()
+        {
+            // Multi-path analysis: keep predecessor states separate
+            if(predecessorStates_.empty())
+            {
+                // No predecessors - start with empty state
+                currentState_ = MemoryOperationState();
+                return;
+            }
+
+            // Scan first few instructions to find register uses
+            // After first wait, continue checking against currentState_
+            int       scanned           = 0;
+            const int MAX_SCAN          = 10; // Look at first 10 instructions
+            bool      firstWaitInserted = false;
+
+            for(auto it = insts_.begin(); it != insts_.end() && scanned < MAX_SCAN; ++it, ++scanned)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+
+                // Skip if this is already a waitcnt
+                if(isWaitCnt(inst))
+                    continue;
+
+                // Check if this instruction uses any registers
+                if(inst.srcRegs.empty())
+                    continue;
+
+                // Check if ANY path (or currentState after first wait) has outstanding operations
+                bool hasOutstandingOps = false;
+                if(!firstWaitInserted)
+                {
+                    // Check all predecessor paths
+                    for(const auto& predState : predecessorStates_)
+                    {
+                        if(predState.dsLoadCount > 0 || predState.dsStoreCount > 0
+                           || predState.globalLoadCount > 0 || predState.globalStoreCount > 0)
+                        {
+                            hasOutstandingOps = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    // Check currentState_
+                    if(currentState_.dsLoadCount > 0 || currentState_.dsStoreCount > 0
+                       || currentState_.globalLoadCount > 0 || currentState_.globalStoreCount > 0)
+                    {
+                        hasOutstandingOps = true;
+                    }
+                }
+
+                if(!hasOutstandingOps)
+                    continue;
+
+                // Check if any source registers are VGPRs or AGPRs
+                bool usesVGPR = false;
+                for(const auto& reg : inst.srcRegs)
+                {
+                    if(reg.dataType == StinkyRegister::Type::Register
+                       && (reg.reg.type == RegType::V || reg.reg.type == RegType::A))
+                    {
+                        usesVGPR = true;
+                        break;
+                    }
+                }
+
+                if(!usesVGPR)
+                    continue;
+
+                // Compute wait requirement
+                WaitCntRequirement finalReq;
+                if(!firstWaitInserted)
+                {
+                    // Multi-path analysis: compute for EACH predecessor path
+                    // and take the minimum (most restrictive) to minimize GPU stalls
+                    for(const auto& predState : predecessorStates_)
+                    {
+                        WaitCntRequirement pathReq = computeWaitRequirementForPath(predState, inst);
+                        finalReq.merge(pathReq); // merge takes minimum
+                    }
+                }
+                else
+                {
+                    // Check against currentState_
+                    finalReq = computeWaitRequirementForPath(currentState_, inst);
+                }
+
+                // Insert waitcnt if needed
+                if(finalReq.isValid())
+                {
+                    insertWaitCntInstruction(it, finalReq);
+
+                    if(!firstWaitInserted)
+                    {
+                        // CRITICAL: Apply wait to EACH predecessor path BEFORE merging
+                        // This preserves register precision through the merge
+                        SWaitCntData waitData(finalReq.vlcnt,
+                                              finalReq.vscnt,
+                                              finalReq.dlcnt,
+                                              finalReq.dscnt,
+                                              WAIT_IGNORE);
+
+                        for(auto& predState : predecessorStates_)
+                        {
+                            predState.applyWaitCnt(waitData);
+                        }
+
+                        // Now merge the post-wait states
+                        mergePredecessorStates();
+                        firstWaitInserted = true;
+                        predecessorStates_.clear();
+                    }
+                    else
+                    {
+                        // Apply wait to currentState_
+                        SWaitCntData waitData(finalReq.vlcnt,
+                                              finalReq.vscnt,
+                                              finalReq.dlcnt,
+                                              finalReq.dscnt,
+                                              WAIT_IGNORE);
+                        currentState_.applyWaitCnt(waitData);
+                    }
+                }
+            }
+
+            // If we didn't insert any wait, still need to merge predecessor states
+            if(!firstWaitInserted)
+            {
+                mergePredecessorStates();
+            }
+        }
+
+        /**
+         * @brief Compute exit states - one per incoming path for precise tracking
+         *
+         * For multi-predecessor blocks, we maintain separate exit states for each
+         * incoming path rather than merging them. This preserves per-path precision
+         * and allows successor blocks to perform accurate multi-path analysis.
+         */
+        std::vector<MemoryOperationState> computeExitStates()
+        {
+            std::vector<MemoryOperationState> exitStates;
+
+            // For multi-predecessor blocks WITHOUT back-edges (diamond CFG), maintain per-path states
+            // For loops (blocks with back-edges), use merged currentState_ for convergence
+            bool usePerPathTracking = !isLoopBlock_ && originalPredecessorStates_.size() >= 2;
+
+            if(usePerPathTracking)
+            {
+                // Find all waits inserted in this block (Phase 0, 1, 2, 3)
+                std::vector<const SWaitCntData*> insertedWaits;
+                for(auto it = insts_.begin(); it != insts_.end(); ++it)
+                {
+                    StinkyInstruction& inst = getStinkyInst(it);
+                    if(isWaitCnt(inst))
+                    {
+                        const SWaitCntData* wait = inst.getModifier<SWaitCntData>();
+                        if(wait)
+                            insertedWaits.push_back(wait);
+                    }
+                }
+
+                // For each predecessor path, compute its exit state
+                for(const auto& predState : originalPredecessorStates_)
+                {
+                    MemoryOperationState pathExit = predState;
+
+                    // Apply all new memory operations in this block
+                    for(auto it = insts_.begin(); it != insts_.end(); ++it)
+                    {
+                        StinkyInstruction& inst = getStinkyInst(it);
+
+                        bool isMemOp = (isGlobalMemLoad(inst) || isGlobalMemStore(inst)
+                                        || isDSRead(inst) || isDSWrite(inst) || isTensorLoad(inst));
+                        if(isMemOp)
+                        {
+                            pathExit.incrementForInst(inst);
+                        }
+                    }
+
+                    // Apply all inserted waits to this path
+                    for(const auto* wait : insertedWaits)
+                    {
+                        pathExit.applyWaitCnt(*wait);
+                    }
+
+                    exitStates.push_back(pathExit);
+                }
+            }
+            else
+            {
+                // No predecessors - compute single exit state from currentState_
+                MemoryOperationState exitState = currentState_;
+
+                bool seenMemoryOp = false;
+                for(auto it = insts_.begin(); it != insts_.end(); ++it)
+                {
+                    StinkyInstruction& inst = getStinkyInst(it);
+
+                    bool isMemOp = (isGlobalMemLoad(inst) || isGlobalMemStore(inst)
+                                    || isDSRead(inst) || isDSWrite(inst) || isTensorLoad(inst));
+                    if(isMemOp)
+                    {
+                        seenMemoryOp = true;
+                        exitState.incrementForInst(inst);
+                    }
+
+                    if(isWaitCnt(inst))
+                    {
+                        const SWaitCntData* wait = inst.getModifier<SWaitCntData>();
+                        if(wait && seenMemoryOp)
+                        {
+                            exitState.applyWaitCnt(*wait);
+                        }
+                    }
+
+                    const SWaitTensorCntData* tensorWait = inst.getModifier<SWaitTensorCntData>();
+                    if(tensorWait && seenMemoryOp)
+                    {
+                        exitState.applyTensorWaitCnt(*tensorWait);
+                    }
+                }
+
+                exitStates.push_back(exitState);
+            }
+
+            return exitStates;
         }
 
         /**
@@ -586,7 +1208,7 @@ namespace
                                                       IRList::iterator useIt)
         {
             WaitCntRequirement   req;
-            MemoryOperationState state;
+            MemoryOperationState state = currentState_;
 
             const StinkyInstruction& memInst = getStinkyInst(memIt);
 
@@ -624,7 +1246,7 @@ namespace
                                                        IRList::iterator nextMemIt)
         {
             WaitCntRequirement   req;
-            MemoryOperationState state;
+            MemoryOperationState state = currentState_;
 
             const StinkyInstruction& storeInst = getStinkyInst(storeIt);
 
@@ -658,11 +1280,16 @@ namespace
             return req;
         }
 
-        IRList&                       insts_;
-        StinkyInstIRBuilder&          irBuilder_;
-        GfxArchID                     arch_;
-        WaitCntConfig                 config_;
-        std::vector<MemoryDependency> dependencies_;
+        IRList&                           insts_;
+        StinkyInstIRBuilder&              irBuilder_;
+        GfxArchID                         arch_;
+        WaitCntConfig                     config_;
+        std::vector<MemoryDependency>     dependencies_;
+        std::vector<MemoryOperationState> predecessorStates_; // States from all predecessors
+        std::vector<MemoryOperationState>
+                             originalPredecessorStates_; // Saved for exit state computation
+        MemoryOperationState currentState_; // Current state during analysis
+        bool                 isLoopBlock_; // Whether this block has a back-edge
     };
 
     /**
@@ -690,22 +1317,186 @@ namespace
 
         void run(Function& func, PassContext& passCtx) override
         {
-            GfxArchID arch = getGfxArchID(passCtx.getKernelInfo().arch[0],
-                                          passCtx.getKernelInfo().arch[1],
-                                          passCtx.getKernelInfo().arch[2]);
+            GfxArchID arch = getGfxArchID(passCtx.getGemmTileConfig().arch[0],
+                                          passCtx.getGemmTileConfig().arch[1],
+                                          passCtx.getGemmTileConfig().arch[2]);
 
-            // Process each BasicBlock
+            // Map to store wait states for each basic block
+            std::map<BasicBlock*, BasicBlockWaitState> blockStates;
+
+            // Detect if we have any loops (blocks with back-edges)
+            bool hasLoops = false;
             traverseCFGInRPO(func, [&](BasicBlock* bb) {
-                IRList& insts = bb->getIR();
-
-                if(insts.empty())
-                    return;
-
-                auto irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
-
-                ConfigurableWaitCntInserter inserter(insts, irBuilder, arch, config_);
-                inserter.insertWaitCounts();
+                if(hasLoopBackEdge(bb))
+                {
+                    hasLoops = true;
+                }
             });
+
+            // Iterative dataflow analysis for convergence (needed for loops)
+            const int MAX_ITERATIONS = 10;
+            int       iteration      = 0;
+            bool      changed        = true;
+
+            while((changed || iteration < 2) && iteration < MAX_ITERATIONS)
+            {
+                changed = false;
+                iteration++;
+
+                // Process each BasicBlock in RPO
+                traverseCFGInRPO(func, [&](BasicBlock* bb) {
+                    IRList& insts = bb->getIR();
+
+                    if(insts.empty())
+                        return;
+
+                    // Compute entry state from predecessors
+                    MemoryOperationState entryState;
+                    bool                 hasValidPredecessor = false;
+                    bool                 hasNonBackEdgePred  = false;
+                    int                  validPredCount      = 0;
+
+                    // First, check if we have any non-back-edge predecessors
+                    for(BasicBlock* pred : bb->getPredecessors())
+                    {
+                        if(pred != bb)
+                        {
+                            auto predStateIt = blockStates.find(pred);
+                            if(predStateIt != blockStates.end() && predStateIt->second.processed)
+                            {
+                                hasNonBackEdgePred = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Detect if this is a pure diamond CFG (multiple non-back-edge predecessors)
+                    bool isDiamondCFG = false;
+                    if(bb->getPredecessors().size() >= 2)
+                    {
+                        int nonBackEdgeCount = 0;
+                        for(BasicBlock* pred : bb->getPredecessors())
+                        {
+                            if(pred != bb)
+                            {
+                                auto predStateIt = blockStates.find(pred);
+                                if(predStateIt != blockStates.end()
+                                   && predStateIt->second.processed)
+                                {
+                                    nonBackEdgeCount++;
+                                }
+                            }
+                        }
+                        isDiamondCFG = (nonBackEdgeCount >= 2);
+                    }
+
+                    // Collect ALL exit states from ALL predecessors (multi-path analysis)
+                    // Each predecessor may have multiple exit states (one per its incoming path)
+                    std::vector<MemoryOperationState> predecessorStates;
+
+                    for(BasicBlock* pred : bb->getPredecessors())
+                    {
+                        // Skip back-edges ONLY on first iteration when we have entry paths
+                        // This avoids merging with not-yet-stable loop state
+                        // After first iteration (iteration > 1), allow merging with back-edge
+                        // But for diamond CFG (multiple non-back-edge preds), always skip back-edge
+                        bool shouldSkipBackEdge = (pred == bb && hasNonBackEdgePred)
+                                                  && (iteration == 1 || isDiamondCFG);
+
+                        if(shouldSkipBackEdge)
+                            continue;
+
+                        auto predStateIt = blockStates.find(pred);
+                        if(predStateIt != blockStates.end() && predStateIt->second.processed)
+                        {
+                            validPredCount++;
+                            hasValidPredecessor = true;
+
+                            // Collect ALL exit states from this predecessor (per-path tracking)
+                            for(const auto& exitState : predStateIt->second.exitStates)
+                            {
+                                predecessorStates.push_back(exitState);
+                            }
+                        }
+                    }
+
+                    // Merge predecessor states for convergence detection
+                    // (Inserter will use separate states for multi-path analysis)
+                    bool firstPred = true;
+                    for(const auto& predState : predecessorStates)
+                    {
+                        if(firstPred)
+                        {
+                            entryState = predState;
+                            firstPred  = false;
+                        }
+                        else
+                        {
+                            entryState.mergeFrom(predState);
+                        }
+                    }
+
+                    // Get or create state for this block
+                    BasicBlockWaitState& bbState = blockStates[bb];
+
+                    // Check if entry state changed (for convergence detection)
+                    bool entryChanged = false;
+                    if(bbState.processed && !statesEqual(bbState.entryState, entryState))
+                    {
+                        entryChanged = true;
+                        changed      = true;
+                    }
+
+                    bbState.entryState = entryState;
+
+                    // Process the block if:
+                    // 1. First time processing (!bbState.processed)
+                    // 2. Entry state changed (entryChanged)
+                    bool shouldProcess = !bbState.processed || entryChanged;
+
+                    if(shouldProcess)
+                    {
+                        // Clear existing waitcnts if reprocessing
+                        if(bbState.processed)
+                        {
+                            clearWaitCnts(insts);
+                        }
+
+                        auto irBuilder = passCtx.getIRBuilder<StinkyInstIRBuilder>(insts, arch);
+
+                        // Pass predecessor states separately for multi-path analysis
+                        bool                        isLoop = hasLoopBackEdge(bb);
+                        ConfigurableWaitCntInserter inserter(
+                            insts, irBuilder, arch, config_, &predecessorStates, isLoop);
+                        std::vector<MemoryOperationState> newExitStates
+                            = inserter.insertWaitCounts();
+
+                        // Check if ANY exit state changed (for convergence)
+                        if(bbState.exitStates.size() != newExitStates.size())
+                        {
+                            changed = true;
+                        }
+                        else
+                        {
+                            for(size_t i = 0; i < newExitStates.size(); ++i)
+                            {
+                                if(!statesEqual(bbState.exitStates[i], newExitStates[i]))
+                                {
+                                    changed = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        bbState.exitStates = newExitStates;
+                        bbState.processed  = true;
+                    }
+                });
+
+                // If no loops, one iteration is sufficient
+                if(!hasLoops && iteration >= 1)
+                    break;
+            }
         }
 
         // Allow configuration to be changed
@@ -720,6 +1511,53 @@ namespace
         }
 
     private:
+        /**
+         * @brief Check if a basic block has a loop back-edge to itself
+         */
+        bool hasLoopBackEdge(const BasicBlock* bb) const
+        {
+            for(const BasicBlock* succ : bb->getSuccessors())
+            {
+                if(succ == bb)
+                    return true;
+            }
+            return false;
+        }
+
+        /**
+         * @brief Compare two MemoryOperationState objects for equality
+         */
+        bool statesEqual(const MemoryOperationState& a, const MemoryOperationState& b) const
+        {
+            // For convergence detection, must compare both counts and register lists
+            // The register order matters for precise dlcnt computation
+            return a.globalLoadCount == b.globalLoadCount
+                   && a.globalStoreCount == b.globalStoreCount && a.dsLoadCount == b.dsLoadCount
+                   && a.dsStoreCount == b.dsStoreCount && a.tensorLoadCount == b.tensorLoadCount
+                   && a.atomicCount == b.atomicCount && a.outstandingDSLoads == b.outstandingDSLoads
+                   && a.outstandingGlobalLoads == b.outstandingGlobalLoads;
+        }
+
+        /**
+         * @brief Clear all waitcnt instructions from an instruction list
+         */
+        void clearWaitCnts(IRList& insts) const
+        {
+            for(auto it = insts.begin(); it != insts.end();)
+            {
+                StinkyInstruction& inst = static_cast<StinkyInstruction&>(*it);
+                if(inst.getModifier<SWaitCntData>() != nullptr
+                   || inst.getModifier<SWaitTensorCntData>() != nullptr)
+                {
+                    it = insts.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        }
+
         WaitCntConfig config_;
     };
 

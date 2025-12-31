@@ -30,6 +30,7 @@ namespace stinkytofu
 {
     bool genAllArchDefinitions(GpuArchManager& manager, const std::string& outdir);
     bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir);
+    bool genPeepholePatterns(const std::string& patternFile, const std::string& outdir);
 }
 
 using namespace stinkytofu;
@@ -70,6 +71,10 @@ int main(int argc, char** argv)
 
     success &= genAllArchDefinitions(manager, outdir);
     success &= genAllArchRocisaMappings(manager, outdir);
+    
+    // Generate peephole optimization patterns
+    std::string patternFile = hardwareDir + "/../lib/Dialect/Transforms/PeepholePatterns.pattern";
+    success &= genPeepholePatterns(patternFile, outdir);
 
     return success ? SUCCESS : FAILURE;
 }

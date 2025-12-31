@@ -21,16 +21,18 @@
  *
  * ************************************************************************ */
 
-#include "stinkytofu.hpp" // Must be first for IRList definition
-#include "StinkyTofu.hpp"
+#include "StinkyBuilder.hpp"
+#include "ErrorHandling.hpp"
 #include "ir/asm/StinkyAsmDirectives.hpp"
 #include "ir/asm/StinkyAsmEmitter.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/StinkyAsmPrinter.hpp"
 #include "ir/asm/StinkyMacro.hpp"
 #include "ir/asm/StinkyModifiers.hpp"
 #include "ir/asm/StinkySignature.hpp"
 #include "isa/ArchHelper.hpp"
 #include "isa/gfx/GfxIsa.hpp"
+#include "stinkytofu.hpp" // Must be first for IRList definition
 
 #include <sstream>
 #include <stdexcept>
@@ -57,12 +59,30 @@ namespace stinkytofu
             const HwInstDesc* desc = getMCIDByUOp(opcode, archID);
             if(!desc)
             {
-                throw std::runtime_error("Failed to get instruction descriptor for " + instrName);
+                STINKY_UNREACHABLE(
+                    ("Failed to get instruction descriptor for " + instrName).c_str());
             }
 
             // Create a standalone instruction
             StinkyInstruction* inst = new StinkyInstruction(desc);
             return inst;
+        }
+
+        // Architecture capability queries
+        bool hasSDWA() const
+        {
+            // SDWA (Sub-DWord Addressing) is supported on:
+            // - gfx9 series (gfx900, gfx906, gfx908, gfx90a, gfx942, gfx950)
+            // - gfx10 series (gfx1010, gfx1030, etc.)
+            // NOT supported on:
+            // - gfx11 series (gfx1100, gfx1250) - these use VOP3P instead
+            return archID != GfxArchID::Gfx1250;
+        }
+
+        bool hasVOP3P() const
+        {
+            // VOP3P (Packed VOP3) is the replacement for SDWA in gfx11+
+            return archID == GfxArchID::Gfx1250;
         }
     };
 
@@ -215,12 +235,29 @@ namespace stinkytofu
         {
             if(!inst)
             {
-                throw std::runtime_error("Cannot add null instruction to module");
+                STINKY_UNREACHABLE("Cannot add null instruction to module");
             }
             // Add the instruction to the end of the list
             pImpl->irList.push_back(inst);
         }
         return insts;
+    }
+
+    void IRListModule::addModule(const IRListModule& module)
+    {
+        // Append all instructions from the other module to this module
+        // IntrusiveList requires inserting one by one
+        std::vector<IRBase*> instructionsToClone;
+        for(IRBase& inst : module.pImpl->irList)
+        {
+            instructionsToClone.push_back(&inst);
+        }
+
+        // TODO: instructions should be clone to prevent unsafe behaviour
+        for(IRBase* inst : instructionsToClone)
+        {
+            pImpl->irList.push_back(inst);
+        }
     }
 
     std::string IRListModule::emitAssembly(bool emitCycleInfo, bool emitComments) const
@@ -232,6 +269,67 @@ namespace stinkytofu
         StinkyAsmEmitter emitter(options);
         emitter.emit(ss, pImpl->irList);
         return ss.str();
+    }
+
+    std::string IRListModule::toString() const
+    {
+        std::ostringstream oss;
+        oss << "IRListModule: " << pImpl->name;
+        oss << " (arch " << static_cast<unsigned int>(pImpl->archID) << ")\n";
+        oss << stinkytofu::toString(pImpl->irList);
+
+        return oss.str();
+    }
+
+    void IRListModule::remapVirtualRegisters(int vgprOffset, int sgprOffset)
+    {
+        // Walk through all instructions in the module and remap virtual registers
+        for(auto& irBase : pImpl->irList)
+        {
+            // Check if this is a StinkyInstruction using classof
+            if(StinkyInstruction::classof(&irBase))
+            {
+                auto* inst = static_cast<StinkyInstruction*>(&irBase);
+                inst->remapRegisters(vgprOffset, sgprOffset);
+            }
+            // Note: Other IR types (directives, labels, etc.) don't have registers to remap
+        }
+    }
+
+    Expected<std::shared_ptr<IRListModule>> IRListModule::cloneAndRemap(int vgprOffset,
+                                                                        int sgprOffset) const
+    {
+        // Create a new module with the same name (with "_clone" suffix for clarity)
+        auto clonedModule = std::make_shared<IRListModule>(pImpl->archID, pImpl->name + "_clone");
+
+        // Clone all instructions from this module
+        for(const auto& irBase : pImpl->irList)
+        {
+            // Check if this is a StinkyInstruction using classof
+            if(StinkyInstruction::classof(&irBase))
+            {
+                const auto* inst = static_cast<const StinkyInstruction*>(&irBase);
+
+                // Clone the instruction using the clone() method
+                StinkyInstruction* clonedInst = inst->clone();
+
+                // Remap virtual registers in the clone
+                clonedInst->remapRegisters(vgprOffset, sgprOffset);
+
+                // Add to the new module
+                clonedModule->add({clonedInst});
+            }
+            else
+            {
+                // For other IR types (directives, labels), we'd need to handle them
+                // For now, we'll skip them or throw an error if encountered
+                // In practice, activation templates should only contain instructions
+                return Expected<std::shared_ptr<IRListModule>>::Error(
+                    "cloneAndRemap: Non-instruction IR elements not yet supported in cloning");
+            }
+        }
+
+        return clonedModule;
     }
 
     // ========================================================================
@@ -257,19 +355,19 @@ namespace stinkytofu
     // Generic MFMA Creation Functions
     // ========================================================================
 
-    std::vector<StinkyInstruction*> StinkyTofu::createMFMA(const std::string&    instType,
-                                                           const std::string&    accType,
-                                                           int                   m,
-                                                           int                   n,
-                                                           int                   k,
-                                                           int                   blocks,
-                                                           bool                  mfma1k,
-                                                           const StinkyRegister& acc,
-                                                           const StinkyRegister& a,
-                                                           const StinkyRegister& b,
-                                                           const StinkyRegister* acc2,
-                                                           bool                  neg,
-                                                           const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyTofu::createMFMA(const std::string&    instType,
+                                                                     const std::string&    accType,
+                                                                     int                   m,
+                                                                     int                   n,
+                                                                     int                   k,
+                                                                     int                   blocks,
+                                                                     bool                  mfma1k,
+                                                                     const StinkyRegister& acc,
+                                                                     const StinkyRegister& a,
+                                                                     const StinkyRegister& b,
+                                                                     const StinkyRegister* acc2,
+                                                                     bool                  neg,
+                                                                     const std::string&    comment)
     {
         std::vector<StinkyInstruction*> result;
         result.reserve(1);
@@ -304,13 +402,14 @@ namespace stinkytofu
         uint16_t isaOpcode = getMnemonicToIsaOpcode(instrStr, pImpl->archID);
         if(isaOpcode == GFX::INVALID)
         {
-            throw std::runtime_error("MFMA instruction not found: " + instrStr);
+            return Expected<std::vector<StinkyInstruction*>>::Error("MFMA instruction not found: "
+                                                                    + instrStr);
         }
 
         const HwInstDesc* desc = getMCIDByIsaOp(isaOpcode, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error("Failed to get instruction descriptor for " + instrStr);
+            STINKY_UNREACHABLE(("Failed to get instruction descriptor for " + instrStr).c_str());
         }
 
         // Create the instruction
@@ -330,23 +429,24 @@ namespace stinkytofu
         return result;
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::createMXMFMA(const std::string&    instType,
-                                                             const std::string&    accType,
-                                                             const std::string&    mxScaleATypeStr,
-                                                             const std::string&    mxScaleBTypeStr,
-                                                             int                   m,
-                                                             int                   n,
-                                                             int                   k,
-                                                             int                   block,
-                                                             const StinkyRegister& acc,
-                                                             const StinkyRegister& a,
-                                                             const StinkyRegister& b,
-                                                             const StinkyRegister& acc2,
-                                                             const StinkyRegister& mxsa,
-                                                             const StinkyRegister& mxsb,
-                                                             bool                  reuseA,
-                                                             bool                  reuseB,
-                                                             const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>>
+        StinkyTofu::createMXMFMA(const std::string&    instType,
+                                 const std::string&    accType,
+                                 const std::string&    mxScaleATypeStr,
+                                 const std::string&    mxScaleBTypeStr,
+                                 int                   m,
+                                 int                   n,
+                                 int                   k,
+                                 int                   block,
+                                 const StinkyRegister& acc,
+                                 const StinkyRegister& a,
+                                 const StinkyRegister& b,
+                                 const StinkyRegister& acc2,
+                                 const StinkyRegister& mxsa,
+                                 const StinkyRegister& mxsb,
+                                 bool                  reuseA,
+                                 bool                  reuseB,
+                                 const std::string&    comment)
     {
         std::vector<StinkyInstruction*> result;
         result.reserve(1);
@@ -362,13 +462,14 @@ namespace stinkytofu
         uint16_t isaOpcode = getMnemonicToIsaOpcode(instrStr, pImpl->archID);
         if(isaOpcode == GFX::INVALID)
         {
-            throw std::runtime_error("MXMFMA instruction not found: " + instrStr);
+            return Expected<std::vector<StinkyInstruction*>>::Error("MXMFMA instruction not found: "
+                                                                    + instrStr);
         }
 
         const HwInstDesc* desc = getMCIDByIsaOp(isaOpcode, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error("Failed to get instruction descriptor for " + instrStr);
+            STINKY_UNREACHABLE(("Failed to get instruction descriptor for " + instrStr).c_str());
         }
 
         // Create the instruction
@@ -393,19 +494,20 @@ namespace stinkytofu
         return result;
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::createSMFMA(const std::string&    instType,
-                                                            const std::string&    accType,
-                                                            int                   m,
-                                                            int                   n,
-                                                            int                   k,
-                                                            int                   blocks,
-                                                            bool                  mfma1k,
-                                                            const StinkyRegister& acc,
-                                                            const StinkyRegister& a,
-                                                            const StinkyRegister& b,
-                                                            const StinkyRegister& metadata,
-                                                            bool                  neg,
-                                                            const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>>
+        StinkyTofu::createSMFMA(const std::string&    instType,
+                                const std::string&    accType,
+                                int                   m,
+                                int                   n,
+                                int                   k,
+                                int                   blocks,
+                                bool                  mfma1k,
+                                const StinkyRegister& acc,
+                                const StinkyRegister& a,
+                                const StinkyRegister& b,
+                                const StinkyRegister& metadata,
+                                bool                  neg,
+                                const std::string&    comment)
     {
         std::vector<StinkyInstruction*> result;
         result.reserve(1);
@@ -423,13 +525,14 @@ namespace stinkytofu
         uint16_t isaOpcode = getMnemonicToIsaOpcode(instrStr, pImpl->archID);
         if(isaOpcode == GFX::INVALID)
         {
-            throw std::runtime_error("SMFMA instruction not found: " + instrStr);
+            return Expected<std::vector<StinkyInstruction*>>::Error("SMFMA instruction not found: "
+                                                                    + instrStr);
         }
 
         const HwInstDesc* desc = getMCIDByIsaOp(isaOpcode, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error("Failed to get instruction descriptor for " + instrStr);
+            STINKY_UNREACHABLE(("Failed to get instruction descriptor for " + instrStr).c_str());
         }
 
         // Create the instruction
@@ -545,18 +648,17 @@ namespace stinkytofu
             pImpl.get(), GFX::s_mul_hi_u32, "S_MUL_HI_U32", dst, {src0, src1}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::SMulLOU32(const StinkyRegister& dst,
-                                                          const StinkyRegister& src0,
-                                                          const StinkyRegister& src1,
-                                                          const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyTofu::SMulLOU32(const StinkyRegister& dst,
+                                                                    const StinkyRegister& src0,
+                                                                    const StinkyRegister& src1,
+                                                                    const std::string&    comment)
     {
         // Check if s_mul_lo_u32 is supported on this architecture (gfx1250+)
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_mul_lo_u32, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error(
-                "SMulLOU32: Instruction 's_mul_lo_u32' is not supported on this architecture. "
-                "This instruction is only available on gfx1250 and later.");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "s_mul_lo_u32 not supported on this architecture (requires gfx1250+)");
         }
 
         return createInst(
@@ -587,18 +689,17 @@ namespace stinkytofu
         return createInst(pImpl.get(), GFX::s_subb_u32, "S_SUBB_U32", dst, {src0, src1}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::SSubU64(const StinkyRegister& dst,
-                                                        const StinkyRegister& src0,
-                                                        const StinkyRegister& src1,
-                                                        const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyTofu::SSubU64(const StinkyRegister& dst,
+                                                                  const StinkyRegister& src0,
+                                                                  const StinkyRegister& src1,
+                                                                  const std::string&    comment)
     {
         // Check if s_sub_u64 is supported on this architecture (gfx1250+)
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_sub_u64, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error(
-                "SSubU64: Instruction 's_sub_u64' is not supported on this architecture. "
-                "This instruction is only available on gfx1250 and later.");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "s_sub_u64 not supported on this architecture (requires gfx1250+)");
         }
 
         return createInst(pImpl.get(), GFX::s_sub_u64, "S_SUB_U64", dst, {src0, src1}, comment);
@@ -841,17 +942,15 @@ namespace stinkytofu
     // Scalar Exec Mask Instructions
     // ========================================================================
 
-    std::vector<StinkyInstruction*> StinkyTofu::SAndSaveExecB32(const StinkyRegister& dst,
-                                                                const StinkyRegister& src,
-                                                                const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyTofu::SAndSaveExecB32(
+        const StinkyRegister& dst, const StinkyRegister& src, const std::string& comment)
     {
         // Check if s_and_saveexec_b32 is supported on this architecture (gfx1250+)
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_and_saveexec_b32, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error("SAndSaveExecB32: Instruction 's_and_saveexec_b32' is not "
-                                     "supported on this architecture. "
-                                     "This instruction is only available on gfx1250 and later.");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "s_and_saveexec_b32 not supported on this architecture (requires gfx1250+)");
         }
 
         return createInst(
@@ -877,17 +976,16 @@ namespace stinkytofu
         return result;
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::SOrSaveExecB32(const StinkyRegister& dst,
-                                                               const StinkyRegister& src,
-                                                               const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyTofu::SOrSaveExecB32(const StinkyRegister& dst,
+                                                                         const StinkyRegister& src,
+                                                                         const std::string& comment)
     {
         // Check if s_or_saveexec_b32 is supported on this architecture (gfx1250+)
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_or_saveexec_b32, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error("SOrSaveExecB32: Instruction 's_or_saveexec_b32' is not "
-                                     "supported on this architecture. "
-                                     "This instruction is only available on gfx1250 and later.");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "s_or_saveexec_b32 not supported on this architecture (requires gfx1250+)");
         }
 
         return createInst(
@@ -1183,19 +1281,18 @@ namespace stinkytofu
             pImpl.get(), GFX::v_pk_fma_f16, "V_PK_FMA_F16", dst, {src0, src1, src2}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::VFmaMixF32(const StinkyRegister& dst,
-                                                           const StinkyRegister& src0,
-                                                           const StinkyRegister& src1,
-                                                           const StinkyRegister& src2,
-                                                           const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyTofu::VFmaMixF32(const StinkyRegister& dst,
+                                                                     const StinkyRegister& src0,
+                                                                     const StinkyRegister& src1,
+                                                                     const StinkyRegister& src2,
+                                                                     const std::string&    comment)
     {
         // Check if v_fma_mix_f32 is supported on this architecture (gfx1250+)
         const HwInstDesc* desc = getMCIDByUOp(GFX::v_fma_mix_f32, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error(
-                "VFmaMixF32: Instruction 'v_fma_mix_f32' is not supported on this architecture. "
-                "This instruction is only available on gfx1250 and later.");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "v_fma_mix_f32 not supported on this architecture (requires gfx1250+)");
         }
 
         return createInst(
@@ -1334,17 +1431,16 @@ namespace stinkytofu
         return createInst(pImpl.get(), GFX::v_rsq_f32, "V_RSQ_F32", dst, {src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::VRsqIFlagF32(const StinkyRegister& dst,
-                                                             const StinkyRegister& src,
-                                                             const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>> StinkyTofu::VRsqIFlagF32(const StinkyRegister& dst,
+                                                                       const StinkyRegister& src,
+                                                                       const std::string& comment)
     {
         // Check if v_rsq_iflag_f32 is supported on this architecture (gfx1250+)
         const HwInstDesc* desc = getMCIDByUOp(GFX::v_rsq_iflag_f32, pImpl->archID);
         if(!desc)
         {
-            throw std::runtime_error("VRsqIFlagF32: Instruction 'v_rsq_iflag_f32' is not supported "
-                                     "on this architecture. "
-                                     "This instruction is only available on gfx1250 and later.");
+            return Expected<std::vector<StinkyInstruction*>>::Error(
+                "v_rsq_iflag_f32 not supported on this architecture (requires gfx1250+)");
         }
 
         return createInst(
@@ -2427,11 +2523,88 @@ namespace stinkytofu
                           comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::VCvtBF16toF32(const StinkyRegister& dst,
-                                                              const StinkyRegister& src,
-                                                              const std::string&    comment)
+    Expected<std::vector<StinkyInstruction*>>
+        StinkyTofu::VCvtBF16toFP32(const StinkyRegister& dst,
+                                   const StinkyRegister& src,
+                                   const StinkyRegister* vgprMask,
+                                   int                   vi,
+                                   const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::v_cvt_f32_bf16, "V_CVT_F32_BF16", dst, {src}, comment);
+        std::vector<StinkyInstruction*> result;
+
+        // v_cvt_f32_bf16 is only supported on gfx950+
+        // Check if instruction is supported before creating it
+        const HwInstDesc* desc = getMCIDByUOp(GFX::v_cvt_f32_bf16, pImpl->archID);
+
+        if(desc)
+        {
+            // Architecture supports v_cvt_f32_bf16 - create the instruction
+            StinkyInstruction* inst = new StinkyInstruction(desc);
+            inst->destRegs.push_back(dst);
+            inst->srcRegs.push_back(src);
+            // Handle vgprMask and vi parameters for architectures that support them
+            // These parameters are used for SDWA modifiers in gfx9 or VOP3P in gfx11+
+            if(pImpl->hasVOP3P())
+            {
+                // gfx11+ architectures use VOP3P with op_sel
+                auto vop3 = VOP3PModifiers();
+                vop3.op_sel.push_back(vi % 2);
+                inst->addModifier<VOP3PModifiers>(vop3);
+            }
+            else if(pImpl->hasSDWA())
+            {
+                // gfx9/gfx10 architectures use SDWA for sub-word selection
+                auto select_bit = SDWAModifiers::SelectBit::WORD_0;
+                if(vi % 2 == 1)
+                {
+                    select_bit = SDWAModifiers::SelectBit::WORD_1;
+                }
+                auto sdwa     = SDWAModifiers();
+                sdwa.src0_sel = select_bit;
+                inst->addModifier<SDWAModifiers>(sdwa);
+            }
+            else
+            {
+                STINKY_UNREACHABLE(
+                    "Architecture has v_cvt_f32_bf16 but neither VOP3P nor SDWA support");
+            }
+            if(!comment.empty())
+            {
+                inst->addModifier(CommentData(comment));
+            }
+            result.push_back(inst);
+        }
+        else
+        {
+            // Pre-gfx950: Emulate BF16->FP32 conversion using bit manipulation
+            if((vi % 2) == 1)
+            {
+                // Odd word: Mask with vgprMask to extract BF16 value
+                if(vgprMask == nullptr)
+                {
+                    return Expected<std::vector<StinkyInstruction*>>::Error(
+                        "vgprMask is required for odd word BF16->FP32 conversion");
+                }
+                result = createInst(pImpl.get(),
+                                    GFX::v_and_b32,
+                                    "V_AND_B32",
+                                    dst,
+                                    {src, *vgprMask},
+                                    "cvt bf16 to fp32 (odd). " + comment);
+            }
+            else
+            {
+                // Even word: Left shift by 16 bits to convert BF16 to FP32
+                result = createInst(pImpl.get(),
+                                    GFX::v_lshlrev_b32,
+                                    "V_LSHLREV_B32",
+                                    dst,
+                                    {StinkyRegister(16), src},
+                                    "cvt bf16 to fp32 (even). " + comment);
+            }
+        }
+
+        return result;
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::VCvtPkF32toBF16(const StinkyRegister& dst,
@@ -2449,207 +2622,207 @@ namespace stinkytofu
 
     // DS (LDS) Instructions
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadU8(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadU8(const StinkyRegister& dst,
                                                          const StinkyRegister& addr,
                                                          const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_u8, "DS_READ_U8", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_u8, "DS_LOAD_U8", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadI8(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadI8(const StinkyRegister& dst,
                                                          const StinkyRegister& addr,
                                                          const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_i8, "DS_READ_I8", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_i8, "DS_LOAD_I8", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadU16(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadU16(const StinkyRegister& dst,
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_u16, "DS_READ_U16", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_u16, "DS_LOAD_U16", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadI16(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadI16(const StinkyRegister& dst,
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_i16, "DS_READ_I16", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_i16, "DS_LOAD_I16", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB32(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB32(const StinkyRegister& dst,
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b32, "DS_READ_B32", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_b32, "DS_LOAD_B32", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB64(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB64(const StinkyRegister& dst,
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b64, "DS_READ_B64", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_b64, "DS_LOAD_B64", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB96(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB96(const StinkyRegister& dst,
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b96, "DS_READ_B96", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_b96, "DS_LOAD_B96", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB128(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB128(const StinkyRegister& dst,
                                                            const StinkyRegister& addr,
                                                            const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b128, "DS_READ_B128", dst, {addr}, comment);
+        return createInst(pImpl.get(), GFX::ds_read_b128, "DS_LOAD_B128", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadU8D16Hi(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadD16HIU8(const StinkyRegister& dst,
                                                               const StinkyRegister& addr,
                                                               const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read_u8_d16_hi, "DS_READ_U8_D16_HI", dst, {addr}, comment);
+            pImpl.get(), GFX::ds_read_u8_d16_hi, "DS_LOAD_D16HI_U8", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadU16D16Hi(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadD16HIU16(const StinkyRegister& dst,
                                                                const StinkyRegister& addr,
                                                                const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read_u16_d16_hi, "DS_READ_U16_D16_HI", dst, {addr}, comment);
+            pImpl.get(), GFX::ds_read_u16_d16_hi, "DS_LOAD_D16HI_U16", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB64TrB4(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB64TrB4(const StinkyRegister& dst,
                                                               const StinkyRegister& addr,
                                                               const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read_b64_tr_b4, "DS_READ_B64_TR_B4", dst, {addr}, comment);
+            pImpl.get(), GFX::ds_read_b64_tr_b4, "DS_LOAD_B64_TR_B4", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB96TrB6(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB96TrB6(const StinkyRegister& dst,
                                                               const StinkyRegister& addr,
                                                               const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read_b96_tr_b6, "DS_READ_B96_TR_B6", dst, {addr}, comment);
+            pImpl.get(), GFX::ds_read_b96_tr_b6, "DS_LOAD_B96_TR_B6", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB64TrB8(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB64TrB8(const StinkyRegister& dst,
                                                               const StinkyRegister& addr,
                                                               const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read_b64_tr_b8, "DS_READ_B64_TR_B8", dst, {addr}, comment);
+            pImpl.get(), GFX::ds_read_b64_tr_b8, "DS_LOAD_B64_TR_B8", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSReadB64TrB16(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoadB64TrB16(const StinkyRegister& dst,
                                                                const StinkyRegister& addr,
                                                                const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read_b64_tr_b16, "DS_READ_B64_TR_B16", dst, {addr}, comment);
+            pImpl.get(), GFX::ds_read_b64_tr_b16, "DS_LOAD_B64_TR_B16", dst, {addr}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSRead2B32(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoad2B32(const StinkyRegister& dst,
                                                            const StinkyRegister& addr0,
                                                            const StinkyRegister& addr1,
                                                            const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read2_b32, "DS_READ2_B32", dst, {addr0, addr1}, comment);
+            pImpl.get(), GFX::ds_read2_b32, "DS_LOAD2_B32", dst, {addr0, addr1}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSRead2B64(const StinkyRegister& dst,
+    std::vector<StinkyInstruction*> StinkyTofu::DSLoad2B64(const StinkyRegister& dst,
                                                            const StinkyRegister& addr0,
                                                            const StinkyRegister& addr1,
                                                            const std::string&    comment)
     {
         return createInst(
-            pImpl.get(), GFX::ds_read2_b64, "DS_READ2_B64", dst, {addr0, addr1}, comment);
+            pImpl.get(), GFX::ds_read2_b64, "DS_LOAD2_B64", dst, {addr0, addr1}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB8(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreB8(const StinkyRegister& addr,
                                                           const StinkyRegister& src,
                                                           const std::string&    comment)
     {
-        return createInstNoDst(pImpl.get(), GFX::ds_write_b8, "DS_WRITE_B8", {addr, src}, comment);
+        return createInstNoDst(pImpl.get(), GFX::ds_write_b8, "DS_STORE_B8", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB16(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreB16(const StinkyRegister& addr,
                                                            const StinkyRegister& src,
                                                            const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b16, "DS_WRITE_B16", {addr, src}, comment);
+            pImpl.get(), GFX::ds_write_b16, "DS_STORE_B16", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB32(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreB32(const StinkyRegister& addr,
                                                            const StinkyRegister& src,
                                                            const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b32, "DS_WRITE_B32", {addr, src}, comment);
+            pImpl.get(), GFX::ds_write_b32, "DS_STORE_B32", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB64(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreB64(const StinkyRegister& addr,
                                                            const StinkyRegister& src,
                                                            const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b64, "DS_WRITE_B64", {addr, src}, comment);
+            pImpl.get(), GFX::ds_write_b64, "DS_STORE_B64", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB96(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreB96(const StinkyRegister& addr,
                                                            const StinkyRegister& src,
                                                            const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b96, "DS_WRITE_B96", {addr, src}, comment);
+            pImpl.get(), GFX::ds_write_b96, "DS_STORE_B96", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB128(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreB128(const StinkyRegister& addr,
                                                             const StinkyRegister& src,
                                                             const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b128, "DS_WRITE_B128", {addr, src}, comment);
+            pImpl.get(), GFX::ds_write_b128, "DS_STORE_B128", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB8D16Hi(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreD16HIB8(const StinkyRegister& addr,
                                                                const StinkyRegister& src,
                                                                const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b8_d16_hi, "DS_WRITE_B8_D16_HI", {addr, src}, comment);
+            pImpl.get(), GFX::ds_write_b8_d16_hi, "DS_STORE_D16HI_B8", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWriteB16D16Hi(const StinkyRegister& addr,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStoreD16HIB16(const StinkyRegister& addr,
                                                                 const StinkyRegister& src,
                                                                 const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b16_d16_hi, "DS_WRITE_B16_D16_HI", {addr, src}, comment);
+            pImpl.get(), GFX::ds_write_b16_d16_hi, "DS_STORE_D16HI_B16", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWrite2B32(const StinkyRegister& addr0,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStore2B32(const StinkyRegister& addr0,
                                                             const StinkyRegister& addr1,
                                                             const StinkyRegister& src,
                                                             const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write2_b32, "DS_WRITE2_B32", {addr0, addr1, src}, comment);
+            pImpl.get(), GFX::ds_write2_b32, "DS_STORE2_B32", {addr0, addr1, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::DSWrite2B64(const StinkyRegister& addr0,
+    std::vector<StinkyInstruction*> StinkyTofu::DSStore2B64(const StinkyRegister& addr0,
                                                             const StinkyRegister& addr1,
                                                             const StinkyRegister& src,
                                                             const std::string&    comment)
     {
         return createInstNoDst(
-            pImpl.get(), GFX::ds_write2_b64, "DS_WRITE2_B64", {addr0, addr1, src}, comment);
+            pImpl.get(), GFX::ds_write2_b64, "DS_STORE2_B64", {addr0, addr1, src}, comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSBPermuteB32(const StinkyRegister& dst,
@@ -2864,27 +3037,27 @@ namespace stinkytofu
             pImpl.get(), GFX::buffer_atomic_add_f32, "BUFFER_ATOMIC_ADD_F32", dst, {src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::BufferAtomicCmpSwap(const StinkyRegister& dst,
-                                                                    const StinkyRegister& addr0,
-                                                                    const StinkyRegister& addr1,
-                                                                    const std::string&    comment)
+    std::vector<StinkyInstruction*> StinkyTofu::BufferAtomicCmpswapB32(const StinkyRegister& dst,
+                                                                       const StinkyRegister& addr0,
+                                                                       const StinkyRegister& addr1,
+                                                                       const std::string& comment)
     {
         return createInst(pImpl.get(),
                           GFX::buffer_atomic_cmpswap,
-                          "BUFFER_ATOMIC_CMPSWAP",
+                          "BUFFER_ATOMIC_CMPSWAP_B32",
                           dst,
                           {addr0, addr1},
                           comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::BufferAtomicCmpSwapX2(const StinkyRegister& dst,
-                                                                      const StinkyRegister& addr0,
-                                                                      const StinkyRegister& addr1,
-                                                                      const std::string&    comment)
+    std::vector<StinkyInstruction*> StinkyTofu::BufferAtomicCmpswapB64(const StinkyRegister& dst,
+                                                                       const StinkyRegister& addr0,
+                                                                       const StinkyRegister& addr1,
+                                                                       const std::string& comment)
     {
         return createInst(pImpl.get(),
                           GFX::buffer_atomic_cmpswap_x2,
-                          "BUFFER_ATOMIC_CMPSWAP_X2",
+                          "BUFFER_ATOMIC_CMPSWAP_B64",
                           dst,
                           {addr0, addr1},
                           comment);
@@ -3148,14 +3321,14 @@ namespace stinkytofu
             pImpl.get(), GFX::flat_store_dwordx4, "FLAT_STORE_DWORDX4", {addr, src}, comment);
     }
 
-    std::vector<StinkyInstruction*> StinkyTofu::FlatAtomicCmpSwap(const StinkyRegister& dst,
-                                                                  const StinkyRegister& addr0,
-                                                                  const StinkyRegister& addr1,
-                                                                  const std::string&    comment)
+    std::vector<StinkyInstruction*> StinkyTofu::FlatAtomicCmpswapB32(const StinkyRegister& dst,
+                                                                     const StinkyRegister& addr0,
+                                                                     const StinkyRegister& addr1,
+                                                                     const std::string&    comment)
     {
         return createInst(pImpl.get(),
                           GFX::flat_atomic_cmpswap,
-                          "FLAT_ATOMIC_CMPSWAP",
+                          "FLAT_ATOMIC_CMPSWAP_B32",
                           dst,
                           {addr0, addr1},
                           comment);
@@ -3294,12 +3467,9 @@ namespace stinkytofu
 
             // Mul high half
             StinkyInstruction* inst2 = pImpl->createInstruction(GFX::v_mul_f32, "V_MUL_F32");
-            inst2->destRegs.push_back(
-                StinkyRegister(dst.reg.type, dst.reg.idx + 1, 1));
-            inst2->srcRegs.push_back(
-                StinkyRegister(src0.reg.type, src0.reg.idx + 1, 1));
-            inst2->srcRegs.push_back(
-                StinkyRegister(src1.reg.type, src1.reg.idx + 1, 1));
+            inst2->destRegs.push_back(StinkyRegister(dst.reg.type, dst.reg.idx + 1, 1));
+            inst2->srcRegs.push_back(StinkyRegister(src0.reg.type, src0.reg.idx + 1, 1));
+            inst2->srcRegs.push_back(StinkyRegister(src1.reg.type, src1.reg.idx + 1, 1));
             if(!comment.empty())
             {
                 inst2->addModifier(CommentData(comment + " (high)"));

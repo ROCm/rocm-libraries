@@ -10,7 +10,7 @@ Adding a new architecture involves:
     - Add new architecture in *gfxisa* library used by table generation
     - This includes defining the instruction set and Rocisa mappings (string to string)
 3. Adding hardware data YAML files (step 4)
-4. Implementing architecture `ArchInfo` class (step 5)
+4. Implementing architecture 'ArchInfo' class (step 5)
     - This class wraps the generated architecture information and provides helper functions
 5. Implementing Rocisa-related header (step 6)
     - Provides helper functions for Rocisa-dependent mapping
@@ -21,34 +21,34 @@ Adding a new architecture involves:
 
 ### Step 1: Update Architecture List
 
-Add the new architecture to `cmake/StinkytofuArchList.cmake`:
+Add the new architecture to 'cmake/StinkytofuArchList.cmake':
 
-```cmake
+'''cmake
 set(STINKYTOFU_ALL_ARCHS
     Gfx942
     Gfx950
     Gfx1250
     Gfx1300    # <-- Add your new architecture here
 )
-```
+'''
 
 ### Step 2: Update Configuration Template
 
-Add a `#cmakedefine` entry in `include/Config.h.in`:
+Add a '#cmakedefine' entry in 'include/Config.h.in':
 
-```cpp
+'''cpp
 // Architecture support definitions
 #cmakedefine STINKYTOFU_ARCH_GFX942
 #cmakedefine STINKYTOFU_ARCH_GFX950
 #cmakedefine STINKYTOFU_ARCH_GFX1250
 #cmakedefine STINKYTOFU_ARCH_GFX1300    // <-- Add this line
-```
+'''
 
 ### Step 3: Create Arch Definitions
 
-Create `hardware/src/gfx/Gfx1300.cpp`:
+Create 'hardware/src/gfx/Gfx1300.cpp':
 
-```cpp
+'''cpp
 ...
 #include "gfx/CommonInstsDSL.hpp"
 #include "gfx/InstDefDSL.hpp"
@@ -74,18 +74,18 @@ namespace stinkytofu
     }
 
 } // namespace stinkytofu
-```
+'''
 
 **Tips for Instruction Definitions:**
 
-- Use `DEF_T` macro for standard instructions
-- Use `GEN_MFMA` / `GEN_WMMA` for matrix instructions
+- Use 'DEF_T' macro for standard instructions
+- Use 'GEN_MFMA' / 'GEN_WMMA' for matrix instructions
 
 ### Step 4: Create Hardware Data File
 
-Create `hardware/data/Gfx1300.yaml` with hardware latency data:
+Create 'hardware/data/Gfx1300.yaml' with hardware latency data:
 
-```yaml
+'''yaml
 # A sample hardware configuration for GFX13.0.0
 # This file is used by StinkyTofu to model the performance of kernels on this architecture
 # The format is YAML
@@ -100,13 +100,13 @@ Create `hardware/data/Gfx1300.yaml` with hardware latency data:
     - ds_read_u8: 48
     - ds_read_u8_d16_hi: 48
     ...
-```
+'''
 
 ### Step 5: Create ArchInfo Class
 
-#### 1. Create `src/hardware/Gfx1300ArchInfo.hpp`:
+#### 1. Create 'src/hardware/Gfx1300ArchInfo.hpp':
 
-```cpp
+'''cpp
 ...
 
 #include "isa/ArchHelper.hpp"
@@ -148,11 +148,11 @@ struct Gfx1300ArchInfo : public ArchHelper::ArchInfo
         return MnemonicToIsaOpcodeMap;
     }
 };
-```
+'''
 
-#### 2. Update `src/hardware/ArchHelper.cpp`:
+#### 2. Update 'src/hardware/ArchHelper.cpp':
 
-```cpp
+'''cpp
 ...
 /* Begin architecture-specific ArchInfo headers */
 ...
@@ -168,13 +168,13 @@ struct Gfx1300ArchInfo : public ArchHelper::ArchInfo
 
 /* End of architecture-specific ArchInfo headers */
 ...
-```
+'''
 
 ### Step 6: Create Rocisa-related header
 
-#### 1. Create `src/ir/rocisa/Gfx1300RocisaArchInfo.hpp` to support the new architecture:
+#### 1. Create 'src/ir/rocisa/Gfx1300RocisaArchInfo.hpp' to support the new architecture:
 
-```cpp
+'''cpp
 ...
 
 namespace
@@ -196,11 +196,11 @@ namespace
         return &convertRocisaToHwInstFunc;
     }
 };
-```
+'''
 
-#### 2. Update `hardware/include/gfx/ArchHelper.hpp`:
+#### 2. Update 'hardware/include/gfx/ArchHelper.hpp':
 
-```cpp
+'''cpp
 ...
 /* Begin architecture-specific ArchInfo headers */
 ...
@@ -216,4 +216,4 @@ namespace
 
 /* End of architecture-specific ArchInfo headers */
 ...
-```
+'''

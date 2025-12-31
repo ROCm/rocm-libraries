@@ -32,66 +32,18 @@ message(STATUS "Configuring StinkyTofu Python Module")
 # nanobind requires find_package(Python ...) not Python3
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
 
-# Try to find nanobind via pip/site-packages
-execute_process(
-    COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
-    OUTPUT_VARIABLE nanobind_DIR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE nanobind_RESULT
+include(FetchContent)
+FetchContent_Declare(
+  nanobind
+  GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+  GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
 )
-
-if(nanobind_RESULT EQUAL 0)
-    message(STATUS "Found nanobind at: ${nanobind_DIR}")
-    list(APPEND CMAKE_PREFIX_PATH "${nanobind_DIR}")
-    find_package(nanobind CONFIG REQUIRED)
-else()
-    message(WARNING "nanobind not found. Python bindings will not be built.")
-    message(WARNING "Install nanobind with: pip install nanobind")
-    return()
-endif()
+FetchContent_MakeAvailable(nanobind)
 
 # ============================================================================
-# Create the StinkyTofu C++ Bridge Library
+# Note: StinkyTofu and StinkyIR have been moved to the core stinkytofu library
+# The Python module now links directly against the core library
 # ============================================================================
-
-# This library provides the C++ API that will be exposed to Python
-add_library(stinkytofu_bridge STATIC
-    src/StinkyTofu.cpp
-    src/StinkyIR.cpp
-)
-
-target_include_directories(stinkytofu_bridge
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/shared/stinkytofu/include
-        ${CMAKE_SOURCE_DIR}/shared/stinkytofu/hardware/include
-        # For generated files like gfxIsa.inc
-        ${TABLEGEN_OUTPUT_DIR}
-)
-
-target_link_libraries(stinkytofu_bridge
-    PUBLIC
-        stinkytofu
-        gfxisa
-)
-
-# Ensure generated files are created before building the bridge
-add_dependencies(stinkytofu_bridge tablegen_generated)
-
-# Enable RTTI, exceptions, and PIC for the bridge library
-# (required for nanobind, std::runtime_error, and linking into shared module)
-target_compile_options(stinkytofu_bridge PRIVATE
-    -frtti
-    -fexceptions
-    -fPIC
-)
-
-# Remove -fno-rtti and -fno-exceptions if they were inherited
-get_target_property(BRIDGE_COMPILE_OPTIONS stinkytofu_bridge COMPILE_OPTIONS)
-if(BRIDGE_COMPILE_OPTIONS)
-    list(REMOVE_ITEM BRIDGE_COMPILE_OPTIONS "-fno-rtti" "-fno-exceptions")
-    set_target_properties(stinkytofu_bridge PROPERTIES COMPILE_OPTIONS "${BRIDGE_COMPILE_OPTIONS}")
-endif()
 
 # ============================================================================
 # Create the Python Module
@@ -109,14 +61,22 @@ nanobind_add_module(stinkytofu_python
 # Restore global compile options
 set_directory_properties(PROPERTIES COMPILE_OPTIONS "${SAVED_COMPILE_OPTIONS}")
 
+target_include_directories(stinkytofu_python PRIVATE
+    ${CMAKE_SOURCE_DIR}/shared/stinkytofu/include
+    ${CMAKE_SOURCE_DIR}/shared/stinkytofu/hardware/include
+    # For generated files like gfxIsa.inc
+    ${TABLEGEN_OUTPUT_DIR}
+)
+
 target_link_libraries(stinkytofu_python PRIVATE
-    stinkytofu_bridge
+    stinkytofu
+    gfxisa
 )
 
 # Set output name to just "stinkytofu" (without the _python suffix)
 set_target_properties(stinkytofu_python PROPERTIES
     OUTPUT_NAME stinkytofu
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/python_module
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
 # Enable RTTI and exceptions for the Python bindings
@@ -146,4 +106,4 @@ install(TARGETS stinkytofu_python
 
 message(STATUS "StinkyTofu Python module configured successfully")
 message(STATUS "  - Python module will be built as: ${CMAKE_BINARY_DIR}/python_module/stinkytofu${Python_SOABI}.so")
-message(STATUS "  - Bridge library: stinkytofu_bridge (with RTTI and exceptions)")
+message(STATUS "  - Linking directly to core stinkytofu library (StinkyTofu and StinkyIR now in core)")

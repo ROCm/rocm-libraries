@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "pass.hpp"
+#include "ir/asm/OptimizationPipeline.hpp"
 #include "stinkytofu.hpp"
 
 #include <nanobind/nanobind.h>
@@ -66,11 +67,53 @@ namespace rocisa
                                                     bool                    stinkytofuDump = false,
                                                     stinkytofu::BasicBlockFilter bbFilter
                                                     = stinkytofu::BasicBlockFilterBuilder::all()) {
-                        std::unique_ptr<stinkytofu::PassManagerDebugConfig> debugConfig;
+                        // Create PassContext (automatically creates an empty Function)
+                        stinkytofu::PassContext ctx;
 
+                        // Configure kernel info in PassContext
+                        // Note: WavefrontSize is automatically computed from arch by setGemmTileConfig
+                        stinkytofu::GemmTileConfig gemmConfig;
+                        gemmConfig.arch     = kernelInfo.isaVersion;
+                        gemmConfig.TileA0   = option.TileA0;
+                        gemmConfig.TileB0   = option.TileB0;
+                        gemmConfig.TileM0   = option.TileM0;
+                        gemmConfig.NumGRA   = option.NumGRA;
+                        gemmConfig.NumGRB   = option.NumGRB;
+                        gemmConfig.NumGRM   = option.NumGRM;
+                        gemmConfig.NumWaves = option.numWaves;
+                        ctx.setGemmTileConfig(gemmConfig);
+
+                        // Configure basic block filter
+                        ctx.setBasicBlockFilter(bbFilter);
+
+                        // Create pipeline configuration with full scheduling and optimization
+                        auto config = stinkytofu::PipelineConfig::fromProfile(
+                            stinkytofu::PipelineProfile::FullPipeline, stinkytofu::OptLevel::O3);
+
+                        // Configure GEMM-specific tile parameters
+                        config.withGemmTileConfig(kernelInfo.isaVersion,
+                                                  option.TileA0,
+                                                  option.TileB0,
+                                                  option.TileM0,
+                                                  option.NumGRA,
+                                                  option.NumGRB,
+                                                  option.NumGRM,
+                                                  option.numWaves);
+
+                        // Configure pass features (GEMM-specific optimizations)
+                        config
+                            .withBarrierSemantics(true) // unrollGemmMovableBarrier
+                            .withLoopUnroll(true) // unrollGemm
+                            .withDagFeatures(true); // distributeGlobalRead
+
+                        // Configure basic block filter
+                        config.basicBlockFilter = bbFilter;
+
+                        // Configure debug output if enabled
                         if(stinkytofuDump)
                         {
-                            debugConfig = std::make_unique<stinkytofu::PassManagerDebugConfig>();
+                            auto debugConfig
+                                = std::make_unique<stinkytofu::PassManagerDebugConfig>();
                             debugConfig->setPrintBeforeAll(true);
                             debugConfig->setPrintAfterAll(true);
                             debugConfig->setDumpToFileInBefore(pathPrefix + "before.txt");
@@ -79,44 +122,30 @@ namespace rocisa
                                 "StinkyDAGSchedulerPass");
                             stinkytofu::PassManagerDebugConfig::addDebugOnly(
                                 "StinkyAsmToRocisaPass");
+                            config.withDebugConfig(std::move(debugConfig));
                         }
 
-                        stinkytofu::StinkyOptInfo optInfo;
-                        optInfo.unrollGemmMovableBarrier = true;
-                        optInfo.unrollGemm               = true;
-                        optInfo.distributeGlobalRead     = true;
+                        // Add Rocisa analysis passes (need access to Module)
+                        config
+                            .addAnalysisPassBefore(
+                                stinkytofu::createRocisaDFSFlatItemsPass(*module.get()))
+                            .addAnalysisPassBefore(stinkytofu::createRocisaStinkyMappingPass());
 
-                        stinkytofu::PassManager passManager;
-                        passManager.setBasicBlockFilter(bbFilter);
-                        passManager.setKernelConfig(kernelInfo.isaVersion,
-                                                    option.TileA0,
-                                                    option.TileB0,
-                                                    option.TileM0,
-                                                    option.NumGRA,
-                                                    option.NumGRB,
-                                                    option.NumGRM,
-                                                    option.numWaves);
-
-                        if(debugConfig)
-                        {
-                            passManager.setDebugConfig(std::move(debugConfig));
-                        }
-                        passManager.setOptConfig(optInfo);
-
-                        passManager.registerAnalysisPass(
-                            stinkytofu::createRocisaDFSFlatItemsPass(*module.get()));
-                        passManager.registerAnalysisPass(
-                            stinkytofu::createRocisaStinkyMappingPass());
-
-                        passManager.addPass(
+                        // Add Rocisa-to-StinkyAsm conversion pass before the built-in pipeline
+                        config.addPassBefore(
                             stinkytofu::createRocisaToStinkyAsmPass(true /*ignore waitCnt*/));
 
-                        passManager.addPass(stinkytofu::createCFGBuilderPass());
-                        passManager.addPass(stinkytofu::createStinkyDAGSchedulerPass());
-                        passManager.addPass(stinkytofu::createScheduleLastLRsPass());
-                        passManager.addPass(stinkytofu::createStinkyUnrollWaitCntPass());
-                        passManager.addPass(stinkytofu::createStinkyAsmToRocisaPass());
-                        passManager.run();
+                        // Add StinkyAsm-to-Rocisa conversion pass after the built-in pipeline
+                        config.addPassAfter(stinkytofu::createStinkyAsmToRocisaPass());
+
+                        // Built-in pipeline includes (in order):
+                        // Phase 1: CFGBuilderPass
+                        // Phase 2: StinkyDAGSchedulerPass, ScheduleLastLRsPass
+                        // Phase 3: Optimization passes (Peephole, DCE, DistributeEdge)
+                        // Phase 4: StinkyUnrollWaitCntPass
+
+                        // Run the pipeline with the Function from PassContext
+                        stinkytofu::OptimizationPipeline::run(ctx.getFunction(), config, ctx);
                     };
                     // Convert the module to stinkytofu instructions
                     if(module->name == "loopWithPrefetch")

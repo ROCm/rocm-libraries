@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -275,7 +275,8 @@ namespace stinkytofu
             }
             {
                 std::string_view text(tokenStart, curPtr - tokenStart);
-                return Token(TokenKind::Identifier, text, tokenLine, tokenColumn);
+                TokenKind        kind = classifyIdentifier(text);
+                return Token(kind, text, tokenLine, tokenColumn);
             }
 
         case '/':
@@ -305,13 +306,39 @@ namespace stinkytofu
                 }
 
                 std::string_view text(tokenStart, curPtr - tokenStart);
-                return Token(TokenKind::Identifier, text, tokenLine, tokenColumn);
+                TokenKind        kind = classifyIdentifier(text);
+                return Token(kind, text, tokenLine, tokenColumn);
             }
 
             // Unknown character
             return Token(
                 TokenKind::Unknown, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
         }
+    }
+
+    TokenKind IRLexer::classifyIdentifier(std::string_view text)
+    {
+        // Check for pattern keywords
+        // This is a simple string comparison - efficient enough for a small set of keywords
+        if(text == "peephole")
+            return TokenKind::KW_peephole;
+        if(text == "pattern")
+            return TokenKind::KW_pattern;
+        if(text == "match")
+            return TokenKind::KW_match;
+        if(text == "constraints")
+            return TokenKind::KW_constraints;
+        if(text == "rewrite")
+            return TokenKind::KW_rewrite;
+        if(text == "replace")
+            return TokenKind::KW_replace;
+        if(text == "remove")
+            return TokenKind::KW_remove;
+        if(text == "with")
+            return TokenKind::KW_with;
+
+        // Not a keyword, return as identifier
+        return TokenKind::Identifier;
     }
 
     void IRLexer::skipWhitespace()

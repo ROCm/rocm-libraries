@@ -2079,7 +2079,7 @@ class TestBF16Conversions:
         module = st.createIRList("bf16_f32_test")
 
         # BF16 to F32
-        module.add(st.VCvtBF16toF32(vgpr(0), vgpr(10), "convert bf16 to f32"))
+        module.add(st.VCvtBF16toFP32(vgpr(0), vgpr(10), "convert bf16 to fp32"))
         # Packed F32 to BF16
         module.add(st.VCvtPkF32toBF16(vgpr(1), vgpr(11), vgpr(12), "convert pk f32 to bf16"))
 
@@ -2174,7 +2174,7 @@ def test_cvt_instruction_parametrized_dual_src(st_func, opcode, desc):
     (lambda st: st.VCvtScalePkF16toBF8(vgpr(0), vgpr(1), vgpr(2)), "v_cvt_scalef32_pk_bf8_f16", "scale_pk_f16_to_bf8"),
     (lambda st: st.VCvtScaleSRF16toFP8(vgpr(0), vgpr(1), vgpr(2)), "v_cvt_scalef32_sr_fp8_f16", "scale_sr_f16_to_fp8"),
     (lambda st: st.VCvtScaleSRF16toBF8(vgpr(0), vgpr(1), vgpr(2)), "v_cvt_scalef32_sr_bf8_f16", "scale_sr_f16_to_bf8"),
-    (lambda st: st.VCvtBF16toF32(vgpr(0), vgpr(1)), "v_cvt_f32_bf16", "bf16_to_f32"),
+    (lambda st: st.VCvtBF16toFP32(vgpr(0), vgpr(1)), "v_cvt_f32_bf16", "bf16_to_fp32"),
     (lambda st: st.VCvtPkF32toBF16(vgpr(0), vgpr(1), vgpr(2)), "v_cvt_pk_bf16_f32", "pk_f32_to_bf16"),
 ])
 def test_cvt_instruction_gfx950(st_func, opcode, desc):
@@ -2201,8 +2201,8 @@ class TestDSMemory:
         module = st.createIRList("ds_basic_test")
 
         # DS Read/Write B32
-        module.add(st.DSReadB32(vgpr(0), vgpr(10), "read 32-bit from LDS"))
-        module.add(st.DSWriteB32(vgpr(11), vgpr(0), "write 32-bit to LDS"))
+        module.add(st.DSLoadB32(vgpr(0), vgpr(10), "read 32-bit from LDS"))
+        module.add(st.DSStoreB32(vgpr(11), vgpr(0), "write 32-bit to LDS"))
 
         # DS Read/Write B64
         module.add(st.DSReadB64(vgpr(2, 2), vgpr(12), "read 64-bit from LDS"))
@@ -2371,11 +2371,11 @@ class TestMemoryInKernel:
         module = st.createIRList("lds_kernel")
 
         # Write to LDS
-        module.add(st.DSWriteB32(vgpr(0), vgpr(10), "write input to LDS"))
+        module.add(st.DSStoreB32(vgpr(0), vgpr(10), "write input to LDS"))
         module.add(st.SBarrier("sync threads"))
 
         # Read from LDS
-        module.add(st.DSReadB32(vgpr(20), vgpr(1), "read from LDS"))
+        module.add(st.DSLoadB32(vgpr(20), vgpr(1), "read from LDS"))
         module.add(st.SBarrier("sync before next"))
 
         asm = module.emitAssembly()
@@ -2392,11 +2392,11 @@ class TestMemoryInKernel:
 # Parametrized tests for comprehensive coverage
 @pytest.mark.parametrize("st_func,opcode,desc", [
     # DS Operations
-    (lambda st: st.DSReadB32(vgpr(0), vgpr(1)), "ds_read_b32", "ds_read_b32"),
-    (lambda st: st.DSReadB64(vgpr(0, 2), vgpr(1)), "ds_read_b64", "ds_read_b64"),
-    (lambda st: st.DSReadB128(vgpr(0, 4), vgpr(1)), "ds_read_b128", "ds_read_b128"),
-    (lambda st: st.DSWriteB32(vgpr(0), vgpr(1)), "ds_write_b32", "ds_write_b32"),
-    (lambda st: st.DSWriteB64(vgpr(0), vgpr(1, 2)), "ds_write_b64", "ds_write_b64"),
+    (lambda st: st.DSLoadB32(vgpr(0), vgpr(1)), "ds_read_b32", "ds_load_b32"),
+    (lambda st: st.DSLoadB64(vgpr(0, 2), vgpr(1)), "ds_read_b64", "ds_load_b64"),
+    (lambda st: st.DSLoadB128(vgpr(0, 4), vgpr(1)), "ds_read_b128", "ds_load_b128"),
+    (lambda st: st.DSStoreB32(vgpr(0), vgpr(1)), "ds_write_b32", "ds_store_b32"),
+    (lambda st: st.DSStoreB64(vgpr(0), vgpr(1, 2)), "ds_write_b64", "ds_store_b64"),
     # Buffer Operations
     (lambda st: st.BufferLoadB32(vgpr(0), vgpr(1)), "buffer_load_dword", "buffer_load_dword"),
     (lambda st: st.BufferLoadB64(vgpr(0, 2), vgpr(1)), "buffer_load_dwordx2", "buffer_load_dwordx2"),

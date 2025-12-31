@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -182,9 +182,9 @@ namespace
             RocisaStinkyMapping& mapping
                 = passCtx.getAnalysisManager().getResult<RocisaStinkyMapping>(func, passCtx);
 
-            GfxArchID arch = getGfxArchID(passCtx.getKernelInfo().arch[0],
-                                          passCtx.getKernelInfo().arch[1],
-                                          passCtx.getKernelInfo().arch[2]);
+            GfxArchID arch = getGfxArchID(passCtx.getGemmTileConfig().arch[0],
+                                          passCtx.getGemmTileConfig().arch[1],
+                                          passCtx.getGemmTileConfig().arch[2]);
 
             // Create a single BasicBlock to hold all IR (common case)
             BasicBlock* bb = func.createBasicBlock("entry");
@@ -273,9 +273,9 @@ namespace
                                   dynamic_cast<BranchInstruction*>(inst)->labelName});
                 }
 
-                // should read from passCtx->getKernelInfo() to see if it's gemm loop
+                // should read from passCtx->getGemmTileConfig() to see if it's gemm loop
                 // It's gemm specialized barrier handling
-                if(passCtx.getOptInfo().unrollGemmMovableBarrier)
+                if(passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier)
                 {
                     if(dynamic_cast<const SBarrier*>(inst))
                     {

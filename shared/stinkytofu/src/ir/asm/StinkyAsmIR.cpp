@@ -26,6 +26,7 @@
 
 #include <iostream> // TODO: don't use iostream.
 
+#include "ErrorHandling.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
 #include "isa/ArchHelper.hpp"
@@ -99,7 +100,8 @@ namespace stinkytofu
 
         if(isaOpcode == GFX::INVALID)
         {
-            assert(false && "Internal error: Unsupported unified opcode");
+            // Return nullptr if instruction not supported on this architecture
+            // Callers use this to probe architecture support
             return nullptr;
         }
         return &getMCIDTable(arch)[isaOpcode];

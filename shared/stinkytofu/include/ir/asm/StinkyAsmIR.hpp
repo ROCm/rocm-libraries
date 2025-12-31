@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -91,6 +91,10 @@ namespace stinkytofu
                 RegType  type;
                 unsigned idx;
                 unsigned num;
+                // Virtual register flag for template-based code generation
+                // Only meaningful when dataType == Type::Register
+                // When true, this register needs offset remapping before use
+                bool isVirtual;
             } reg;
 
             // For LiteralInt type
@@ -115,9 +119,37 @@ namespace stinkytofu
             return reg.num < other.reg.num;
         }
 
+        // define equality for comparisons
+        bool operator==(const StinkyRegister& other) const noexcept
+        {
+            if(dataType != other.dataType)
+                return false;
+
+            switch(dataType)
+            {
+            case Type::Register:
+                return reg.type == other.reg.type && reg.idx == other.reg.idx
+                       && reg.num == other.reg.num;
+            case Type::LiteralInt:
+                return literalInt == other.literalInt;
+            case Type::LiteralDouble:
+                return literalDouble == other.literalDouble;
+            case Type::LiteralString:
+                return literalValue == other.literalValue;
+            case Type::Invalid:
+                return true; // Two invalid registers are equal
+            }
+            return false;
+        }
+
+        bool operator!=(const StinkyRegister& other) const noexcept
+        {
+            return !(*this == other);
+        }
+
         StinkyRegister(RegType type, int regIdx, int regNum)
             : dataType(Type::Register)
-            , reg{type, static_cast<unsigned>(regIdx), static_cast<unsigned>(regNum)}
+            , reg{type, static_cast<unsigned>(regIdx), static_cast<unsigned>(regNum), false}
         {
         }
 
@@ -126,7 +158,8 @@ namespace stinkytofu
             : dataType(Type::Register)
             , reg{stringToRegType(typeStr),
                   static_cast<unsigned>(regIdx),
-                  static_cast<unsigned>(regNum)}
+                  static_cast<unsigned>(regNum),
+                  false}
         {
         }
 
@@ -150,7 +183,7 @@ namespace stinkytofu
 
         StinkyRegister()
             : dataType(Type::Invalid)
-            , reg{RegType::UNKNOWN, 0, 0}
+            , reg{RegType::UNKNOWN, 0, 0, false}
         {
         }
 
@@ -218,6 +251,111 @@ namespace stinkytofu
             // Tensor load register is a special register, it is not a physical register.
             return StinkyRegister(RegType::TENSOR_LOAD, 0, 1);
         }
+
+        /**
+         * @brief Create a virtual VGPR register for template-based code generation
+         *
+         * Virtual registers are used when generating reusable instruction templates
+         * (e.g., activation functions). They need offset remapping when instantiated.
+         *
+         * @param idx Virtual register index (e.g., 0 for first temp register)
+         * @param num Number of consecutive registers (default 1)
+         * @return Virtual register that can be remapped with withOffset()
+         *
+         * Example:
+         *   auto vTemp0 = StinkyRegister::Virtual(0);  // Virtual v0
+         *   auto vTemp1 = StinkyRegister::Virtual(1);  // Virtual v1
+         *   // Later when inlining:
+         *   auto v10 = vTemp0.withOffset(10);  // Maps to physical v10
+         */
+        static StinkyRegister Virtual(int idx, int num = 1)
+        {
+            StinkyRegister reg(RegType::V, idx, num);
+            reg.reg.isVirtual = true;
+            return reg;
+        }
+
+        /**
+         * @brief Create a virtual SGPR register for template-based code generation
+         *
+         * Similar to Virtual() but for scalar registers.
+         *
+         * @param idx Virtual register index
+         * @param num Number of consecutive registers (default 1)
+         * @return Virtual SGPR that can be remapped with withOffset()
+         */
+        static StinkyRegister VirtualSGPR(int idx, int num = 1)
+        {
+            StinkyRegister reg(RegType::S, idx, num);
+            reg.reg.isVirtual = true;
+            return reg;
+        }
+
+        /**
+         * @brief Apply register offset to remap virtual register to physical
+         *
+         * Used when instantiating instruction templates with actual register allocations.
+         * Only applies to virtual registers - non-virtual registers are returned unchanged.
+         * Literals are also returned unchanged.
+         *
+         * @param offset Offset to add to register index
+         * @return New register with offset applied (or original if not virtual/register)
+         *
+         * Example:
+         *   auto vTemp = StinkyRegister::Virtual(0);  // Virtual v0
+         *   auto v10 = vTemp.withOffset(10);          // Physical v10
+         *   auto v20 = vTemp.withOffset(20);          // Physical v20
+         */
+        StinkyRegister withOffset(int offset) const
+        {
+            // Only apply offset to virtual registers
+            if(dataType != Type::Register || !reg.isVirtual)
+                return *this;
+
+            StinkyRegister result = *this;
+            result.reg.idx += offset;
+            result.reg.isVirtual = false; // No longer virtual after remapping
+            return result;
+        }
+
+        /**
+         * @brief Check if this is a virtual register needing remapping
+         *
+         * Note: Only registers (Type::Register) can be virtual. Literals always return false.
+         */
+        bool isVirtualRegister() const
+        {
+            return dataType == Type::Register && reg.isVirtual;
+        }
+
+        /**
+         * @brief Compute hash value for this register
+         *
+         * Used by std::unordered_map and other hash-based containers.
+         */
+        size_t hash() const noexcept
+        {
+            size_t h = std::hash<int>{}(static_cast<int>(dataType));
+            if(dataType == Type::Register)
+            {
+                h ^= std::hash<int>{}(static_cast<int>(reg.type)) << 1;
+                h ^= std::hash<unsigned>{}(reg.idx) << 2;
+                h ^= std::hash<unsigned>{}(reg.num) << 3;
+            }
+            else if(dataType == Type::LiteralInt)
+            {
+                h ^= std::hash<int>{}(literalInt) << 1;
+            }
+            else if(dataType == Type::LiteralDouble)
+            {
+                h ^= std::hash<double>{}(literalDouble) << 1;
+            }
+            else if(dataType == Type::LiteralString)
+            {
+                h ^= std::hash<std::string>{}(literalValue) << 1;
+            }
+            return h;
+        }
     };
 
     // Represents a single assembly instruction.
@@ -268,6 +406,16 @@ namespace stinkytofu
             return hwInstDesc;
         }
 
+        void updateHwInstDesc(const HwInstDesc* newDesc)
+        {
+            if(newDesc)
+            {
+                hwInstDesc    = newDesc;
+                issueCycles   = newDesc->issue;
+                latencyCycles = newDesc->latency;
+            }
+        }
+
         bool is(InstFlag flag) const
         {
             return hwInstDesc->has(flag);
@@ -311,6 +459,151 @@ namespace stinkytofu
                   bool               printDetails = false,
                   const std::string& prefix       = "") const;
 
+        /**
+         * @brief Clone this instruction (deep copy)
+         *
+         * Creates a new instruction with the same descriptor, registers, and modifiers.
+         *
+         * Notes:
+         * - Modifiers are deep copied using copy constructors (works for POD modifiers)
+         * - users/sources are NOT copied (dependency tracking should be rebuilt)
+         *
+         * This is needed because StinkyInstruction inherits from IntrusiveListNode
+         * which has a deleted copy constructor.
+         *
+         * @return New instruction (caller owns the pointer)
+         */
+        StinkyInstruction* clone() const
+        {
+            StinkyInstruction* cloned = new StinkyInstruction(hwInstDesc);
+
+            // Copy register lists
+            cloned->destRegs = destRegs;
+            cloned->srcRegs  = srcRegs;
+
+            // Copy issue/latency cycles
+            cloned->issueCycles   = issueCycles;
+            cloned->latencyCycles = latencyCycles;
+
+            // Deep copy modifiers - this works because all current modifier structs
+            // are copyable (POD types, std::vector, std::string)
+            for(const auto& mod : modifiers)
+            {
+                // We can't use mod->clone() without adding virtual clone() to Modifier base
+                // Instead, we rely on the fact that all modifiers are copyable
+                // This requires type-specific handling
+                switch(mod->getType())
+                {
+                case Modifier::Type::DS:
+                    cloned->modifiers.push_back(
+                        std::make_unique<DSModifiers>(*static_cast<DSModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::FLAT:
+                    cloned->modifiers.push_back(
+                        std::make_unique<FLATModifiers>(*static_cast<FLATModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::GLOBAL:
+                    cloned->modifiers.push_back(std::make_unique<GLOBALModifiers>(
+                        *static_cast<GLOBALModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::MUBUF:
+                    cloned->modifiers.push_back(
+                        std::make_unique<MUBUFModifiers>(*static_cast<MUBUFModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::SMEM:
+                    cloned->modifiers.push_back(
+                        std::make_unique<SMEMModifiers>(*static_cast<SMEMModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::SDWA:
+                    cloned->modifiers.push_back(
+                        std::make_unique<SDWAModifiers>(*static_cast<SDWAModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::DPP:
+                    cloned->modifiers.push_back(
+                        std::make_unique<DPPModifiers>(*static_cast<DPPModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::VOP3P:
+                    cloned->modifiers.push_back(
+                        std::make_unique<VOP3PModifiers>(*static_cast<VOP3PModifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::TRUE16:
+                    cloned->modifiers.push_back(std::make_unique<True16Modifiers>(
+                        *static_cast<True16Modifiers*>(mod.get())));
+                    break;
+                case Modifier::Type::EXEC:
+                    cloned->modifiers.push_back(
+                        std::make_unique<EXEC>(*static_cast<EXEC*>(mod.get())));
+                    break;
+                case Modifier::Type::VCC:
+                    cloned->modifiers.push_back(
+                        std::make_unique<VCC>(*static_cast<VCC*>(mod.get())));
+                    break;
+                case Modifier::Type::SWAITCNT_DATA:
+                    cloned->modifiers.push_back(
+                        std::make_unique<SWaitCntData>(*static_cast<SWaitCntData*>(mod.get())));
+                    break;
+                case Modifier::Type::SWAITTENSORCNT_DATA:
+                    cloned->modifiers.push_back(std::make_unique<SWaitTensorCntData>(
+                        *static_cast<SWaitTensorCntData*>(mod.get())));
+                    break;
+                case Modifier::Type::LABEL_NAME:
+                    cloned->modifiers.push_back(
+                        std::make_unique<LabelData>(*static_cast<LabelData*>(mod.get())));
+                    break;
+                case Modifier::Type::COMMENT:
+                    cloned->modifiers.push_back(
+                        std::make_unique<CommentData>(*static_cast<CommentData*>(mod.get())));
+                    break;
+                }
+            }
+
+            // Note: users/sources are intentionally NOT copied
+            // These are dependency tracking and should be rebuilt if needed
+
+            return cloned;
+        }
+
+        /**
+         * @brief Remap virtual registers to physical registers
+         *
+         * This method applies register offsets to all virtual registers in the instruction.
+         * Used when instantiating instruction templates with actual register allocations.
+         *
+         * @param vgprOffset Offset to add to VGPR virtual registers
+         * @param sgprOffset Offset to add to SGPR virtual registers
+         *
+         * Example:
+         *   // Template instruction: v_add_u32 v0, v1, v2 (using virtual registers)
+         *   StinkyInstruction* inst = ...;
+         *   inst->remapRegisters(10, 0);  // Remaps to: v_add_u32 v10, v11, v12
+         */
+        void remapRegisters(int vgprOffset, int sgprOffset)
+        {
+            // Remap destination registers
+            for(auto& reg : destRegs)
+            {
+                if(!reg.isVirtualRegister())
+                    continue;
+
+                if(reg.reg.type == RegType::V)
+                    reg = reg.withOffset(vgprOffset);
+                else if(reg.reg.type == RegType::S)
+                    reg = reg.withOffset(sgprOffset);
+            }
+
+            // Remap source registers
+            for(auto& reg : srcRegs)
+            {
+                if(!reg.isVirtualRegister())
+                    continue;
+
+                if(reg.reg.type == RegType::V)
+                    reg = reg.withOffset(vgprOffset);
+                else if(reg.reg.type == RegType::S)
+                    reg = reg.withOffset(sgprOffset);
+            }
+        }
+
     public:
         static bool classof(const IRBase* ir)
         {
@@ -340,6 +633,9 @@ namespace stinkytofu
         StinkyInstruction* createStinkyInstBefore(IRList::iterator pos, const HwInstDesc* mcid)
         {
             assert(irlist != nullptr && "StinkyInstIRBuilder not initialized");
+            assert(mcid != nullptr
+                   && "Cannot create instruction with null descriptor - instruction not supported "
+                      "on this architecture");
 
             StinkyInstruction* stinkyInst = new StinkyInstruction(mcid);
             irlist->insert(pos, stinkyInst);
@@ -536,4 +832,59 @@ namespace stinkytofu
     {
         return inst.is(InstFlag::IF_HasSideEffect);
     }
+
+    /// Determines if an instruction must be preserved and cannot be eliminated.
+    ///
+    /// This is a comprehensive check that covers all instructions with observable effects,
+    /// including memory operations, control flow, barriers, and instructions explicitly
+    /// marked with side effects.
+    ///
+    /// This function is distinct from isHasSideEffect() which only checks the
+    /// IF_HasSideEffect flag. This function performs a broader classification suitable
+    /// for optimization passes like dead code elimination.
+    ///
+    /// @param inst The instruction to check
+    /// @return true if the instruction must be preserved, false if it can be eliminated
+    inline bool mustPreserveInstruction(const StinkyInstruction& inst)
+    {
+        // Memory operations (loads/stores)
+        if(isGlobalMemLoad(inst) || isGlobalMemStore(inst))
+            return true;
+
+        if(isDSRead(inst) || isDSWrite(inst))
+            return true;
+
+        if(isGlobalMemAtomic(inst))
+            return true;
+
+        if(isTensorLoad(inst))
+            return true;
+
+        // Control flow
+        if(isBranch(inst))
+            return true;
+
+        // Barriers and synchronization
+        if(isBarrier(inst))
+            return true;
+
+        // Instructions explicitly marked with side effects
+        if(isHasSideEffect(inst))
+            return true;
+
+        return false;
+    }
 } // namespace stinkytofu
+
+// Hash specialization for StinkyRegister (required for std::unordered_map)
+namespace std
+{
+    template <>
+    struct hash<stinkytofu::StinkyRegister>
+    {
+        size_t operator()(const stinkytofu::StinkyRegister& sreg) const noexcept
+        {
+            return sreg.hash();
+        }
+    };
+} // namespace std

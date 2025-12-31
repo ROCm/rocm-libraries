@@ -49,6 +49,20 @@ namespace stinkytofu
     // Output: Function with multiple BasicBlocks connected via CFG edges
     std::unique_ptr<Pass> createCFGBuilderPass();
 
+    // PeepholeOptimizationPass applies local instruction fusion patterns
+    // defined in PeepholePatterns.pattern to optimize instruction sequences.
+    std::unique_ptr<Pass> createPeepholeOptimizationPass();
+
+    // DeadCodeEliminationPass removes instructions whose results are never used.
+    // This pass is particularly useful after peephole optimization which may
+    // create dead intermediate values.
+    std::unique_ptr<Pass> createDeadCodeEliminationPass();
+
+    // DuplicateEliminationPass identifies and eliminates redundant computations
+    // (Common Subexpression Elimination). Works well with DCE to clean up
+    // unused originals.
+    std::unique_ptr<Pass> createDuplicateEliminationPass();
+
     // The following passes are used for translation between rocisa and
     // stinkytofu. They are specific to tensilelite rocisa and are therefore not
     // included in the stinkytofu library.

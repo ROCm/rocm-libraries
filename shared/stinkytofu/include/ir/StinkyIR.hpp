@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "ErrorHandling.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include <cstdint>
 #include <memory>
@@ -90,12 +91,13 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions implementing the division
          */
-        std::vector<StinkyInstruction*> vectorStaticDivide(StinkyTofu&                  builder,
-                                                           uint32_t                     qReg,
-                                                           uint32_t                     dReg,
-                                                           int                          divisor,
-                                                           const std::vector<uint32_t>& tmpVgpr,
-                                                           const std::string& comment = "");
+        Expected<std::vector<StinkyInstruction*>>
+            vectorStaticDivide(StinkyTofu&                  builder,
+                               uint32_t                     qReg,
+                               uint32_t                     dReg,
+                               int                          divisor,
+                               const std::vector<uint32_t>& tmpVgpr,
+                               const std::string&           comment = "");
 
         /**
          * @brief Static division and remainder with power-of-2 or magic number (@function).
@@ -112,7 +114,7 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*>
+        Expected<std::vector<StinkyInstruction*>>
             vectorStaticDivideAndRemainder(StinkyTofu&                  builder,
                                            uint32_t                     qReg,
                                            uint32_t                     rReg,
@@ -159,7 +161,7 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*>
+        Expected<std::vector<StinkyInstruction*>>
             scalarStaticDivideAndRemainder(StinkyTofu&                  builder,
                                            uint32_t                     qReg,
                                            uint32_t                     rReg,
@@ -186,12 +188,13 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*> vectorStaticMultiply(StinkyTofu& builder,
-                                                             uint32_t    productReg,
-                                                             uint32_t    operandReg,
-                                                             int         multiplier,
-                                                             const std::vector<uint32_t>& tmpSgpr,
-                                                             const std::string& comment = "");
+        Expected<std::vector<StinkyInstruction*>>
+            vectorStaticMultiply(StinkyTofu&                  builder,
+                                 uint32_t                     productReg,
+                                 uint32_t                     operandReg,
+                                 int                          multiplier,
+                                 const std::vector<uint32_t>& tmpSgpr,
+                                 const std::string&           comment = "");
 
         /**
          * @brief Multiply vector register by bytes-per-element (@function).
@@ -295,12 +298,13 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*> BranchIfZeroTyped(StinkyTofu&        builder,
-                                                          uint32_t           sgprName,
-                                                          const std::string& dataType,
-                                                          uint32_t           tmpVgpr,
-                                                          const std::string& label,
-                                                          const std::string& comment = "");
+        Expected<std::vector<StinkyInstruction*>> BranchIfZeroTyped(StinkyTofu&        builder,
+                                                                    uint32_t           sgprName,
+                                                                    const std::string& dataType,
+                                                                    uint32_t           tmpVgpr,
+                                                                    const std::string& label,
+                                                                    const std::string& comment
+                                                                    = "");
 
         /**
          * @brief Branch if scalar register is not zero with data type support (@function).
@@ -314,11 +318,12 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*> BranchIfNotZeroTyped(StinkyTofu&        builder,
-                                                             uint32_t           sgprName,
-                                                             const std::string& dataType,
-                                                             const std::string& label,
-                                                             const std::string& comment = "");
+        Expected<std::vector<StinkyInstruction*>> BranchIfNotZeroTyped(StinkyTofu&        builder,
+                                                                       uint32_t           sgprName,
+                                                                       const std::string& dataType,
+                                                                       const std::string& label,
+                                                                       const std::string& comment
+                                                                       = "");
 
         // ============================================================================
         // Casting Functions (f_cast.hpp)
@@ -345,15 +350,16 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*> VSaturateCastInt(StinkyTofu&        builder,
-                                                         uint32_t           valueReg,
-                                                         uint32_t           tmpVgpr,
-                                                         uint32_t           tmpSgpr,
-                                                         int32_t            lowerBound,
-                                                         int32_t            upperBound,
-                                                         const std::string& saturateType = "normal",
-                                                         bool               initGpr      = true,
-                                                         const std::string& comment      = "");
+        Expected<std::vector<StinkyInstruction*>> VSaturateCastInt(StinkyTofu&        builder,
+                                                                   uint32_t           valueReg,
+                                                                   uint32_t           tmpVgpr,
+                                                                   uint32_t           tmpSgpr,
+                                                                   int32_t            lowerBound,
+                                                                   int32_t            upperBound,
+                                                                   const std::string& saturateType
+                                                                   = "normal",
+                                                                   bool initGpr = true,
+                                                                   const std::string& comment = "");
 
         // ============================================================================
         // Memory & Synchronization Functions (functions.hpp)
@@ -377,13 +383,205 @@ namespace stinkytofu
          * @param comment Optional comment
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*> DSInit(StinkyTofu&        builder,
-                                               uint32_t           tmpVgprStart,
-                                               uint32_t           serialVgpr,
-                                               uint32_t           numThreads,
-                                               uint32_t           ldsNumElements,
-                                               int32_t            initValue = 0,
-                                               const std::string& comment   = "");
+        Expected<std::vector<StinkyInstruction*>> DSInit(StinkyTofu&        builder,
+                                                         uint32_t           tmpVgprStart,
+                                                         uint32_t           serialVgpr,
+                                                         uint32_t           numThreads,
+                                                         uint32_t           ldsNumElements,
+                                                         int32_t            initValue = 0,
+                                                         const std::string& comment   = "");
+
+        // ========================================================================
+        // Activation Functions (@function)
+        // ========================================================================
+
+        /**
+         * @brief ReLU activation: max(0, x) (@function)
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*>
+            reluF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut);
+        std::vector<StinkyInstruction*>
+            reluF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut);
+        std::vector<StinkyInstruction*>
+            reluF64(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut);
+        std::vector<StinkyInstruction*>
+            reluI32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut);
+
+        /**
+         * @brief Leaky ReLU: x >= 0 ? x : alpha * x (@function)
+         * Uses conditional mask to select between x and alpha*x based on sign.
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param alpha Slope for x < 0 (as StinkyRegister)
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*> leakyReluF16(StinkyTofu&    builder,
+                                                     uint32_t       vgprIn,
+                                                     uint32_t       vgprOut,
+                                                     StinkyRegister alpha);
+        std::vector<StinkyInstruction*> leakyReluF32(StinkyTofu&    builder,
+                                                     uint32_t       vgprIn,
+                                                     uint32_t       vgprOut,
+                                                     StinkyRegister alpha);
+
+        /**
+         * @brief GELU activation: 0.5 * x * (1 + tanh(k0 * x * (1 + k1 * x * x))) (@function)
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param tmpVgpr Temporary VGPR index for intermediate calculations
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*>
+            geluF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr);
+        std::vector<StinkyInstruction*>
+            geluF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr);
+
+        /**
+         * @brief Sigmoid activation: 1 / (1 + exp(-x)) (@function)
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param tmpVgpr Temporary VGPR index for intermediate calculations
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*>
+            sigmoidF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr);
+        std::vector<StinkyInstruction*>
+            sigmoidF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr);
+
+        /**
+         * @brief Absolute value: abs(x) (@function)
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*>
+            absF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut);
+        std::vector<StinkyInstruction*>
+            absF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut);
+
+        /**
+         * @brief Clamp: max(alpha, min(x, beta)) (@function)
+         * Clamps x to the range [alpha, beta]. Matches Activation.py order.
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param alpha Minimum value (as StinkyRegister)
+         * @param beta Maximum value (as StinkyRegister)
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*> clampF16(StinkyTofu&    builder,
+                                                 uint32_t       vgprIn,
+                                                 uint32_t       vgprOut,
+                                                 StinkyRegister alpha,
+                                                 StinkyRegister beta);
+        std::vector<StinkyInstruction*> clampF32(StinkyTofu&    builder,
+                                                 uint32_t       vgprIn,
+                                                 uint32_t       vgprOut,
+                                                 StinkyRegister alpha,
+                                                 StinkyRegister beta);
+
+        /**
+         * @brief Silu (Swish-1): x * sigmoid(x) (@function)
+         * Also known as Swish with beta=1. Common in modern networks.
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param tmpVgpr Temporary VGPR index for sigmoid calculation
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*>
+            siluF16(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr);
+        std::vector<StinkyInstruction*>
+            siluF32(StinkyTofu& builder, uint32_t vgprIn, uint32_t vgprOut, uint32_t tmpVgpr);
+
+        /**
+         * @brief Swish: x * sigmoid(beta * x) (@function)
+         * Generalized version of Silu with beta parameter.
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param beta Scaling parameter (as StinkyRegister)
+         * @param tmpVgpr1 First temporary VGPR index for intermediate calculations
+         * @param tmpVgpr2 Second temporary VGPR index for sigmoid calculation
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*> swishF16(StinkyTofu&    builder,
+                                                 uint32_t       vgprIn,
+                                                 uint32_t       vgprOut,
+                                                 StinkyRegister beta,
+                                                 uint32_t       tmpVgpr1,
+                                                 uint32_t       tmpVgpr2);
+        std::vector<StinkyInstruction*> swishF32(StinkyTofu&    builder,
+                                                 uint32_t       vgprIn,
+                                                 uint32_t       vgprOut,
+                                                 StinkyRegister beta,
+                                                 uint32_t       tmpVgpr1,
+                                                 uint32_t       tmpVgpr2);
+
+        /**
+         * @brief Clipped ReLU: if x > alpha: min(x, beta) else: min(0, beta) (@function)
+         * ReLU with both lower and upper clipping bounds.
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param alpha Lower threshold (as StinkyRegister)
+         * @param beta Upper clipping value (as StinkyRegister)
+         * @param tmpVgpr Temporary VGPR index for intermediate calculations
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*> clippedReluF16(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister alpha,
+                                                       StinkyRegister beta,
+                                                       uint32_t       tmpVgpr);
+        std::vector<StinkyInstruction*> clippedReluF32(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister alpha,
+                                                       StinkyRegister beta,
+                                                       uint32_t       tmpVgpr);
+        std::vector<StinkyInstruction*> clippedReluF64(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister alpha,
+                                                       StinkyRegister beta,
+                                                       uint32_t       tmpVgpr);
+        std::vector<StinkyInstruction*> clippedReluI32(StinkyTofu&    builder,
+                                                       uint32_t       vgprIn,
+                                                       uint32_t       vgprOut,
+                                                       StinkyRegister alpha,
+                                                       StinkyRegister beta,
+                                                       uint32_t       tmpVgpr);
+
+        /**
+         * @brief DGelu (Gradient of GELU): derivative of GELU activation (@function)
+         * Formula: 0.5 * tanh(xx) + x1 * (4 / (exp(-xx) + exp(xx))^2) + 0.5
+         * Where: x1 = 0.0535161 * x^3 + 0.398942 * x
+         *        xx = 0.0356774 * x^3 + 0.797885 * x
+         * Only f32 is implemented (matches Activation.py).
+         * @param builder StinkyTofu builder that creates and owns instructions
+         * @param vgprIn Input VGPR index
+         * @param vgprOut Output VGPR index
+         * @param tmpVgpr1 First temporary VGPR
+         * @param tmpVgpr2 Second temporary VGPR
+         * @param tmpVgpr3 Third temporary VGPR
+         * @return Vector of instructions
+         */
+        std::vector<StinkyInstruction*> dgeluF32(StinkyTofu& builder,
+                                                 uint32_t    vgprIn,
+                                                 uint32_t    vgprOut,
+                                                 uint32_t    tmpVgpr1,
+                                                 uint32_t    tmpVgpr2,
+                                                 uint32_t    tmpVgpr3);
 
     private:
         std::unique_ptr<StinkyIRImpl> pImpl;
@@ -454,12 +652,13 @@ namespace stinkytofu
          * @param comment Optional comment (defaults to showing current offset)
          * @return Vector of instructions (empty if writeSgpr=false)
          */
-        std::vector<StinkyInstruction*> loadKernArg(uint32_t           dstSgpr,
-                                                    uint32_t           srcAddr,
-                                                    int                dword,
-                                                    bool               writeSgpr  = true,
-                                                    std::optional<int> sgprOffset = std::nullopt,
-                                                    const std::string& comment    = "");
+        Expected<std::vector<StinkyInstruction*>> loadKernArg(uint32_t           dstSgpr,
+                                                              uint32_t           srcAddr,
+                                                              int                dword,
+                                                              bool               writeSgpr = true,
+                                                              std::optional<int> sgprOffset
+                                                              = std::nullopt,
+                                                              const std::string& comment = "");
 
         /**
          * @brief Load all kernel arguments efficiently
@@ -476,10 +675,10 @@ namespace stinkytofu
          * @param numSgprPreload Number of SGPRs already preloaded (skip these)
          * @return Vector of instructions
          */
-        std::vector<StinkyInstruction*> loadAllKernArg(uint32_t sgprStartIndex,
-                                                       uint32_t srcAddr,
-                                                       int      numSgprToLoad,
-                                                       int      numSgprPreload = 0);
+        Expected<std::vector<StinkyInstruction*>> loadAllKernArg(uint32_t sgprStartIndex,
+                                                                 uint32_t srcAddr,
+                                                                 int      numSgprToLoad,
+                                                                 int      numSgprPreload = 0);
 
     private:
         StinkyTofu& builder;
@@ -487,7 +686,7 @@ namespace stinkytofu
     };
 
     // Backward compatibility: StinkyTofu is now an alias for StinkyAsmIR
-    // StinkyAsmIR is defined in StinkyTofu.hpp
+    // StinkyAsmIR is defined in StinkyBuilder.hpp
     // Users can still use "StinkyTofu" name in their code
 
 } // namespace stinkytofu

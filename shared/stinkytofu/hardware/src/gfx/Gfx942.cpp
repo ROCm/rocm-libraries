@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -146,56 +146,73 @@ namespace stinkytofu
         // ============================================
         // Vector ALU (VOP2 / VOP3 / VALU arithmetic)
         // ============================================
-        for(std::string op : {"v_add", "v_mul", "v_max", "v_min", "v_fma"})
+        // Commutative operations
+        for(std::string op : {"v_add", "v_mul", "v_max", "v_min"})
             for(auto ty : {"f16", "f32", "f64"})
-                DEF_T(VALU, op + "_" + ty);
+                DEF_T(CommutativeVALU, op + "_" + ty);
+
+        // FMA (first two operands commutative: a*b+c = b*a+c)
+        for(auto ty : {"f16", "f32", "f64"})
+            DEF_T(CommutativeVALU, "v_fma_" + std::string(ty));
 
         for(std::string suffix : {"_i32", "_u32", "_co_u32", "c_co_u32", "3_u32"})
-            DEF_T(VALU, "v_add" + suffix);
+            DEF_T(CommutativeVALU, "v_add" + suffix);
 
         for(std::string suffix : {"lo_u32", "hi_i32", "hi_u32", "i32_i24", "u32_u24"})
-            DEF_T(VALU, "v_mul_" + suffix);
+            DEF_T(CommutativeVALU, "v_mul_" + suffix);
 
         for(std::string suffix : {"f16", "f32", "i32", "u32", "co_u32"})
             DEF_T(VALU, "v_sub_" + suffix);
 
-        // Packed integer 16-bit arithmetic and logical operations
-        for(auto op :
-            {"v_pk_mad_i16", "v_pk_add_i16", "v_pk_sub_i16", "v_pk_max_i16", "v_pk_min_i16"})
+        // Packed integer 16-bit commutative operations
+        for(auto op : {"v_pk_add_i16", "v_pk_max_i16", "v_pk_min_i16"})
+            DEF_T(CommutativeVALU, op);
+
+        // Packed integer 16-bit non-commutative operations
+        for(auto op : {"v_pk_mad_i16", "v_pk_sub_i16"})
             DEF_T(VALU, op);
 
-        // Packed unsigned 16-bit arithmetic and logical operations
-        for(auto op : {"v_pk_mul_lo_u16",
-                       "v_pk_mad_u16",
-                       "v_pk_add_u16",
-                       "v_pk_sub_u16",
-                       "v_pk_max_u16",
-                       "v_pk_min_u16"})
+        // Packed unsigned 16-bit commutative operations
+        for(auto op : {"v_pk_mul_lo_u16", "v_pk_add_u16", "v_pk_max_u16", "v_pk_min_u16"})
+            DEF_T(CommutativeVALU, op);
+
+        // Packed unsigned 16-bit non-commutative operations
+        for(auto op : {"v_pk_mad_u16", "v_pk_sub_u16"})
             DEF_T(VALU, op);
 
-        // Packed 16-bit bit shift operations
+        // Packed 16-bit bit shift operations (non-commutative)
         for(auto op : {"v_pk_lshlrev_b16", "v_pk_lshrrev_b16", "v_pk_ashrrev_i16"})
             DEF_T(VALU, op);
 
-        // Packed float 16-bit operations (excluding duplicates defined later)
+        // Packed float 16-bit commutative operations
         for(auto op : {"v_pk_add_f16", "v_pk_mul_f16", "v_pk_min_f16"})
-            DEF_T(VALU, op);
+            DEF_T(CommutativeVALU, op);
 
-        // Mixed precision operations (excluding v_mad_mix_f32 defined later)
+        // Mixed precision operations (non-commutative)
         for(auto op : {"v_mad_mixlo_f16", "v_mad_mixhi_f16"})
             DEF_T(VALU, op);
 
-        // Packed float 32-bit operations
-        for(auto op : {"v_pk_fma_f32", "v_pk_mul_f32", "v_pk_add_f32", "v_pk_mov_b32"})
+        // Packed float 32-bit commutative operations
+        for(auto op : {"v_pk_mul_f32", "v_pk_add_f32"})
+            DEF_T(CommutativeVALU, op);
+
+        // Packed float 32-bit non-commutative operations
+        for(auto op : {"v_pk_fma_f32", "v_pk_mov_b32"})
             DEF_T(VALU, op);
 
+        // Commutative VALU
         for(auto name : {
                 "v_max_i32",
                 "v_min_i32",
                 "v_dot2c_f32_f16",
                 "v_dot2_f32_f16",
-                "v_pk_fma_f16",
                 "v_pk_max_f16",
+            })
+            DEF_T(CommutativeVALU, name);
+
+        // Non-commutative VALU
+        for(auto name : {
+                "v_pk_fma_f16",
                 "v_mad_i32_i24",
                 "v_mad_u32_u24",
                 "v_med3_i32",
@@ -205,12 +222,13 @@ namespace stinkytofu
             })
             DEF_T(VALU, name);
 
-        // Other b32 VALU
-        for(auto op : {"v_and_b32",
-                       "v_and_or_b32",
+        // Commutative bitwise b32 VALU
+        for(auto op : {"v_and_b32", "v_or_b32", "v_xor_b32"})
+            DEF_T(CommutativeVALU, op);
+
+        // Non-commutative b32 VALU
+        for(auto op : {"v_and_or_b32",
                        "v_not_b32",
-                       "v_or_b32",
-                       "v_xor_b32",
                        "v_cndmask_b32",
                        "v_lshlrev_b32",
                        "v_lshrrev_b32",

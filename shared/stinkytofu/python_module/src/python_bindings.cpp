@@ -21,8 +21,9 @@
  *
  * ************************************************************************ */
 
-#include "StinkyIR.hpp"
-#include "StinkyTofu.hpp"
+#include "ErrorHandling.hpp"
+#include "StinkyBuilder.hpp"
+#include "ir/StinkyIR.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyModifiers.hpp"
 #include "ir/asm/StinkySignature.hpp"
@@ -36,6 +37,49 @@
 
 namespace nb = nanobind;
 using namespace stinkytofu;
+
+// ========================================================================
+// Error Handling Helper - Convert Expected<T> to Python Exceptions
+// ========================================================================
+
+/// @brief Unwrap an Expected<T> or throw a Python exception if it contains an error
+/// @tparam T The success type
+/// @param result The Expected<T> to unwrap
+/// @return The unwrapped value
+/// @throws std::runtime_error (converted to Python RuntimeError) if Expected contains an error
+template <typename T>
+T unwrapExpected(Expected<T> result)
+{
+    if(!result)
+    {
+        throw std::runtime_error(result.getError());
+    }
+    return std::move(*result);
+}
+
+// Test functions for Expected<T> error handling
+namespace test
+{
+    Expected<int> testExpectedSuccess(int value)
+    {
+        return value * 2;
+    }
+
+    Expected<int> testExpectedError(const std::string& errorMsg)
+    {
+        return Expected<int>::Error(errorMsg);
+    }
+
+    Expected<std::vector<int>> testExpectedVectorSuccess()
+    {
+        return std::vector<int>{1, 2, 3, 4, 5};
+    }
+
+    Expected<std::vector<int>> testExpectedVectorError()
+    {
+        return Expected<std::vector<int>>::Error("Vector creation failed");
+    }
+} // namespace test
 
 // ========================================================================
 // Helper Functions for Reducing Binding Boilerplate
@@ -317,13 +361,33 @@ NB_MODULE(stinkytofu, m)
              nb::arg("regIdx"),
              nb::arg("regNum") = 1,
              "Create a register with the given type, index, and count")
-        .def_prop_ro("regType",
-                     [](const StinkyRegister& r) { return regTypeToString(r.reg.type); },
-                     "Register type (e.g., 'v', 's', 'a')")
-        .def_prop_ro("regIdx", [](const StinkyRegister& r) { return r.reg.idx; },
-                     "Register index")
-        .def_prop_ro("regNum", [](const StinkyRegister& r) { return r.reg.num; },
-                     "Number of consecutive registers")
+        .def_static("Virtual",
+                    &StinkyRegister::Virtual,
+                    nb::arg("idx"),
+                    nb::arg("num") = 1,
+                    "Create a virtual VGPR with the given index and count")
+        .def_static("VirtualSGPR",
+                    &StinkyRegister::VirtualSGPR,
+                    nb::arg("idx"),
+                    nb::arg("num") = 1,
+                    "Create a virtual SGPR with the given index and count")
+        .def("isVirtualRegister",
+             &StinkyRegister::isVirtualRegister,
+             "Check if this register is a virtual register")
+        .def("withOffset",
+             &StinkyRegister::withOffset,
+             nb::arg("offset"),
+             "Apply an offset to this virtual register's index and mark it as physical")
+        .def_prop_ro(
+            "regType",
+            [](const StinkyRegister& r) { return regTypeToString(r.reg.type); },
+            "Register type (e.g., 'v', 's', 'a')")
+        .def_prop_ro(
+            "regIdx", [](const StinkyRegister& r) { return r.reg.idx; }, "Register index")
+        .def_prop_ro(
+            "regNum",
+            [](const StinkyRegister& r) { return r.reg.num; },
+            "Number of consecutive registers")
         .def("__repr__", [](const StinkyRegister& r) {
             if(r.reg.num == 1)
             {
@@ -331,8 +395,8 @@ NB_MODULE(stinkytofu, m)
             }
             else
             {
-                return regTypeToString(r.reg.type) + "[" + std::to_string(r.reg.idx)
-                       + ":" + std::to_string(r.reg.idx + r.reg.num - 1) + "]";
+                return regTypeToString(r.reg.type) + "[" + std::to_string(r.reg.idx) + ":"
+                       + std::to_string(r.reg.idx + r.reg.num - 1) + "]";
             }
         });
 
@@ -531,11 +595,31 @@ NB_MODULE(stinkytofu, m)
              nb::rv_policy::reference,
              "Add instruction(s) to this module (accepts a list, returns the same list for "
              "chaining)")
+        .def("addModule",
+             &IRListModule::addModule,
+             nb::arg("module"),
+             nb::rv_policy::reference,
+             "Add all instructions from another module to this module")
         .def("emitAssembly",
              &IRListModule::emitAssembly,
              nb::arg("emit_cycle_info") = false,
              nb::arg("emit_comments")   = true,
-             "Emit the assembly code for all instructions in this module");
+             "Emit the assembly code for all instructions in this module")
+        .def("remapVirtualRegisters",
+             &IRListModule::remapVirtualRegisters,
+             nb::arg("vgprOffset"),
+             nb::arg("sgprOffset"),
+             "Remap all virtual registers in this module to physical registers (in-place)")
+        .def(
+            "cloneAndRemap",
+            [](const IRListModule& self, int vgprOffset, int sgprOffset) {
+                return unwrapExpected(self.cloneAndRemap(vgprOffset, sgprOffset));
+            },
+            nb::arg("vgprOffset"),
+            nb::arg("sgprOffset"),
+            "Create a deep copy of this module and remap its virtual registers (for template "
+            "reuse)")
+        .def("__str__", &IRListModule::toString, "Get a string representation of this module");
 
     // ========================================================================
     // Bind StinkyAsmIR Class (Low-Level Assembly IR)
@@ -612,7 +696,23 @@ NB_MODULE(stinkytofu, m)
     bindDSSS(cls, "VFmaF32", &StinkyTofu::VFmaF32);
     bindDSSS(cls, "VFmaF64", &StinkyTofu::VFmaF64);
     bindDSSS(cls, "VFmaPKF16", &StinkyTofu::VFmaPKF16);
-    bindDSSS(cls, "VFmaMixF32", &StinkyTofu::VFmaMixF32);
+    cls.def(
+        "VFmaMixF32",
+        [](StinkyTofu&           self,
+           const StinkyRegister& dst,
+           const StinkyRegister& src0,
+           const StinkyRegister& src1,
+           const StinkyRegister& src2,
+           const std::string&    comment) {
+            return unwrapExpected(self.VFmaMixF32(dst, src0, src1, src2, comment));
+        },
+        nb::arg("dst"),
+        nb::arg("src0"),
+        nb::arg("src1"),
+        nb::arg("src2"),
+        nb::arg("comment") = "",
+        nb::rv_policy::reference,
+        "Vector FMA with mixed precision (gfx1250+ only)");
     bindDSSS(cls, "VMadI32I24", &StinkyTofu::VMadI32I24);
     bindDSSS(cls, "VMadU32U24", &StinkyTofu::VMadU32U24);
     bindDSSS(cls, "VMadMixF32", &StinkyTofu::VMadMixF32);
@@ -631,7 +731,19 @@ NB_MODULE(stinkytofu, m)
     bindDS(cls, "VRcpIFlagF32", &StinkyTofu::VRcpIFlagF32);
     bindDS(cls, "VRsqF16", &StinkyTofu::VRsqF16);
     bindDS(cls, "VRsqF32", &StinkyTofu::VRsqF32);
-    bindDS(cls, "VRsqIFlagF32", &StinkyTofu::VRsqIFlagF32);
+    cls.def(
+        "VRsqIFlagF32",
+        [](StinkyTofu&           self,
+           const StinkyRegister& dst,
+           const StinkyRegister& src,
+           const std::string&    comment) {
+            return unwrapExpected(self.VRsqIFlagF32(dst, src, comment));
+        },
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("comment") = "",
+        nb::rv_policy::reference,
+        "Vector reciprocal square root with integer flag (gfx1250+ only)");
     bindDS(cls, "VRndneF32", &StinkyTofu::VRndneF32);
 
     // Vector Min/Max/Med Instructions
@@ -867,40 +979,57 @@ NB_MODULE(stinkytofu, m)
             "VCvtScaleSRF16toBF8",
             &StinkyTofu::VCvtScaleSRF16toBF8,
             "Convert scaled F16 to BF8 (stochastic rounding)");
-    bindDS(cls, "VCvtBF16toF32", &StinkyTofu::VCvtBF16toF32, "Convert BF16 to F32");
+    // VCvtBF16toFP32 has extra optional parameters for vgprMask and vi
+    cls.def(
+        "VCvtBF16toFP32",
+        [](StinkyTofu&           self,
+           const StinkyRegister& dst,
+           const StinkyRegister& src,
+           const StinkyRegister* vgprMask,
+           int                   vi,
+           const std::string&    comment) {
+            return unwrapExpected(self.VCvtBF16toFP32(dst, src, vgprMask, vi, comment));
+        },
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("vgprMask") = nullptr,
+        nb::arg("vi")       = 0,
+        nb::arg("comment")  = "",
+        nb::rv_policy::reference,
+        "Convert BF16 to FP32 (gfx950+ only)");
     bindDSS(cls, "VCvtPkF32toBF16", &StinkyTofu::VCvtPkF32toBF16, "Convert packed F32 to BF16");
 
     // ========================================================================
     // Memory Instructions (from mem.hpp)
     // ========================================================================
 
-    // DS (LDS) Instructions
-    bindDA(cls, "DSReadU8", &StinkyTofu::DSReadU8, "LDS read unsigned 8-bit");
-    bindDA(cls, "DSReadI8", &StinkyTofu::DSReadI8, "LDS read signed 8-bit");
-    bindDA(cls, "DSReadU16", &StinkyTofu::DSReadU16, "LDS read unsigned 16-bit");
-    bindDA(cls, "DSReadI16", &StinkyTofu::DSReadI16, "LDS read signed 16-bit");
-    bindDA(cls, "DSReadB32", &StinkyTofu::DSReadB32, "LDS read 32-bit");
-    bindDA(cls, "DSReadB64", &StinkyTofu::DSReadB64, "LDS read 64-bit");
-    bindDA(cls, "DSReadB96", &StinkyTofu::DSReadB96, "LDS read 96-bit");
-    bindDA(cls, "DSReadB128", &StinkyTofu::DSReadB128, "LDS read 128-bit");
-    bindDA(cls, "DSReadU8D16Hi", &StinkyTofu::DSReadU8D16Hi, "LDS read U8 to D16 high");
-    bindDA(cls, "DSReadU16D16Hi", &StinkyTofu::DSReadU16D16Hi, "LDS read U16 to D16 high");
-    bindDA(cls, "DSReadB64TrB4", &StinkyTofu::DSReadB64TrB4, "LDS read 64-bit transpose B4");
-    bindDA(cls, "DSReadB96TrB6", &StinkyTofu::DSReadB96TrB6, "LDS read 96-bit transpose B6");
-    bindDA(cls, "DSReadB64TrB8", &StinkyTofu::DSReadB64TrB8, "LDS read 64-bit transpose B8");
-    bindDA(cls, "DSReadB64TrB16", &StinkyTofu::DSReadB64TrB16, "LDS read 64-bit transpose B16");
-    bindDAA(cls, "DSRead2B32", &StinkyTofu::DSRead2B32, "LDS read two 32-bit");
-    bindDAA(cls, "DSRead2B64", &StinkyTofu::DSRead2B64, "LDS read two 64-bit");
-    bindAS(cls, "DSWriteB8", &StinkyTofu::DSWriteB8, "LDS write 8-bit");
-    bindAS(cls, "DSWriteB16", &StinkyTofu::DSWriteB16, "LDS write 16-bit");
-    bindAS(cls, "DSWriteB32", &StinkyTofu::DSWriteB32, "LDS write 32-bit");
-    bindAS(cls, "DSWriteB64", &StinkyTofu::DSWriteB64, "LDS write 64-bit");
-    bindAS(cls, "DSWriteB96", &StinkyTofu::DSWriteB96, "LDS write 96-bit");
-    bindAS(cls, "DSWriteB128", &StinkyTofu::DSWriteB128, "LDS write 128-bit");
-    bindAS(cls, "DSWriteB8D16Hi", &StinkyTofu::DSWriteB8D16Hi, "LDS write D16 high to B8");
-    bindAS(cls, "DSWriteB16D16Hi", &StinkyTofu::DSWriteB16D16Hi, "LDS write D16 high to B16");
-    bindAAS(cls, "DSWrite2B32", &StinkyTofu::DSWrite2B32, "LDS write two 32-bit");
-    bindAAS(cls, "DSWrite2B64", &StinkyTofu::DSWrite2B64, "LDS write two 64-bit");
+    // DS (LDS) Instructions (using rocisa-compatible naming)
+    bindDA(cls, "DSLoadU8", &StinkyTofu::DSLoadU8, "LDS load unsigned 8-bit");
+    bindDA(cls, "DSLoadI8", &StinkyTofu::DSLoadI8, "LDS load signed 8-bit");
+    bindDA(cls, "DSLoadU16", &StinkyTofu::DSLoadU16, "LDS load unsigned 16-bit");
+    bindDA(cls, "DSLoadI16", &StinkyTofu::DSLoadI16, "LDS load signed 16-bit");
+    bindDA(cls, "DSLoadB32", &StinkyTofu::DSLoadB32, "LDS load 32-bit");
+    bindDA(cls, "DSLoadB64", &StinkyTofu::DSLoadB64, "LDS load 64-bit");
+    bindDA(cls, "DSLoadB96", &StinkyTofu::DSLoadB96, "LDS load 96-bit");
+    bindDA(cls, "DSLoadB128", &StinkyTofu::DSLoadB128, "LDS load 128-bit");
+    bindDA(cls, "DSLoadD16HIU8", &StinkyTofu::DSLoadD16HIU8, "LDS load U8 to D16 high");
+    bindDA(cls, "DSLoadD16HIU16", &StinkyTofu::DSLoadD16HIU16, "LDS load U16 to D16 high");
+    bindDA(cls, "DSLoadB64TrB4", &StinkyTofu::DSLoadB64TrB4, "LDS load 64-bit transpose B4");
+    bindDA(cls, "DSLoadB96TrB6", &StinkyTofu::DSLoadB96TrB6, "LDS load 96-bit transpose B6");
+    bindDA(cls, "DSLoadB64TrB8", &StinkyTofu::DSLoadB64TrB8, "LDS load 64-bit transpose B8");
+    bindDA(cls, "DSLoadB64TrB16", &StinkyTofu::DSLoadB64TrB16, "LDS load 64-bit transpose B16");
+    bindDAA(cls, "DSLoad2B32", &StinkyTofu::DSLoad2B32, "LDS load two 32-bit");
+    bindDAA(cls, "DSLoad2B64", &StinkyTofu::DSLoad2B64, "LDS load two 64-bit");
+    bindAS(cls, "DSStoreB8", &StinkyTofu::DSStoreB8, "LDS store 8-bit");
+    bindAS(cls, "DSStoreB16", &StinkyTofu::DSStoreB16, "LDS store 16-bit");
+    bindAS(cls, "DSStoreB32", &StinkyTofu::DSStoreB32, "LDS store 32-bit");
+    bindAS(cls, "DSStoreB64", &StinkyTofu::DSStoreB64, "LDS store 64-bit");
+    bindAS(cls, "DSStoreB96", &StinkyTofu::DSStoreB96, "LDS store 96-bit");
+    bindAS(cls, "DSStoreB128", &StinkyTofu::DSStoreB128, "LDS store 128-bit");
+    bindAS(cls, "DSStoreD16HIB8", &StinkyTofu::DSStoreD16HIB8, "LDS store D16 high to B8");
+    bindAS(cls, "DSStoreD16HIB16", &StinkyTofu::DSStoreD16HIB16, "LDS store D16 high to B16");
+    bindAAS(cls, "DSStore2B32", &StinkyTofu::DSStore2B32, "LDS store two 32-bit");
+    bindAAS(cls, "DSStore2B64", &StinkyTofu::DSStore2B64, "LDS store two 64-bit");
     bindDS(cls, "DSBPermuteB32", &StinkyTofu::DSBPermuteB32, "LDS byte permute 32-bit");
 
     // Buffer (MUBUF) Instructions
@@ -935,12 +1064,12 @@ NB_MODULE(stinkytofu, m)
     bindAS(cls, "BufferStoreB128", &StinkyTofu::BufferStoreB128, "Buffer store 128-bit");
     bindDS(cls, "BufferAtomicAddF32", &StinkyTofu::BufferAtomicAddF32, "Buffer atomic add F32");
     bindDAA(cls,
-            "BufferAtomicCmpSwap",
-            &StinkyTofu::BufferAtomicCmpSwap,
+            "BufferAtomicCmpswapB32",
+            &StinkyTofu::BufferAtomicCmpswapB32,
             "Buffer atomic compare-swap 32-bit");
     bindDAA(cls,
-            "BufferAtomicCmpSwapX2",
-            &StinkyTofu::BufferAtomicCmpSwapX2,
+            "BufferAtomicCmpswapB64",
+            &StinkyTofu::BufferAtomicCmpswapB64,
             "Buffer atomic compare-swap 64-bit");
 
     // Scalar Memory (SMEM) Instructions
@@ -1002,7 +1131,8 @@ NB_MODULE(stinkytofu, m)
     bindAS(cls, "FlatStoreB64", &StinkyTofu::FlatStoreB64, "Flat store 64-bit");
     bindAS(cls, "FlatStoreB96", &StinkyTofu::FlatStoreB96, "Flat store 96-bit");
     bindAS(cls, "FlatStoreB128", &StinkyTofu::FlatStoreB128, "Flat store 128-bit");
-    bindDAA(cls, "FlatAtomicCmpSwap", &StinkyTofu::FlatAtomicCmpSwap, "Flat atomic compare-swap");
+    bindDAA(
+        cls, "FlatAtomicCmpswapB32", &StinkyTofu::FlatAtomicCmpswapB32, "Flat atomic compare-swap");
 
     // Composite Instructions
     // ========================================================================
@@ -1161,11 +1291,42 @@ NB_MODULE(stinkytofu, m)
     bindDSS(cls, "SMulI32", &StinkyTofu::SMulI32);
     bindDSS(cls, "SMulHII32", &StinkyTofu::SMulHII32);
     bindDSS(cls, "SMulHIU32", &StinkyTofu::SMulHIU32);
-    bindDSS(cls, "SMulLOU32", &StinkyTofu::SMulLOU32);
+    // SMulLOU32 uses Expected<T> - unwrap to Python exception
+    cls.def(
+        "SMulLOU32",
+        [](StinkyTofu&           self,
+           const StinkyRegister& dst,
+           const StinkyRegister& src0,
+           const StinkyRegister& src1,
+           const std::string&    comment) {
+            return unwrapExpected(self.SMulLOU32(dst, src0, src1, comment));
+        },
+        nb::arg("dst"),
+        nb::arg("src0"),
+        nb::arg("src1"),
+        nb::arg("comment") = "",
+        nb::rv_policy::reference,
+        "Create S_MUL_LO_U32 instruction (32-bit unsigned integer multiply, low 32 bits)\n\n"
+        "Note: This instruction requires gfx1250+ architecture.\n"
+        "Raises RuntimeError if not supported on current architecture.");
     bindDSS(cls, "SSubI32", &StinkyTofu::SSubI32);
     bindDSS(cls, "SSubU32", &StinkyTofu::SSubU32);
     bindDSS(cls, "SSubBU32", &StinkyTofu::SSubBU32);
-    bindDSS(cls, "SSubU64", &StinkyTofu::SSubU64);
+    cls.def(
+        "SSubU64",
+        [](StinkyTofu&           self,
+           const StinkyRegister& dst,
+           const StinkyRegister& src0,
+           const StinkyRegister& src1,
+           const std::string&    comment) {
+            return unwrapExpected(self.SSubU64(dst, src0, src1, comment));
+        },
+        nb::arg("dst"),
+        nb::arg("src0"),
+        nb::arg("src1"),
+        nb::arg("comment") = "",
+        nb::rv_policy::reference,
+        "64-bit scalar unsigned subtraction (gfx1250+ only)");
 
     // Scalar Bitwise Instructions
     bindDSS(cls, "SAndB32", &StinkyTofu::SAndB32);
@@ -1202,9 +1363,33 @@ NB_MODULE(stinkytofu, m)
     bindDS(cls, "SSExtI16toI32", &StinkyTofu::SSExtI16toI32);
 
     // Scalar Exec Mask Instructions
-    bindDS(cls, "SAndSaveExecB32", &StinkyTofu::SAndSaveExecB32);
+    cls.def(
+        "SAndSaveExecB32",
+        [](StinkyTofu&           self,
+           const StinkyRegister& dst,
+           const StinkyRegister& src,
+           const std::string&    comment) {
+            return unwrapExpected(self.SAndSaveExecB32(dst, src, comment));
+        },
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("comment") = "",
+        nb::rv_policy::reference,
+        "Save exec mask and perform bitwise AND (gfx1250+ only)");
     bindDS(cls, "SAndSaveExecB64", &StinkyTofu::SAndSaveExecB64);
-    bindDS(cls, "SOrSaveExecB32", &StinkyTofu::SOrSaveExecB32);
+    cls.def(
+        "SOrSaveExecB32",
+        [](StinkyTofu&           self,
+           const StinkyRegister& dst,
+           const StinkyRegister& src,
+           const std::string&    comment) {
+            return unwrapExpected(self.SOrSaveExecB32(dst, src, comment));
+        },
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("comment") = "",
+        nb::rv_policy::reference,
+        "Save exec mask and perform bitwise OR (gfx1250+ only)");
     bindDS(cls, "SOrSaveExecB64", &StinkyTofu::SOrSaveExecB64);
 
     // Scalar Register Access Instructions
@@ -1220,93 +1405,163 @@ NB_MODULE(stinkytofu, m)
             "Create a label instruction (emitted as 'label:' in assembly)")
 
         // Generic MFMA Creation Functions
-        .def("createMFMA",
-             &StinkyTofu::createMFMA,
-             nb::arg("instType"),
-             nb::arg("accType"),
-             nb::arg("m"),
-             nb::arg("n"),
-             nb::arg("k"),
-             nb::arg("blocks"),
-             nb::arg("mfma1k"),
-             nb::arg("acc"),
-             nb::arg("a"),
-             nb::arg("b"),
-             nb::arg("acc2")    = nullptr,
-             nb::arg("neg")     = false,
-             nb::arg("comment") = "",
-             nb::rv_policy::reference,
-             "Create a generic MFMA instruction (e.g., v_mfma_f32_32x32x8_bf16)\n"
-             "Parameters:\n"
-             "  instType: Input data type ('bf16', 'f16', 'i8', 'f8', 'bf8', etc.)\n"
-             "  accType: Accumulator type ('f32', 'i32')\n"
-             "  m, n, k: Matrix dimensions\n"
-             "  blocks: Number of blocks (default 1)\n"
-             "  mfma1k: Whether this is a _1k variant\n"
-             "  acc: Accumulator destination register\n"
-             "  a, b: Source registers\n"
-             "  acc2: Optional accumulator source (defaults to acc if None)\n"
-             "  neg: Negate operands\n"
-             "  comment: Optional comment")
-        .def("createMXMFMA",
-             &StinkyTofu::createMXMFMA,
-             nb::arg("instType"),
-             nb::arg("accType"),
-             nb::arg("mxScaleATypeStr"),
-             nb::arg("mxScaleBTypeStr"),
-             nb::arg("m"),
-             nb::arg("n"),
-             nb::arg("k"),
-             nb::arg("block"),
-             nb::arg("acc"),
-             nb::arg("a"),
-             nb::arg("b"),
-             nb::arg("acc2"),
-             nb::arg("mxsa"),
-             nb::arg("mxsb"),
-             nb::arg("reuseA")  = false,
-             nb::arg("reuseB")  = false,
-             nb::arg("comment") = "",
-             nb::rv_policy::reference,
-             "Create an MX format MFMA instruction (e.g., v_wmma_scale_f32_16x16x128_f8f6f4)\n"
-             "Parameters:\n"
-             "  instType: Input data type ('f8', 'f4', 'f6', 'bf8', etc.)\n"
-             "  accType: Accumulator type (typically 'f32')\n"
-             "  mxScaleATypeStr, mxScaleBTypeStr: Scale format ('e5m3', 'fp8')\n"
-             "  m, n, k: Matrix dimensions\n"
-             "  block: Block size (16 or other)\n"
-             "  acc, a, b, acc2: Register operands\n"
-             "  mxsa, mxsb: Scale factor registers\n"
-             "  reuseA, reuseB: Matrix reuse flags\n"
-             "  comment: Optional comment")
-        .def("createSMFMA",
-             &StinkyTofu::createSMFMA,
-             nb::arg("instType"),
-             nb::arg("accType"),
-             nb::arg("m"),
-             nb::arg("n"),
-             nb::arg("k"),
-             nb::arg("blocks"),
-             nb::arg("mfma1k"),
-             nb::arg("acc"),
-             nb::arg("a"),
-             nb::arg("b"),
-             nb::arg("metadata"),
-             nb::arg("neg")     = false,
-             nb::arg("comment") = "",
-             nb::rv_policy::reference,
-             "Create a sparse MFMA instruction (e.g., v_smfmac_f32_16x16x32_bf16)\n"
-             "Parameters:\n"
-             "  instType: Input data type ('bf16', 'f16', 'i8', 'f8', 'bf8', etc.)\n"
-             "  accType: Accumulator type ('f32', 'i32')\n"
-             "  m, n, k: Matrix dimensions\n"
-             "  blocks: Number of micro-blocks\n"
-             "  mfma1k: Whether this is a _1k variant\n"
-             "  acc: Accumulator destination register\n"
-             "  a, b: Source registers\n"
-             "  metadata: Sparsity metadata register\n"
-             "  neg: Negate operands\n"
-             "  comment: Optional comment");
+        .def(
+            "createMFMA",
+            [](StinkyTofu&           self,
+               const std::string&    instType,
+               const std::string&    accType,
+               int                   m,
+               int                   n,
+               int                   k,
+               int                   blocks,
+               bool                  mfma1k,
+               const StinkyRegister& acc,
+               const StinkyRegister& a,
+               const StinkyRegister& b,
+               const StinkyRegister* acc2,
+               bool                  neg,
+               const std::string&    comment) {
+                return unwrapExpected(self.createMFMA(
+                    instType, accType, m, n, k, blocks, mfma1k, acc, a, b, acc2, neg, comment));
+            },
+            nb::arg("instType"),
+            nb::arg("accType"),
+            nb::arg("m"),
+            nb::arg("n"),
+            nb::arg("k"),
+            nb::arg("blocks"),
+            nb::arg("mfma1k"),
+            nb::arg("acc"),
+            nb::arg("a"),
+            nb::arg("b"),
+            nb::arg("acc2")    = nullptr,
+            nb::arg("neg")     = false,
+            nb::arg("comment") = "",
+            nb::rv_policy::reference,
+            "Create a generic MFMA instruction (e.g., v_mfma_f32_32x32x8_bf16)\n"
+            "Parameters:\n"
+            "  instType: Input data type ('bf16', 'f16', 'i8', 'f8', 'bf8', etc.)\n"
+            "  accType: Accumulator type ('f32', 'i32')\n"
+            "  m, n, k: Matrix dimensions\n"
+            "  blocks: Number of blocks (default 1)\n"
+            "  mfma1k: Whether this is a _1k variant\n"
+            "  acc: Accumulator destination register\n"
+            "  a, b: Source registers\n"
+            "  acc2: Optional accumulator source (defaults to acc if None)\n"
+            "  neg: Negate operands\n"
+            "  comment: Optional comment")
+        .def(
+            "createMXMFMA",
+            [](StinkyTofu&           self,
+               const std::string&    instType,
+               const std::string&    accType,
+               const std::string&    mxScaleATypeStr,
+               const std::string&    mxScaleBTypeStr,
+               int                   m,
+               int                   n,
+               int                   k,
+               int                   block,
+               const StinkyRegister& acc,
+               const StinkyRegister& a,
+               const StinkyRegister& b,
+               const StinkyRegister& acc2,
+               const StinkyRegister& mxsa,
+               const StinkyRegister& mxsb,
+               bool                  reuseA,
+               bool                  reuseB,
+               const std::string&    comment) {
+                return unwrapExpected(self.createMXMFMA(instType,
+                                                        accType,
+                                                        mxScaleATypeStr,
+                                                        mxScaleBTypeStr,
+                                                        m,
+                                                        n,
+                                                        k,
+                                                        block,
+                                                        acc,
+                                                        a,
+                                                        b,
+                                                        acc2,
+                                                        mxsa,
+                                                        mxsb,
+                                                        reuseA,
+                                                        reuseB,
+                                                        comment));
+            },
+            nb::arg("instType"),
+            nb::arg("accType"),
+            nb::arg("mxScaleATypeStr"),
+            nb::arg("mxScaleBTypeStr"),
+            nb::arg("m"),
+            nb::arg("n"),
+            nb::arg("k"),
+            nb::arg("block"),
+            nb::arg("acc"),
+            nb::arg("a"),
+            nb::arg("b"),
+            nb::arg("acc2"),
+            nb::arg("mxsa"),
+            nb::arg("mxsb"),
+            nb::arg("reuseA")  = false,
+            nb::arg("reuseB")  = false,
+            nb::arg("comment") = "",
+            nb::rv_policy::reference,
+            "Create an MX format MFMA instruction (e.g., v_wmma_scale_f32_16x16x128_f8f6f4)\n"
+            "Parameters:\n"
+            "  instType: Input data type ('f8', 'f4', 'f6', 'bf8', etc.)\n"
+            "  accType: Accumulator type (typically 'f32')\n"
+            "  mxScaleATypeStr, mxScaleBTypeStr: Scale format ('e5m3', 'fp8')\n"
+            "  m, n, k: Matrix dimensions\n"
+            "  block: Block size (16 or other)\n"
+            "  acc, a, b, acc2: Register operands\n"
+            "  mxsa, mxsb: Scale factor registers\n"
+            "  reuseA, reuseB: Matrix reuse flags\n"
+            "  comment: Optional comment")
+        .def(
+            "createSMFMA",
+            [](StinkyTofu&           self,
+               const std::string&    instType,
+               const std::string&    accType,
+               int                   m,
+               int                   n,
+               int                   k,
+               int                   blocks,
+               bool                  mfma1k,
+               const StinkyRegister& acc,
+               const StinkyRegister& a,
+               const StinkyRegister& b,
+               const StinkyRegister& metadata,
+               bool                  neg,
+               const std::string&    comment) {
+                return unwrapExpected(self.createSMFMA(
+                    instType, accType, m, n, k, blocks, mfma1k, acc, a, b, metadata, neg, comment));
+            },
+            nb::arg("instType"),
+            nb::arg("accType"),
+            nb::arg("m"),
+            nb::arg("n"),
+            nb::arg("k"),
+            nb::arg("blocks"),
+            nb::arg("mfma1k"),
+            nb::arg("acc"),
+            nb::arg("a"),
+            nb::arg("b"),
+            nb::arg("metadata"),
+            nb::arg("neg")     = false,
+            nb::arg("comment") = "",
+            nb::rv_policy::reference,
+            "Create a sparse MFMA instruction (e.g., v_smfmac_f32_16x16x32_bf16)\n"
+            "Parameters:\n"
+            "  instType: Input data type ('bf16', 'f16', 'i8', 'f8', 'bf8', etc.)\n"
+            "  accType: Accumulator type ('f32', 'i32')\n"
+            "  m, n, k: Matrix dimensions\n"
+            "  blocks: Number of micro-blocks\n"
+            "  mfma1k: Whether this is a _1k variant\n"
+            "  acc: Accumulator destination register\n"
+            "  a, b: Source registers\n"
+            "  metadata: Sparsity metadata register\n"
+            "  neg: Negate operands\n"
+            "  comment: Optional comment");
 
     // ========================================================================
     // Bind StinkyIR (High-Level IR Builder)
@@ -1319,28 +1574,50 @@ NB_MODULE(stinkytofu, m)
              "(e.g., [9, 4, 2])")
 
         // Division & Remainder Functions
-        .def("vectorStaticDivide",
-             &StinkyIR::vectorStaticDivide,
-             nb::arg("builder"),
-             nb::arg("qReg"),
-             nb::arg("dReg"),
-             nb::arg("divisor"),
-             nb::arg("tmpVgpr"),
-             nb::arg("comment") = "",
-             "Static vector division (@function)\n"
-             "Divides vDReg by a constant divisor, storing quotient in vQReg")
+        .def(
+            "vectorStaticDivide",
+            [](StinkyIR&                    self,
+               StinkyTofu&                  builder,
+               uint32_t                     qReg,
+               uint32_t                     dReg,
+               int                          divisor,
+               const std::vector<uint32_t>& tmpVgpr,
+               const std::string&           comment) {
+                return unwrapExpected(
+                    self.vectorStaticDivide(builder, qReg, dReg, divisor, tmpVgpr, comment));
+            },
+            nb::arg("builder"),
+            nb::arg("qReg"),
+            nb::arg("dReg"),
+            nb::arg("divisor"),
+            nb::arg("tmpVgpr"),
+            nb::arg("comment") = "",
+            "Static vector division (@function)\n"
+            "Divides vDReg by a constant divisor, storing quotient in vQReg")
 
-        .def("vectorStaticDivideAndRemainder",
-             &StinkyIR::vectorStaticDivideAndRemainder,
-             nb::arg("builder"),
-             nb::arg("qReg"),
-             nb::arg("rReg"),
-             nb::arg("dReg"),
-             nb::arg("divisor"),
-             nb::arg("tmpVgpr"),
-             nb::arg("doRemainder") = true,
-             nb::arg("comment")     = "",
-             "Static vector division with remainder (@function)")
+        .def(
+            "vectorStaticDivideAndRemainder",
+            [](StinkyIR&                    self,
+               StinkyTofu&                  builder,
+               uint32_t                     qReg,
+               uint32_t                     rReg,
+               uint32_t                     dReg,
+               int                          divisor,
+               const std::vector<uint32_t>& tmpVgpr,
+               bool                         doRemainder,
+               const std::string&           comment) {
+                return unwrapExpected(self.vectorStaticDivideAndRemainder(
+                    builder, qReg, rReg, dReg, divisor, tmpVgpr, doRemainder, comment));
+            },
+            nb::arg("builder"),
+            nb::arg("qReg"),
+            nb::arg("rReg"),
+            nb::arg("dReg"),
+            nb::arg("divisor"),
+            nb::arg("tmpVgpr"),
+            nb::arg("doRemainder") = true,
+            nb::arg("comment")     = "",
+            "Static vector division with remainder (@function)")
 
         .def("vectorUInt32DivideAndRemainder",
              &StinkyIR::vectorUInt32DivideAndRemainder,
@@ -1353,28 +1630,50 @@ NB_MODULE(stinkytofu, m)
              nb::arg("comment")     = "",
              "Dynamic vector division using FP32 reciprocal (@function)")
 
-        .def("scalarStaticDivideAndRemainder",
-             &StinkyIR::scalarStaticDivideAndRemainder,
-             nb::arg("builder"),
-             nb::arg("qReg"),
-             nb::arg("rReg"),
-             nb::arg("dReg"),
-             nb::arg("divisor"),
-             nb::arg("tmpSgpr"),
-             nb::arg("doRemainder") = 1,
-             nb::arg("comment")     = "",
-             "Static scalar division with remainder (@function)")
+        .def(
+            "scalarStaticDivideAndRemainder",
+            [](StinkyIR&                    self,
+               StinkyTofu&                  builder,
+               uint32_t                     qReg,
+               uint32_t                     rReg,
+               uint32_t                     dReg,
+               int                          divisor,
+               const std::vector<uint32_t>& tmpSgpr,
+               int                          doRemainder,
+               const std::string&           comment) {
+                return unwrapExpected(self.scalarStaticDivideAndRemainder(
+                    builder, qReg, rReg, dReg, divisor, tmpSgpr, doRemainder, comment));
+            },
+            nb::arg("builder"),
+            nb::arg("qReg"),
+            nb::arg("rReg"),
+            nb::arg("dReg"),
+            nb::arg("divisor"),
+            nb::arg("tmpSgpr"),
+            nb::arg("doRemainder") = 1,
+            nb::arg("comment")     = "",
+            "Static scalar division with remainder (@function)")
 
         // Multiplication Functions
-        .def("vectorStaticMultiply",
-             &StinkyIR::vectorStaticMultiply,
-             nb::arg("builder"),
-             nb::arg("productReg"),
-             nb::arg("operandReg"),
-             nb::arg("multiplier"),
-             nb::arg("tmpSgpr"),
-             nb::arg("comment") = "",
-             "Vector multiplication by constant (@function)")
+        .def(
+            "vectorStaticMultiply",
+            [](StinkyIR&                    self,
+               StinkyTofu&                  builder,
+               uint32_t                     productReg,
+               uint32_t                     operandReg,
+               int                          multiplier,
+               const std::vector<uint32_t>& tmpSgpr,
+               const std::string&           comment) {
+                return unwrapExpected(self.vectorStaticMultiply(
+                    builder, productReg, operandReg, multiplier, tmpSgpr, comment));
+            },
+            nb::arg("builder"),
+            nb::arg("productReg"),
+            nb::arg("operandReg"),
+            nb::arg("multiplier"),
+            nb::arg("tmpSgpr"),
+            nb::arg("comment") = "",
+            "Vector multiplication by constant (@function)")
 
         .def("vectorMultiplyBpe",
              &StinkyIR::vectorMultiplyBpe,
@@ -1422,57 +1721,112 @@ NB_MODULE(stinkytofu, m)
              nb::arg("comment") = "",
              "Branch if scalar register is not zero (@function)")
 
-        .def("BranchIfZeroTyped",
-             &StinkyIR::BranchIfZeroTyped,
-             nb::arg("builder"),
-             nb::arg("sgprName"),
-             nb::arg("dataType"),
-             nb::arg("tmpVgpr"),
-             nb::arg("label"),
-             nb::arg("comment") = "",
-             "Branch if scalar register is zero with type support (@function)\n"
-             "Supports: 'i32', 'i64', 'f32', 'f64'")
+        .def(
+            "BranchIfZeroTyped",
+            [](StinkyIR&          self,
+               StinkyTofu&        builder,
+               uint32_t           sgprName,
+               const std::string& dataType,
+               uint32_t           tmpVgpr,
+               const std::string& label,
+               const std::string& comment) {
+                return unwrapExpected(
+                    self.BranchIfZeroTyped(builder, sgprName, dataType, tmpVgpr, label, comment));
+            },
+            nb::arg("builder"),
+            nb::arg("sgprName"),
+            nb::arg("dataType"),
+            nb::arg("tmpVgpr"),
+            nb::arg("label"),
+            nb::arg("comment") = "",
+            "Branch if scalar register is zero with type support (@function)\n"
+            "Supports: 'i32', 'i64', 'f32', 'f64'")
 
-        .def("BranchIfNotZeroTyped",
-             &StinkyIR::BranchIfNotZeroTyped,
-             nb::arg("builder"),
-             nb::arg("sgprName"),
-             nb::arg("dataType"),
-             nb::arg("label"),
-             nb::arg("comment") = "",
-             "Branch if scalar register is not zero with type support (@function)\n"
-             "Supports: 'i32', 'i64', 'f32', 'f64'")
+        .def(
+            "BranchIfNotZeroTyped",
+            [](StinkyIR&          self,
+               StinkyTofu&        builder,
+               uint32_t           sgprName,
+               const std::string& dataType,
+               const std::string& label,
+               const std::string& comment) {
+                return unwrapExpected(
+                    self.BranchIfNotZeroTyped(builder, sgprName, dataType, label, comment));
+            },
+            nb::arg("builder"),
+            nb::arg("sgprName"),
+            nb::arg("dataType"),
+            nb::arg("label"),
+            nb::arg("comment") = "",
+            "Branch if scalar register is not zero with type support (@function)\n"
+            "Supports: 'i32', 'i64', 'f32', 'f64'")
 
         // Casting Functions
-        .def("VSaturateCastInt",
-             &StinkyIR::VSaturateCastInt,
-             nb::arg("builder"),
-             nb::arg("valueReg"),
-             nb::arg("tmpVgpr"),
-             nb::arg("tmpSgpr"),
-             nb::arg("lowerBound"),
-             nb::arg("upperBound"),
-             nb::arg("saturateType") = "normal",
-             nb::arg("initGpr")      = true,
-             nb::arg("comment")      = "",
-             "Saturate cast integer to bounds (@function)\n"
-             "Clamps value to [lowerBound, upperBound] range\n"
-             "saturateType: 'normal' (both bounds), 'upper' (max only), 'lower' (min only, not yet "
-             "implemented), 'none'")
+        .def(
+            "VSaturateCastInt",
+            [](StinkyIR&          self,
+               StinkyTofu&        builder,
+               uint32_t           valueReg,
+               uint32_t           tmpVgpr,
+               uint32_t           tmpSgpr,
+               int32_t            lowerBound,
+               int32_t            upperBound,
+               const std::string& saturateType,
+               bool               initGpr,
+               const std::string& comment) {
+                return unwrapExpected(self.VSaturateCastInt(builder,
+                                                            valueReg,
+                                                            tmpVgpr,
+                                                            tmpSgpr,
+                                                            lowerBound,
+                                                            upperBound,
+                                                            saturateType,
+                                                            initGpr,
+                                                            comment));
+            },
+            nb::arg("builder"),
+            nb::arg("valueReg"),
+            nb::arg("tmpVgpr"),
+            nb::arg("tmpSgpr"),
+            nb::arg("lowerBound"),
+            nb::arg("upperBound"),
+            nb::arg("saturateType") = "normal",
+            nb::arg("initGpr")      = true,
+            nb::arg("comment")      = "",
+            "Saturate cast integer to bounds (@function)\n"
+            "Clamps value to [lowerBound, upperBound] range\n"
+            "saturateType: 'normal' (both bounds), 'upper' (max only), 'lower' (min only, not yet "
+            "implemented), 'none'")
 
         // Memory & Synchronization Functions
-        .def("DSInit",
-             &StinkyIR::DSInit,
-             nb::arg("builder"),
-             nb::arg("tmpVgprStart"),
-             nb::arg("serialVgpr"),
-             nb::arg("numThreads"),
-             nb::arg("ldsNumElements"),
-             nb::arg("initValue") = 0,
-             nb::arg("comment")   = "",
-             "Initialize LDS (Local Data Share) memory (@function)\n"
-             "Synchronizes threads, writes init value to LDS in parallel, and syncs again\n"
-             "Requires 2 consecutive VGPRs starting at tmpVgprStart");
+        .def(
+            "DSInit",
+            [](StinkyIR&          self,
+               StinkyTofu&        builder,
+               uint32_t           tmpVgprStart,
+               uint32_t           serialVgpr,
+               uint32_t           numThreads,
+               uint32_t           ldsNumElements,
+               int32_t            initValue,
+               const std::string& comment) {
+                return unwrapExpected(self.DSInit(builder,
+                                                  tmpVgprStart,
+                                                  serialVgpr,
+                                                  numThreads,
+                                                  ldsNumElements,
+                                                  initValue,
+                                                  comment));
+            },
+            nb::arg("builder"),
+            nb::arg("tmpVgprStart"),
+            nb::arg("serialVgpr"),
+            nb::arg("numThreads"),
+            nb::arg("ldsNumElements"),
+            nb::arg("initValue") = 0,
+            nb::arg("comment")   = "",
+            "Initialize LDS (Local Data Share) memory (@function)\n"
+            "Synchronizes threads, writes init value to LDS in parallel, and syncs again\n"
+            "Requires 2 consecutive VGPRs starting at tmpVgprStart");
 
     // ========================================================================
     // Bind ArgumentLoader Class
@@ -1532,7 +1886,8 @@ NB_MODULE(stinkytofu, m)
                     }
                 }
 
-                return self.loadKernArg(dstSgpr, srcAddr, dword, writeSgpr, offsetValue, comment);
+                return unwrapExpected(
+                    self.loadKernArg(dstSgpr, srcAddr, dword, writeSgpr, offsetValue, comment));
             },
             nb::arg("dstSgpr"),
             nb::arg("srcAddr"),
@@ -1564,7 +1919,14 @@ NB_MODULE(stinkytofu, m)
 
         .def(
             "loadAllKernArg",
-            &ArgumentLoader::loadAllKernArg,
+            [](ArgumentLoader& self,
+               uint32_t        sgprStartIndex,
+               uint32_t        srcAddr,
+               int             numSgprToLoad,
+               int             numSgprPreload) {
+                return unwrapExpected(
+                    self.loadAllKernArg(sgprStartIndex, srcAddr, numSgprToLoad, numSgprPreload));
+            },
             nb::arg("sgprStartIndex"),
             nb::arg("srcAddr"),
             nb::arg("numSgprToLoad"),
@@ -1909,4 +2271,32 @@ NB_MODULE(stinkytofu, m)
             "__str__",
             [](const KernelBody& kb) { return kb.toString(); },
             "Generate complete kernel assembly (same as toString())");
+
+    // ========================================================================
+    // Test functions for Expected<T> error handling
+    // ========================================================================
+
+    m.def(
+        "_testExpectedSuccess",
+        [](int value) { return unwrapExpected(test::testExpectedSuccess(value)); },
+        nb::arg("value"),
+        "Test function: Returns value * 2 (should succeed)");
+
+    m.def(
+        "_testExpectedError",
+        [](const std::string& errorMsg) {
+            return unwrapExpected(test::testExpectedError(errorMsg));
+        },
+        nb::arg("errorMsg"),
+        "Test function: Always returns error (should raise RuntimeError)");
+
+    m.def(
+        "_testExpectedVectorSuccess",
+        []() { return unwrapExpected(test::testExpectedVectorSuccess()); },
+        "Test function: Returns [1,2,3,4,5] (should succeed)");
+
+    m.def(
+        "_testExpectedVectorError",
+        []() { return unwrapExpected(test::testExpectedVectorError()); },
+        "Test function: Always returns error (should raise RuntimeError)");
 }

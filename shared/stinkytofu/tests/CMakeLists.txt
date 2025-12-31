@@ -34,6 +34,13 @@ set(UNIT_TEST_FILES
     unit/IntrusiveListTest.cpp
     unit/ConfigurableWaitCntPassTest.cpp
     unit/StinkyAsmEmitterTest.cpp
+    unit/VirtualRegisterTest.cpp
+    unit/ErrorHandlingTest.cpp
+    unit/PeepholeOptimizationPassTest.cpp
+    unit/DeadCodeEliminationPassTest.cpp
+    unit/DuplicateEliminationPassTest.cpp
+    unit/OptimizationPipelineTest.cpp
+    unit/OperationRegistryTest.cpp
 )
 list(TRANSFORM UNIT_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 

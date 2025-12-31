@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,6 +52,16 @@ namespace stinkytofu
         IntegerLiteral, // Integer constants
         HexLiteral, // Hexadecimal constants (0x...)
         FloatLiteral, // Floating point constants
+
+        // Pattern keywords (for pattern definition files)
+        KW_peephole, // 'peephole' (pattern type)
+        KW_pattern, // 'pattern'
+        KW_match, // 'match'
+        KW_constraints, // 'constraints'
+        KW_rewrite, // 'rewrite'
+        KW_replace, // 'replace'
+        KW_remove, // 'remove'
+        KW_with, // 'with'
 
         // Invalid token
         Unknown
@@ -173,6 +183,10 @@ namespace stinkytofu
 
         /// Lex a numeric literal.
         Token lexNumber();
+
+        /// Classify an identifier string as a keyword or identifier.
+        /// Returns the appropriate TokenKind (KW_* or Identifier).
+        static TokenKind classifyIdentifier(std::string_view text);
 
         /// Check if a character is whitespace (excluding newline).
         static bool isWhitespace(char c);
