@@ -36,7 +36,6 @@ namespace rocRoller
     {
         struct Assign;
         struct Barrier;
-        struct ComputeIndex;
         struct ConditionalOp;
         struct AssertOp;
         struct Deallocate;
@@ -67,7 +66,6 @@ namespace rocRoller
 
         using Operation = std::variant<Assign,
                                        Barrier,
-                                       ComputeIndex,
                                        ConditionalOp,
                                        AssertOp,
                                        Deallocate,

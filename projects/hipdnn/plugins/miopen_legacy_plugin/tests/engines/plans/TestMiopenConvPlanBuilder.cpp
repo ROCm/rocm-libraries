@@ -155,9 +155,9 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeT
     flatbuffers::FlatBufferBuilder builder
         = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
-    auto mutableGraph = hipdnn_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+    auto mutableGraph = hipdnn_data_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
     mutableGraph->mutable_nodes()->GetMutableObject(0)->mutate_compute_data_type(
-        hipdnn_sdk::data_objects::DataType::HALF);
+        hipdnn_data_sdk::data_objects::DataType::HALF);
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));

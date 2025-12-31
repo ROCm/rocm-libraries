@@ -4,7 +4,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormBwdPlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace miopen_legacy_plugin;

@@ -4,9 +4,9 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <algorithm>
 #include <iostream>
@@ -15,7 +15,7 @@
 #include <random>
 #include <vector>
 
-using hipdnn_sdk::utilities::TensorLayout;
+using hipdnn_data_sdk::utilities::TensorLayout;
 
 #define HIP_CHECK(status)                                                                      \
     do                                                                                         \
@@ -107,14 +107,16 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
 }
 
 template <typename F>
-void run(F&& f)
+bool run(F&& f)
 {
-    f.template operator()<float, float>(TensorLayout::NCHW);
-    f.template operator()<half, float>(TensorLayout::NCHW);
-    f.template operator()<hip_bfloat16, float>(TensorLayout::NCHW);
-    f.template operator()<float, float>(TensorLayout::NHWC);
-    f.template operator()<half, float>(TensorLayout::NHWC);
-    f.template operator()<hip_bfloat16, float>(TensorLayout::NHWC);
+    bool allPassed = true;
+    allPassed &= f.template operator()<float, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<half, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<hip_bfloat16, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<float, float>(TensorLayout::NHWC);
+    allPassed &= f.template operator()<half, float>(TensorLayout::NHWC);
+    allPassed &= f.template operator()<hip_bfloat16, float>(TensorLayout::NHWC);
+    return allPassed;
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
@@ -124,7 +126,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
 {
     auto tensor = std::make_shared<hipdnn_frontend::graph::Tensor_attributes>();
     tensor->set_dim(dims).set_data_type(dataType);
-    tensor->set_stride(hipdnn_sdk::utilities::generateStrides(dims, layout.strideOrder));
+    tensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder));
 
     return tensor;
 }
@@ -146,5 +148,5 @@ struct SampleRunner
     Config config;
 
     template <typename InputType, typename IntermediateType>
-    void operator()(const TensorLayout& layout);
+    bool operator()(const TensorLayout& layout);
 };

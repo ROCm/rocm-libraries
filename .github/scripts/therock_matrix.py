@@ -17,7 +17,7 @@ subtree_to_project_map = {
     "projects/hipsparselt": "sparse",
     "projects/miopen": "miopen",
     "projects/rocblas": "blas",
-    "project/rocfft": "fft",
+    "projects/rocfft": "fft",
     "projects/rocprim": "prim",
     "projects/rocrand": "rand",
     "projects/rocsolver": "solver",

@@ -146,6 +146,82 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    std::set<int> ControlFlowRWTracer::getCoordinateDependencies(int coordinate) const
+    {
+        if(!m_dependenciesBuilt)
+        {
+            Throw<FatalError>("Dependencies not built. Call buildDependencies() first.");
+        }
+
+        auto it = m_dependencies.find(coordinate);
+        if(it != m_dependencies.end())
+        {
+            return it->second;
+        }
+
+        return {};
+    }
+
+    //
+    // This assumes that: the trace is ordered and records for the
+    // same control operation are consecutive.
+    //
+    void ControlFlowRWTracer::buildDependencies()
+    {
+        if(m_dependenciesBuilt)
+            return;
+
+        m_dependencies.clear();
+
+        // Single pass through the trace to build backward dependencies
+        auto it = m_trace.begin();
+        while(it != m_trace.end())
+        {
+            int currentControl = it->control;
+
+            std::unordered_set<int> writtenCoords;
+            std::unordered_set<int> readCoords;
+
+            // Collect all reads and writes for the current operation
+            while(it != m_trace.end() && it->control == currentControl)
+            {
+                if(it->rw == WRITE || it->rw == READWRITE)
+                {
+                    writtenCoords.insert(it->coordinate);
+                }
+                if(it->rw == READ || it->rw == READWRITE)
+                {
+                    readCoords.insert(it->coordinate);
+                }
+                ++it;
+            }
+
+            // For each coordinate being written
+            for(int written : writtenCoords)
+            {
+                // Collect all coordinates this write depends on (including transitive)
+                std::unordered_set<int> allDeps;
+
+                for(int read : readCoords)
+                {
+                    if(written == read)
+                        continue;
+
+                    allDeps.insert(read);
+
+                    // Add transitive dependencies
+                    if(m_dependencies.contains(read))
+                        allDeps.insert(m_dependencies[read].begin(), m_dependencies[read].end());
+                }
+
+                // Update backward dependencies for the written coordinate
+                m_dependencies[written].insert(allDeps.begin(), allDeps.end());
+            }
+        }
+
+        m_dependenciesBuilt = true;
+    }
+
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
         AssertFatal(control > 0 && coordinate > 0);
@@ -195,6 +271,16 @@ namespace rocRoller::KernelGraph
             {
                 trackRegister(control, c.coordinate, rw);
             }
+        }
+    }
+
+    void ControlFlowRWTracer::trackBuffer(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            if(m_graph.coordinates.get<Buffer>(c.coordinate).has_value())
+                trackRegister(control, c.coordinate, rw);
         }
     }
 
@@ -275,11 +361,6 @@ namespace rocRoller::KernelGraph
         }
     }
 
-    void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
-    {
-        // Already in a Scope
-    }
-
     void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
     {
         CollectDataFlowExpressionVisitor visitor;
@@ -333,8 +414,8 @@ namespace rocRoller::KernelGraph
         // typically involve: incrementing loop counters and
         // offsets.  Loop counters are scoped already.
         //
-        // Offsets are created "inside" ComputeIndex nodes and are
-        // used in other nodes like LoadTiled.  These "inside"
+        // Offsets are created by AssignIndexExpressions and are
+        // used in other nodes like LoadTiled.  These
         // references do not explicitly appear in the graph.
         //
         // If we examine loop increment operations and "track" an
@@ -416,15 +497,19 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(LoadTiled const& op, int tag)
     {
+        auto user = m_graph.mapper.get<User>(tag);
 
         auto dst = m_graph.mapper.get<MacroTile>(tag);
 
         dst = only(m_graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::View>))
                   .value_or(dst);
 
-        trackConnections(tag, {dst}, ReadWrite::READ);
+        trackRegister(tag, user, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+
+        trackConnections(tag, {user, dst}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadVGPR const& op, int tag)
@@ -522,6 +607,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {source, dst}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)
@@ -541,6 +627,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, src, ReadWrite::READ);
         trackConnections(tag, {src}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreVGPR const& op, int tag)

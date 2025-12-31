@@ -99,7 +99,7 @@ inline std::string get_filename(const std::string& matrix_filename)
     size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
     if(last_dot_pos == std::string::npos || last_dot_pos == 0)
     {
-        matrix_filename_with_ext += ".csr";
+        matrix_filename_with_ext += ".bin";
     }
 
     const char* matrices_dir = get_hipsparse_clients_matrices_dir();
@@ -1119,7 +1119,9 @@ int read_bin_matrix(const char*          filename,
 
     int err;
 
-    int nrowf, ncolf, nnzf;
+    int nrowf = 0;
+    int ncolf = 0;
+    int nnzf  = 0;
 
     err = fread(&nrowf, sizeof(int), 1, f);
     err |= fread(&ncolf, sizeof(int), 1, f);
