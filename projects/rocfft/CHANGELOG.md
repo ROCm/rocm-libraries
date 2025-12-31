@@ -24,6 +24,7 @@ Documentation for rocFFT is available at
 ### Added
 
 * Added support for per precision and architecture kernel configuration entries in the library.
+* Support for the gfx1152 and gfx1153 architectures.
 
 ### Optimized
 

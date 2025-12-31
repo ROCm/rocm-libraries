@@ -5,9 +5,9 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/utilities/Constants.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -15,12 +15,12 @@
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 // Note: Sample temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
@@ -95,6 +95,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     yTensor.memory().markDeviceModified();
     auto yHostPtr = yTensor.memory().hostData();
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation...\n";
@@ -114,6 +116,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+
+        validationPassed = yValid;
     }
 
     std::cout << "First 10 y values: ";
@@ -124,6 +128,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nBatch normalization inference graph execution complete for " << inputType
               << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -136,9 +141,18 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All batch normalization inference runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All batch normalization inference runs completed successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout << "One or more batch normalization inference runs failed validation.\n";
+        return 1;
+    }
 }

@@ -138,7 +138,7 @@ void testing_iamax_iamin_batched(const Arguments& arg, FUNC func)
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);
     CHECK_HIP_ERROR(dx.transfer_from(hx));
 
-    double gpu_time_used;
+    double gpu_time_used{0};
     R      hipblas_error_host = 0, hipblas_error_device = 0;
 
     if(arg.unit_check || arg.norm_check)
