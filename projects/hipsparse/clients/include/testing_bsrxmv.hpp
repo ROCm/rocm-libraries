@@ -438,6 +438,15 @@ void testing_bsrxmv(Arguments argus)
     hipsparseInit<T>(hx, 1, nb * block_dim);
     hipsparseInit<T>(hy_1, 1, mb * block_dim);
 
+    std::cout << "mb: " << mb << " nb: " << nb << " block_dim: " << block_dim << std::endl;
+
+    std::cout << "hy_1" << std::endl;
+    for(size_t i = 0; i < hy_1.size(); i++)
+    {
+        std::cout << hy_1[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
     // copy vector is easy in STL; hy_gold = hx: save a copy in hy_gold which will be output of CPU
     hy_2    = hy_1;
     hy_gold = hy_1;
@@ -495,6 +504,8 @@ void testing_bsrxmv(Arguments argus)
                                                dbsr_row_ptr,
                                                &nnzb));
 
+    std::cout << "nnzb: " << nnzb << std::endl;
+
     auto dbsr_col_ind_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnzb), device_free};
     auto dbsr_val_managed = hipsparse_unique_ptr{
@@ -530,6 +541,27 @@ void testing_bsrxmv(Arguments argus)
                               sizeof(T) * nnzb * block_dim * block_dim,
                               hipMemcpyDeviceToHost));
 
+    std::cout << "hbsr_row_ptr" << std::endl;
+    for(size_t i = 0; i < hbsr_row_ptr.size(); i++)
+    {
+        std::cout << hbsr_row_ptr[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
+    std::cout << "hbsr_col_ind" << std::endl;
+    for(size_t i = 0; i < hbsr_col_ind.size(); i++)
+    {
+        std::cout << hbsr_col_ind[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
+    std::cout << "hbsr_val" << std::endl;
+    for(size_t i = 0; i < hbsr_val.size(); i++)
+    {
+        std::cout << hbsr_val[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
     int size_of_mask = 0;
 
     // 1. Setup the random number engine
@@ -550,6 +582,8 @@ void testing_bsrxmv(Arguments argus)
         }
     }
 
+    std::cout << "size_of_mask: " << size_of_mask << std::endl;
+
     // Initialization of the mask.
     std::vector<int> hbsr_mask_ptr(size_of_mask);
     int              count = 0;
@@ -560,6 +594,13 @@ void testing_bsrxmv(Arguments argus)
             hbsr_mask_ptr[count++] = i + idx_base;
         }
     }
+
+    std::cout << "hbsr_mask_ptr" << std::endl;
+    for(size_t i = 0; i < hbsr_mask_ptr.size(); i++)
+    {
+        std::cout << hbsr_mask_ptr[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     auto dbsr_mask_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * size_of_mask), device_free};
@@ -636,6 +677,20 @@ void testing_bsrxmv(Arguments argus)
                     h_beta,
                     hy_gold.data(),
                     idx_base);
+
+        std::cout << "hy_1" << std::endl;
+        for(size_t i = 0; i < hy_1.size(); i++)
+        {
+            std::cout << hy_1[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "hy_gold" << std::endl;
+        for(size_t i = 0; i < hy_gold.size(); i++)
+        {
+            std::cout << hy_gold[i] << " ";
+        }
+        std::cout << "" << std::endl;
 
         unit_check_near(1, mb * block_dim, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, mb * block_dim, 1, hy_gold.data(), hy_2.data());
