@@ -1,64 +1,73 @@
-#!/ usr / bin / env python3
+#!/usr/bin/env python3
 
 ################################################################################
 #
-#MIT License
+# MIT License
 #
-#Copyright 2024 - 2025 AMD ROCm(TM) Software
+# Copyright 2024-2025 AMD ROCm(TM) Software
 #
-#Permission is hereby granted, free of charge, to any person obtaining a copy
-#of this software and associated documentation files(the "Software"), to deal
-#in the Software without restriction, including without limitation the rights
-#to use, copy, modify, merge, publish, distribute, sublicense, and / or sell cop -
-#ies of the Software, and to permit persons to whom the Software is furnished
-#to do so, subject to the following                                 conditions:
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
 #
-#The above copyright notice and this permission notice shall be included in all
-#copies or substantial portions of the                                      Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM -
-#PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-#FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE AUTHORS OR
-#COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-#IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE -
-#CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-    ################################################################################
+################################################################################
 
-    ""
-    "Test basic functionality of rocRoller's GEMM client."
-    ""
+"""Test basic functionality of rocRoller's GEMM client."""
 
-    import contextlib import functools import itertools import os import pathlib import subprocess
-        from dataclasses import dataclass
+import contextlib
+import functools
+import itertools
+import os
+import pathlib
+import subprocess
+from dataclasses import dataclass
 
-            import pytest import yaml import shutil
+import pytest
+import yaml 
+import shutil
 
-                build
-    = pathlib.Path(__file__).parent.parent
-      / "build" if os.getenv("ROCROLLER_BUILD_DIR") is not None : build
-    = pathlib.Path(os.getenv("ROCROLLER_BUILD_DIR"))
+build = pathlib.Path(__file__).parent.parent / "build"
+if os.getenv("ROCROLLER_BUILD_DIR") is not None:
+    build = pathlib.Path(os.getenv("ROCROLLER_BUILD_DIR"))
 
-          gemm
-    = (build / "client" / "rocroller-gemm")
-          .resolve()
+gemm = (build / "client" / "rocroller-gemm").resolve()
 
-#Python 3.11 has contextlib.chdir            but 3.10 doesn't
-              @contextlib.contextmanager def chdir(directory)
-    : current_directory
-    = os.getcwd()
-try : os
-    .chdir(directory) yield finally : os.chdir(current_directory)
+
+# Python 3.11 has contextlib.chdir but 3.10 doesn't
+@contextlib.contextmanager
+def chdir(directory):
+    current_directory = os.getcwd()
+    try:
+        os.chdir(directory)
+        yield
+    finally:
+        os.chdir(current_directory)
+
 
 #
-#Helpers
+# Helpers
 #
 
-                                          @functools.cache def rocm_gfx()
-        : ""
-          "Return GPU architecture (gfxXXXX) for local GPU device."
-          "" output = None
-    try : output = subprocess.run(
+
+@functools.cache
+def rocm_gfx():
+    """Return GPU architecture (gfxXXXX) for local GPU device."""
+    output = None
+    try:
+        output = subprocess.run(
             ["rocminfo"], capture_output=True, text=True, check=True
         ).stdout
     except subprocess.CalledProcessError:
@@ -131,8 +140,9 @@ def write_solution_config_if_present(tmp_path, solution_params):
 
     return solution_params
 
+
 #
-#Solution parameter helpers
+# Solution parameter helpers
 #
 
 
@@ -260,6 +270,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
@@ -324,6 +336,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
@@ -386,6 +400,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
@@ -454,11 +470,11 @@ def build_solution_params():
     """Build giant list of solution parameter combinations to test."""
 
     solution_params = [
-#data - parallel gemm, float, params from command line
+        # data-parallel gemm, float, params from command line
         [],
-#data - parallel gemm, float, params from config file
+        # data-parallel gemm, float, params from config file
         ["--config", DP_GEMM],
-#streamk gemm, float, params from command line
+        # streamk gemm, float, params from command line
         ["--streamk"],
     ]
 
@@ -468,7 +484,7 @@ def build_solution_params():
         scale_configurations("A"),
         scale_configurations("B"),
     ):
-#XXXX Mixing and outputting to half precision fails correctness checks.
+        # XXXX Mixing and outputting to half precision fails correctness checks.
         if (type.A != type.B) and (type.D == "half"):
             continue
         params = [
@@ -499,7 +515,7 @@ def build_solution_params():
 
 def build_problem_params():
     """Build list of problem parameters to test."""
-#Should consider making this a container
+    # Should consider making this a container
     return [["--m", "512", "--n", "512", "--k", "256", "--numWGs", "4"]]
 
 
@@ -511,7 +527,7 @@ def build_wgm_params():
 
     params = []
     for dimension in [0, 1]:
-#the last entry will have no "tail block"
+        # the last entry will have no "tail block"
         for wgm in [1, 3, 5, 16, num_tiles[dimension]]:
             solution_params = [
                 f"--mac_m={tile_size[0]}",
@@ -524,8 +540,9 @@ def build_wgm_params():
             params.append([solution_params, problem_params])
     return params
 
+
 #
-#GEMM 'generate' and 'validate' helpers
+# GEMM 'generate' and 'validate' helpers
 #
 
 
@@ -569,7 +586,7 @@ def gemm_validate_two_stage_assembly(tmp_path, solution_params, problem_params):
 
     asm = tmp_path / "test.s"
 
-#get these working; load command from.co
+    # get these working; load command from .co
 
     cmd = [gemm]
     cmd.extend(["generate", "--asm", asm])
@@ -586,19 +603,20 @@ def gemm_validate_two_stage_assembly(tmp_path, solution_params, problem_params):
     cmd.extend(problem_params)
     subprocess.run(cmd, check=True)
 
+
 #
-#PyTest tests !
+# PyTest tests!
 #
 
 
 def test_gemm_example(tmp_path):
     """GEMM 'example' subcommand."""
 
-#"gemm example" with no output file should fail
+    # "gemm example" with no output file should fail
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.run([gemm, "example"], check=True)
 
-#"gemm example example.yaml" should write to example.yaml
+    # "gemm example example.yaml" should write to example.yaml
     example = tmp_path / "example.yaml"
     subprocess.run([gemm, "example", example], check=True)
     assert example.exists()
@@ -620,9 +638,9 @@ def test_gemm_options(tmp_path):
         yaml_contents = example_problem.read_text()
         return yaml.load(yaml_contents, Loader=yaml.Loader)
 
-#fails
+    # fails
     with pytest.raises(subprocess.CalledProcessError):
-#overspecify tile size is bad
+        # overspecify tile size is bad
         subprocess.run(
             [
                 gemm,
@@ -635,7 +653,7 @@ def test_gemm_options(tmp_path):
             check=True,
         )
 
-#setting tile size via shortcut
+    # setting tile size via shortcut
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--wgts=1024x2048x4096"]
     )
@@ -643,7 +661,7 @@ def test_gemm_options(tmp_path):
     assert post["mac_n"] == 2048
     assert post["mac_k"] == 4096
 
-#setting mi via shortcut
+    # setting mi via shortcut
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--mi=2x4x8"]
     )
@@ -660,7 +678,7 @@ def test_gemm_options(tmp_path):
     assert post["wave_k"] == 16
     assert post["wave_b"] == 2
 
-#setting lds options
+    # setting lds options
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=AB"]
     )
@@ -675,7 +693,7 @@ def test_gemm_options(tmp_path):
     assert post["load_B"] == "BufferToLDSViaVGPR"
     assert post["storeLDS_D"]
 
-#setting d2l options
+    # setting d2l options
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--d2lds=AB"]
     )
@@ -688,7 +706,7 @@ def test_gemm_options(tmp_path):
     assert post["load_A"] == "BufferToLDS"
     assert post["load_B"] == "BufferToVGPR"
 
-#setting mxlds options
+    # setting mxlds options
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--mxlds=AB"]
     )
@@ -707,7 +725,7 @@ def test_gemm_options(tmp_path):
     assert post["loadScale_A"] == "BufferToLDS"
     assert post["loadScale_B"] == "BufferToLDS"
 
-#setting swizzle tile size
+    # setting swizzle tile size
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--sts=5x7/11x13"]
     )
@@ -716,7 +734,7 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
 
-#can also use a big X
+    # can also use a big X
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--sts=5x7X11x13"]
     )
@@ -725,7 +743,7 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
 
-#setting data initialization modes
+    # setting data initialization modes
     post = run_and_load_example_problem_yaml(
         [
             gemm,
@@ -792,7 +810,7 @@ def test_gemm_generate_from_example(tmp_path):
     example = tmp_path / "example.yaml"
     subprocess.run([gemm, "example", example], check=True)
 
-#We should be able to generate a kernel from the config file
+    # We should be able to generate a kernel from the config file
     subprocess.run([gemm, "generate", "--config", example], check=True)
 
 
@@ -823,37 +841,37 @@ def test_gemm_generate(tmp_path):
     """GEMM 'generate' basics."""
 
     with chdir(tmp_path):
-#"gemm generate" should pass
+        # "gemm generate" should pass
         subprocess.run([gemm, "generate"], check=True)
 
-#"gemm generate --asm" should write an assembly and two yaml files in the current directory
+        # "gemm generate --asm" should write an assembly and two yaml files in the current directory
         before = list(tmp_path.glob("*.s")) + list(tmp_path.glob("*.yaml"))
         subprocess.run([gemm, "generate", "--asm"], check=True)
         after = list(tmp_path.glob("*.s")) + list(tmp_path.glob("*.yaml"))
         assert len(after) == len(before) + 3
 
-#"gemm generate --asm test.s" should write an.s and.yaml pair
+        # "gemm generate --asm test.s" should write an .s and .yaml pair
         asm_path = tmp_path / "test_asm.s"
         yaml_path = asm_path.with_suffix(".yaml")
         subprocess.run([gemm, "generate", "--asm", asm_path], check=True)
         assert asm_path.exists()
         assert yaml_path.exists()
 
-#possible to not write a pair ?
-#"gemm generate --co" should write an co and two yaml files in the current directory
+        # possible to not write a pair?
+        # "gemm generate --co" should write an co and two yaml files in the current directory
         before = list(tmp_path.glob("*.co")) + list(tmp_path.glob("*.yaml"))
         subprocess.run([gemm, "generate", "--co"], check=True)
         after = list(tmp_path.glob("*.co")) + list(tmp_path.glob("*.yaml"))
         assert len(after) == len(before) + 3
 
-#"gemm generate --co test.co" should write.co +.yaml pair
+        # "gemm generate --co test.co" should write .co+.yaml pair
         co_path = tmp_path / "test_co.co"
         yaml_path = asm_path.with_suffix(".yaml")
         subprocess.run([gemm, "generate", "--co", co_path], check=True)
         assert co_path.exists()
         assert yaml_path.exists()
 
-#"gemm generate --config" should fail
+        # "gemm generate --config" should fail
         with pytest.raises(subprocess.CalledProcessError):
             subprocess.run([gemm, "generate", "--config"], check=True)
 
@@ -868,12 +886,12 @@ def test_gemm_validate(tmp_path):
 
     problem_params = [["--m", "512", "--n", "512", "--k", "256", "--numWGs", "4"]]
     solution_params = [
-#data - parallel gemm, float, params from command line
-#[],
-#data - parallel gemm, float, params from config file
+        # data-parallel gemm, float, params from command line
+        # [],
+        # data-parallel gemm, float, params from config file
         ["--config", DP_HGEMM_GFX120X if isGFX120X else DP_GEMM],
-#streamk gemm, float, params from command line
-#["--streamk"],
+        # streamk gemm, float, params from command line
+        # ["--streamk"],
     ]
 
     for problem, solution in itertools.product(problem_params, solution_params):
@@ -894,7 +912,7 @@ def test_gemm_validate_once(tmp_path, solution_params, problem_params):
 
 @pytest.mark.parametrize("solution_params,problem_params", build_wgm_params())
 def test_gemm_wgm(tmp_path, solution_params, problem_params):
-#TODO This is a temporary fix to enable GFX12 CI
+    # TODO This is a temporary fix to enable GFX12 CI
     if rocm_gfx().startswith("gfx12"):
         return
 
@@ -905,7 +923,6 @@ def test_kernel_graph_dot_truncation(tmp_path):
     - With truncation enabled (small max label length), kgraph.py should succeed and produce non-empty outputs.
     - With truncation disabled (0), kgraph.py should report a parse error.
     """
-
     arch = rocm_gfx()
     if arch is not None and arch.startswith("gfx12"):
         pytest.skip("Skipping KernelGraph DOT truncation test on gfx12")
@@ -957,7 +974,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
         cmd = [str(kgraph), str(asm_path), "-o", str(pdf_path)]
         return run_cmd(cmd, env=os.environ.copy(), cwd=tmp_path)
 
-#Case 1 : truncation enabled(should succeed)
+    #Case 1 : truncation enabled(should succeed)
     asm_trunc = tmp_path / "workgroupmapping_truncated5.s"
     pdf_trunc = tmp_path / "workgroupmapping_truncated5.pdf"
 
@@ -985,7 +1002,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
     max_line = max(len(line) for line in dot_trunc.read_text(errors="ignore").splitlines() or [""])
     assert max_line < 16384, f"Expected DOT lines to be <16384 with truncation, got max {max_line}"
 
-#Case 2 : truncation disabled(should error in kgraph parse)
+    #Case 2 : truncation disabled(should error in kgraph parse)
     asm_untrunc = tmp_path / "workgroupmapping_untruncated.s"
     pdf_untrunc = tmp_path / "workgroupmapping_untruncated.pdf"
 
