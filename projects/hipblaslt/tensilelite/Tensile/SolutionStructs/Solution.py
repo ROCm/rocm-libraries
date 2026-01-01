@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -389,21 +389,21 @@ class Solution(collections.abc.Mapping):
     # (ShiftPtr is default and not set to state["EdgeType"] yet here)
     # if not (state["ProblemType"]["TLUA"] and state["EdgeType"] == "ShiftPtr") and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
     if not (state["ProblemType"]["TLUA"]) and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
-      state["NonDTLTailLoopA"] = True
-      state["tailLoopOptA"] = False
+      if state["DirectToLds"] and not state["DirectToVgprA"]:
+        state["NonDTLTailLoopA"] = True
+      if state["DirectToLds"] or state["DirectToVgprA"]:
+        state["tailLoopOptA"] = False
     # if not (state["ProblemType"]["TLUB"] and state["EdgeType"] == "ShiftPtr") and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
     if not (state["ProblemType"]["TLUB"]) and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
-      state["NonDTLTailLoopB"] = True
-      state["tailLoopOptB"] = False
+      if state["DirectToLds"] and not state["DirectToVgprB"]:
+        state["NonDTLTailLoopB"] = True
+      if state["DirectToLds"] or state["DirectToVgprB"]:
+        state["tailLoopOptB"] = False
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
       state["tailLoopOptA"] = False
-      state["tailLoopOptB"] = False
-    if (state["DirectToVgprA"]):
-      state["tailLoopOptA"] = False
-    if (state["DirectToVgprB"]):
       state["tailLoopOptB"] = False
 
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
@@ -997,6 +997,7 @@ class Solution(collections.abc.Mapping):
       return
 
     if state["StreamK"] != 0:
+      state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
@@ -1505,6 +1506,8 @@ class Solution(collections.abc.Mapping):
       state["ForceUnrollSubIter"] = True
       state["numSubTiles"] = 2
       state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
+      # disable TailLoopInNLL
+      state["TailloopInNll"] = False
     else:
       state["ForceUnrollSubIter"] = False
       state["numSubTiles"] = 1
@@ -2501,6 +2504,31 @@ class Solution(collections.abc.Mapping):
     state["NoTailLoop"] = False
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 and state["StreamK"] == 0:
       state["NoTailLoop"] = True
+
+    # TailLoopInNLL optimization check
+    if state["TailloopInNll"]:
+      # Disable TailLoopInNLL
+      # - StreamK is 0 (need to disable GSU for TailLoopInNLL)
+      # - (not MFMA) or WMMA
+      # - PrefetchGlobalRead is 0
+      # - NoTailLoop
+      if (state["StreamK"] == 0) or \
+         ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
+         (state["PrefetchGlobalRead"] == 0) or \
+         state["NoTailLoop"]:
+        state["TailloopInNll"] = False
+
+      # need restrictions for TailLoopInNLL
+      if state["TailloopInNll"]:
+        # need to disable StaggerU
+        state["StaggerU"] = 0
+        state["StaggerUMapping"] = 0
+        state["StaggerUStride"] = 0
+        # need to disable SuppressNoLoadLoop
+        state["SuppressNoLoadLoop"] = False
+        # disable UseCustomMainLoopSchedule
+        state["UseCustomMainLoopSchedule"] = False
+        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll-K
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved

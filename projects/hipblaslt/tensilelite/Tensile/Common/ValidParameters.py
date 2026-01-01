@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -859,7 +859,12 @@ validParameters = { # we need to make sure this matches develop
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
     "UseCustomMainLoopSchedule" : [0, 1],
-    "AdaptiveGemm": [0, 1]
+    "AdaptiveGemm": [0, 1],
+    # TailLoop in NoLoadLoop optimization
+    # generate TailLoop code in NoLoadLoop to take advantage of prefetch and wider globalLoad plus instruction scheduling
+    # Need certain conditions to use TailLoopInNLL optimization
+    # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
+    "TailLoopInNLL": [False, True]
 }
 
 newMIValidParameters = {

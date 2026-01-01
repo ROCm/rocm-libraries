@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -426,7 +426,8 @@ defaultBenchmarkCommonParameters = [
     {"UseCustomMainLoopSchedule": [1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
-    {"AdaptiveGemm": [0]}
+    {"AdaptiveGemm": [0]},
+    {"TailloopInNll": [False]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
