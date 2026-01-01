@@ -942,6 +942,18 @@ public:
         const auto total_bits = getDataSignBits<DataType>() + getDataExponentBits<DataType>() 
                               + getDataMantissaBits<DataType>();
         
+        /**********************************************************************************
+         *
+         * Skewness values between -0.5 and 0.5 are considered acceptable for normality.
+         * Negative skewness indicates a longer left tail, while positive skewness
+         * indicates a longer right tail.
+         * Excess kurtosis values between -1 and 1 is considered acceptable for normality.
+         * Negative excess kurtosis indicates flatter distribution, while positive excess
+         * kurtosis indicates a peaked distribution.
+         * Normal data from the generator is well within these tolerances, so stricter
+         * tolerances detect any major changes. Tolerances are adjusted for precision.
+         *
+         *********************************************************************************/
         double skewness_tolerance, excess_kurtosis_tolerance;
 
         if (total_bits <= 6) {
