@@ -862,9 +862,9 @@ validParameters = { # we need to make sure this matches develop
     "AdaptiveGemm": [0, 1],
     # TailLoop in NoLoadLoop optimization
     # generate TailLoop code in NoLoadLoop to take advantage of prefetch and wider globalLoad plus instruction scheduling
-    # Need certain conditions to use TailLoopInNLL optimization
+    # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
-    "TailLoopInNLL": [False, True]
+    "TailloopInNll": [False, True]
 }
 
 newMIValidParameters = {

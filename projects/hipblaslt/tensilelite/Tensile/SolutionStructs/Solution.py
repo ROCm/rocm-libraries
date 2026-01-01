@@ -1506,7 +1506,7 @@ class Solution(collections.abc.Mapping):
       state["ForceUnrollSubIter"] = True
       state["numSubTiles"] = 2
       state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
-      # disable TailLoopInNLL
+      # disable TailloopInNll
       state["TailloopInNll"] = False
     else:
       state["ForceUnrollSubIter"] = False
@@ -2505,10 +2505,10 @@ class Solution(collections.abc.Mapping):
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 and state["StreamK"] == 0:
       state["NoTailLoop"] = True
 
-    # TailLoopInNLL optimization check
+    # TailloopInNll optimization check
     if state["TailloopInNll"]:
-      # Disable TailLoopInNLL
-      # - StreamK is 0 (need to disable GSU for TailLoopInNLL)
+      # Disable TailloopInNll
+      # - StreamK is 0 (need to disable GSU for TailloopInNll)
       # - (not MFMA) or WMMA
       # - PrefetchGlobalRead is 0
       # - NoTailLoop
@@ -2518,7 +2518,7 @@ class Solution(collections.abc.Mapping):
          state["NoTailLoop"]:
         state["TailloopInNll"] = False
 
-      # need restrictions for TailLoopInNLL
+      # need restrictions for TailloopInNll
       if state["TailloopInNll"]:
         # need to disable StaggerU
         state["StaggerU"] = 0
