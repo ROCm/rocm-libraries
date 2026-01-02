@@ -209,17 +209,33 @@ else if(*alpha)
 ```cpp
 // Correct: Non-type (NB) before type (T)
 template <rocblas_int NB, typename T>
-rocblas_status rocblas_trtri_template(...)
+void kernel_calc(const T* data, T* output, rocblas_int n)
 {
-    // T can be automatically deduced from function arguments
-    return rocblas_trtri_small<NB>(handle, ...);  // No need to specify T
+    // Kernel implementation - T is part of function signature
 }
+
+// Caller can omit T - it's deduced from the pointer types
+template <rocblas_int NB, typename TPtr>
+void kernel_wrapper(TPtr data, TPtr output, rocblas_int n)
+{
+    // Only specify NB, T is automatically deduced from TPtr
+    kernel_calc<NB>(data, output, n);  // T deduced from pointer arguments
+}
+
+// Example usage
+float* d_data;
+float* d_output;
+kernel_wrapper<256>(d_data, d_output, n);  // Only NB specified, TPtr=float* deduced
 
 // Incorrect: Type before non-type
 template <typename T, rocblas_int NB>  // ❌ Wrong order
+void bad_kernel(const T* data, T* output)
+{
+    // Caller must specify: bad_kernel<float, 256>(data, output)  // Both required!
+}
 ```
 
-**Rationale:** Type parameters can be automatically deduced from function arguments, but non-type parameters cannot. Placing type parameters last allows calling templates without explicitly specifying types.
+**Rationale:** Type parameters can be automatically deduced from function arguments, but non-type parameters cannot. Placing non-type parameters first allows calling templates with only explicit non-type arguments while types are auto-deduced from function parameters.
 
 ## RAII Patterns
 
