@@ -43,17 +43,6 @@ This directory contains agent development rules for AI coding assistants (Cursor
   - API examples and build commands
 
 ### Documentation
-- **`AGENT_RULES_SUMMARY.md`** (9 KB)
-  - Detailed explanation of all rules
-  - How agents will use the rules
-  - Customization guide
-  - Comparison to hipDNN
-
-- **`AGENT_RULES_COMPARISON.md`** (9 KB)
-  - Side-by-side comparison with hipDNN rules
-  - Key differences and adaptations
-  - Usage recommendations
-
 - **`AGENT_RULES_README.md`** (this file)
   - Quick overview of all files
   - Getting started guide
