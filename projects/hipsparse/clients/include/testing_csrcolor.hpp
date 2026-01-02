@@ -41,7 +41,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrcolor_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 
     static constexpr int M               = 10;
     static constexpr int NNZ             = 10;
@@ -228,7 +228,7 @@ void testing_csrcolor_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csrcolor(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     hipsparseIndexBase_t idxBase  = argus.baseA;
     std::string          filename = argus.filename;
 
@@ -254,11 +254,8 @@ void testing_csrcolor(const Arguments& argus)
     int m;
     int k;
     int nnz;
-    if(!generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idxBase))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idxBase));
 
     hipsparseColorInfo_t colorInfo;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateColorInfo(&colorInfo));

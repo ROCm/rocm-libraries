@@ -161,10 +161,10 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
+#if (!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 {
     switch(status)
@@ -227,6 +227,23 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     return "<undefined HIPSPARSE_STATUS value>";
 }
 #endif
+
+// CHECK_GENERATE_MATRIX_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+#else
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                  \
+    do                                                                                       \
+    {                                                                                        \
+        auto error = ERROR;                                                                  \
+        if(error != true)                                                                    \
+        {                                                                                    \
+            fprintf(stderr, "Error encountered generating matrix data", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                              \
+        }                                                                                    \
+    } while(0)
+#endif
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
 
 // CHECK_HIP_ERROR
 #ifdef GOOGLE_TEST
@@ -1245,6 +1262,11 @@ bool generate_csr_matrix(const std::string    filename,
             {
                 return true;
             }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
+            }
         }
         else if(extension == "mtx")
         {
@@ -1278,6 +1300,11 @@ bool generate_csr_matrix(const std::string    filename,
 
                     return true;
                 }
+            }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
             }
         }
     }

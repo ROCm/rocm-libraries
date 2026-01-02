@@ -43,7 +43,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrilusv(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     hipsparseIndexBase_t idx_base = argus.baseA;
     std::string          filename = argus.filename;
 
@@ -68,11 +68,8 @@ void testing_csrilusv(Arguments argus)
     int m;
     int n;
     int nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // Allocate memory on device
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};

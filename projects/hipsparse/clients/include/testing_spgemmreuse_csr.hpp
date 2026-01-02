@@ -39,7 +39,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spgemmreuse_csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              k         = 100;
@@ -209,7 +209,7 @@ void testing_spgemmreuse_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spgemmreuse_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     J                    m        = argus.M;
     J                    k        = argus.K;
     T                    h_alpha  = make_DataType<T>(argus.alpha);
@@ -244,12 +244,8 @@ void testing_spgemmreuse_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz_A;
-    if(!generate_csr_matrix(
-           filename, m, k, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idxBaseA))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, m, k, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idxBaseA));
 
     // Sparse matrix B as the transpose of A
     J n     = m;

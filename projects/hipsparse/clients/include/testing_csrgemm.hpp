@@ -43,7 +43,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrgemm_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                  M         = 1;
     int                  N         = 1;
     int                  K         = 1;
@@ -699,7 +699,7 @@ static void host_csrgemm(int                  m,
 template <typename T>
 void testing_csrgemm(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  M          = argus.M;
     int                  N          = argus.N;
     int                  K          = argus.K;
@@ -736,12 +736,8 @@ void testing_csrgemm(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz_A = 0;
-    if(!generate_csr_matrix(
-           filename, M, K, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, M, K, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A));
 
     // B = A^T so that we can compute the square of A
     N                      = M;

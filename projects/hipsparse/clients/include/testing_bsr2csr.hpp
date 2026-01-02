@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_bsr2csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                  m            = 1;
     int                  n            = 1;
     int                  safe_size    = 1;
@@ -295,11 +295,8 @@ void testing_bsr2csr(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, csr_row_ptr, csr_col_ind, csr_val, csr_idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, csr_row_ptr, csr_col_ind, csr_val, csr_idx_base));
 
     // m and n can be modifed if we read in a matrix from a file
     int mb = (m + block_dim - 1) / block_dim;

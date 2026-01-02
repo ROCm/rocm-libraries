@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csric02_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                    m         = 100;
     int                    nnz       = 100;
     int                    safe_size = 100;
@@ -159,7 +159,7 @@ void testing_csric02_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csric02(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                    m        = argus.M;
     hipsparseIndexBase_t   idx_base = argus.baseA;
     hipsparseSolvePolicy_t policy   = argus.solve_policy;
@@ -194,11 +194,8 @@ void testing_csric02(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     std::vector<T> hcsr_val_orig(hcsr_val);
 

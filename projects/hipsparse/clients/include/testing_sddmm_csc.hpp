@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_sddmm_csc_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 
     int32_t              n         = 100;
     int32_t              m         = 100;
@@ -188,7 +188,7 @@ template <typename I, typename J, typename T>
 void testing_sddmm_csc(Arguments argus)
 {
 // only csr format supported when using cusparse backend
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
@@ -221,11 +221,8 @@ void testing_sddmm_csc(Arguments argus)
 
     // Read or construct CSR matrix
     I nnz = 0;
-    if(!generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base));
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;

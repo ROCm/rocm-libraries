@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename T>
 void testing_sparse_to_dense_coo_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
     int64_t safe_size = 100;
     int32_t m         = 10;
     int32_t n         = 10;
@@ -111,7 +111,7 @@ void testing_sparse_to_dense_coo_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSparseToDense(handle, matA, nullptr, alg, dbuf), "Error: matB is nullptr");
     // cuda returns success here
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseSparseToDense(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
 #endif
@@ -125,7 +125,7 @@ void testing_sparse_to_dense_coo_bad_arg(const Arguments& argus)
 template <typename I, typename T>
 void testing_sparse_to_dense_coo(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
     I                           m        = argus.M;
     I                           n        = argus.N;
     hipsparseOrder_t            order    = argus.orderA;
@@ -150,11 +150,8 @@ void testing_sparse_to_dense_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     I ld = (order == HIPSPARSE_ORDER_COL) ? m : n;
 

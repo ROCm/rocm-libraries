@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_sparse_to_dense_csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
     int64_t safe_size = 100;
     int32_t m         = 10;
     int32_t n         = 10;
@@ -131,7 +131,7 @@ void testing_sparse_to_dense_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_sparse_to_dense_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
     J                           m        = argus.M;
     J                           n        = argus.N;
     hipsparseIndexBase_t        idx_base = argus.baseA;
@@ -157,11 +157,8 @@ void testing_sparse_to_dense_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     I ld = (order == HIPSPARSE_ORDER_COL) ? m : n;
 

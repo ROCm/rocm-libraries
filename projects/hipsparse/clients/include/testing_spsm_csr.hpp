@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spsm_csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              k         = 100;
@@ -182,7 +182,7 @@ void testing_spsm_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spsm_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
@@ -197,7 +197,7 @@ void testing_spsm_csr(Arguments argus)
     hipsparseSpSMAlg_t   alg      = argus.spsm_alg;
     std::string          filename = argus.filename;
 
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
     if(orderB != orderC)
     {
         return;
@@ -222,11 +222,8 @@ void testing_spsm_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     if(m != n)
     {

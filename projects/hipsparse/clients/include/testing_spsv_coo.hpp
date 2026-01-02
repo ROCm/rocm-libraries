@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename T>
 void testing_spsv_coo_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              nnz       = 100;
@@ -124,7 +124,7 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_analysis(handle, transA, &alpha, A, x, nullptr, dataType, alg, descr, dbuf),
         "Error: y is nullptr");
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_analysis(handle, transA, &alpha, A, x, y, dataType, alg, descr, nullptr),
         "Error: dbuf is nullptr");
@@ -145,7 +145,7 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_solve(handle, transA, &alpha, A, x, nullptr, dataType, alg, descr),
         "Error: y is nullptr");
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_solve(handle, transA, &alpha, A, x, y, dataType, alg, nullptr),
         "Error: descr is nullptr");
@@ -162,7 +162,7 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
 template <typename I, typename T>
 void testing_spsv_coo(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     I                    m        = argus.M;
     I                    n        = argus.N;
     T                    h_alpha  = make_DataType<T>(argus.alpha);
@@ -190,11 +190,8 @@ void testing_spsv_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base));
 
     std::vector<I> hrow_ind(nnz);
 

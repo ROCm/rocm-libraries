@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_hyb2csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int safe_size = 100;
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
@@ -98,7 +98,7 @@ void testing_hyb2csr_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_hyb2csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  m        = argus.M;
     int                  n        = argus.N;
     hipsparseIndexBase_t idx_base = argus.baseA;
@@ -124,12 +124,8 @@ void testing_hyb2csr(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(
-           filename, m, n, nnz, hcsr_row_ptr_gold, hcsr_col_ind_gold, hcsr_val_gold, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, m, n, nnz, hcsr_row_ptr_gold, hcsr_col_ind_gold, hcsr_val_gold, idx_base));
 
     // Allocate memory on the device
     auto dcsr_row_ptr_managed

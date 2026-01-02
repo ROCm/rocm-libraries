@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spsv_csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              nnz       = 100;
@@ -125,7 +125,7 @@ void testing_spsv_csr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_analysis(handle, transA, &alpha, A, x, nullptr, dataType, alg, descr, dbuf),
         "Error: y is nullptr");
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_analysis(handle, transA, &alpha, A, x, y, dataType, alg, descr, nullptr),
         "Error: dbuf is nullptr");
@@ -146,7 +146,7 @@ void testing_spsv_csr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_solve(handle, transA, &alpha, A, x, nullptr, dataType, alg, descr),
         "Error: y is nullptr");
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpSV_solve(handle, transA, &alpha, A, x, y, dataType, alg, nullptr),
         "Error: descr is nullptr");
@@ -163,7 +163,7 @@ void testing_spsv_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spsv_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     J                    m        = argus.M;
     J                    n        = argus.N;
     T                    h_alpha  = make_DataType<T>(argus.alpha);
@@ -192,11 +192,8 @@ void testing_spsv_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     std::vector<T> hx(m);
     std::vector<T> hy_1(m);

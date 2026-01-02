@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrmv_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                  n         = 100;
     int                  m         = 100;
     int                  nnz       = 100;
@@ -132,7 +132,7 @@ void testing_csrmv_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csrmv(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  nrow     = argus.M;
     int                  ncol     = argus.N;
     T                    h_alpha  = make_DataType<T>(argus.alpha);
@@ -159,12 +159,8 @@ void testing_csrmv(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(
-           filename, nrow, ncol, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, nrow, ncol, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     int m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? nrow : ncol;
     int n = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ncol : nrow;

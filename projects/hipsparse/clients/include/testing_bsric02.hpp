@@ -45,7 +45,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_bsric02_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                    mb        = 100;
     int                    nnzb      = 100;
     int                    block_dim = 4;
@@ -338,7 +338,7 @@ void testing_bsric02_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_bsric02(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                    m         = argus.M;
     int                    block_dim = argus.block_dim;
     hipsparseDirection_t   dir       = argus.dirA;
@@ -375,11 +375,8 @@ void testing_bsric02(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // m can be modifed if we read in a matrix from a file
     int mb = (m + block_dim - 1) / block_dim;

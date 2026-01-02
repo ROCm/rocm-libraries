@@ -43,7 +43,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_gemmi_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int safe_size = 100;
     T   alpha     = make_DataType<T>(0.6);
     T   beta      = make_DataType<T>(0.2);
@@ -278,7 +278,7 @@ void testing_gemmi_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_gemmi(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int         M        = argus.M;
     int         N        = argus.N;
     int         K        = argus.K;
@@ -305,12 +305,8 @@ void testing_gemmi(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(
-           filename, N, K, nnz, hcsc_col_ptrB, hcsc_row_indB, hcsc_valB, HIPSPARSE_INDEX_BASE_ZERO))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, N, K, nnz, hcsc_col_ptrB, hcsc_row_indB, hcsc_valB, HIPSPARSE_INDEX_BASE_ZERO));
 
     int lda = std::max(1, M);
     int ldc = std::max(1, M);

@@ -47,7 +47,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_hybmv_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                  safe_size = 100;
     T                    alpha     = make_DataType<T>(0.6);
     T                    beta      = make_DataType<T>(0.2);
@@ -100,7 +100,7 @@ void testing_hybmv_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_hybmv(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                     m              = argus.M;
     int                     n              = argus.N;
     T                       h_alpha        = make_DataType<T>(argus.alpha);
@@ -135,11 +135,8 @@ void testing_hybmv(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base));
 
     std::vector<T> hx(n);
     std::vector<T> hy_1(m);

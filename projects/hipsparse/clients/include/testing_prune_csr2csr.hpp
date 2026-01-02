@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_prune_csr2csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     size_t safe_size = 1;
 
     int    M                      = 1;
@@ -520,7 +520,7 @@ void testing_prune_csr2csr_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_prune_csr2csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  M              = argus.M;
     int                  N              = argus.N;
     T                    threshold      = make_DataType<T>(argus.threshold);
@@ -557,12 +557,8 @@ void testing_prune_csr2csr(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz_A = 0;
-    if(!generate_csr_matrix(
-           filename, M, N, nnz_A, h_csr_row_ptr_A, h_csr_col_ind_A, h_csr_val_A, csr_idx_base_A))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, M, N, nnz_A, h_csr_row_ptr_A, h_csr_col_ind_A, h_csr_val_A, csr_idx_base_A));
 
     // Allocate device memory
     auto d_nnz_total_dev_host_ptr_managed

@@ -43,7 +43,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrgeam_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int safe_size = 1;
 
     T alpha = make_DataType<T>(1.0);
@@ -694,7 +694,7 @@ void testing_csrgeam_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csrgeam(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  M          = argus.M;
     int                  N          = argus.N;
     T                    h_alpha    = make_DataType<T>(argus.alpha);
@@ -730,13 +730,8 @@ void testing_csrgeam(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz_A = 0;
-    if(!generate_csr_matrix(
-           filename, M, N, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
-
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, M, N, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A));
     // B = A
     int              nnz_B = nnz_A;
     std::vector<int> hcsr_row_ptr_B(M + 1, 0);

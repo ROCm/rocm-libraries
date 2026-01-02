@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_bsrsm2_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int   mb        = 100;
     int   nrhs      = 100;
     int   nnzb      = 100;
@@ -517,7 +517,7 @@ void testing_bsrsm2_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_bsrsm2(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  m         = argus.M;
     int                  nrhs      = argus.N;
     int                  block_dim = argus.block_dim;
@@ -557,11 +557,8 @@ void testing_bsrsm2(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     int mb = (m + block_dim - 1) / block_dim;
 
