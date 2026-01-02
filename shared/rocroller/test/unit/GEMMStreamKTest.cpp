@@ -77,6 +77,12 @@ namespace GEMMTests
 
     TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMM)
     {
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
+        {
+            GTEST_SKIP() << "Skipping StreamKMultipleFixupsTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
+        }
+
         auto [problemConfig, mode, loadPathA, loadPathB, storeLDSD] = std::get<1>(GetParam());
         auto [dataTypeAB, macM, macN, macK, m, n, k, numWGs]        = problemConfig;
 
@@ -97,12 +103,6 @@ namespace GEMMTests
 
         gemm.workgroupSizeX = 128;
         gemm.workgroupSizeY = 2;
-
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
-        {
-            GTEST_SKIP() << "Skipping StreamKMultipleFixupsTestGPU on architecture "
-                         << m_context->targetArchitecture().target().toString();
-        }
 
         // assert that the number of output tiles is smaller than number of WGs
         // which means there is not enough data-parallel tiles, and has to split
@@ -129,6 +129,12 @@ namespace GEMMTests
 
     TEST_P(StreamKWGMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
     {
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
+        {
+            GTEST_SKIP() << "Skipping StreamKWGMTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
+        }
+
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
@@ -137,12 +143,6 @@ namespace GEMMTests
 
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
-        {
-            GTEST_SKIP() << "Skipping StreamKWGMTestGPU on architecture "
-                         << m_context->targetArchitecture().target().toString();
-        }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
@@ -161,6 +161,12 @@ namespace GEMMTests
 
     TEST_P(StreamKTestGPU, GPU_BasicGEMM)
     {
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
+        {
+            GTEST_SKIP() << "Skipping StreamKTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
+        }
+
         auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero, prefetchConfig]
             = std::get<1>(GetParam());
         auto [prefetchInFlight, prefetchLDSFactor] = prefetchConfig;
@@ -179,12 +185,6 @@ namespace GEMMTests
 
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
-        {
-            GTEST_SKIP() << "Skipping StreamKTestGPU on architecture "
-                         << m_context->targetArchitecture().target().toString();
-        }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
