@@ -220,5 +220,5 @@ These rules were inspired by the hipDNN project's agent development rules and ad
 
 ---
 
-**Questions?** See `AGENT_RULES_SUMMARY.md` for detailed documentation or `AGENT_RULES_COMPARISON.md` for comparison with hipDNN.
+**Questions?** See `AGENT_RULES_SUMMARY.md` for detailed documentation.
 
