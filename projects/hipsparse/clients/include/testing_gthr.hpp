@@ -116,10 +116,7 @@ void testing_gthr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hx_val.data(), dx_val, sizeof(T) * nnz, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int i = 0; i < nnz; ++i)
-        {
-            hx_val_gold[i] = hy[hx_ind[i] - idx_base];
-        }
+        host_gthr(nnz, hy.data(), hx_val_gold.data(), hx_ind.data(), idx_base);
 
         // enable unit check, notice unit check is not invasive, but norm check is,
         // unit check and norm check can not be interchanged their order

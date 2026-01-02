@@ -124,10 +124,7 @@ void testing_sctr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * N, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int i = 0; i < nnz; ++i)
-        {
-            hy_gold[hx_ind[i] - idx_base] = hx_val[i];
-        }
+        host_sctr(nnz, hx_val.data(), hx_ind.data(), hy_gold.data(), idx_base);
         // enable unit check, notice unit check is not invasive, but norm check is,
         // unit check and norm check can not be interchanged their order
         unit_check_general(1, N, 1, hy_gold.data(), hy.data());
