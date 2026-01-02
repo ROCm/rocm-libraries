@@ -58,6 +58,8 @@ public:
     virtual std::shared_ptr<const EngineDescriptor> getEngine() const;
 
     virtual hipdnnPluginConstData_t getSerializedEngineConfig() const;
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend
