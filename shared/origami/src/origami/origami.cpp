@@ -96,14 +96,14 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     int32_t wgm;
 
     if (numMTs == 1 || numTotalTiles <= numXCD) {
-      wgmxccchunk = 1;
-      wgmxcc = 1;
+      wgmxccchunk = 0;
+      wgmxcc = 0;
       wgm = 1;
     }
     // This gives a nice strided read pattern for batched GEMMs
     else if (numMTs % numXCD == 0) {
-      wgmxccchunk = 1;
-      wgmxcc = 1;
+      wgmxccchunk = 0;
+      wgmxcc = 0;
       wgm = 1;
     }
     else {
@@ -154,11 +154,11 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // shortcut:
   // 1. if we have decided to not remap xcc, there is no reason to use wgm
   // 2. GEMMs that only have one tile in one dimension don't need wgm
-  if (out_wgmxcc == 1 || numMT_M == 1 || numMT_N == 1)
+  if (out_wgmxcc == 0 || numMT_M == 1 || numMT_N == 1)
     out_wgm = 1;
   // For tall cases (M >> N), if we have enough tiles to schedule, we use the number of tiles
   // in the smaller dimension as WGM value
-  else if (numMTs > numCUs && M > 10 * N && numMT_N <= 8)
+  else if (numMTs > 2 * numCUs && numMT_N <= 8)
     out_wgm = numMT_N;
   else {
     // List of candidates for WGM values
@@ -257,7 +257,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
         config.logger.log("L2Estimate", wgmL2Estimate);
       }
     }
-
+    // Set the best WGM
     out_wgm = bestWGM;
   }
 
