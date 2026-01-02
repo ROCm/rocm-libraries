@@ -80,35 +80,11 @@ struct kernel_params
         }
         else
         {
-            out_pix_tile0 = 1;
-            out_pix_tile1 = 1;
-            if(pd.GetMode() == miopenPoolingMax)
-            {
-                out_pix_tile0 = in_width > 8 && in_width <= 24 ? 4 : 1;
-                out_pix_tile1 = in_width <= 24 ? 1 : (in_width > 64 && in_width <= 96 ? 4 : 8);
-            }
-
-            grp_tile0 = 8;
-            grp_tile1 = 8;
-            if(pd.GetMode() == miopenPoolingMax)
-            {
-                grp_tile0 = in_width <= 8     ? 8  //
-                            : in_width <= 16  ? 4  //
-                            : in_width <= 24  ? 8  //
-                            : in_width <= 32  ? 32 //
-                            : in_width <= 64  ? 8  //
-                            : in_width <= 96  ? 16 //
-                            : in_width <= 128 ? 16
-                                              : 32;
-                grp_tile1 = in_width <= 8     ? 8  //
-                            : in_width <= 16  ? 16 //
-                            : in_width <= 24  ? 8  //
-                            : in_width <= 32  ? 4  //
-                            : in_width <= 64  ? 8  //
-                            : in_width <= 96  ? 4  //
-                            : in_width <= 128 ? 16
-                                              : 4;
-            }
+            // set to max values for safer memory estimations
+            out_pix_tile0 = PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0;
+            out_pix_tile1 = PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1;
+            grp_tile0     = PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0;
+            grp_tile1     = PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1;
         }
     }
 };
@@ -137,25 +113,14 @@ std::size_t sizeof_local_memory(const miopen::pooling::ProblemDescription& probl
     const kernel_params kp(problem);
 
     // aliases to ease programming
-    const auto& MLO_POOLING_KERNEL_SZ0 = kp.kernel_size_w;
-    const auto& MLO_POOLING_KERNEL_SZ1 = kp.kernel_size_h;
-    const auto& MLO_POOLING_STRIDE0    = kp.kernel_stride_w;
-    const auto& MLO_POOLING_STRIDE1    = kp.kernel_stride_h;
-    // safer estimates of memory with max values of tunable parameters
-    assert(kp.out_pix_tile0 <=
-           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0);
-    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0;
-    assert(kp.out_pix_tile1 <=
-           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1);
-    const auto& MLO_POOLBWD_N_VERT_OUT_PIX =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1;
-    assert(kp.grp_tile0 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0);
-    const auto& MLO_POOLBWD_GROUP_SZ0 =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0;
-    assert(kp.grp_tile1 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1);
-    const auto& MLO_POOLBWD_GROUP_SZ1 =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1;
+    const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
+    const auto& MLO_POOLING_KERNEL_SZ1      = kp.kernel_size_h;
+    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX = kp.out_pix_tile0;
+    const auto& MLO_POOLBWD_N_VERT_OUT_PIX  = kp.out_pix_tile1;
+    const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
+    const auto& MLO_POOLING_STRIDE1         = kp.kernel_stride_h;
+    const auto& MLO_POOLBWD_GROUP_SZ0       = kp.grp_tile0;
+    const auto& MLO_POOLBWD_GROUP_SZ1       = kp.grp_tile1;
 
     const auto MLO_POOLBWD_LCL_DATA_WIDTH =
         (static_cast<std::size_t>(MLO_POOLBWD_GROUP_SZ0) * MLO_POOLBWD_N_HORIZ_OUT_PIX +

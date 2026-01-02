@@ -71,11 +71,8 @@ struct kernel_params
         }
         else
         {
-            out_pix_tile1 = out_height <= 8    ? 1 //
-                            : out_height <= 32 ? 4 //
-                                               : 8;
-            if(out_height > 16 && out_height % 32 > 16)
-                out_pix_tile1 = std::min(16, std::max(1, prePow2(out_pix_tile1 * kernel_stride_h)));
+            // set to max value for safer memory estimations
+            out_pix_tile1 = PerformanceConfigPooling2d<OperationType::Forward>::max_out_pix_tile1;
         }
     }
 };
@@ -122,11 +119,7 @@ std::size_t sizeof_private_memory(const miopen::pooling::ProblemDescription& pro
     const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
     const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
     const auto& MLO_POOLING_N_HORIZ_OUT_PIX = kp.out_pix_tile0;
-    // safer estimate of memory with max_out_pix_tile1
-    assert(kp.out_pix_tile1 <=
-           PerformanceConfigPooling2d<OperationType::Forward>::max_out_pix_tile1);
-    const auto& MLO_POOLING_N_VERT_OUT_PIX =
-        PerformanceConfigPooling2d<OperationType::Forward>::max_out_pix_tile1;
+    const auto& MLO_POOLING_N_VERT_OUT_PIX  = kp.out_pix_tile1;
 
     const auto MLO_BOT_DATA_SZ0 =
         (static_cast<std::size_t>(MLO_POOLING_N_HORIZ_OUT_PIX) - 1) * MLO_POOLING_STRIDE0 +
