@@ -200,6 +200,27 @@ inline rocsparse_double_complex
     return rocsparse_double_complex(r * cos(theta), r * sin(theta));
 }
 
+// Specialization for _Float16: generate small integer values that are exactly representable
+// in half precision to avoid accumulation errors during atomic adds.
+template <>
+inline _Float16 random_generator<_Float16>(_Float16 a, _Float16 b)
+{
+    // Generate small integer values scaled to fit in the desired range
+    int int_val = std::uniform_int_distribution<int>(-8, 8)(rocsparse_rng_get());
+    return static_cast<_Float16>(int_val * 0.125f);
+}
+
+// Specialization for rocsparse_bfloat16: generate small integer values that are exactly representable
+// in bfloat16 to avoid accumulation errors during atomic adds.
+template <>
+inline rocsparse_bfloat16 random_generator<rocsparse_bfloat16>(rocsparse_bfloat16 a,
+                                                               rocsparse_bfloat16 b)
+{
+    // Generate small integer values scaled to fit in the desired range
+    int int_val = std::uniform_int_distribution<int>(-8, 8)(rocsparse_rng_get());
+    return static_cast<rocsparse_bfloat16>(int_val * 0.125f);
+}
+
 /*! \brief  generate a random number in range [a,b] from a predetermined finite cache using integer numbers*/
 template <typename T>
 inline T random_cached_generator_exact(int a = 1, int b = 10)
@@ -251,6 +272,31 @@ template <>
 inline double random_cached_generator(double a, double b)
 {
     return rocsparse_uniform_double(a, b);
+}
+
+// Specialization for _Float16: generate small integer values that are exactly representable
+// in half precision to avoid accumulation errors during atomic adds.
+// Values are in [-8, 8] range which are exact in f16 (10-bit mantissa can represent integers up to 2048)
+template <>
+inline _Float16 random_cached_generator(_Float16 a, _Float16 b)
+{
+    // Generate small integer values scaled to fit in the desired range
+    // Using integers from -8 to 8, scaled by 0.125 to get values like -1.0, -0.875, ..., 0, ..., 1.0
+    int int_val = rocsparse_uniform_int(-8, 8);
+    return static_cast<_Float16>(int_val * 0.125f);
+}
+
+// Specialization for rocsparse_bfloat16: generate small integer values that are exactly representable
+// in bfloat16 to avoid accumulation errors during atomic adds.
+// BFloat16 has only 7-bit mantissa, so use smaller range.
+// Integers up to 128 are exactly representable.
+template <>
+inline rocsparse_bfloat16 random_cached_generator(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
+{
+    // Generate small integer values scaled to fit in the desired range
+    // Using integers from -8 to 8, scaled by 0.125 to get values like -1.0, -0.875, ..., 0, ..., 1.0
+    int int_val = rocsparse_uniform_int(-8, 8);
+    return static_cast<rocsparse_bfloat16>(int_val * 0.125f);
 }
 
 template <>
