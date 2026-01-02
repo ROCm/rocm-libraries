@@ -171,7 +171,21 @@ python3 rtest.py -t cqe
 ### Numerical Verification
 
 ```cpp
-// Compare against reference implementation
+// Helper to get epsilon for real and complex types (from clients/include/unit.hpp)
+template <typename T, std::enable_if_t<(!rocblas_is_complex<T>), int> = 0>
+constexpr double get_epsilon()
+{
+    return std::numeric_limits<T>::epsilon();
+}
+
+template <typename T, std::enable_if_t<(rocblas_is_complex<T>), int> = 0>
+constexpr auto get_epsilon()
+{
+    // For complex types, get epsilon of the underlying real type
+    return get_epsilon<decltype(std::real(T{}))>();
+}
+
+// Compare against reference implementation (works for real and complex types)
 template <typename T>
 void verify_gemm_result(const T* computed,
                         const T* reference,
@@ -179,13 +193,15 @@ void verify_gemm_result(const T* computed,
                         rocblas_int n,
                         rocblas_int ldc)
 {
-    double tolerance = std::numeric_limits<T>::epsilon() * 10;
+    double tolerance = get_epsilon<T>() * 10;
     
     for(rocblas_int i = 0; i < m; i++)
     {
         for(rocblas_int j = 0; j < n; j++)
         {
-            T diff = std::abs(computed[i + j * ldc] - reference[i + j * ldc]);
+            auto idx = i + j * ldc;
+            // std::abs returns magnitude for both real and complex types
+            auto diff = std::abs(computed[idx] - reference[idx]);
             EXPECT_NEAR(diff, 0.0, tolerance);
         }
     }
