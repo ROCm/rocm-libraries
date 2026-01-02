@@ -167,19 +167,26 @@ rocblas_status rocblas_sgemm(
 
 ## Testing Patterns
 
+**Note:** Tests use `rocblas_gemm<T>` as a test infrastructure wrapper. End users should call precision-specific functions directly: `rocblas_sgemm`, `rocblas_dgemm`, `rocblas_cgemm`, `rocblas_zgemm`, etc.
+
 ### Test Structure
 ```cpp
 template <typename T>
 void testing_gemm(const Arguments& arg)
 {
-    rocblas_handle handle;
-    rocblas_create_handle(&handle);
+    // Test wrapper that dispatches to precision-specific APIs
+    auto rocblas_gemm_fn = rocblas_gemm<T>;
     
-    // Setup and execute
-    rocblas_status status = rocblas_gemm<T>(handle, ...);
-    ASSERT_EQ(status, rocblas_status_success);
+    rocblas_local_handle handle{arg};
     
-    rocblas_destroy_handle(handle);
+    // Allocate memory using test infrastructure
+    DEVICE_MEMCHECK(device_matrix<T>, dA, (m, k, lda));
+    DEVICE_MEMCHECK(device_matrix<T>, dB, (k, n, ldb));
+    DEVICE_MEMCHECK(device_matrix<T>, dC, (m, n, ldc));
+    
+    // Execute via test wrapper
+    DAPI_CHECK(rocblas_gemm_fn, 
+               (handle, transA, transB, m, n, k, &alpha, dA, lda, dB, ldb, &beta, dC, ldc));
 }
 
 TEST(gemm_gtest, float)
