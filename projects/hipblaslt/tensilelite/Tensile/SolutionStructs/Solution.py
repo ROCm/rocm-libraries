@@ -2512,12 +2512,10 @@ class Solution(collections.abc.Mapping):
     # TailloopInNll optimization check
     if state["TailloopInNll"]:
       # Disable TailloopInNll
-      # - StreamK is 0 (need to disable GSU for TailloopInNll)
       # - (not MFMA) or WMMA
       # - PrefetchGlobalRead is 0
       # - NoTailLoop
-      if (state["StreamK"] == 0) or \
-         ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
+      if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
          (state["PrefetchGlobalRead"] == 0) or \
          state["NoTailLoop"]:
         state["TailloopInNll"] = False
@@ -2532,7 +2530,12 @@ class Solution(collections.abc.Mapping):
         state["SuppressNoLoadLoop"] = False
         # disable UseCustomMainLoopSchedule
         state["UseCustomMainLoopSchedule"] = False
-        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll-K
+        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
+        # disable GSU>1 (TODO: enable TIN+GSU>1)
+        if state["GlobalSplitU"] > 1:
+          state["GlobalSplitU"] = 1
+        # disable UserGSU (tentative)
+        state["InternalSupportParams"]["SupportUserGSU"] = False
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
