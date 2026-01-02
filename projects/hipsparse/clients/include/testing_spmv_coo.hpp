@@ -43,7 +43,7 @@ template <typename I, typename T>
 void testing_spmv_coo_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              nnz       = 100;
@@ -152,7 +152,7 @@ template <typename I, typename T>
 void testing_spmv_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     I                    m        = argus.M;
     I                    n        = argus.N;
     T                    h_alpha  = make_DataType<T>(argus.alpha);
