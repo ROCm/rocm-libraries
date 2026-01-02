@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_prune_csr2csr_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     size_t safe_size = 1;
 
     int    M                      = 1;
@@ -520,7 +520,7 @@ void testing_prune_csr2csr_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_prune_csr2csr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  M              = argus.M;
     int                  N              = argus.N;
     T                    threshold      = make_DataType<T>(argus.threshold);

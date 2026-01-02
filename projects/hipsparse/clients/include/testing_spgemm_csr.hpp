@@ -39,7 +39,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spgemm_csr_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              k         = 100;
@@ -334,7 +334,7 @@ void testing_spgemm_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spgemm_csr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     J                    m        = argus.M;
     J                    k        = argus.K;
     T                    h_alpha  = make_DataType<T>(argus.alpha);

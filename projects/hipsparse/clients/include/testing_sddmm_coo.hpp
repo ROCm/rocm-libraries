@@ -43,7 +43,7 @@ using namespace hipsparse_test;
 template <typename I, typename T>
 void testing_sddmm_coo_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 
     int32_t              n         = 100;
     int32_t              m         = 100;
@@ -185,7 +185,7 @@ void testing_sddmm_coo_bad_arg(const Arguments& argus)
 template <typename I, typename T>
 void testing_sddmm_coo(Arguments argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     I                    m        = argus.M;
     I                    n        = argus.N;
     I                    k        = argus.K;

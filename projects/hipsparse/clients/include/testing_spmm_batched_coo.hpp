@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename I, typename T>
 void testing_spmm_batched_coo_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int32_t              m         = 100;
     int32_t              n         = 100;
     int32_t              k         = 100;
@@ -59,7 +59,7 @@ void testing_spmm_batched_coo_bad_arg(const Arguments& argus)
     hipsparseIndexType_t idxTypeI  = HIPSPARSE_INDEX_32I;
     hipDataType          dataType  = HIP_R_32F;
 
-#if (CUDART_VERSION >= 11003)
+#if(CUDART_VERSION >= 11003)
     hipsparseSpMMAlg_t alg = HIPSPARSE_SPMM_COO_ALG1;
 #else
     hipsparseSpMMAlg_t alg = HIPSPARSE_COOMM_ALG1;
@@ -168,7 +168,7 @@ void testing_spmm_batched_coo_bad_arg(const Arguments& argus)
 template <typename I, typename T>
 void testing_spmm_batched_coo(Arguments argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     I                    m        = argus.M;
     I                    n        = argus.N;
     I                    k        = argus.K;
@@ -184,7 +184,7 @@ void testing_spmm_batched_coo(Arguments argus)
     I batch_count_B = 10;
     I batch_count_C = 10;
 
-#if (CUDART_VERSION >= 11003)
+#if(CUDART_VERSION >= 11003)
     hipsparseSpMMAlg_t alg = HIPSPARSE_SPMM_COO_ALG1;
 #else
     hipsparseSpMMAlg_t alg = HIPSPARSE_COOMM_ALG1;
@@ -192,7 +192,7 @@ void testing_spmm_batched_coo(Arguments argus)
 
     std::string filename = argus.filename;
 
-#if (defined(CUDART_VERSION))
+#if(defined(CUDART_VERSION))
     if(orderB != orderC || orderB != HIPSPARSE_ORDER_COL)
     {
         return;
@@ -366,7 +366,7 @@ void testing_spmm_batched_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     //When using cusparse backend, cant pass nullptr for buffer to preprocess
     if(bufferSize == 0)
     {
@@ -378,14 +378,14 @@ void testing_spmm_batched_coo(Arguments argus)
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
     // HIPSPARSE pointer mode host
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 #endif
 
     // HIPSPARSE pointer mode device
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
         handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));

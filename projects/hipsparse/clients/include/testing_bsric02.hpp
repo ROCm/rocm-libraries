@@ -45,7 +45,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_bsric02_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int                    mb        = 100;
     int                    nnzb      = 100;
     int                    block_dim = 4;
@@ -338,7 +338,7 @@ void testing_bsric02_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_bsric02(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                    m         = argus.M;
     int                    block_dim = argus.block_dim;
     hipsparseDirection_t   dir       = argus.dirA;

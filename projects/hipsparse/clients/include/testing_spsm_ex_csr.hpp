@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spsm_ex_csr_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              k         = 100;
@@ -179,7 +179,7 @@ void testing_spsm_ex_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spsm_ex_csr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
@@ -194,7 +194,7 @@ void testing_spsm_ex_csr(Arguments argus)
     hipsparseSpSMAlg_t   alg      = argus.spsm_alg;
     std::string          filename = argus.filename;
 
-#if (defined(CUDART_VERSION))
+#if(defined(CUDART_VERSION))
     if(orderB != orderC)
     {
         return;

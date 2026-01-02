@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_gebsr2gebsc_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 
     hipsparseStatus_t              status;
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);

@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrmv_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int                  n         = 100;
     int                  m         = 100;
     int                  nnz       = 100;
@@ -132,7 +132,7 @@ void testing_csrmv_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csrmv(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  nrow     = argus.M;
     int                  ncol     = argus.N;
     T                    h_alpha  = make_DataType<T>(argus.alpha);

@@ -40,7 +40,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csru2csr_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int m         = 100;
     int n         = 100;
     int nnz       = 100;
@@ -246,7 +246,7 @@ void testing_csru2csr_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csru2csr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  m        = argus.M;
     int                  n        = argus.N;
     hipsparseIndexBase_t idx_base = argus.baseA;

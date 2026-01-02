@@ -40,7 +40,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_gebsr2gebsr_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int                  mb              = 1;
     int                  nb              = 1;
     int                  nnzb            = 1;

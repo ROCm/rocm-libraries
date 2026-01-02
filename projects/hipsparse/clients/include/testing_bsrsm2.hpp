@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_bsrsm2_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int   mb        = 100;
     int   nrhs      = 100;
     int   nnzb      = 100;
@@ -517,7 +517,7 @@ void testing_bsrsm2_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_bsrsm2(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  m         = argus.M;
     int                  nrhs      = argus.N;
     int                  block_dim = argus.block_dim;

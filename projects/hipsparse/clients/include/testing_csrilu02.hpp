@@ -44,7 +44,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrilu02_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int                    m         = 100;
     int                    nnz       = 100;
     int                    safe_size = 100;
@@ -178,7 +178,7 @@ void testing_csrilu02_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csrilu02(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                    m         = argus.M;
     int                    boost     = argus.numericboost;
     double                 boost_tol = argus.boosttol;

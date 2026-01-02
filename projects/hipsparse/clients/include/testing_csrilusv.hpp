@@ -43,7 +43,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrilusv(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     hipsparseIndexBase_t idx_base = argus.baseA;
     std::string          filename = argus.filename;
 

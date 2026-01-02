@@ -41,7 +41,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_csrcolor_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 
     static constexpr int M               = 10;
     static constexpr int NNZ             = 10;
@@ -228,7 +228,7 @@ void testing_csrcolor_bad_arg(const Arguments& argus)
 template <typename T>
 void testing_csrcolor(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     hipsparseIndexBase_t idxBase  = argus.baseA;
     std::string          filename = argus.filename;
 
