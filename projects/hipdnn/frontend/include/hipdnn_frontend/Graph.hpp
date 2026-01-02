@@ -27,16 +27,19 @@
 namespace hipdnn_frontend::graph
 {
 // When an error occurs, get the backend error string and append it to the error_message.
-#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                        \
-    if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
-    {                                                                                   \
-        std::array<char, 256> backend_err_msg{};                                        \
-        hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
-                                                             backend_err_msg.size());   \
-        std::string full_error_msg                                                      \
-            = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
-        return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
-    }
+#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                            \
+    do                                                                                      \
+    {                                                                                       \
+        if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
+        {                                                                                   \
+            std::array<char, 256> backend_err_msg{};                                        \
+            hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
+                                                                 backend_err_msg.size());   \
+            std::string full_error_msg                                                      \
+                = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
+            return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
+        }                                                                                   \
+    } while(0)
 
 class Graph : public INode
 {
