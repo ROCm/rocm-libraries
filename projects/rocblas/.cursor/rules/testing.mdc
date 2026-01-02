@@ -37,8 +37,22 @@ void testing_gemm(const Arguments& arg)
     rocblas_handle handle;
     rocblas_create_handle(&handle);
     
-    // Allocate memory
-    // ... device allocations ...
+    // Allocate device memory using rocBLAS handle-managed allocation
+    size_t size_A = size_t(m) * k;
+    size_t size_B = size_t(k) * n;
+    size_t size_C = size_t(m) * n;
+
+    auto dA_managed = handle->device_malloc(sizeof(T) * size_A);
+    auto dB_managed = handle->device_malloc(sizeof(T) * size_B);
+    auto dC_managed = handle->device_malloc(sizeof(T) * size_C);
+
+    T* dA = static_cast<T*>(dA_managed);
+    T* dB = static_cast<T*>(dB_managed);
+    T* dC = static_cast<T*>(dC_managed);
+
+    ASSERT_NE(dA, nullptr);
+    ASSERT_NE(dB, nullptr);
+    ASSERT_NE(dC, nullptr);
     
     // Execute operation
     rocblas_status status = rocblas_gemm<T>(handle, ...);
