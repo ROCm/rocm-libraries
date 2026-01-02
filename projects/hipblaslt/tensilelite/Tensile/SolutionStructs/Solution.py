@@ -1436,7 +1436,7 @@ class Solution(collections.abc.Mapping):
           and (state["ProblemType"]["DataTypeA"].isSingle() and state["ProblemType"]["DataTypeB"].isSingle()):
           reject(state, printRejectionReason, "ConvertAfterDS doesn't support SS_BSS type")
           return
-      
+
     # Complex datatype restrictions.
     if state["ProblemType"]["DataType"].isComplex():
       if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
