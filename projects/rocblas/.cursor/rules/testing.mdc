@@ -4,6 +4,8 @@ globs: ["*.cpp", "*.hpp", "*.h", "clients/gtest/**", "clients/benchmarks/**"]
 
 # Testing Guidelines
 
+> **Note to AI Agents:** If testing patterns have evolved or examples are misleading, suggest updates to these guidelines.
+
 ## Framework
 
 - Use Google Test (gtest) framework for all C/C++ tests

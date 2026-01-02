@@ -188,12 +188,28 @@ See `AGENT_RULES_COMPARISON.md` for detailed comparison.
 
 ## 🤝 Contributing
 
+### For Developers Updating Rules
+
 When updating these rules:
 
 1. Test with actual agent interactions
 2. Update all relevant files (don't forget copilot-instructions.md)
 3. Document changes in this README
 4. Consider impact on both Cursor and GitHub Copilot
+
+### For AI Agents Using These Rules
+
+**Help improve these rules!** If you notice:
+
+- ✅ **Inconsistencies:** Pattern in code differs from documented rule
+- ✅ **Missing patterns:** Critical idioms not documented
+- ✅ **Outdated examples:** Code examples don't match current practices
+- ✅ **Gaps:** Questions these rules should answer but don't
+
+**Suggest updates by saying:**
+> "I notice [observation]. The rules in [file] section [section] should be updated to [suggestion]. This will help future agents [benefit]."
+
+This creates a continuous improvement loop where the rules evolve with the codebase.
 
 ## ✅ Verification
 

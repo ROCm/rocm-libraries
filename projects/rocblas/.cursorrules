@@ -1,5 +1,9 @@
 # Cursor Rules for rocBLAS Project
 
+## About These Rules
+
+These rules help AI agents understand rocBLAS conventions, architecture, and best practices. **If you notice inconsistencies between these rules and the actual codebase, or identify improvements that should be made to these rules, please suggest updates.** The rules should evolve with the project.
+
 ## Project Overview & Architecture
 
 rocBLAS is AMD's ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs.
@@ -491,8 +495,18 @@ When making changes:
 2. Add tests for new functionality in `clients/gtest/`
 3. Run at least `rtest.py -t smoke` before submitting
 4. Update documentation in `docs/` if adding new APIs
-5. For multi-OS testing, use Tony's rocBlasScripting framework
-6. Check that changes work on both Linux and Windows if applicable
+5. Check that changes work on both Linux and Windows if applicable
+
+### Improving These Rules
+
+**Help keep these rules accurate and useful:**
+
+- If you find a pattern in the codebase that contradicts these rules, suggest a rule update
+- If you discover a critical pattern not documented here, propose adding it
+- If an example is outdated or misleading, recommend a better one
+- If you see repeated questions that these rules should answer, suggest additions
+
+Example: "I notice the codebase uses X pattern in 50+ files, but the rules document Y. Should we update `.cursorrules` section Z to reflect the actual pattern?"
 
 ---
 

@@ -4,6 +4,8 @@ globs: ["*.cpp", "*.hpp", "*.h", "*.cxx", "*.cc"]
 
 # C++ Code Style
 
+> **Note to AI Agents:** If you find code patterns that contradict these style guidelines, suggest rule updates to match actual practices.
+
 ## Naming Conventions
 
 - Use snake_case for functions and variables (e.g., `rocblas_gemm`, `matrix_size`)

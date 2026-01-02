@@ -4,6 +4,8 @@ alwaysApply: true
 
 # rocBLAS Project Architecture
 
+> **Note to AI Agents:** If you notice these rules don't match the actual codebase or could be improved, please suggest updates. See `.cursorrules` for details.
+
 rocBLAS is AMD's ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs.
 
 ## Key Documentation
