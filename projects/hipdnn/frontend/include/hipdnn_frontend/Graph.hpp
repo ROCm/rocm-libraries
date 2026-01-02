@@ -574,8 +574,9 @@ public:
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)
     {
-        HIPDNN_FE_LOG_INFO("BUILD with handle for graph {}, policy: {}, modes: [{}]",
-                           graph_attributes.get_name(),
+        HIPDNN_FE_LOG_INFO("BUILD with handle for graph '{}', policy: {}, modes: [{}]",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name(),
                            policy,
                            fmt::join(modes, ", "));
 
@@ -585,7 +586,9 @@ public:
         HIPDNN_CHECK_ERROR(check_support());
         HIPDNN_CHECK_ERROR(build_plans());
 
-        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph {}",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name());
         return {ErrorCode::OK, ""};
     }
 
