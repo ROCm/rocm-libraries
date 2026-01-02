@@ -269,30 +269,47 @@ Never use explicit `new`/`delete`, `malloc`/`free`, or `hipMalloc`/`hipFree`.
 
 ## Constants and Macros
 
+### Constants: Use static constexpr
+
+**Use `static constexpr` for constants. Never use macros for constants.**
+
 ```cpp
-// Prefer static constexpr over macros
+// Template variable for constants
 template <typename T>
 static constexpr T negative_one = -1;
 
 template <typename T>
 static constexpr T zero = 0;
 
-// Inside functions, use static constexpr
+// Inside functions, use static constexpr (not just constexpr)
 void my_function()
 {
-    static constexpr int BLOCK_SIZE = 256;  // Not just constexpr
+    static constexpr int BLOCK_SIZE = 256;
 }
+```
 
-// Macros with control flow must use do-while(0)
+### Macros: Only for Control Flow
+
+**Only use macros for control flow constructs where necessary.** Macros with control flow must use `do-while(0)` wrapper.
+
+```cpp
+// Macro with control flow - wraps early return
 #define RETURN_ZERO_IF_QUERIED(h) \
     do                            \
     {                             \
         if((h)->is_query())       \
             return rocblas_status_success; \
     } while(0)
+
+// Usage
+void some_function(rocblas_handle handle)
+{
+    RETURN_ZERO_IF_QUERIED(handle);  // No semicolon needed with do-while
+    // ... rest of function
+}
 ```
 
-**Never use macros for constants.** Use `static constexpr` or template variables.
+**Why do-while(0)?** Ensures the macro behaves like a single statement in all contexts (if/else, etc.).
 
 ## API Function Signature Pattern
 
