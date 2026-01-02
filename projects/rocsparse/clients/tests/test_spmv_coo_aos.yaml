@@ -323,7 +323,7 @@ Tests:
   category: pre_checkin
   function: spmv_coo_aos
   indextype: *i32_i64
-  precision: [*float16_float16_float16_float32_axyt_precision]
+  precision: [*float16_float16_float16_float32_axyt_precision, *bfloat16_bfloat16_bfloat16_float32_axyt_precision]
   M: [34, 104, 343]
   N: [57, 109, 458]
   alpha_beta: *alpha_beta_range_checkin
