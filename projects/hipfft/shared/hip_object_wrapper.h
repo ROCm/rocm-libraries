@@ -78,6 +78,12 @@ struct hip_object_wrapper_t
         other.obj = nullptr;
     }
 
+    hip_object_wrapper_t& operator=(hip_object_wrapper_t&& other)
+    {
+        std::swap(obj, other.obj);
+        return *this;
+    }
+
 private:
     T obj;
 };
