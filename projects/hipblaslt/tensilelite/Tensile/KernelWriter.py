@@ -2377,7 +2377,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # tail loop in NoLoadLoop case, generate close loop code for TailLoop here (except for last loop iteration)
       if useTailloopInNll:
         finalLoop = (u == kernel["LoopIters"] - 1)
-        module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -2, finalLoop, skipCondJumpCounter=u))
+        NLLindexLast = (NLLindex == NLLnum - 1)
+        module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -2, finalLoop, skipCondJumpCounter=u, NLLindexLast=NLLindexLast))
 
     return module
 
@@ -2390,6 +2391,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def noLoadLoop( self, kernel, tensorParametersA, tensorParametersB, isOptNLL, isNGLL, pack, NLLindex=0, NLLnum=1, useTailloopInNll=False):
     module = Module("noLoadLoop")
     LoopNameComment = "NoGlobalLoadLoop" if isNGLL else "NoLoadLoop"
+    if useTailloopInNll:
+      LoopNameComment = "TailLoop in " + LoopNameComment
     isOptNLLComment = "Opt" if isOptNLL else "Ord"
     startComment = "%s. %s - Begin " % (isOptNLLComment, LoopNameComment)
     if NLLnum > 1:
@@ -2430,12 +2433,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.codes.localWriteA = Module()
       self.codes.localWriteB = Module()
 
-    openSum = self.openSumAtLeastUnroll(kernel, prefetch=False, isOptNLL=isOptNLL, isNGLL=isNGLL, NLLindex=NLLindex, NLLnum=NLLnum)
-    module.add(openSum)
-
     # re-calculate loop counter for tailloopInNll
     if useTailloopInNll:
       module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1, tailloopInNll=True, NLLindex=NLLindex))
+
+    openSum = self.openSumAtLeastUnroll(kernel, prefetch=False, isOptNLL=isOptNLL, isNGLL=isNGLL, NLLindex=NLLindex, NLLnum=NLLnum, \
+                                        tailloopInNll=useTailloopInNll)
+    module.add(openSum)
 
     if not self.states.numItersPLR and not kernel["UseCustomMainLoopSchedule"]:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
@@ -3201,6 +3205,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               # deepCopy packCode for OptNLL noLoadLoop
               deepCopyPack = deepcopy(pack)
             module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, NLLindex=NLLindex, NLLnum=NLLnum))
+            self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
     if self.states.actualSummationLoops>1 and self.states.staggerU:
       module.addComment1("remove stagger offsets")
@@ -5672,7 +5677,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def closeLoop(self, kernel, tPA, tPB, loopIdx, \
                 finalLoop, emitEndLabelOnly=False, oddLabel=False, \
-                skipCondJumpCounter=-1):
+                skipCondJumpCounter=-1, NLLlast=False):
     return ""
 
   ##############################################################################
@@ -5686,7 +5691,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # At Least 1 Unroll
   ##############################################################################
   @abc.abstractmethod
-  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1):
+  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1, NLLindexLast=False):
     return ""
 
   @abc.abstractmethod

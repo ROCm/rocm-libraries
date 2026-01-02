@@ -5489,9 +5489,6 @@ class KernelWriterAssembly(KernelWriter):
             module.add(self.setTailSrd(tP, sgpr(tmpSgpr+0)))
             module.addSpaceLine()
 
-        if tailloopInNll:
-          module.addComment("Tail Loop in NoLoadLoop")
-
         # LOCAL_SPLITU * min(sizeL % LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)
         module.addComment("numIter%s = LOCAL_SPLITU * min(size%s %% LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)" \
             % (self.states.unrollChar, self.states.unrollChar))
@@ -5501,7 +5498,7 @@ class KernelWriterAssembly(KernelWriter):
           "SizesSum+%u"%loopIdx, kernel["DepthU"], ContinuousRegister(tmpSgpr+2, 2), 2))
         loopCounter = sgpr(loopCounterName)
 
-        if tailloopInNll:
+        if tailloopInNll and NLLindex == 0:
           # tailLoop in NLL case
           if kernel["StreamK"]:
             # StreamK + TailLoopINNLL case
@@ -5694,7 +5691,7 @@ class KernelWriterAssembly(KernelWriter):
   # Close Loop
   # finalLoop : final unroll loop
   ##############################################################################
-  def closeLoop(self, kernel, tPA, tPB, loopIdx, finalLoop, emitEndLabelOnly=False, oddLabel=False, skipCondJumpCounter=-1):
+  def closeLoop(self, kernel, tPA, tPB, loopIdx, finalLoop, emitEndLabelOnly=False, oddLabel=False, skipCondJumpCounter=-1, NLLindexLast=False):
     module = Module("closeLoop")
     if emitEndLabelOnly:
       loopIdx = self.states.unrollIdx
@@ -5716,8 +5713,6 @@ class KernelWriterAssembly(KernelWriter):
       loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][loopIdx]]
       loopLabelBegin = Label("TailLoopBegin%s"%(loopChar), "" )
       loopLabelEnd = Label("TailLoopEnd%s"%(loopChar), "" )
-      if tailloopInNll:
-        EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
       loopCounter = self.loopCounter(kernel, loopIdx)
       numReadsIterCoalescedA = self.states.numReadsIterCoalescedA
       numReadsIterCoalescedB = self.states.numReadsIterCoalescedB
@@ -5946,8 +5941,10 @@ class KernelWriterAssembly(KernelWriter):
       elif tailloopInNll:
         module.add(SBranch(labelName=loopLabelEnd.getLabelName(), \
                   comment="End of tailloopInNll. Jump to the end of TailLoop"))
-        # end of tailloopInNll label
-        module.add(EndOfTailLoopInNLLLabel)
+        if NLLindexLast:
+          # end of tailloopInNll label (NLLindex==NLLnum-1 only)
+          EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
+          module.add(EndOfTailLoopInNLLLabel)
 
       if needTailEndCode:
         if len(kernel["ProblemType"]["IndicesSummation"]) > 1 or kernel["StreamK"]:
@@ -7202,7 +7199,7 @@ class KernelWriterAssembly(KernelWriter):
   # or in the PAP code.
   # isOptNLL : this is for the store-interleaved NLL optimization
   ##############################################################################
-  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1):
+  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1, tailloopInNll=False):
     isLongBranch = False
     if kernel["EnableMatrixInstruction"] and kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
       acclen = getAccToArchLen(kernel)
@@ -7363,6 +7360,9 @@ class KernelWriterAssembly(KernelWriter):
 
       if (not isNGLL) and NLLnum == 2:
         OptOrOrd = "Opt" if isOptNLL else "Ord"
+        if tailloopInNll:
+          # tailloopInNll case, add "_TI_" to avoid duplicated label
+          OptOrOrd += "_TI_"
         loopLabel2ndNLL = Label("%sNLL_second"%(OptOrOrd), "second %s NoLoadLoop entry"%OptOrOrd )
         # NLL + double buffer (NLLnum==2) case (PGR1/2), we need to generate 2 NLL (first and second buffer)
         if NLLindex == 0:

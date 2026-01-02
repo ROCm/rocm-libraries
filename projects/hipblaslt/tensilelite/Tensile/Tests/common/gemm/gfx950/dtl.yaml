@@ -80,7 +80,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - TransposeLDS: [1]
         - StaggerU: [0]
-        - TailLoopInNLL: [0, 1]
+        - TailloopInNll: [0, 1]
         - StreamK: [0,3]
         - DirectToLds: [0, 1]
       BenchmarkJoinParameters:
@@ -126,7 +126,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [1, 4]
         - ScheduleIterAlg: [3]
         - StaggerU: [0]
-        - TailLoopInNLL: [0, 1]
+        - TailloopInNll: [0, 1]
         - StreamK: [0,3]
         - DirectToLds: [1]
       BenchmarkJoinParameters:
@@ -664,7 +664,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1, 2]
         - LDSTrInst: [0,1]
         - SourceSwap: [1]
-        - TailLoopInNLL: [0, 1]
+        - TailloopInNll: [0, 1]
         - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -778,7 +778,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
-        - TailLoopInNLL: [0, 1]
+        - TailloopInNll: [0, 1]
         - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -857,7 +857,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1, 2]
         - SourceSwap: [1]
-        - TailLoopInNLL: [0, 1]
+        - TailloopInNll: [0, 1]
         - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -1021,7 +1021,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [1]
         - LDSTrInst: [0,1]
-        - TailLoopInNLL: [0, 1]
+        - TailloopInNll: [0, 1]
         - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -1129,7 +1129,7 @@ BenchmarkProblems:
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
-        - TailLoopInNLL: [0, 1]
+        - TailloopInNll: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
