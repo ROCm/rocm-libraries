@@ -403,11 +403,11 @@ TEST(TestConvolutionWgradNode, PackNode)
 
     builder.Finish(offset);
     auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Node>(bufferPointer);
+    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
 
     EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "ConvolutionWgrad");
     EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes);
 
     auto packedAttributes = nodeFlatbuffer->attributes_as_ConvolutionWrwAttributes();
     ASSERT_NE(packedAttributes, nullptr);
@@ -432,7 +432,8 @@ TEST(TestConvolutionWgradNode, PackNode)
     EXPECT_EQ(packedAttributes->dilation()->Get(0), 1);
     EXPECT_EQ(packedAttributes->dilation()->Get(1), 1);
 
-    EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(packedAttributes->conv_mode(),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestConvolutionWgradNode, GatherHipdnnTensor)

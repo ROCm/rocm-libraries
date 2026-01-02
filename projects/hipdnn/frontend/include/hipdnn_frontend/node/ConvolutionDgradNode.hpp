@@ -4,12 +4,12 @@
 
 #include "Node.hpp"
 #include <algorithm>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <numeric>
 
 namespace hipdnn_frontend::graph
@@ -331,10 +331,10 @@ public:
                 "ConvolutionDgradNode: Stride dimension mismatch between dy and dx tensors");
 
             // Extract stride order from dy tensor and apply to dx tensor
-            auto strideOrder = hipdnn_sdk::utilities::extractStrideOrder(dyStrides);
+            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(dyStrides);
 
             // Generate dx strides using the extracted stride order and dx dimensions
-            auto dxStrides = hipdnn_sdk::utilities::generateStrides(dxDimsFinal, strideOrder);
+            auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDimsFinal, strideOrder);
 
             dx->set_stride(dxStrides);
         }
@@ -342,14 +342,14 @@ public:
         return {};
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

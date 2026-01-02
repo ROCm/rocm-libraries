@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
@@ -11,9 +11,9 @@
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
 using namespace miopen_legacy_plugin;
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 class TestGpuConvFwdBiasActivPlan : public ::testing::Test
 {

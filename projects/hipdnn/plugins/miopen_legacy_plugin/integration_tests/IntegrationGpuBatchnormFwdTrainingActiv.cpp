@@ -5,7 +5,7 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -16,7 +16,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 
@@ -88,13 +88,19 @@ protected:
         xAttr.set_uid(BatchnormFwdTrainingActivTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto scaleAttr = graph::makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
+        auto scaleAttr
+            = graph::makeTensorAttributes("scale",
+                                          intermediateDataType,
+                                          derivedDims,
+                                          generateStrides(derivedDims, layout.strideOrder));
         scaleAttr.set_uid(BatchnormFwdTrainingActivTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = graph::makeTensorAttributes(
-            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
+        auto biasAttr
+            = graph::makeTensorAttributes("bias",
+                                          intermediateDataType,
+                                          derivedDims,
+                                          generateStrides(derivedDims, layout.strideOrder));
         biasAttr.set_uid(BatchnormFwdTrainingActivTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -111,10 +117,11 @@ protected:
 
         if(scenario == BatchnormTrainingScenario::FULL_TRAINING)
         {
-            auto prevRunningMeanAttr = graph::makeTensorAttributes("prev_running_mean",
-                                                                   intermediateDataType,
-                                                                   derivedDims,
-                                                                   generateStrides(derivedDims));
+            auto prevRunningMeanAttr
+                = graph::makeTensorAttributes("prev_running_mean",
+                                              intermediateDataType,
+                                              derivedDims,
+                                              generateStrides(derivedDims, layout.strideOrder));
             prevRunningMeanAttr.set_uid(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID);
             prevRunningMeanTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningMeanAttr));
@@ -123,7 +130,7 @@ protected:
                 = graph::makeTensorAttributes("prev_running_variance",
                                               intermediateDataType,
                                               derivedDims,
-                                              generateStrides(derivedDims));
+                                              generateStrides(derivedDims, layout.strideOrder));
             prevRunningVarianceAttr.set_uid(
                 BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID);
             prevRunningVarianceTensorAttr
