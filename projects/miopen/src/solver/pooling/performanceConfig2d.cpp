@@ -45,8 +45,7 @@ void PerformanceConfigPooling2d<OpType>::HeuristicInit(
 }
 
 template <OperationType OpType>
-bool PerformanceConfigPooling2d<OpType>::SetNextValue(
-    const miopen::pooling::ProblemDescription&)
+bool PerformanceConfigPooling2d<OpType>::SetNextValue(const miopen::pooling::ProblemDescription&)
 {
 #if !MIOPEN_BACKEND_HIP
     return false;
