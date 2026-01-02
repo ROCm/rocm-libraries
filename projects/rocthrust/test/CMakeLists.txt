@@ -363,14 +363,15 @@ target_link_libraries(enum_devices PRIVATE hip::host)
 add_custom_command(
     TARGET enum_devices
     POST_BUILD
-    COMMAND enum_devices
-    ARGS "${CMAKE_BINARY_DIR}/resources.json"
+    COMMAND ${CMAKE_COMMAND} -E echo "Generating resource spec file"
+    COMMAND $<TARGET_FILE:enum_devices> ARGS resources.json
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     VERBATIM
 )
 
 # Generate the resource spec file at install time
 rocm_install(
-    CODE "execute_process(COMMAND ${CMAKE_BINARY_DIR}/test/enum_devices
+    CODE "execute_process(COMMAND $<TARGET_FILE:enum_devices>
                                   \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/resources.json)"
     COMPONENT tests
 )
