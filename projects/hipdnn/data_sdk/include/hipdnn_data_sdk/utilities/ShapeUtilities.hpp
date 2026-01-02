@@ -189,6 +189,42 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     return strideOrder;
 }
 
+// Checks if the tensor defined by dims and strides is packed (contiguous in memory).
+// Note: Assumes dims are positive (validated at graph level).
+// Strides can be negative (for reversed dimensions).
+inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    if(dims.size() != strides.size())
+    {
+        throw std::invalid_argument("Dimensions and strides must have the same number of elements");
+    }
+
+    // Handle edge case: empty tensor
+    if(dims.empty())
+    {
+        return true;
+    }
+
+    // Calculate total element count
+    const auto count
+        = std::accumulate(dims.begin(), dims.end(), static_cast<int64_t>(1), std::multiplies<>());
+
+    // Calculate memory span: the offset from first to last element
+    // For each dimension i, the maximum offset is (dims[i] - 1) * strides[i]
+    // This works correctly with negative strides (for reversed tensor dimensions)
+    const auto space
+        = std::inner_product(dims.begin(),
+                             dims.end(),
+                             strides.begin(),
+                             static_cast<int64_t>(0),
+                             std::plus<>(),
+                             [](int64_t len, int64_t stride) { return (len - 1) * stride; });
+
+    // A tensor is packed if all elements are contiguous:
+    // total_elements == (max_offset + 1)
+    return count == space + 1;
+}
+
 // Gets the derived (per channel) shape from a full Tensor shape.
 // Ex. {1, 3, 224, 224} will return {1, 3, 1, 1}
 inline std::vector<int64_t> getDerivedShape(const std::vector<int64_t>& shape)

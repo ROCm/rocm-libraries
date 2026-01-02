@@ -100,6 +100,7 @@ find_package(miopen CONFIG REQUIRED)
 add_library(
     miopen_legacy_plugin_private
     engines/MiopenEngine.cpp
+    engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
