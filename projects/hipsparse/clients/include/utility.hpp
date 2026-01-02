@@ -161,8 +161,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
@@ -232,15 +232,16 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 #ifdef GOOGLE_TEST
 #define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
 #else
-#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                  \
-    do                                                                                       \
-    {                                                                                        \
-        auto error = ERROR;                                                                  \
-        if(error != true)                                                                    \
-        {                                                                                    \
-            fprintf(stderr, "Error encountered generating matrix data", __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                              \
-        }                                                                                    \
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
+    do                                                                                             \
+    {                                                                                              \
+        auto error = ERROR;                                                                        \
+        if(error != true)                                                                          \
+        {                                                                                          \
+            fprintf(                                                                               \
+                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
     } while(0)
 #endif
 #define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
