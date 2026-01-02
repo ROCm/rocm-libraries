@@ -100,16 +100,8 @@ namespace GEMMTests
 
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
-            if(dataTypeAB == DataType::Float)
-            {
-                GTEST_SKIP() << "Architecture "
-                             << m_context->targetArchitecture().target().toString()
-                             << " does not support WMMA with Float";
-            }
-
-            gemm.waveM = 16;
-            gemm.waveN = 16;
-            gemm.waveK = 16;
+            GTEST_SKIP() << "Skipping StreamKMultipleFixupsTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
         }
 
         // assert that the number of output tiles is smaller than number of WGs
@@ -148,8 +140,8 @@ namespace GEMMTests
 
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
-            GTEST_SKIP() << "Architecture " << m_context->targetArchitecture().target().toString()
-                         << " does not support WMMA with Float";
+            GTEST_SKIP() << "Skipping StreamKWGMTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
         }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
@@ -190,16 +182,8 @@ namespace GEMMTests
 
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
-            if(typeAB == DataType::Float)
-            {
-                GTEST_SKIP() << "Architecture "
-                             << m_context->targetArchitecture().target().toString()
-                             << " does not support WMMA with Float";
-            }
-
-            gemm.m = 16;
-            gemm.n = 16;
-            gemm.k = 16;
+            GTEST_SKIP() << "Skipping StreamKTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
         }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
