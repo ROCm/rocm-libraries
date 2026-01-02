@@ -62,41 +62,40 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate(hipdnnHandle_t* handle)
 
         hipdnn_backend::HandleFactory::createHandle(handle);
 
-        LOG_API_SUCCESS(apiName, "createHandle={:p}", static_cast<void*>(*handle));
+        LOG_API_SUCCESS(apiName, "createHandle={}", logPtr(*handle));
     });
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
 {
-    LOG_API_ENTRY("handle={:p}", static_cast<void*>(handle));
+    LOG_API_ENTRY("handle={}", logPtr(handle));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
 
         delete handle;
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "handle destroyed", "");
     });
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream(hipdnnHandle_t handle, hipStream_t streamId)
 {
-    LOG_API_ENTRY(
-        "handle={:p}, streamId={:p}", static_cast<void*>(handle), static_cast<void*>(streamId));
+    LOG_API_ENTRY("handle={}, streamId={:p}", logPtr(handle), static_cast<void*>(streamId));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
 
         handle->setStream(streamId);
+        hipdnn_backend::logging::logHipDeviceInfo(streamId);
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "stream={:p}", static_cast<void*>(streamId));
     });
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetStream(hipdnnHandle_t handle, hipStream_t* streamId)
 {
-    LOG_API_ENTRY(
-        "handle={:p}, streamId_ptr={:p}", static_cast<void*>(handle), static_cast<void*>(streamId));
+    LOG_API_ENTRY("handle={}, streamId_ptr={:p}", logPtr(handle), static_cast<void*>(streamId));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
@@ -111,28 +110,27 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetStream(hipdnnHandle_t handle, hipS
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor(
     hipdnnBackendDescriptorType_t descriptorType, hipdnnBackendDescriptor_t* descriptor)
 {
-    LOG_API_ENTRY("descriptorType={}, descriptor_ptr={:p}",
-                  hipdnn_backend::hipdnnGetBackendDescriptorTypeName(descriptorType),
-                  static_cast<void*>(descriptor));
+    LOG_API_ENTRY(
+        "descriptorType={}, descriptor_ptr={:p}", descriptorType, static_cast<void*>(descriptor));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         hipdnn_backend::DescriptorFactory::create(descriptorType, descriptor);
 
-        LOG_API_SUCCESS(apiName, "created_descriptor={:p}", static_cast<void*>(*descriptor));
+        LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendDestroyDescriptor(hipdnnBackendDescriptor_t descriptor)
 {
-    LOG_API_ENTRY("descriptor={:p}", static_cast<void*>(descriptor));
+    LOG_API_ENTRY("descriptor={}", logPtr(descriptor));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
 
         hipdnn_backend::DescriptorFactory::destroy(descriptor);
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "descriptor destroyed", "");
     });
 }
 
@@ -140,10 +138,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
                                                           hipdnnBackendDescriptor_t executionPlan,
                                                           hipdnnBackendDescriptor_t variantPack)
 {
-    LOG_API_ENTRY("handle={:p}, executionPlan={:p}, variantPack={:p}",
-                  static_cast<void*>(handle),
-                  static_cast<void*>(executionPlan),
-                  static_cast<void*>(variantPack));
+    LOG_API_ENTRY("handle={}, executionPlan={}, variantPack={}",
+                  logPtr(handle),
+                  logPtr(executionPlan),
+                  logPtr(variantPack));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
@@ -152,20 +150,20 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 
         handle->getPluginResourceManager()->executeOpGraph(executionPlan, variantPack);
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "executionPlan={}", logPtr(executionPlan));
     });
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescriptor_t descriptor)
 {
-    LOG_API_ENTRY("descriptor={:p}", static_cast<void*>(descriptor));
+    LOG_API_ENTRY("descriptor={}", logPtr(descriptor));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfInvalidDescriptor(descriptor);
 
         descriptor->finalize();
 
-        LOG_API_SUCCESS(apiName, "", "");
+        LOG_API_SUCCESS(apiName, "descriptor={}", logPtr(descriptor));
     });
 }
 
@@ -177,11 +175,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                               int64_t* elementCount,
                               void* arrayOfElements)
 {
-    LOG_API_ENTRY("descriptor={:p}, attributeName={}, attributeType={}, "
+    LOG_API_ENTRY("descriptor={}, attributeName={}, attributeType={}, "
                   "requestedElementCount={}, elementCount_ptr={:p}, arrayOfElements_ptr={:p}",
-                  static_cast<void*>(descriptor),
-                  hipdnn_backend::hipdnnGetAttributeNameString(attributeName),
-                  hipdnn_backend::hipdnnGetAttributeTypeString(attributeType),
+                  logPtr(descriptor),
+                  attributeName,
+                  attributeType,
                   requestedElementCount,
                   static_cast<void*>(elementCount),
                   arrayOfElements);
@@ -194,15 +192,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
         if(elementCount == nullptr)
         {
-            LOG_API_SUCCESS(apiName,
-                            "status={}, elementCount_ptr=nullptr",
-                            hipdnn_backend::hipdnnGetStatusString(HIPDNN_STATUS_SUCCESS));
+            LOG_API_SUCCESS(apiName, "status={}, elementCount_ptr=nullptr", HIPDNN_STATUS_SUCCESS);
         }
         else
         {
             LOG_API_SUCCESS(apiName,
                             "status={}, retrieved_elementCount={}",
-                            hipdnn_backend::hipdnnGetStatusString(HIPDNN_STATUS_SUCCESS),
+                            HIPDNN_STATUS_SUCCESS,
                             *elementCount);
         }
     });
@@ -215,11 +211,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                               int64_t elementCount,
                               const void* arrayOfElements)
 {
-    LOG_API_ENTRY("descriptor={:p}, attributeName={}, attributeType={}, "
+    LOG_API_ENTRY("descriptor={}, attributeName={}, attributeType={}, "
                   "elementCount={}, arrayOfElements_ptr={:p}",
-                  static_cast<void*>(descriptor),
-                  hipdnn_backend::hipdnnGetAttributeNameString(attributeName),
-                  hipdnn_backend::hipdnnGetAttributeTypeString(attributeType),
+                  logPtr(descriptor),
+                  attributeName,
+                  attributeType,
                   elementCount,
                   arrayOfElements);
 
@@ -228,8 +224,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
         descriptor->setAttribute(attributeName, attributeType, elementCount, arrayOfElements);
 
-        LOG_API_SUCCESS(
-            apiName, "status={}", hipdnn_backend::hipdnnGetStatusString(HIPDNN_STATUS_SUCCESS));
+        LOG_API_SUCCESS(apiName, "status={}", HIPDNN_STATUS_SUCCESS);
     });
 }
 
@@ -245,13 +240,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
         hipdnn_backend::DescriptorFactory::createGraphExt(
             descriptor, serializedGraph, graphByteSize);
 
-        LOG_API_SUCCESS(apiName, "created_descriptor={:p}", static_cast<void*>(*descriptor));
+        LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
 }
 
 HIPDNN_BACKEND_EXPORT const char* hipdnnGetErrorString(hipdnnStatus_t status)
 {
-    LOG_API_ENTRY("status={}", hipdnn_backend::hipdnnGetStatusString(status));
+    LOG_API_ENTRY("status={}", status);
 
     return hipdnn_backend::hipdnnGetStatusString(status);
 }
@@ -311,7 +306,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     LOG_API_ENTRY("numPaths={}, pluginPaths_ptr={:p}, loadingMode={}",
                   numPaths,
                   static_cast<const void*>(pluginPaths),
-                  hipdnn_backend::hipdnnGetPluginLoadingModeString(loadingMode));
+                  loadingMode);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__] {
         if(numPaths > 0)
@@ -329,10 +324,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
         }
 
         hipdnn_backend::plugin::EnginePluginResourceManager::setPluginPaths(pathsVec, loadingMode);
-        // TODO: automatic formatting loading mode to string
-        LOG_API_SUCCESS(apiName,
-                        "set_plugin_paths={}",
-                        hipdnn_backend::hipdnnGetPluginLoadingModeString(loadingMode));
+        LOG_API_SUCCESS(apiName, "set_plugin_paths={}", loadingMode);
         return HIPDNN_STATUS_SUCCESS;
     });
 }

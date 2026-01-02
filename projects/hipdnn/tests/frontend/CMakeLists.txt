@@ -7,8 +7,12 @@ find_package(Threads REQUIRED)
 
 add_executable(
     public_hipdnn_frontend_tests
-    main.cpp IntegrationBatchnormForwardInference.cpp IntegrationConvForward.cpp
-    IntegrationConvolutionBackwardData.cpp IntegrationConvolutionBackwardWeight.cpp
+    main.cpp
+    IntegrationBatchnormForwardInference.cpp
+    IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationConvForward.cpp
+    IntegrationConvolutionBackwardData.cpp
+    IntegrationConvolutionBackwardWeight.cpp
     IntegrationGraphEngineFiltering.cpp
 )
 

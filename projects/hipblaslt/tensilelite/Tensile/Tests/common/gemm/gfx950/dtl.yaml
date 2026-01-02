@@ -958,6 +958,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 2, 4, 1 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
@@ -972,6 +973,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - DirectToLds: [1]
+        - DirectToVgprA: [0,1]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]

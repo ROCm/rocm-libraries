@@ -46,20 +46,25 @@ add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(fused_conv_fprop_bias_activ convolution/FusedConvFpropBiasActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
 
-if(WIN32)
-    # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
-    # when consuming the hipdnn_data_sdk.  We need to clear these options Refer to issue:
-    # https://github.com/ROCm/TheRock/issues/2003
+# Enable testing and add sample tests
+enable_testing()
 
-    if(TARGET spdlog::spdlog_header_only)
-        # Can't do this to an alias
-        get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
-        message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
+# Helper function to add a hipDNN sample test
+function(add_hipdnn_sample_test TARGET_NAME)
+    add_test(NAME sample_${TARGET_NAME} COMMAND ${TARGET_NAME} --verify-cpu)
+    set_tests_properties(sample_${TARGET_NAME} PROPERTIES LABELS "sample_test")
+endfunction()
 
-        if(NOT aliased_target_name)
-            set_target_properties(
-                spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS ""
-            )
-        endif()
-    endif()
-endif()
+# Register convolution samples as tests
+add_hipdnn_sample_test(conv_fprop)
+add_hipdnn_sample_test(conv_dgrad)
+add_hipdnn_sample_test(conv_wgrad)
+add_hipdnn_sample_test(fused_conv_fprop_activ)
+add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+
+# Register batchnorm samples as tests
+add_hipdnn_sample_test(bn_training)
+add_hipdnn_sample_test(fused_bn_training_activ)
+add_hipdnn_sample_test(bn_backward)
+add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
+# Note: bn_inference is currently disabled per issue #2459
