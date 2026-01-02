@@ -11,6 +11,8 @@ hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
+find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
+
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
 # imported, we will instead use find_package and not install the headers.
@@ -91,25 +93,20 @@ _hipdnn_data_sdk_process_dependency(
     nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
 )
 
-if(WIN32)
-    # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
-    # when consuming the hipdnn_data_sdk.  We need to clear these options Refer to issue:
-    # https://github.com/ROCm/TheRock/issues/2003
-
-    # Can't do this to an alias
-    get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
-    message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
-
-    if(NOT aliased_target_name)
-        set_target_properties(spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS "")
-    endif()
-endif()
-
 add_library(hipdnn_data_sdk INTERFACE)
-target_link_libraries(
-    hipdnn_data_sdk INTERFACE flatbuffers::flatbuffers spdlog::spdlog_header_only
-                         nlohmann_json::nlohmann_json
-)
+
+# Add includes from dependency targets
+hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
+hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
+hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+
+if (fmt_FOUND)
+    message(STATUS "Found fmt: using system fmt")
+    hipdnn_add_dependency_includes(hipdnn_data_sdk fmt::fmt COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
+else()
+    message(STATUS "Not found fmt: using bundled fmt from spdlog")
+endif()
+target_compile_definitions(hipdnn_data_sdk INTERFACE FMT_HEADER_ONLY)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
