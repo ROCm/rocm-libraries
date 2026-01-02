@@ -2530,6 +2530,7 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     S4 = SNop(4)
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
+        reorder_packing = True
         print(f"\nDDDDDDDDDDDDDDDD, {kernel['UseMFMAF32XEmulation']=}")
 
         n_pack_instr = 16 
@@ -2540,11 +2541,14 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         if not kernel["UseMFMAF32XEmulation"]:
             pack_a0 = [ 3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10, 11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11]
             pack_b0 = [                                    11,11,12,12,13,13,14,14,15,15,16,16,17,17,18,18,19,19,20,20,21,21,22,22,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23]
-        else:
-            pack_a0 = [ 3,3,4,4, 5,5, 6,6,7,7, 8,8,9,9, 10,10, 11,11,11,11,]
+        elif not reorder_packing:
+            pack_a0 = [ 3,3,4,4, 5,5, 6,6,7,7, 8,8,9,9, 10,10, 11,11,11,11]
             snops.extend([         (5, S4),            (10, S4) ])
             pack_b0 = [                                        11,11,12,12, 13,13, 14,14,15,15, 16,16,17,17, 18,18, 19,19,20,20,]
             snops.extend([                                                      (13, S4),                   (18, S4) ])
+        else:
+            pack_a0 = [ 3,3,4,4, 7,7, 8,8,9,9, 5,5,6,6, 7,7, 10,10,11,11]
+            pack_b0 = [                                        12,12,13,13, 16,16, 17,17,18,18,  14,14,15,15, 16,16,  19,19,20,20]
 
         lrb0 = [           4,4,        7,7]
         syncs.add(                                        11, dscnt=0, comment="Wait for LRB0 to complete before pack",
@@ -2568,16 +2572,20 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         syncs.add(                                                                                   28, dscnt=0, comment="Wait for LRB3 to complete")
         if not kernel["UseMFMAF32XEmulation"]:
             pack_b3 = [                                                                              28,28,29,29,30,30,31,31,32,32,33,33,34,34,35,35,36,36,37,37,38,38,39,39,40,40,41,41,42,42,43,43,44,44,45,45,46,46,47,47,47,47,47,47,47,47,47,47]
-        else:
+        elif not reorder_packing:
             pack_b3 = [                                                                              28,28,29,29, 30,30, 31,31,32,32, 33,33,34,34, 35,35, 36,36,37,37]
             snops.extend([                                                                                          (30, S4),                   (35, S4) ])
+        else:
+            pack_b3 = [                                                                              28,28,29,29, 32,32,  33,33,34,34,  30,30,31,31, 32,32,  35,35,36,36]
         lra3 = [                                                                                                                                     36,36,37,37]
         syncs.add(                                                                                                                                                39, dscnt=0, comment="Wait LRA3 to complete")
         if not kernel["UseMFMAF32XEmulation"]:
             pack_a3 = [                                                                                                                                           39,39,40,40,41,41,42,42,43,43,44,44,45,45,46,46,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47]
-        else:
+        elif not reorder_packing:
             pack_a3 = [                                                                                                                                           39,39,40,40, 41,41, 42,42,43,43, 44,44,45,45, 46,46, 47,47,47,47]
             snops.extend([                                                                                                                                                       (41, S4),                   (46, S4) ])
+        else:
+            pack_a3 = [                                                                                                                                           39,39,40,40,  43,43,  44,44,45,45,  41,41,42,42,  43,43, 46,46,47,47]
 
     else:
         return False, None
@@ -2620,4 +2628,6 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
   
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snop_code)
 
+    if reorder_packing:
+        opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1
