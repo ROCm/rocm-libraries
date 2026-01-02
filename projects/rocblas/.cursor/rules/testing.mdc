@@ -16,6 +16,8 @@ globs: ["*.cpp", "*.hpp", "*.h", "clients/gtest/**", "clients/benchmarks/**"]
 
 ### Test File Structure
 
+**Note on API Usage:** Tests use `rocblas_gemm<T>` which is a **test infrastructure wrapper** that internally dispatches to precision-specific functions (rocblas_sgemm, rocblas_dgemm, etc.). End users of the rocBLAS library should call the precision-specific functions directly (e.g., `rocblas_sgemm` for float, `rocblas_dgemm` for double).
+
 ```cpp
 /* ************************************************************************
  * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
@@ -25,52 +27,69 @@ globs: ["*.cpp", "*.hpp", "*.h", "clients/gtest/**", "clients/benchmarks/**"]
 #include "rocblas_test.hpp"
 #include <gtest/gtest.h>
 
-// Template test function
+// Template test function using test infrastructure
 template <typename T>
 void testing_gemm(const Arguments& arg)
 {
+    // Test infrastructure provides a templated wrapper around precision-specific APIs
+    // rocblas_gemm<T> internally calls rocblas_sgemm, rocblas_dgemm, etc.
+    auto rocblas_gemm_fn = arg.api & c_API_FORTRAN ? rocblas_gemm<T, true> : rocblas_gemm<T, false>;
+    
+    rocblas_local_handle handle{arg};
     rocblas_int m = arg.M;
     rocblas_int n = arg.N;
     rocblas_int k = arg.K;
+    rocblas_int lda = arg.lda;
+    rocblas_int ldb = arg.ldb;
+    rocblas_int ldc = arg.ldc;
     
-    // Setup
-    rocblas_handle handle;
-    rocblas_create_handle(&handle);
+    T h_alpha = arg.get_alpha<T>();
+    T h_beta = arg.get_beta<T>();
     
-    // Allocate device memory using rocBLAS handle-managed allocation
-    size_t size_A = size_t(m) * k;
-    size_t size_B = size_t(k) * n;
-    size_t size_C = size_t(m) * n;
-
-    auto dA_managed = handle->device_malloc(sizeof(T) * size_A);
-    auto dB_managed = handle->device_malloc(sizeof(T) * size_B);
-    auto dC_managed = handle->device_malloc(sizeof(T) * size_C);
-
-    T* dA = static_cast<T*>(dA_managed);
-    T* dB = static_cast<T*>(dB_managed);
-    T* dC = static_cast<T*>(dC_managed);
-
-    ASSERT_NE(dA, nullptr);
-    ASSERT_NE(dB, nullptr);
-    ASSERT_NE(dC, nullptr);
+    rocblas_operation transA = rocblas_operation_none;
+    rocblas_operation transB = rocblas_operation_none;
     
-    // Execute operation
-    rocblas_status status = rocblas_gemm<T>(handle, ...);
+    // Allocate host and device memory using test infrastructure
+    HOST_MEMCHECK(host_matrix<T>, hA, (m, k, lda));
+    HOST_MEMCHECK(host_matrix<T>, hB, (k, n, ldb));
+    HOST_MEMCHECK(host_matrix<T>, hC, (m, n, ldc));
     
-    // Verify results
-    ASSERT_EQ(status, rocblas_status_success);
+    DEVICE_MEMCHECK(device_matrix<T>, dA, (m, k, lda));
+    DEVICE_MEMCHECK(device_matrix<T>, dB, (k, n, ldb));
+    DEVICE_MEMCHECK(device_matrix<T>, dC, (m, n, ldc));
     
-    // Cleanup
-    rocblas_destroy_handle(handle);
+    // Initialize data on host
+    rocblas_init_matrix(hA, arg, rocblas_client_general_matrix);
+    rocblas_init_matrix(hB, arg, rocblas_client_general_matrix);
+    rocblas_init_matrix(hC, arg, rocblas_client_general_matrix);
+    
+    // Copy data from CPU to device
+    CHECK_HIP_ERROR(dA.transfer_from(hA));
+    CHECK_HIP_ERROR(dB.transfer_from(hB));
+    CHECK_HIP_ERROR(dC.transfer_from(hC));
+    
+    // Execute operation via test wrapper
+    CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+    DAPI_CHECK(rocblas_gemm_fn, 
+               (handle, transA, transB, m, n, k, &h_alpha, dA, lda, dB, ldb, &h_beta, dC, ldc));
+    
+    // Verify results (unit_check, norm_check, etc.)
+    if(arg.unit_check || arg.norm_check)
+    {
+        // Validation code here
+    }
 }
 
-// Test instantiation
+// Test instantiation via YAML or direct arguments
 TEST(gemm_gtest, float)
 {
     Arguments arg;
     arg.M = 128;
     arg.N = 128;
     arg.K = 128;
+    arg.lda = 128;
+    arg.ldb = 128;
+    arg.ldc = 128;
     testing_gemm<float>(arg);
 }
 ```
