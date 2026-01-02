@@ -104,7 +104,8 @@ typedef Error error_object; // NOLINT(readability-identifier-naming)
 typedef Error error_t; // NOLINT(readability-identifier-naming)
 
 #define HIPDNN_RETURN_IF_NE(x, y, error_status, message) \
-    do {                                                 \
+    do                                                   \
+    {                                                    \
         if(x != y)                                       \
         {                                                \
             return {error_status, message};              \
@@ -112,39 +113,44 @@ typedef Error error_t; // NOLINT(readability-identifier-naming)
     } while(0)
 
 #define HIPDNN_RETURN_IF_EQ(x, y, error_status, message) \
-    do {                                                 \
+    do                                                   \
+    {                                                    \
         if(x == y)                                       \
         {                                                \
             return {error_status, message};              \
         }                                                \
     } while(0)
 
-#define HIPDNN_RETURN_IF_TRUE(x, error_status, message)  \
-    do {                                                 \
-        if(x)                                            \
-        {                                                \
-            return {error_status, message};              \
-        }                                                \
+#define HIPDNN_RETURN_IF_TRUE(x, error_status, message) \
+    do                                                  \
+    {                                                   \
+        if(x)                                           \
+        {                                               \
+            return {error_status, message};             \
+        }                                               \
     } while(0)
 
 #define HIPDNN_RETURN_IF_FALSE(x, error_status, message) \
-    do {                                                 \
+    do                                                   \
+    {                                                    \
         if(!(x))                                         \
         {                                                \
             return {error_status, message};              \
         }                                                \
     } while(0)
 
-#define HIPDNN_RETURN_IF_NULL(x, error_status, message)  \
-    do {                                                 \
-        if(x == nullptr)                                 \
-        {                                                \
-            return {error_status, message};              \
-        }                                                \
+#define HIPDNN_RETURN_IF_NULL(x, error_status, message) \
+    do                                                  \
+    {                                                   \
+        if(x == nullptr)                                \
+        {                                               \
+            return {error_status, message};             \
+        }                                               \
     } while(0)
 
 #define HIPDNN_RETURN_IF_LT(x, y, error_status, message) \
-    do {                                                 \
+    do                                                   \
+    {                                                    \
         if(x < y)                                        \
         {                                                \
             return {error_status, message};              \
@@ -152,7 +158,8 @@ typedef Error error_t; // NOLINT(readability-identifier-naming)
     } while(0)
 
 #define HIPDNN_RETURN_IF_GE(x, y, error_status, message) \
-    do {                                                 \
+    do                                                   \
+    {                                                    \
         if(x >= y)                                       \
         {                                                \
             return {error_status, message};              \
@@ -160,7 +167,8 @@ typedef Error error_t; // NOLINT(readability-identifier-naming)
     } while(0)
 
 #define HIPDNN_RETURN_IF_LE(x, y, error_status, message) \
-    do {                                                 \
+    do                                                   \
+    {                                                    \
         if(x <= y)                                       \
         {                                                \
             return {error_status, message};              \

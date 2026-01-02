@@ -40,7 +40,8 @@ private:
 };
 
 #define THROW_IF_NE(x, y, failureStatus, message)                          \
-    do {                                                                   \
+    do                                                                     \
+    {                                                                      \
         if(x != y)                                                         \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
@@ -48,7 +49,8 @@ private:
     } while(0)
 
 #define THROW_IF_EQ(x, y, failureStatus, message)                          \
-    do {                                                                   \
+    do                                                                     \
+    {                                                                      \
         if(x == y)                                                         \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
@@ -56,7 +58,8 @@ private:
     } while(0)
 
 #define THROW_IF_TRUE(x, failureStatus, message)                           \
-    do {                                                                   \
+    do                                                                     \
+    {                                                                      \
         if(x)                                                              \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
@@ -64,7 +67,8 @@ private:
     } while(0)
 
 #define THROW_IF_FALSE(x, failureStatus, message)                          \
-    do {                                                                   \
+    do                                                                     \
+    {                                                                      \
         if(!(x))                                                           \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
@@ -72,7 +76,8 @@ private:
     } while(0)
 
 #define THROW_IF_NULL(x, failureStatus, message)                           \
-    do {                                                                   \
+    do                                                                     \
+    {                                                                      \
         if(x == nullptr)                                                   \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
@@ -80,7 +85,8 @@ private:
     } while(0)
 
 #define THROW_IF_LT(x, y, failureStatus, message)                          \
-    do {                                                                   \
+    do                                                                     \
+    {                                                                      \
         if(x < y)                                                          \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
