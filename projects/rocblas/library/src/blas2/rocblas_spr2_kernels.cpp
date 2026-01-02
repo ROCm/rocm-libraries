@@ -82,7 +82,7 @@ rocblas_spr2_kernel(bool           host_ptr_mode,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         auto*       AP = load_ptr_batch(APa, batch, shift_AP, stride_AP);
@@ -92,7 +92,7 @@ rocblas_spr2_kernel(bool           host_ptr_mode,
         rocblas_spr2_kernel_calc<DIM_X, DIM_Y, N_TX>(is_upper, n, alpha, x, incx, y, incy, AP);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

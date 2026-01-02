@@ -217,7 +217,7 @@ rocblas_gbmvn_kernel(bool           host_ptr_mode,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -243,7 +243,7 @@ rocblas_gbmvn_kernel(bool           host_ptr_mode,
         rocblas_gbmvn_kernel_calc<WARP, DIM_Y>(m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -275,7 +275,7 @@ rocblas_gbmvt_kernel(bool              host_ptr_mode,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         const auto alpha = host_ptr_mode ? alpha_device_host.value
@@ -300,7 +300,7 @@ rocblas_gbmvt_kernel(bool              host_ptr_mode,
             transA, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

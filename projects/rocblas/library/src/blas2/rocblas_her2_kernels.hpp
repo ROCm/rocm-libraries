@@ -103,7 +103,7 @@ rocblas_her2_kernel(bool           is_upper,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         auto*       A = load_ptr_batch(Aa, batch, shift_A, stride_A);
@@ -113,7 +113,7 @@ rocblas_her2_kernel(bool           is_upper,
         rocblas_her2_kernel_calc(is_upper, n, area, alpha, x, incx, y, incy, A, lda);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

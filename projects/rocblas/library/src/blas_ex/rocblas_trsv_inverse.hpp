@@ -56,7 +56,7 @@ rocblas_internal_flip_vector_kernel(U* __restrict__ data,
 
 #if DEVICE_GRID_YZ_16BIT
         DEVICE_GRID_SETUP
-        do
+        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
         {
 #endif
             T*          pdata = load_ptr_batch(data, batch, offset, stride);
@@ -66,7 +66,7 @@ rocblas_internal_flip_vector_kernel(U* __restrict__ data,
             pdata[end]        = pdata[start];
             pdata[start]      = temp;
 #if DEVICE_GRID_YZ_16BIT
-        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+        }
 #endif
     }
 }

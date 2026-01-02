@@ -65,7 +65,7 @@ namespace
         uint32_t batch = blockIdx.z;
 #if DEVICE_GRID_YZ_16BIT
         DEVICE_GRID_SETUP
-        do
+        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
         {
 #endif
 
@@ -74,7 +74,7 @@ namespace
             gemm_ex_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc, D, ldd);
 
 #if DEVICE_GRID_YZ_16BIT
-        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+        }
 #endif
     }
 
@@ -174,14 +174,14 @@ namespace
 
 #if DEVICE_GRID_YZ_16BIT
         DEVICE_GRID_SETUP
-        do
+        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
         {
 #endif
             auto C = load_ptr_batch(dC, batch, shift_c, stride_c);
             rocblas_gemm_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc);
 
 #if DEVICE_GRID_YZ_16BIT
-        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+        }
 #endif
     }
 
@@ -284,7 +284,7 @@ namespace
 
 #if DEVICE_GRID_YZ_16BIT
         DEVICE_GRID_SETUP
-        do
+        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
         {
 #endif
 
@@ -420,7 +420,7 @@ namespace
             }
 
 #if DEVICE_GRID_YZ_16BIT
-        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+        }
 #endif
     }
 
@@ -469,7 +469,7 @@ namespace
 
 #if DEVICE_GRID_YZ_16BIT
         DEVICE_GRID_SETUP
-        do
+        for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
         {
 #endif
 
@@ -592,7 +592,7 @@ namespace
             }
 
 #if DEVICE_GRID_YZ_16BIT
-        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+        }
 #endif
     }
 

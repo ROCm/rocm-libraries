@@ -189,7 +189,7 @@ rocblas_hbmvn_kernel(bool           is_upper,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
@@ -201,7 +201,7 @@ rocblas_hbmvn_kernel(bool           is_upper,
             is_upper, n, k, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

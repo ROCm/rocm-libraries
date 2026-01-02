@@ -75,7 +75,7 @@ rocblas_dot_kernel_inc1(rocblas_int n,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -98,7 +98,7 @@ rocblas_dot_kernel_inc1(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -120,7 +120,7 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -169,7 +169,7 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -200,7 +200,7 @@ rocblas_dot_kernel(rocblas_int n,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -224,7 +224,7 @@ rocblas_dot_kernel(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -299,7 +299,7 @@ rocblas_dot_kernel_magsq(rocblas_int n,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -322,7 +322,7 @@ rocblas_dot_kernel_magsq(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

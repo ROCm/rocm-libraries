@@ -138,7 +138,7 @@ rocblas_spmv_kernel(bool           is_upper,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -160,7 +160,7 @@ rocblas_spmv_kernel(bool           is_upper,
 
         rocblas_spmv_kernel_calc<DIM_X, DIM_Y>(is_upper, n, alpha, AP, x, incx, beta, y, incy);
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

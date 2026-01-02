@@ -54,7 +54,7 @@ rocblas_swap_kernel(rocblas_int    n,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -67,7 +67,7 @@ rocblas_swap_kernel(rocblas_int    n,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -90,7 +90,7 @@ rocblas_sswap_2_kernel(rocblas_int n,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -109,7 +109,7 @@ rocblas_sswap_2_kernel(rocblas_int n,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

@@ -198,7 +198,7 @@ rocblas_tpmvn_kernel(bool           is_upper,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         rocblas_tpmvn_kernel_calc<NB>(is_upper,
@@ -210,7 +210,7 @@ rocblas_tpmvn_kernel(bool           is_upper,
                                       load_ptr_batch(workspace, batch, shift_w, stride_w));
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -236,7 +236,7 @@ rocblas_tpmvt_kernel(bool           is_upper,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -248,7 +248,7 @@ rocblas_tpmvt_kernel(bool           is_upper,
                                       incx,
                                       load_ptr_batch(workspace, batch, shift_w, stride_w));
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -274,7 +274,7 @@ rocblas_tpmvc_kernel(bool           is_upper,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         rocblas_tpmvc_kernel_calc<NB>(is_upper,
@@ -285,7 +285,7 @@ rocblas_tpmvc_kernel(bool           is_upper,
                                       incx,
                                       load_ptr_batch(workspace, batch, shift_w, stride_w));
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

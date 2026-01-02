@@ -82,7 +82,7 @@ rocblas_internal_gemmt_kernel(rocblas_int    N,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -167,7 +167,7 @@ rocblas_internal_gemmt_kernel(rocblas_int    N,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

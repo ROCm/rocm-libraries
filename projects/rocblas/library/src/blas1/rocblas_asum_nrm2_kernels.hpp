@@ -92,7 +92,7 @@ rocblas_reduction_kernel_part1(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         int64_t tid = blockIdx.x * NB + threadIdx.x;
@@ -113,7 +113,7 @@ rocblas_reduction_kernel_part1(rocblas_int    n,
         if(threadIdx.x == 0)
             workspace[batch * nblocks + blockIdx.x] = sum;
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

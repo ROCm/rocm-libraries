@@ -64,7 +64,7 @@ rocblas_trtri_trsm_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -74,7 +74,7 @@ rocblas_trtri_trsm_kernel(rocblas_fill     uplo,
         rocblas_custom_trtri_device<IB>(uplo, diag, IB, a_i, lda, invA_i, NB);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

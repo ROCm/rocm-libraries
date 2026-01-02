@@ -163,7 +163,7 @@ rocblas_copy_matrix_trsm(rocblas_int    rows,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -176,7 +176,7 @@ rocblas_copy_matrix_trsm(rocblas_int    rows,
             xb[tx + size_t(ldb) * ty] = xa[tx + size_t(lda) * ty];
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -247,7 +247,7 @@ rocblas_set_matrix_trsm(int64_t        rows,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -257,7 +257,7 @@ rocblas_set_matrix_trsm(int64_t        rows,
             xa[tx + lda * ty] = T(0.0);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -2020,7 +2020,7 @@ rocblas_trsm_small_right_device(rocblas_fill      uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -2272,7 +2272,7 @@ rocblas_trsm_small_right_device(rocblas_fill      uplo,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -2305,7 +2305,7 @@ rocblas_trsm_small_64_right_device(rocblas_fill      uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -2408,7 +2408,7 @@ rocblas_trsm_small_64_right_device(rocblas_fill      uplo,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -2450,7 +2450,7 @@ rocblas_trsm_small_left_device(rocblas_fill      uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
@@ -2631,7 +2631,7 @@ rocblas_trsm_small_left_device(rocblas_fill      uplo,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -2666,7 +2666,7 @@ rocblas_trsm_small_left_device_sharedB(rocblas_fill      uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
@@ -2859,7 +2859,7 @@ rocblas_trsm_small_left_device_sharedB(rocblas_fill      uplo,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -2892,7 +2892,7 @@ rocblas_trsm_small_64_left_device(rocblas_fill      uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -2996,7 +2996,7 @@ rocblas_trsm_small_64_left_device(rocblas_fill      uplo,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -3192,7 +3192,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
@@ -3276,7 +3276,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -3314,7 +3314,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_forward_substitution(rocblas_operati
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
@@ -3388,7 +3388,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_forward_substitution(rocblas_operati
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

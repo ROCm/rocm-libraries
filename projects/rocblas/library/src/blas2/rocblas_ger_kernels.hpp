@@ -72,7 +72,7 @@ rocblas_ger_kernel(rocblas_int    m,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -117,7 +117,7 @@ rocblas_ger_kernel(rocblas_int    m,
             }
         }
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -214,7 +214,7 @@ rocblas_sger_kernel(rocblas_int    m,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -250,7 +250,7 @@ rocblas_sger_kernel(rocblas_int    m,
             A[i] += res_y * x[(tx + i) * int64_t(incx)];
         }
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -296,7 +296,7 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -371,7 +371,7 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
             A[(DIM_X / 2) + j + k * size_t(lda)] = areg_lower[k];
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

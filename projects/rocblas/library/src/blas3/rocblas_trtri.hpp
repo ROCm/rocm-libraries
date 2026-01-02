@@ -407,7 +407,7 @@ rocblas_trtri_fill(rocblas_handle handle,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -430,7 +430,7 @@ rocblas_trtri_fill(rocblas_handle handle,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -456,7 +456,7 @@ rocblas_trtri_small_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -470,7 +470,7 @@ rocblas_trtri_small_kernel(rocblas_fill     uplo,
         rocblas_trtri_device<NB>(uplo, diag, n, individual_A, lda, individual_invA, ldinvA);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -494,7 +494,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trtri_remainder_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -508,7 +508,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trtri_remainder_kernel(rocblas_fill     uplo,
         rocblas_trtri_device<2 * NB>(uplo, diag, n, individual_A, lda, individual_invA, ldinvA);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -609,7 +609,7 @@ rocblas_trtri_diagonal_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -628,7 +628,7 @@ rocblas_trtri_diagonal_kernel(rocblas_fill     uplo,
             uplo, diag, rem < IB ? rem : IB, individual_A, lda, individual_invA, ldinvA);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

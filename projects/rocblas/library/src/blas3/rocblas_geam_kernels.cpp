@@ -44,7 +44,7 @@ rocblas_geam_zero_matrix_device(rocblas_int    m,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -56,7 +56,7 @@ rocblas_geam_zero_matrix_device(rocblas_int    m,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -93,7 +93,7 @@ rocblas_geam_device(rocblas_operation transA,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         if(tx < m && ty < n)
@@ -138,7 +138,7 @@ rocblas_geam_device(rocblas_operation transA,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -170,7 +170,7 @@ rocblas_geam_2matrix_device(rocblas_operation transA,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         if(tx < m && ty < n)
@@ -207,7 +207,7 @@ rocblas_geam_2matrix_device(rocblas_operation transA,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -317,7 +317,7 @@ rocblas_geam_1D_device(size_t         size,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         if(tx < size)
@@ -341,7 +341,7 @@ rocblas_geam_1D_device(size_t         size,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -367,7 +367,7 @@ rocblas_geam_1D_2matrix_device(size_t         size,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         if(tx < size)
@@ -388,7 +388,7 @@ rocblas_geam_1D_2matrix_device(size_t         size,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -421,7 +421,7 @@ rocblas_geam_inplace_device(rocblas_operation transB,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         if(tx < m && ty < n)
@@ -467,7 +467,7 @@ rocblas_geam_inplace_device(rocblas_operation transB,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

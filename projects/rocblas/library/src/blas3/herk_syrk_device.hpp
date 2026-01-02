@@ -73,7 +73,7 @@ rocblas_syr2k_scale_kernel(bool           is_upper,
     uint32_t batch = blockIdx.z;
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -81,7 +81,7 @@ rocblas_syr2k_scale_kernel(bool           is_upper,
         rocblas_syr2k_scale_device<API_INT, HERK>(is_upper, n, beta, C, ldc);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -118,7 +118,7 @@ rocblas_syrkx_herkx_small_kernel(rocblas_int    N,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
         auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
@@ -187,7 +187,7 @@ rocblas_syrkx_herkx_small_kernel(rocblas_int    N,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -1233,7 +1233,7 @@ rocblas_syr2k_her2k_kernel(bool           is_upper,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -1247,7 +1247,7 @@ rocblas_syr2k_her2k_kernel(bool           is_upper,
             is_upper, n, k, alpha, A, lda, B, ldb, C, ldc);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -1349,7 +1349,7 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -1395,7 +1395,7 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
                 C[row + row * int64_t(ldc)] = std::real(C[row + row * int64_t(ldc)]);
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 

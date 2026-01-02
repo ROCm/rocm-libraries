@@ -90,7 +90,7 @@ rocblas_set_matrix_zero_if_alpha_zero_kernel(rocblas_int    m,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -108,7 +108,7 @@ rocblas_set_matrix_zero_if_alpha_zero_kernel(rocblas_int    m,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -209,7 +209,7 @@ rocblas_trmm_outofplace_kernel(rocblas_diagonal diag,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -363,7 +363,7 @@ rocblas_trmm_outofplace_kernel(rocblas_diagonal diag,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -498,7 +498,7 @@ rocblas_trmm_lNx_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -556,7 +556,7 @@ rocblas_trmm_lNx_kernel(rocblas_fill     uplo,
                 C[ty * size_t(ldc) + tx] = accumulator;
         }
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -588,7 +588,7 @@ rocblas_trmm_lTx_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -659,7 +659,7 @@ rocblas_trmm_lTx_kernel(rocblas_fill     uplo,
                 C[ty * size_t(ldc) + tx] = accumulator;
         }
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -691,7 +691,7 @@ rocblas_trmm_rNx_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -750,7 +750,7 @@ rocblas_trmm_rNx_kernel(rocblas_fill     uplo,
                 C[ty * size_t(ldc) + tx] = accumulator;
         }
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
@@ -782,7 +782,7 @@ rocblas_trmm_rTx_kernel(rocblas_fill     uplo,
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
-    do
+    for(; batch < batch_count; batch += dc_YZ_grid_launch_limit)
     {
 #endif
 
@@ -851,7 +851,7 @@ rocblas_trmm_rTx_kernel(rocblas_fill     uplo,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
+    }
 #endif
 }
 
