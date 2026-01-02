@@ -306,14 +306,6 @@ void testing_gebsr2csr(Arguments argus)
     hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
     hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
 
-    if(m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse does not support m == 0 for csr2bsr
-        return;
-#endif
-    }
-
     int mb = m * row_block_dim;
     int nb = n * col_block_dim;
 

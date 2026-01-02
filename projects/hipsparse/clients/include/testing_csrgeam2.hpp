@@ -773,14 +773,6 @@ void testing_csrgeam2(Arguments argus)
         return;
     }
 
-    if(idx_base_C != idx_base_A || idx_base_C != idx_base_B || M == 0 || N == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse does not support mixed index bases nor does it properly handle m == 0 or n == 0
-        return;
-#endif
-    }
-
     // B = A so that we can compute the square of A
     int              nnz_B = nnz_A;
     std::vector<int> hcsr_row_ptr_B(M + 1, 0);

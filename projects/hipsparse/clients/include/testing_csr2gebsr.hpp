@@ -443,14 +443,6 @@ void testing_csr2gebsr(Arguments argus)
     hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
     hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
 
-    if(row_block_dim == 1 || m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // Do not test cusparse with block dim 1
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures
