@@ -905,6 +905,8 @@ namespace hiptensor
                                                                     BDataType,
                                                                     CDataType,
                                                                     DDataType,
+                                                                    {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB,
+                                                                     plan->mOpDesc->mOpC},
                                                                     workspace));
 
                 auto reference = resource->allocDevice(sizeD);

@@ -54,5 +54,6 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
                                                 hiptensorDataType_t         typeB,
                                                 hiptensorDataType_t         typeC,
                                                 hiptensorDataType_t         typeD,
+                                                std::vector<hiptensorOperator_t> const& operators,
                                                 void*                       workspace);
 

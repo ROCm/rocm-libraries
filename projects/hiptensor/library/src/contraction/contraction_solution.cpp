@@ -233,6 +233,7 @@ namespace hiptensor
                                         std::vector<std::size_t> e_ms_ns_lengths,
                                         std::vector<std::size_t> e_ms_ns_strides,
                                         std::vector<int32_t>     e_ms_ns_modes,
+                                        std::vector<hiptensorOperator_t> const& operators,
                                         void*                    workspacePtr,
                                         unsigned long            workspaceSize,
                                         StreamConfig const&      streamConfig /*= StreamConfig{}*/)
@@ -255,6 +256,7 @@ namespace hiptensor
                      e_ms_ns_lengths,
                      e_ms_ns_strides,
                      e_ms_ns_modes,
+                     operators,
                      workspacePtr))
         {
             return {HIPTENSOR_STATUS_INTERNAL_ERROR, -1.0f};

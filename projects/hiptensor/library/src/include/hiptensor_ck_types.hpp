@@ -40,6 +40,7 @@ namespace hiptensor
     using CkPassThrough       = ck::tensor_operation::element_wise::PassThrough;
     using CkHiptensorUnaryOp  = ck::tensor_operation::element_wise::HiptensorUnaryOp;
     using CkHiptensorBinaryOp = ck::tensor_operation::element_wise::HiptensorBinaryOp;
+    using CkBilinearUnary  = ck::tensor_operation::element_wise::BilinearUnary;
     using CkUnaryCombinedOp
         = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScale>;
     using CkPermutationUnaryCombinedOp

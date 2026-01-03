@@ -71,6 +71,8 @@ namespace hiptensor
         std::enable_if_t<(std::is_same_v<typename MetaTraits<DeviceOp>::CDEOp,
                                          ck::tensor_operation::element_wise::Bilinear>)
                          || (std::is_same_v<typename MetaTraits<DeviceOp>::CDEOp,
+                                         ck::tensor_operation::element_wise::BilinearUnary>)
+                         || (std::is_same_v<typename MetaTraits<DeviceOp>::CDEOp,
                                             ck::tensor_operation::element_wise::BilinearComplex>)>>
         : public ContractionSolution
     {
@@ -99,6 +101,7 @@ namespace hiptensor
                       std::vector<std::size_t> e_ms_ns_lengths,
                       std::vector<std::size_t> e_ms_ns_strides,
                       std::vector<int32_t>     e_ms_ns_modes,
+                      std::vector<hiptensorOperator_t> const& operators,
                       void*                    workspacePtr) override
         {
             using Base   = ContractionSolution;
@@ -161,22 +164,51 @@ namespace hiptensor
                 normal_e_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
 
             // Initialize the argument pointer
-            Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
-                A,
-                B,
-                std::array<const void*, 1>{D},
-                E,
-                toCKVec(normal_a_ms_ks_lengths),
-                toCKVec(normal_a_ms_ks_strides),
-                toCKVec(normal_b_ns_ks_lengths),
-                toCKVec(normal_b_ns_ks_strides),
-                std::array<std::vector<ck::index_t>, 1>{toCKVec(normal_ds_ms_ns_lengths)},
-                std::array<std::vector<ck::index_t>, 1>{toCKVec(normal_ds_ms_ns_strides)},
-                toCKVec(normal_e_ms_ns_lengths),
-                toCKVec(normal_e_ms_ns_strides),
-                typename Traits::AOp{},
-                typename Traits::BOp{},
-                typename Traits::CDEOp(alphaF, betaF)));
+            if constexpr(std::is_same_v<typename Traits::AOp,
+                         ck::tensor_operation::element_wise::PassThrough> &&
+                         std::is_same_v<typename Traits::BOp,
+                         ck::tensor_operation::element_wise::PassThrough> &&
+                         (std::is_same_v<typename Traits::CDEOp,
+                         ck::tensor_operation::element_wise::Bilinear> ||
+                         std::is_same_v<typename Traits::CDEOp,
+                         ck::tensor_operation::element_wise::BilinearComplex>))
+            {
+                Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                    A,
+                    B,
+                    std::array<const void*, 1>{D},
+                    E,
+                    toCKVec(normal_a_ms_ks_lengths),
+                    toCKVec(normal_a_ms_ks_strides),
+                    toCKVec(normal_b_ns_ks_lengths),
+                    toCKVec(normal_b_ns_ks_strides),
+                    std::array<std::vector<ck::index_t>, 1>{toCKVec(normal_ds_ms_ns_lengths)},
+                    std::array<std::vector<ck::index_t>, 1>{toCKVec(normal_ds_ms_ns_strides)},
+                    toCKVec(normal_e_ms_ns_lengths),
+                    toCKVec(normal_e_ms_ns_strides),
+                    typename Traits::AOp{},
+                    typename Traits::BOp{},
+                    typename Traits::CDEOp(alphaF, betaF)));
+            }
+            else
+            {                                          
+                Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                    A,
+                    B,
+                    std::array<const void*, 1>{D},
+                    E,
+                    toCKVec(normal_a_ms_ks_lengths),
+                    toCKVec(normal_a_ms_ks_strides),
+                    toCKVec(normal_b_ns_ks_lengths),
+                    toCKVec(normal_b_ns_ks_strides),
+                    std::array<std::vector<ck::index_t>, 1>{toCKVec(normal_ds_ms_ns_lengths)},
+                    std::array<std::vector<ck::index_t>, 1>{toCKVec(normal_ds_ms_ns_strides)},
+                    toCKVec(normal_e_ms_ns_lengths),
+                    toCKVec(normal_e_ms_ns_strides),
+                    typename Traits::AOp{operators[0]},
+                    typename Traits::BOp{operators[1]},
+                    typename Traits::CDEOp{ck::tensor_operation::element_wise::Bilinear{alphaF, betaF}, ck::tensor_operation::element_wise::HiptensorUnaryOp{operators[2]}}));
+            }
 
             // Attach the workspace pointer
             deviceOp->SetWorkSpacePointer(Base::mInvokerArgPtr.get(), workspacePtr);
@@ -252,6 +284,7 @@ namespace hiptensor
                       std::vector<std::size_t> e_ms_ns_lengths,
                       std::vector<std::size_t> e_ms_ns_strides,
                       std::vector<int32_t>     e_ms_ns_modes,
+                      std::vector<hiptensorOperator_t> const& operators,
                       void*                    workspacePtr) override
         {
             using Base   = ContractionSolution;

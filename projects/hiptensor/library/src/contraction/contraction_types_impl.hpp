@@ -44,6 +44,12 @@ namespace hiptensor
         static constexpr auto value = hiptensorOperator_t::HIPTENSOR_OP_IDENTITY;
     };
 
+    template <>
+    struct ElementWiseOperatorType<ck::tensor_operation::element_wise::HiptensorUnaryOp>
+    {
+        static constexpr auto value = hiptensorOperator_t::HIPTENSOR_OP_UNKNOWN;
+    };
+
     // Specialize overrides for runtime ContractionOperatorType
     template <>
     struct ContractionOperatorType<ck::tensor_operation::element_wise::Scale>
@@ -67,6 +73,12 @@ namespace hiptensor
     struct ContractionOperatorType<ck::tensor_operation::element_wise::BilinearComplex>
     {
         static constexpr auto value = ContractionOpId_t::BILINEAR_COMPLEX;
+    };
+
+    template <>
+    struct ContractionOperatorType<ck::tensor_operation::element_wise::BilinearUnary>
+    {
+        static constexpr auto value = ContractionOpId_t::BILINEAR_UNARY;
     };
 
 } // namespace hiptensor

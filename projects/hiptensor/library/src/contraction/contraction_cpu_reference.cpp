@@ -51,6 +51,7 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
                                                 hiptensorDataType_t         typeB,
                                                 hiptensorDataType_t         typeC,
                                                 hiptensorDataType_t         typeD,
+                                                std::vector<hiptensorOperator_t> const& operators,
                                                 void*                       workspace)
 {
     auto& instances   = hiptensor::ContractionCpuReferenceInstances::instance();
@@ -88,6 +89,7 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
                                                  d_ms_ns_lengths,
                                                  d_ms_ns_strides,
                                                  d_ms_ns_modes,
+                                                 operators,
                                                  workspace,
                                                  0);
         return errorCode;

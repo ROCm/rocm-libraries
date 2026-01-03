@@ -69,6 +69,7 @@ namespace hiptensor
                                                                  ComputeDataType>,
         std::enable_if_t<
             (std::is_same_v<CDEElementwiseOperation, ck::tensor_operation::element_wise::Bilinear>)
+            || (std::is_same_v<CDEElementwiseOperation, ck::tensor_operation::element_wise::BilinearUnary>)
             || (std::is_same_v<CDEElementwiseOperation,
                                ck::tensor_operation::element_wise::BilinearComplex>)>>
     {

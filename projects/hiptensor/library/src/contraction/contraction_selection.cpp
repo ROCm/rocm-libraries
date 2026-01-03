@@ -64,6 +64,7 @@ namespace hiptensor
                                       std::vector<std::size_t> const&    e_ms_ns_strides,
                                       std::vector<int32_t> const&        e_ms_ns_modes,
                                       hiptensorComputeDescriptor_t       computeType,
+                                      std::vector<hiptensorOperator_t> const& operators,
                                       const uint64_t                     workspaceSize)
     {
         // Make sure that we calculate full element space incase strides are not packed.
@@ -142,6 +143,7 @@ namespace hiptensor
                                                  e_ms_ns_lengths,
                                                  e_ms_ns_strides,
                                                  e_ms_ns_modes,
+                                                 operators,
                                                  wspace,
                                                  workspaceSize,
                                                  StreamConfig{

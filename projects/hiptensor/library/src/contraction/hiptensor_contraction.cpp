@@ -120,6 +120,7 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                               hiptensor::getTensorLengths(desc->mDescD),
                               hiptensor::getTensorStrides(desc->mDescD),
                               desc->mModeD,
+                              {},
                               nullptr))
         {
             if(*workspaceSize == 0)
@@ -196,10 +197,12 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
     int                  nModeD = descD->mLengths.size();
     std::vector<int32_t> modeDV(modeD, modeD + nModeD);
 
+    bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY) || (opC != HIPTENSOR_OP_IDENTITY);
+
     auto contractionOp = descC ? (descCompute == HIPTENSOR_COMPUTE_DESC_C32F
                                           || descCompute == HIPTENSOR_COMPUTE_DESC_C64F
                                       ? hiptensor::ContractionOpId_t::BILINEAR_COMPLEX
-                                      : hiptensor::ContractionOpId_t::BILINEAR)
+                                      : ( hasUnaryOp ? hiptensor::ContractionOpId_t::BILINEAR_UNARY : hiptensor::ContractionOpId_t::BILINEAR) )
                                : (descCompute == HIPTENSOR_COMPUTE_DESC_C32F
                                           || descCompute == HIPTENSOR_COMPUTE_DESC_C64F
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
@@ -365,6 +368,8 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
                                                  hiptensor::getTensorLengths(plan->mOpDesc->mDescD),
                                                  hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
                                                  plan->mOpDesc->mModeD,
+                                                 {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB,
+                                                  plan->mOpDesc->mOpC},
                                                  workspace,
                                                  workspaceSize,
                                                  StreamConfig{
@@ -422,6 +427,8 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
                                                  hiptensor::getTensorLengths(plan->mOpDesc->mDescD),
                                                  hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
                                                  plan->mOpDesc->mModeD,
+                                                 {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB,
+                                                  plan->mOpDesc->mOpC},
                                                  workspace,
                                                  workspaceSize,
                                                  StreamConfig{stream, false});
@@ -597,6 +604,12 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     auto solutionQ = hiptensor::ContractionSolutionRegistry::Query{candidates}
                          .query((hiptensor::ContractionOpId_t)desc->mContractionOpId)
                          .query(ADataType, BDataType, DDataType, EDataType, computeType);
+    
+    bool hasUnaryOp = (desc->mOpA != HIPTENSOR_OP_IDENTITY) || (desc->mOpB != HIPTENSOR_OP_IDENTITY) || (desc->mOpC != HIPTENSOR_OP_IDENTITY);
+    if(hasUnaryOp) 
+        solutionQ = solutionQ.query(HIPTENSOR_OP_UNKNOWN, HIPTENSOR_OP_UNKNOWN);
+    else
+        solutionQ = solutionQ.query(HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY);
 
     candidates = toContractionSolutionVec(solutionQ.solutions());
 
@@ -648,6 +661,8 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
                                                 hiptensor::getTensorStrides(desc->mDescD),
                                                 desc->mModeD,
                                                 desc->mDescCompute,
+                                                {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB,
+                                                 plan->mOpDesc->mOpC},
                                                 workspaceSizeLimit);
             //Save solutions (from fastest to slowest) for plan cache autotune
             pref->mCandidates.clear();

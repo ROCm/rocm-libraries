@@ -53,6 +53,7 @@ namespace hiptensor
                                       std::vector<std::size_t> const&          e_ms_ns_strides,
                                       std::vector<int32_t> const&              e_ms_ns_modes,
                                       hiptensorComputeDescriptor_t             computeType,
+                                      std::vector<hiptensorOperator_t> const&  operators,
                                       const uint64_t                           workspaceSize);
 
     template <typename A,

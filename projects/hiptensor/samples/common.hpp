@@ -28,7 +28,7 @@
 
 #include "../test/utils.hpp"
 
-#define MAX_ELEMENTS_PRINT_COUNT 512
+#define MAX_ELEMENTS_PRINT_COUNT 128
 
 #define HIPTENSOR_FREE_DEVICE(ptr)     \
     if(ptr != nullptr)                 \

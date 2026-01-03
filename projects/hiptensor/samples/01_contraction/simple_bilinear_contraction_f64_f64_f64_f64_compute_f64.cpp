@@ -39,15 +39,15 @@ int main(int argc, char* argv[])
     typedef double ADataType;
     typedef double BDataType;
     typedef double CDataType;
-    typedef double floatTypeCompute;
+    typedef double doubleTypeCompute;
 
     constexpr hiptensorDataType_t          typeA       = HIPTENSOR_R_64F;
     constexpr hiptensorDataType_t          typeB       = HIPTENSOR_R_64F;
     constexpr hiptensorDataType_t          typeC       = HIPTENSOR_R_64F;
     constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_64F;
 
-    floatTypeCompute alpha{1.0f};
-    floatTypeCompute beta{1.0f};
+    doubleTypeCompute alpha{1.0};
+    doubleTypeCompute beta{1.0};
     return bilinearContractionSample<ADataType,
                                      BDataType,
                                      CDataType,

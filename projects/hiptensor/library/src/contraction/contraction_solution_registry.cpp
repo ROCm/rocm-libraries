@@ -79,6 +79,12 @@ namespace hiptensor
         return query(hashContractionOps(opCDE));
     }
 
+    ContractionSolutionRegistry::Query
+        ContractionSolutionRegistry::Query::query(hiptensorOperator_t opA, hiptensorOperator_t opB) const
+    {
+        return query(hashElementOps(opA, opB));
+    }
+
     std::unordered_map<ContractionSolutionRegistry::Query::Uid, ContractionSolution*> const&
         ContractionSolutionRegistry::Query::solutions() const
     {

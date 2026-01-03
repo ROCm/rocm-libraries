@@ -80,6 +80,9 @@ namespace hiptensor
             // By contraction operation
             Query query(ContractionOpId_t opCDE) const;
 
+            // By element-wise operations
+            Query query(hiptensorOperator_t opA, hiptensorOperator_t opB) const;
+
             // Full map of Uid to ContractionSolution*
             std::unordered_map<Uid, ContractionSolution*> const& solutions() const;
 

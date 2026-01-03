@@ -34,6 +34,7 @@
 #include <ck/utility/type_convert.hpp>
 
 #include <hiptensor/hiptensor_types.h>
+#include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
 
 namespace ck
 {
@@ -173,34 +174,73 @@ namespace ck
                 {
                 }
                 __host__ __device__ HiptensorUnaryOp(const HiptensorUnaryOp& dynamic_op) = default;
-                __host__            __device__ ~HiptensorUnaryOp()                       = default;
+                __host__ __device__ ~HiptensorUnaryOp()                       = default;
                 __host__ __device__ HiptensorUnaryOp& operator=(const HiptensorUnaryOp& other)
                     = default;
 
+                template<typename T>
+                __host__ __device__ void switch_op(T& y, T const& x) const
+                {
+                    switch(op_type)
+                    {
+                    case HIPTENSOR_OP_IDENTITY: hiptensor_identity(y, x); break;
+                    case HIPTENSOR_OP_SQRT: hiptensor_sqrt(y, x); break;
+                    case HIPTENSOR_OP_RELU: hiptensor_relu(y, x); break;
+                    case HIPTENSOR_OP_CONJ: hiptensor_conj(y, x); break;
+                    case HIPTENSOR_OP_RCP: hiptensor_rcp(y, x); break;
+                    case HIPTENSOR_OP_SIGMOID: hiptensor_sigmoid(y, x); break;
+                    case HIPTENSOR_OP_TANH: hiptensor_tanh(y, x); break;
+                    case HIPTENSOR_OP_EXP: hiptensor_exp(y, x); break;
+                    case HIPTENSOR_OP_LOG: hiptensor_log(y, x); break;
+                    case HIPTENSOR_OP_ABS: hiptensor_abs(y, x); break;
+                    case HIPTENSOR_OP_NEG: hiptensor_neg(y, x); break;
+                    case HIPTENSOR_OP_SIN: hiptensor_sin(y, x); break;
+                    case HIPTENSOR_OP_COS: hiptensor_cos(y, x); break;
+                    case HIPTENSOR_OP_TAN: hiptensor_tan(y, x); break;
+                    case HIPTENSOR_OP_SINH: hiptensor_sinh(y, x); break;
+                    case HIPTENSOR_OP_COSH: hiptensor_cosh(y, x); break;
+                    case HIPTENSOR_OP_ASIN: hiptensor_asin(y, x); break;
+                    case HIPTENSOR_OP_ACOS: hiptensor_acos(y, x); break;
+                    case HIPTENSOR_OP_ATAN: hiptensor_atan(y, x); break;
+                    case HIPTENSOR_OP_ASINH: hiptensor_asinh(y, x); break;
+                    case HIPTENSOR_OP_ACOSH: hiptensor_acosh(y, x); break;
+                    case HIPTENSOR_OP_ATANH: hiptensor_atanh(y, x); break;
+                    case HIPTENSOR_OP_CEIL: hiptensor_ceil(y, x); break;
+                    case HIPTENSOR_OP_FLOOR: hiptensor_floor(y, x); break;
+                    default: hiptensor_identity(y, x); break;
+                    }
+                }
+
                 __host__ __device__ void operator()(double& y, const double& x) const
                 {
-                    double_ops[op_type](y, x);
+                    //double_ops[op_type](y, x);
+                    switch_op(y, x);
                 }
 
                 __host__ __device__ void operator()(float& y, const float& x) const
                 {
-                    float_ops[op_type](y, x);
+                    //float_ops[op_type](y, x);
+                    switch_op(y, x);
                 }
 
                 __host__ __device__ void operator()(half_t& y, const half_t& x) const
                 {
                     float tempX = static_cast<float>(x);
                     float tempY;
-                    float_ops[op_type](tempY, tempX);
+                    //float_ops[op_type](tempY, tempX);
+                    switch_op(tempY, tempX);
                     y = static_cast<float>(tempY);
                 }
 
                 __host__ __device__ void operator()(bhalf_t& y, const bhalf_t& x) const
                 {
-                    float tempX = ck::type_convert<float, bhalf_t>(x);
+                    //float tempX = ck::type_convert<float, bhalf_t>(x);
+                    float tempX = static_cast<float>(x);
+                    
                     float tempY;
-                    float_ops[op_type](tempY, tempX);
-                    y = type_convert<bhalf_t, float>(tempY);
+                    //float_ops[op_type](tempY, tempX);
+                    switch_op(tempY, tempX);
+                    y = type_convert<bhalf_t, float>(tempY);  
                 }
 
             public:
@@ -378,6 +418,28 @@ namespace ck
 
             public:
                 hiptensorOperator_t op_type = HIPTENSOR_OP_IDENTITY;
+            };
+
+            struct BilinearUnary 
+            {
+                static constexpr const char* name = "BilinearUnary";
+
+                __host__ __device__ BilinearUnary() : bilinear_op_(), unary_op_() {}
+
+                __host__ __device__ BilinearUnary(Bilinear bilinear_op, HiptensorUnaryOp unary_op) 
+                    : bilinear_op_(bilinear_op), unary_op_(unary_op) {}
+
+                template <typename Y, typename X0, typename X1>
+                __host__ __device__ __noinline__ void operator()(Y& y, const X0& x0, const X1& x1) const
+                {
+                    X1 x1_tmp;
+                    unary_op_(x1_tmp, x1);
+                    bilinear_op_(y, x0, x1_tmp);
+                }
+
+                private:
+                Bilinear bilinear_op_;
+                HiptensorUnaryOp    unary_op_;
             };
         } // namespace element_wise
     } // namespace tensor_operation

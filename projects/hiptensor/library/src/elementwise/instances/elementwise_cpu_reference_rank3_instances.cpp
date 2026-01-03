@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include "../device/hiptensor_ck_types.hpp"
+#include "hiptensor_ck_types.hpp"
 #include "../elementwise_cpu_reference_impl.hpp"
 #include "../elementwise_cpu_reference_instances.hpp"
 #include <hiptensor_element_wise_operation.hpp>

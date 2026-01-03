@@ -41,6 +41,7 @@ namespace hiptensor
         BILINEAR         = 1, ///< \f${D=\alpha\mathcal{A}\mathcal{B}+\beta\mathcal{C}}\f$
         SCALE_COMPLEX    = 2,
         BILINEAR_COMPLEX = 3,
+        BILINEAR_UNARY   = 4,
         UNKNOWN,
     };
 

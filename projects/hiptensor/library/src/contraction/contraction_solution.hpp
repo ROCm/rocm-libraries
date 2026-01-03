@@ -82,6 +82,7 @@ namespace hiptensor
                               std::vector<std::size_t> e_ms_ns_lengths,
                               std::vector<std::size_t> e_ms_ns_strides,
                               std::vector<int32_t>     e_ms_ns_modes,
+                              std::vector<hiptensorOperator_t> const& operators,
                               void*                    workspacePtr)
             = 0;
 
@@ -103,6 +104,7 @@ namespace hiptensor
                                                         std::vector<std::size_t> e_ms_ns_lengths,
                                                         std::vector<std::size_t> e_ms_ns_strides,
                                                         std::vector<int32_t>     e_ms_ns_modes,
+                                                        std::vector<hiptensorOperator_t> const& operators,
                                                         void*                    workspacePtr,
                                                         unsigned long            workspaceSize,
                                                         StreamConfig const&      streamConfig
