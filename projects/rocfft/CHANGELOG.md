@@ -11,6 +11,7 @@ Documentation for rocFFT is available at
 * Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides with small lengths on the two fastest dimensions.
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
 * Fixed incorrect results on some strided real-complex FFTs on gfx90a.
+* Fixed incorrect results on some even-length real FFTs that have odd-length strides on higher dimensions.
 
 ## rocFFT 1.0.36 for ROCm 7.2.0
 
