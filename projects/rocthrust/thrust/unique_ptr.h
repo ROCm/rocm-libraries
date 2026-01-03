@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  Apache-2.0
+
 /*! \file unique_ptr.h
  *  \brief A smart pointer that owns and manages another object through a
  *         pointer and disposes of that object when the \p unique_ptr goes

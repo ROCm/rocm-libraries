@@ -157,7 +157,7 @@ union NodeAttributes {
 After updating FlatBuffer schemas, regenerate the C++ headers:
 
 ```bash
-ninja generate_hipdnn_sdk_headers
+ninja generate_hipdnn_data_sdk_headers
 ```
 
 #### Frontend Implementation
