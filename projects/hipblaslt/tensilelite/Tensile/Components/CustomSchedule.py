@@ -159,11 +159,29 @@ class ScheduleInfo:
         self.nllZeroDscnt = nllZeroDscnt
         self.mfmaReorder = mfmaReorder
         self.snopCode = snopCode
-        self.__skipValidation__ = False
+        self._skipValidation = False
+
+        # Empty list - validate all keys; list of keys - skip order validation for these keys 
+        self._skipOrderValidation : None | list[str] = []
 
     def disableValidation(self):
-        self.__skipValidation__ = True
+        self._skipValidation = True
 
+    def isValidationDisabled(self):
+        return self._skipValidation
+
+    def disableOrderValidation(self, keys: list[str] = []):
+        """
+        Disable order validation for specified keys.
+        
+        Args:
+            keys: list of keys to disable order validation for. If empty, disables for all keys.
+        
+        """
+        self._skipOrderValidation = keys if keys else list(self.optSchedule.keys())
+    
+    def getSkippedOrderValidationKeys(self):
+        return self._skipOrderValidation
 
 def removeComments(module):
     retModule = Module()
@@ -2524,7 +2542,6 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     syncs = SyncSchedule()
-    gr_inc_step = 0
     
     snops: list[tuple[int, SNop]] = []
     snopCode = []
@@ -2582,6 +2599,7 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
             syncs.add(                                                                               28, dscnt=2, comment="Wait for the first 2 LRB3 to complete")
             syncs.add(                                                                               30, dscnt=0, comment="Wait for the rest    LRB3 to complete")
             pack_b3 = [                                                                              28,28,29,29, 32,32,  33,33,34,34,  30,30,31,31, 32,32,  35,35,36,36]
+        
         lra3 = [                                                                                                                                     36,36,37,37]
         if not kernel["UseMFMAF32XEmulation"]:
             syncs.add(                                                                                                                                            39, dscnt=0, comment="Wait for LRA3 to complete")
@@ -2635,5 +2653,5 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
 
     if reorder_packing:
-        opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
+        opt1.disableOrderValidation(["PackA0", "PackB0", "PackA3", "PackB3", ]) # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1

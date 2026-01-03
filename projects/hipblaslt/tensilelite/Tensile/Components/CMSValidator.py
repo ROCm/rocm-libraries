@@ -1211,6 +1211,9 @@ def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple
     not just the 'GRIncA' instructions.
     """
     for k in scheduleInfo.optSchedule.keys():
+        if k in scheduleInfo.getSkippedOrderValidationKeys():
+            printWarning(f"Ascending order validation for instructions {k} is explicitly disabled.")
+            continue
         seq = schedule_get(k, code_path, scheduleInfo)
         for i in range(1, len(seq)):
             if seq[i] < seq[i - 1]:
@@ -1236,7 +1239,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     is invalid. It may be a false positive.
     """
     # Case where there was an explicit request to skip validation.
-    if scheduleInfo.__skipValidation__:
+    if scheduleInfo.isValidationDisabled():
         mt0 = context.get("kernel", {}).get("MacroTile0", "?")
         mt1 = context.get("kernel", {}).get("MacroTile1", "?")
         du = context.get("kernel", {}).get("DepthU", "?")
