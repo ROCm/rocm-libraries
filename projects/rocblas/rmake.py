@@ -456,8 +456,17 @@ def config_cmd():
             args.gpu_architecture = OS_info["GPU"]
         else:
             fatal("Could not detect GPU as requested. Not continuing.")
+    
+    # TEMPORARY WORKAROUND: Add xnack+ to architectures that need it for Tensile
+    gpu_arch = args.gpu_architecture
+    archs_needing_xnack = ['gfx950', 'gfx942', 'gfx90a', 'gfx908']
+    for arch in archs_needing_xnack:
+        if arch in gpu_arch and ':xnack' not in gpu_arch:
+            print(f"WORKAROUND: Adding :xnack+ to {arch}")
+            gpu_arch = gpu_arch.replace(arch, f'{arch}:xnack+')
+    
     # not just for tensile
-    cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
+    cmake_options.append(f'-DGPU_TARGETS=\"{gpu_arch}\"')
 
     if not args.build_tensile:
         cmake_options.append(f"-DBUILD_WITH_TENSILE=OFF")

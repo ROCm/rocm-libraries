@@ -32,21 +32,42 @@ for arg in "$@"; do
         -a|--architecture)
             fixed_args+=("$arg")
             ;;
-        gfx950|gfx942|gfx90a|gfx908)
-            # These architectures need xnack+ for Tensile
-            echo "WORKAROUND: Transforming $arg to ${arg}:xnack+"
-            fixed_args+=("${arg}:xnack+")
+        gfx950|gfx942|gfx90a|gfx908|gfx1200|gfx1201|gfx1100|gfx1101|gfx1102|gfx1103|gfx1150|gfx1151|gfx1152|gfx1153)
+            # Check if already has target-id (: present)
+            if [[ "$arg" == *:* ]]; then
+                # Already has target-id, pass through
+                echo "Architecture $arg already has target-id, passing through"
+                fixed_args+=("$arg")
+            else
+                # Needs xnack+ for Tensile (for supported archs)
+                case "$arg" in
+                    gfx950|gfx942|gfx90a|gfx908)
+                        echo "WORKAROUND: Transforming $arg to ${arg}:xnack+"
+                        fixed_args+=("${arg}:xnack+")
+                        ;;
+                    *)
+                        # Other archs might not need xnack+, pass through
+                        echo "Architecture $arg detected, passing through as-is"
+                        fixed_args+=("$arg")
+                        ;;
+                esac
+            fi
             ;;
         *)
             fixed_args+=("$arg")
             ;;
     esac
 done
+echo "Original args: $@"
+echo "Fixed args: ${fixed_args[@]}"
 echo "================================================"
 # =============================================================================
 
+# Re-set positional parameters to use fixed args
+set -- "${fixed_args[@]}"
+
 declare -a input_args
-input_args="${fixed_args[@]}"
+input_args="$@"
 
 #use readlink rather than realpath for CentOS 6.10 support
 ROCBLAS_SRC_PATH=`dirname "$(readlink -m $0)"`
