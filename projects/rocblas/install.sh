@@ -23,11 +23,30 @@ export AMD_LOG_LEVEL=3
 
 echo "ASAN enabled: Logs will be in /tmp/asan_rocblas.*"
 echo "Debug allocation tracking enabled"
+
+# WORKAROUND: Fix architecture strings for Tensile requirements
+# Transform arguments to add xnack+ where needed
+fixed_args=()
+for arg in "$@"; do
+    case "$arg" in
+        -a|--architecture)
+            fixed_args+=("$arg")
+            ;;
+        gfx950|gfx942|gfx90a|gfx908)
+            # These architectures need xnack+ for Tensile
+            echo "WORKAROUND: Transforming $arg to ${arg}:xnack+"
+            fixed_args+=("${arg}:xnack+")
+            ;;
+        *)
+            fixed_args+=("$arg")
+            ;;
+    esac
+done
 echo "================================================"
 # =============================================================================
 
 declare -a input_args
-input_args="$@"
+input_args="${fixed_args[@]}"
 
 #use readlink rather than realpath for CentOS 6.10 support
 ROCBLAS_SRC_PATH=`dirname "$(readlink -m $0)"`
