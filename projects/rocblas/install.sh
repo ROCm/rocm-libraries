@@ -1,5 +1,31 @@
 #!/usr/bin/env bash
 
+# =============================================================================
+# TEMPORARY: FORCE ASAN AND DIAGNOSTIC LOGGING FOR CI DEBUGGING
+# TODO: REMOVE THIS SECTION AFTER DEBUGGING IS COMPLETE
+# =============================================================================
+echo "================================================"
+echo "TEMPORARY DEBUG BUILD: ASAN AND DIAGNOSTICS ENABLED"
+echo "================================================"
+
+# Force Address Sanitizer to catch memory corruption issues
+export ASAN_FORCED=1
+
+# Enable diagnostic logging in test client
+export ROCBLAS_CLIENT_DEBUG_ALLOC=1
+
+# ASAN runtime options for better diagnostics
+export ASAN_OPTIONS="detect_leaks=1:halt_on_error=0:log_path=/tmp/asan_rocblas:print_stacktrace=1:symbolize=1"
+
+# Enable verbose HIP error reporting
+export HIP_VISIBLE_DEVICES=0
+export AMD_LOG_LEVEL=3
+
+echo "ASAN enabled: Logs will be in /tmp/asan_rocblas.*"
+echo "Debug allocation tracking enabled"
+echo "================================================"
+# =============================================================================
+
 declare -a input_args
 input_args="$@"
 
@@ -531,7 +557,14 @@ if [[ "${rmake_invoked}" == false ]]; then
   rm -rf ${full_build_dir}
 
   #rmake.py at top level same as install.sh
-  python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
+  # TEMPORARY: Force ASAN build for CI debugging with debug symbols
+  if [ "$ASAN_FORCED" = "1" ]; then
+    echo "Force enabling --address-sanitizer and debug mode for better stack traces..."
+    # Use -g for debug symbols which gives better ASAN output, but keep optimization
+    python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH} --address-sanitizer --relwithdebinfo
+  else
+    python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
+  fi
   check_exit_code "$?"
 
   popd

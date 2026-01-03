@@ -55,6 +55,18 @@ void free_ptr_use(void* ptr, bool call_free)
 {
     std::lock_guard<std::mutex> lock(mem_mutex);
     auto it = mem_allocated.find(ptr);
+    
+    // Debug logging to catch double-free or untracked pointer issues
+    static auto* debug_alloc = getenv("ROCBLAS_CLIENT_DEBUG_ALLOC");
+    if(debug_alloc && ptr)
+    {
+        if(it == mem_allocated.end() && call_free)
+        {
+            rocblas_cerr << "WARNING: Freeing untracked pointer " << ptr 
+                        << " (potential double-free or memory corruption)" << std::endl;
+        }
+    }
+    
     if(ptr && it != mem_allocated.end())
     {
         mem_used -= it->second;
