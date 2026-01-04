@@ -2,10 +2,10 @@
 /* SPDX-License-Identifier:  MIT */
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -19,9 +19,9 @@
 #include <unordered_map>
 
 using namespace miopen_legacy_plugin;
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 class TestMiopenConvFwdBiasActivPlanBuilder : public ::testing::Test
 {
@@ -75,7 +75,7 @@ struct ConvolutionBiasActivationTestParam
 {
     FusedOp op;
     test_conv_common::ConvTestCase convTestCase;
-    hipdnn_sdk::utilities::TensorLayout layout;
+    hipdnn_data_sdk::utilities::TensorLayout layout;
     test_activation_common::ActivTestCase activTestCase;
     hipdnn_frontend::DataType defaultDataType;
     std::unordered_map<TypeKey, hipdnn_frontend::DataType> dataTypes;
@@ -86,7 +86,7 @@ struct ConvolutionBiasActivationTestParam
 
     friend std::ostream& operator<<(std::ostream& os, const ConvolutionBiasActivationTestParam& tc)
     {
-        using namespace hipdnn_sdk::utilities;
+        using namespace hipdnn_data_sdk::utilities;
         os << tc.label;
         os << ", Operation:" << tc.op;
         os << ", Conv: " << tc.convTestCase;
@@ -262,7 +262,7 @@ test_conv_common::ConvTestCase validConvTestCase5d()
 
 test_activation_common::ActivTestCase validActivTestCase()
 {
-    return {hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+    return {hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
             0.0,
             std::nullopt,
             std::nullopt,
@@ -513,7 +513,7 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
               validConvTestCase4d(),
               TensorLayout::NCHW,
               test_activation_common::ActivTestCase{
-                  hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, 0.0},
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, 0.0},
               hipdnn_frontend::DataType::FLOAT,
               {},
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
@@ -523,28 +523,30 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
               validConvTestCase4d(),
               TensorLayout::NCHW,
               test_activation_common::ActivTestCase{
-                  hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, 0.0, 1.0},
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, 0.0, 1.0},
               hipdnn_frontend::DataType::FLOAT,
               {},
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               true,
               "CLAMP is supported"},
-        Param{
-            FusedOp::CBA,
-            validConvTestCase4d(),
-            TensorLayout::NCHW,
-            test_activation_common::ActivTestCase{
-                hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, std::nullopt, 1.0},
-            hipdnn_frontend::DataType::FLOAT,
-            {},
-            {TypeKey::Y_CONV, TypeKey::Y_BIAS},
-            false,
-            "Leaky RELU is NOT supported"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  std::nullopt,
+                  1.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Leaky RELU is NOT supported"},
         Param{FusedOp::CA,
               validConvTestCase4d(),
               TensorLayout::NCHW,
               test_activation_common::ActivTestCase{
-                  hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, 0.0},
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, 0.0},
               hipdnn_frontend::DataType::FLOAT,
               {},
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
@@ -554,23 +556,25 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
               validConvTestCase4d(),
               TensorLayout::NCHW,
               test_activation_common::ActivTestCase{
-                  hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, 0.0, 1.0},
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, 0.0, 1.0},
               hipdnn_frontend::DataType::FLOAT,
               {},
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               true,
               "CLAMP is supported"},
-        Param{
-            FusedOp::CA,
-            validConvTestCase4d(),
-            TensorLayout::NCHW,
-            test_activation_common::ActivTestCase{
-                hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, std::nullopt, std::nullopt, 1.0},
-            hipdnn_frontend::DataType::FLOAT,
-            {},
-            {TypeKey::Y_CONV, TypeKey::Y_BIAS},
-            false,
-            "Leaky RELU is NOT supported"},
+        Param{FusedOp::CA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  std::nullopt,
+                  1.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Leaky RELU is NOT supported"},
     };
 
     return params;
@@ -601,35 +605,35 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
 {
     {
         auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-        hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
-        hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-        hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-        hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-        hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
@@ -659,24 +663,24 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
 
         EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, mockGraph),
-                     hipdnn_plugin::HipdnnPluginException);
+                     hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
 
         EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, mockGraph),
-                     hipdnn_plugin::HipdnnPluginException);
+                     hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, graph),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGraph)
@@ -687,7 +691,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
         HipdnnEnginePluginExecutionContext ctx;
 
         EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, ctx),
-                     hipdnn_plugin::HipdnnPluginException);
+                     hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
     {
@@ -696,7 +700,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
         HipdnnEnginePluginExecutionContext ctx;
 
         EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, ctx),
-                     hipdnn_plugin::HipdnnPluginException);
+                     hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
 }
@@ -704,10 +708,10 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
-                 hipdnn_plugin::HipdnnPluginException);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
