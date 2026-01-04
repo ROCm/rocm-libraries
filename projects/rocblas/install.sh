@@ -1,71 +1,5 @@
 #!/usr/bin/env bash
 
-# =============================================================================
-# TEMPORARY: FORCE ASAN AND DIAGNOSTIC LOGGING FOR CI DEBUGGING
-# TODO: REMOVE THIS SECTION AFTER DEBUGGING IS COMPLETE
-# =============================================================================
-echo "================================================"
-echo "TEMPORARY DEBUG BUILD: ASAN AND DIAGNOSTICS ENABLED"
-echo "================================================"
-
-# Force Address Sanitizer to catch memory corruption issues
-export ASAN_FORCED=1
-
-# Enable diagnostic logging in test client
-export ROCBLAS_CLIENT_DEBUG_ALLOC=1
-
-# ASAN runtime options for better diagnostics
-export ASAN_OPTIONS="detect_leaks=1:halt_on_error=0:log_path=/tmp/asan_rocblas:print_stacktrace=1:symbolize=1"
-
-# Enable verbose HIP error reporting
-export HIP_VISIBLE_DEVICES=0
-export AMD_LOG_LEVEL=3
-
-echo "ASAN enabled: Logs will be in /tmp/asan_rocblas.*"
-echo "Debug allocation tracking enabled"
-
-# WORKAROUND: Fix architecture strings for Tensile requirements
-# Transform arguments to add xnack+ where needed
-fixed_args=()
-for arg in "$@"; do
-    case "$arg" in
-        -a|--architecture)
-            fixed_args+=("$arg")
-            ;;
-        gfx950|gfx942|gfx90a|gfx908|gfx1200|gfx1201|gfx1100|gfx1101|gfx1102|gfx1103|gfx1150|gfx1151|gfx1152|gfx1153)
-            # Check if already has target-id (: present)
-            if [[ "$arg" == *:* ]]; then
-                # Already has target-id, pass through
-                echo "Architecture $arg already has target-id, passing through"
-                fixed_args+=("$arg")
-            else
-                # Needs xnack+ for Tensile (for supported archs)
-                case "$arg" in
-                    gfx950|gfx942|gfx90a|gfx908)
-                        echo "WORKAROUND: Transforming $arg to ${arg}:xnack+"
-                        fixed_args+=("${arg}:xnack+")
-                        ;;
-                    *)
-                        # Other archs might not need xnack+, pass through
-                        echo "Architecture $arg detected, passing through as-is"
-                        fixed_args+=("$arg")
-                        ;;
-                esac
-            fi
-            ;;
-        *)
-            fixed_args+=("$arg")
-            ;;
-    esac
-done
-echo "Original args: $@"
-echo "Fixed args: ${fixed_args[@]}"
-echo "================================================"
-# =============================================================================
-
-# Re-set positional parameters to use fixed args
-set -- "${fixed_args[@]}"
-
 declare -a input_args
 input_args="$@"
 
@@ -597,14 +531,7 @@ if [[ "${rmake_invoked}" == false ]]; then
   rm -rf ${full_build_dir}
 
   #rmake.py at top level same as install.sh
-  # TEMPORARY: Force ASAN build for CI debugging with debug symbols
-  if [ "$ASAN_FORCED" = "1" ]; then
-    echo "Force enabling --address-sanitizer and debug mode for better stack traces..."
-    # Use -g for debug symbols which gives better ASAN output, but keep optimization
-    python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH} --address-sanitizer --relwithdebinfo
-  else
-    python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
-  fi
+  python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
   check_exit_code "$?"
 
   popd
