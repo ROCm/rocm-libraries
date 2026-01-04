@@ -1381,8 +1381,11 @@ class Solution(collections.abc.Mapping):
       else:
         state["VectorWidthB"] = 1
 
-    if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-      state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+    if state["ProblemType"]["Sparse"]:
+      if not state["DirectToVgprSparseMetadata"]:
+        state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+      # ON/OFF the sourceswap according to the sparse type automatically
+      state["SourceSwap"] = 0 if state["ProblemType"]["Sparse"] == 1 else 1
 
     numBytes = state["ProblemType"]["DataType"].numBytes()
     isa = tuple(state["ISA"])
@@ -3128,14 +3131,6 @@ class Solution(collections.abc.Mapping):
       if state["EnableMatrixInstruction"] and state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Sparse A kernel does not support MIArchVgpr yet.")
         return
-      # Not Support Feature
-      if state["ProblemType"]["Sparse"] == 1 and state["SourceSwap"] :
-        reject(state, printRejectionReason, "Sparse A kernel cannot support SourceSwap.")
-        return
-      else:
-        if state["ProblemType"]["Sparse"] == 2 and not state["SourceSwap"]:
-          reject(state, printRejectionReason, "Sparse B kernel must enable SourceSwap.")
-          return
       state["AssertSummationElementMultiple"] = 8
 
     # check if need to use lds init Acc vgprs
