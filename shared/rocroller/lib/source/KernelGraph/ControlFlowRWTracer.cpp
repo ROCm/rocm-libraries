@@ -284,6 +284,16 @@ namespace rocRoller::KernelGraph
         }
     }
 
+    void ControlFlowRWTracer::trackBuffer(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            if(m_graph.coordinates.get<Buffer>(c.coordinate).has_value())
+                trackRegister(control, c.coordinate, rw);
+        }
+    }
+
     bool ControlFlowRWTracer::hasGeneratedInputs(int const& tag)
     {
         auto inputs = m_graph.control.getInputNodeIndices<Sequence>(tag);
@@ -361,11 +371,6 @@ namespace rocRoller::KernelGraph
         }
     }
 
-    void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
-    {
-        // Already in a Scope
-    }
-
     void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
     {
         CollectDataFlowExpressionVisitor visitor;
@@ -419,8 +424,8 @@ namespace rocRoller::KernelGraph
         // typically involve: incrementing loop counters and
         // offsets.  Loop counters are scoped already.
         //
-        // Offsets are created "inside" ComputeIndex nodes and are
-        // used in other nodes like LoadTiled.  These "inside"
+        // Offsets are created by AssignIndexExpressions and are
+        // used in other nodes like LoadTiled.  These
         // references do not explicitly appear in the graph.
         //
         // If we examine loop increment operations and "track" an
@@ -514,6 +519,7 @@ namespace rocRoller::KernelGraph
 
         trackConnections(tag, {user, dst}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadVGPR const& op, int tag)
@@ -611,6 +617,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {source, dst}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)
@@ -630,6 +637,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, src, ReadWrite::READ);
         trackConnections(tag, {src}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreVGPR const& op, int tag)

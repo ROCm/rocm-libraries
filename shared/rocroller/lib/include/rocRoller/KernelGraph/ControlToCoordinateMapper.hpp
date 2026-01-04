@@ -112,43 +112,8 @@ namespace rocRoller::KernelGraph
             return a.id < b.id;
         }
 
-        enum class ComputeIndexArgument : int
-        {
-            TARGET = 0,
-            INCREMENT,
-            BASE,
-            OFFSET,
-            STRIDE,
-            BUFFER,
-            BASEADDRESS,
-
-            Count
-        };
-
-        std::string   toString(ComputeIndexArgument cia);
-        std::ostream& operator<<(std::ostream&, ComputeIndexArgument const&);
-
-        struct ComputeIndex
-        {
-            ComputeIndexArgument argument;
-            int                  index = 0;
-
-            bool operator==(ComputeIndex const& other) const
-            {
-                return this->index == other.index && this->argument == other.argument;
-            }
-        };
-
-        bool inline operator<(ComputeIndex const& a, ComputeIndex const& b)
-        {
-            if(a.argument == b.argument)
-                return a.index < b.index;
-            return a.argument < b.argument;
-        }
-
         using ConnectionSpec = std::variant<std::monostate,
                                             JustNaryArgument,
-                                            ComputeIndex,
                                             TypeAndSubDimension,
                                             TypeAndNaryArgument,
                                             UnrollStride,

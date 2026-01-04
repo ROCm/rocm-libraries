@@ -29,15 +29,16 @@
 template <typename Ti, typename To, typename Tex>
 void testing_syrk_ex_bad_arg(const Arguments& arg)
 {
+    auto rocblas_syrk_ex_fn = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_fortran : rocblas_syrk_ex;
+    auto rocblas_syrk_ex_fn_64
+        = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_fortran : rocblas_syrk_ex;
+
+    // TODO
+    //auto rocblas_syrk_ex_fn_64
+    //    = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_64_fortran : rocblas_syrk_ex_64;
+
     for(auto pointer_mode : {rocblas_pointer_mode_host, rocblas_pointer_mode_device})
     {
-        auto rocblas_syrk_ex_fn
-            = arg.api & c_API_FORTRAN ? rocblas_syrk_ex : rocblas_syrk_ex_fortran;
-        auto rocblas_syrk_ex_fn_64 = arg.api & c_API_FORTRAN ? rocblas_syrk_ex : rocblas_syrk_ex;
-        // TODO
-        //auto rocblas_syrk_ex_fn_64
-        //    = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_64_fortran : rocblas_syrk_ex_64;
-
         const rocblas_fill      uplo   = rocblas_fill_upper;
         const rocblas_operation transA = rocblas_operation_none;
         const int64_t           N      = 100;
@@ -94,7 +95,7 @@ void testing_syrk_ex_bad_arg(const Arguments& arg)
         rocblas_init_matrix(
             hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true, true);
         rocblas_init_matrix(
-            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false, true);
+            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false);
 
         CHECK_HIP_ERROR(dA.transfer_from(hA));
         CHECK_HIP_ERROR(dC.transfer_from(hC));
@@ -163,8 +164,9 @@ nullptr, a_type, lda, one, nullptr, c_type, ldc, compute_type));
 template <typename Ti, typename To, typename Tex>
 void testing_syrk_ex(const Arguments& arg)
 {
-    auto rocblas_syrk_ex_fn = arg.api & c_API_FORTRAN ? rocblas_syrk_ex : rocblas_syrk_ex_fortran;
-    auto rocblas_syrk_ex_fn_64 = arg.api & c_API_FORTRAN ? rocblas_syrk_ex : rocblas_syrk_ex;
+    auto rocblas_syrk_ex_fn = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_fortran : rocblas_syrk_ex;
+    auto rocblas_syrk_ex_fn_64
+        = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_fortran : rocblas_syrk_ex;
     // TODO
     //auto rocblas_syrk_ex_fn_64
     //    = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_64_fortran : rocblas_syrk_ex_64;
@@ -196,8 +198,6 @@ void testing_syrk_ex(const Arguments& arg)
     rocblas_datatype c_type       = arg.c_type;
     rocblas_datatype compute_type = arg.compute_type;
 
-    using To_hpa = std::conditional_t<std::is_same_v<To, rocblas_bfloat16>, float, To>;
-
     // check for invalid sizes
     bool invalid_size = N < 0 || K < 0 || lda < A_row || ldc < N;
     if(invalid_size)
@@ -219,7 +219,6 @@ void testing_syrk_ex(const Arguments& arg)
     // Allocate host memory
     HOST_MEMCHECK(host_matrix<Ti>, hA, (A_row, A_col, lda));
     HOST_MEMCHECK(host_matrix<To>, hC, (N, N, ldc));
-    HOST_MEMCHECK(host_matrix<To_hpa>, hC_gold, (N, N, ldc));
 
     if(arg.unit_check || arg.norm_check)
     {
@@ -233,11 +232,14 @@ void testing_syrk_ex(const Arguments& arg)
         rocblas_init_matrix(
             hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true, true);
         rocblas_init_matrix(
-            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false, true);
+            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false);
 
         HOST_MEMCHECK(host_matrix<To>, hC_copy, (N, N, ldc));
         HOST_MEMCHECK(host_matrix<To>, hC_orig, (N, N, ldc));
+        HOST_MEMCHECK(host_matrix<To>, hC_gold, (N, N, ldc));
+
         hC_orig = hC;
+        hC_gold = hC;
 
         // copy data from CPU to device
         CHECK_HIP_ERROR(dA.transfer_from(hA));
@@ -355,8 +357,7 @@ void testing_syrk_ex(const Arguments& arg)
         // CPU BLAS
         cpu_time_used = get_time_us_no_sync();
 
-        ref_syrk_ex<Ti, To_hpa, Tex>(
-            uplo, transA, N, K, h_alpha_Tc, hA, lda, h_beta_Tc, hC_gold, ldc);
+        ref_syrk_ex<Ti, To, Tex>(uplo, transA, N, K, h_alpha_Tc, hA, lda, h_beta_Tc, hC_gold, ldc);
 
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
@@ -374,19 +375,18 @@ void testing_syrk_ex(const Arguments& arg)
                                      ? sum_error_tolerance_for_gfx11<Tex, Ti, To>
                                      : 4 * sum_error_tolerance<Ti>;
                     tol = tol * K + 2 * sum_error_tolerance<To>; // add To conversion rounding error
-                    near_check_general<To, To_hpa>(N, N, ldc, hC_gold, hC, tol);
+                    near_check_general<To>(N, N, ldc, hC_gold, hC, tol);
                 }
                 else
                 {
-                    unit_check_general<To, To_hpa>(N, N, ldc, hC_gold, hC);
+                    unit_check_general<To>(N, N, ldc, hC_gold, hC);
                 }
             }
 
             double error = 0;
             if(arg.norm_check)
             {
-                error_host
-                    = std::abs(norm_check_general<To>('F', N, N, ldc, (To_hpa*)hC_gold, (To*)hC));
+                error = std::abs(norm_check_general<To>('F', N, N, ldc, (To*)hC_gold, (To*)hC));
             }
             return error;
         };

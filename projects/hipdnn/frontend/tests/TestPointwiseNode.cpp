@@ -2,13 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
-#include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <vector>
 
 using namespace hipdnn_frontend;
@@ -24,8 +24,8 @@ std::vector<PointwiseMode> getPointwiseModesByChecker(CheckerFunc checker)
 {
     std::vector<PointwiseMode> modes;
     // Iterate through all possible PointwiseMode values and check if they match the criteria
-    for(int i = static_cast<int>(hipdnn_sdk::data_objects::PointwiseMode::MIN);
-        i <= static_cast<int>(hipdnn_sdk::data_objects::PointwiseMode::MAX);
+    for(int i = static_cast<int>(hipdnn_data_sdk::data_objects::PointwiseMode::MIN);
+        i <= static_cast<int>(hipdnn_data_sdk::data_objects::PointwiseMode::MAX);
         ++i)
     {
         auto mode = static_cast<PointwiseMode>(i);

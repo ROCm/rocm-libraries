@@ -26,7 +26,6 @@
 
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
-#include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDirect2LDS.hpp>
@@ -36,7 +35,7 @@
 #include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddStreamK.hpp>
 #include <rocRoller/KernelGraph/Transforms/AliasDataFlowTags.hpp>
-#include <rocRoller/KernelGraph/Transforms/AssignComputeIndex.hpp>
+#include <rocRoller/KernelGraph/Transforms/AssignIndexExpressions.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>

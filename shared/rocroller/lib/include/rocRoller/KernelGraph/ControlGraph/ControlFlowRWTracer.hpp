@@ -104,7 +104,6 @@ namespace rocRoller::KernelGraph
         void operator()(ControlGraph::Assign const& op, int tag);
         void operator()(ControlGraph::Barrier const& op, int tag);
         void operator()(ControlGraph::Block const& op, int tag);
-        void operator()(ControlGraph::ComputeIndex const& op, int tag);
         void operator()(ControlGraph::ConditionalOp const& op, int tag);
         void operator()(ControlGraph::Deallocate const& op, int tag);
         void operator()(ControlGraph::DoWhileOp const& op, int tag);
@@ -135,6 +134,7 @@ namespace rocRoller::KernelGraph
         void trackRegister(int control, int coordinate, ReadWrite rw);
         void trackConnections(int control, std::unordered_set<int> const& exclude, ReadWrite rw);
         void trackOffsetAndStride(int control, ReadWrite rw);
+        void trackBuffer(int control, ReadWrite rw);
 
         bool hasGeneratedInputs(int const& tag);
         void generate(std::set<int> candidates);

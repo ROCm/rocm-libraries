@@ -4,12 +4,12 @@
 
 #include "GraphAttributes.hpp"
 #include <flatbuffers/flatbuffers.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -213,66 +213,66 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto result = std::visit(
-            [&](auto&& arg)
-                -> std::pair<hipdnn_sdk::data_objects::TensorValue, flatbuffers::Offset<void>> {
+            [&](auto&& arg) -> std::pair<hipdnn_data_sdk::data_objects::TensorValue,
+                                         flatbuffers::Offset<void>> {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr(std::is_same_v<T, float>)
                 {
-                    hipdnn_sdk::data_objects::Float32Value floatVal(arg);
-                    return {hipdnn_sdk::data_objects::TensorValue::Float32Value,
+                    hipdnn_data_sdk::data_objects::Float32Value floatVal(arg);
+                    return {hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
                             builder.CreateStruct(floatVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, double>)
                 {
-                    hipdnn_sdk::data_objects::Float64Value doubleVal(arg);
-                    return {hipdnn_sdk::data_objects::TensorValue::Float64Value,
+                    hipdnn_data_sdk::data_objects::Float64Value doubleVal(arg);
+                    return {hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
                             builder.CreateStruct(doubleVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, half>)
                 {
-                    hipdnn_sdk::data_objects::Float16Value halfVal(arg);
-                    return {hipdnn_sdk::data_objects::TensorValue::Float16Value,
+                    hipdnn_data_sdk::data_objects::Float16Value halfVal(arg);
+                    return {hipdnn_data_sdk::data_objects::TensorValue::Float16Value,
                             builder.CreateStruct(halfVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, hip_bfloat16>)
                 {
-                    hipdnn_sdk::data_objects::BFloat16Value bfVal(arg);
-                    return {hipdnn_sdk::data_objects::TensorValue::BFloat16Value,
+                    hipdnn_data_sdk::data_objects::BFloat16Value bfVal(arg);
+                    return {hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value,
                             builder.CreateStruct(bfVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, uint8_t>)
                 {
-                    hipdnn_sdk::data_objects::Float8Value uint8Val(arg);
-                    return {hipdnn_sdk::data_objects::TensorValue::Float8Value,
+                    hipdnn_data_sdk::data_objects::Float8Value uint8Val(arg);
+                    return {hipdnn_data_sdk::data_objects::TensorValue::Float8Value,
                             builder.CreateStruct(uint8Val).Union()};
                 }
                 else if constexpr(std::is_same_v<T, int32_t>)
                 {
-                    hipdnn_sdk::data_objects::Int32Value int32Val(arg);
-                    return {hipdnn_sdk::data_objects::TensorValue::Int32Value,
+                    hipdnn_data_sdk::data_objects::Int32Value int32Val(arg);
+                    return {hipdnn_data_sdk::data_objects::TensorValue::Int32Value,
                             builder.CreateStruct(int32Val).Union()};
                 }
                 else
                 {
                     // For std::monostate case
-                    return {hipdnn_sdk::data_objects::TensorValue::NONE, 0};
+                    return {hipdnn_data_sdk::data_objects::TensorValue::NONE, 0};
                 }
             },
             _value);
 
-        return hipdnn_sdk::data_objects::CreateTensorAttributesDirect(builder,
-                                                                      _uid,
-                                                                      _name.c_str(),
-                                                                      toSdkType(_dataType),
-                                                                      &_stride,
-                                                                      &_dim,
-                                                                      _isVirtual,
-                                                                      result.first,
-                                                                      result.second);
+        return hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                           _uid,
+                                                                           _name.c_str(),
+                                                                           toSdkType(_dataType),
+                                                                           &_stride,
+                                                                           &_dim,
+                                                                           _isVirtual,
+                                                                           result.first,
+                                                                           result.second);
     }
 
 private:

@@ -189,17 +189,31 @@ namespace rocRoller
             return result;
         }
 
-        DataType getOffsetTypeFromComputeIndex(const KernelGraph& graph, int offsetTag)
+        DataType getOffsetDataTypeFromGraph(int                op,
+                                            KernelGraph const& graph,
+                                            bool               isStorePartOfGlobalToLDSOp)
         {
-            for(auto const& conn : graph.mapper.getCoordinateConnections(offsetTag))
+            DataType rv = DataType::UInt64;
+            auto     s  = graph.control.get<StoreTiled>(op);
+            auto     l  = graph.control.get<LoadTiled>(op);
+            auto     ll = graph.control.get<LoadLDSTile>(op);
+            auto     sl = graph.control.get<StoreLDSTile>(op);
+
+            auto isGlobalLoad = false;
+            if(l)
             {
-                if(auto computeIndex = graph.control.get<ComputeIndex>(conn.control);
-                   computeIndex.has_value())
+                auto [_, macTile] = graph.getDimension<MacroTile>(op);
+                if(macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
                 {
-                    return computeIndex->offsetType;
+                    isGlobalLoad = true;
                 }
             }
-            Throw<FatalError>("No ComputeIndex found for Offset tag.", ShowValue(offsetTag));
+
+            if(s || (l and not isGlobalLoad) || ll || sl || isStorePartOfGlobalToLDSOp)
+            {
+                rv = DataType::UInt32;
+            }
+            return rv;
         }
 
         Generator<Instruction> LoadStoreTileGenerator::getOffset(LoadStoreTileInfo& info,
@@ -268,7 +282,7 @@ namespace rocRoller
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(
                         offsetTag,
                         Register::Type::Vector,
-                        getOffsetTypeFromComputeIndex(*m_graph, offsetTag),
+                        getOffsetDataTypeFromGraph(info.tag, *m_graph, isStorePartOfGlobalToLDS),
                         1);
                     info.rowOffsetReg->setName(concatenate("Offset", offsetTag));
                     m_context->getScopeManager()->addRegister(offsetTag);
@@ -338,141 +352,6 @@ namespace rocRoller
                 }
 
                 co_yield generate(stride, strideExpr);
-            }
-        }
-
-        Generator<Instruction> LoadStoreTileGenerator::genComputeIndex(int                 tag,
-                                                                       ComputeIndex const& ci,
-                                                                       Transformer         coords)
-        {
-            auto tagger = m_context->registerTagManager();
-
-            auto base = m_graph->mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASE});
-            auto offset = m_graph->mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::OFFSET});
-            auto stride = m_graph->mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
-            auto target = m_graph->mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::TARGET});
-            auto increment = m_graph->mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
-            auto buffer = m_graph->mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
-
-            auto info = fmt::format("KernelGraph::LoadStoreTileGenerator::ComputeIndex({}): "
-                                    "target {} increment {} base {} offset {} stride {} buffer {}",
-                                    tag,
-                                    target,
-                                    increment,
-                                    base,
-                                    offset,
-                                    stride,
-                                    buffer);
-            Log::debug(info);
-            co_yield Instruction::Comment(info);
-
-            // TODO: Design a better way of binding storage to coordinates
-            auto maybeLDS = m_graph->coordinates.get<LDS>(target);
-            if(maybeLDS)
-            {
-                // If target is LDS; it might be a duplicated LDS
-                // node.  For the purposes of computing indexes,
-                // use the parent LDS as the target instead.
-                namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-
-                auto maybeParentLDS = only(
-                    m_graph->coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
-                if(maybeParentLDS)
-                    target = *maybeParentLDS;
-            }
-            maybeLDS = m_graph->coordinates.get<LDS>(target);
-
-            auto isTransposed
-                = m_graph->coordinates
-                      .findNodes(target,
-                                 [&](int tag) -> bool {
-                                     auto maybeAdhoc = m_graph->coordinates.get<Adhoc>(tag);
-                                     return maybeAdhoc
-                                            && maybeAdhoc->name() == "Adhoc.transpose.simdsPerWave";
-                                 })
-                      .to<std::vector>()
-                      .size()
-                  == 1;
-
-            auto scope = m_context->getScopeManager();
-
-            auto toBytes = [&](ExpressionPtr expr) -> ExpressionPtr {
-                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
-
-                // TODO: This would be a good place to add a GPU
-                // assert.  If numBits is not a multiple of 8, assert
-                // that (expr * numBits) is a multiple of 8.
-                Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
-
-                if(numBits % 8u == 0)
-                    return expr * L(numBits / 8u);
-                return (expr * L(numBits)) / L(8u);
-            };
-
-            // Set the zero-coordinates to zero
-            auto fullStop  = [&](int tag) { return tag == increment; };
-            auto direction = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
-            auto [required, path] = findRequiredCoordinates(target, direction, fullStop, *m_graph);
-
-            for(auto tag : required)
-                if((tag != increment) && (!coords.hasCoordinate(tag)))
-                    coords.setCoordinate(tag, L(0u));
-
-            // Set the increment coordinate to zero if it doesn't
-            // already have a value
-            bool initializeIncrement = !coords.hasPath({target}, ci.forward);
-            if(initializeIncrement)
-            {
-                coords.setCoordinate(increment, L(0u));
-            }
-
-            if(base < 0 && offset > 0)
-            {
-                auto offsetType = Register::Type::Vector;
-                if(ci.isStorePartOfGlobalToLDS)
-                    offsetType = Register::Type::Scalar;
-                auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
-                offsetReg->setName(concatenate("Offset", offset));
-                scope->addRegister(offset);
-            }
-
-            // Create a buffer descriptor
-            if(buffer > 0)
-            {
-                auto user = m_graph->coordinates.get<User>(target);
-                if(user && !tagger->hasRegister(buffer))
-                {
-                    AssertFatal(
-                        user->size, "Invalid User dimension: missing size.", ShowValue(target));
-
-                    auto bufferReg = tagger->getRegister(
-                        buffer, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
-                    bufferReg->setName(concatenate("Buffer", buffer));
-                    if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
-                    {
-                        Register::ValuePtr basePointer;
-                        auto               bufferExpr = bufferReg->expression();
-                        co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
-                        ExpressionPtr base = basePointer->expression();
-                        if(user->offset)
-                        {
-                            base = base + user->offset;
-                        }
-                        bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, base);
-                        bufferExpr = BufferDescriptor::SetOptions(
-                            bufferExpr, BufferDescriptor::GetDefaultOptions(m_context));
-                        // TODO: Handle sizes larger than 32 bits
-                        bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
-                        co_yield Expression::generate(bufferReg, bufferExpr, m_context);
-                    }
-                    scope->addRegister(buffer);
-                }
             }
         }
 
@@ -1023,7 +902,7 @@ namespace rocRoller
                 ShowValue(Dir) + toString(info)
                 + concatenate(ShowValue(allStridesAreLiteral), ShowValue(colStrideIsOne)));
 
-            // Get the values from the associated ComputeIndex node
+            // Get the offset values set by AssignIndexExpressions
             co_yield getOffset(info, coords, !allStridesAreLiteral && info.m > 1);
             AssertFatal(info.rowOffsetReg, "Invalid row offset register.");
 
