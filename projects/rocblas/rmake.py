@@ -545,11 +545,13 @@ def arg_into_list(arg) -> list:
 
 def label_modifiers(labels):
     global args
-    processed = ["noTensile", "dependencies"]
+    processed = ["noTensile", "dependencies", "asan", "ci:asan"]
     overlap = [v for v in processed if v in labels]
     if len(overlap):
         if "noTensile" in overlap:
             args.build_tensile = False
+        if "asan" in overlap or "ci:asan" in overlap:
+            args.address_sanitizer = True
         # TODO: Deferred
         # if "dependencies" in overlap and os.name != "nt":
         #     args.dependencies = True
