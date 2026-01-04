@@ -95,6 +95,7 @@ def getRequiredParametersMin() -> set:
         'SwapGlobalReadOrder',
         'TailloopInNll',
         'TransposeLDS',
+        'TransposeLDSMetadata',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
         'UseInstOffsetForGRO',

@@ -2559,11 +2559,17 @@ class Solution(collections.abc.Mapping):
     # LDS
     ########################################
 
-    state["TransposeLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
-    state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
+    if state["ProblemType"]["Sparse"]:
+      transposeLDSMetadata = int(state["TransposeLDSMetadata"])
+      if transposeLDSMetadata == -1:
+        state["TransposeLDSMetadata"] = int(not state["ProblemType"]["TLUMetadata"])
+      else:
+        state["TransposeLDSMetadata"] = int(transposeLDSMetadata)
 
-    if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-      state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"] and (not state["ProblemType"]["TLUMetadata"])
+      state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
+
+      if not state["DirectToVgprSparseMetadata"]:
+        state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"]
 
     # Determine if we can load directly-to-LDS.
     # Transpose requires a trip through registers to perform the transpose so can't use DirectToLdsA
