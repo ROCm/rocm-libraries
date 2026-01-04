@@ -456,6 +456,20 @@ def config_cmd():
             args.gpu_architecture = OS_info["GPU"]
         else:
             fatal("Could not detect GPU as requested. Not continuing.")
+    
+    # When ASAN is enabled, Tensile requires xnack+ for certain architectures
+    if args.address_sanitizer and args.gpu_architecture != "all":
+        arch_list = args.gpu_architecture.split(';')
+        modified_arch_list = []
+        asan_archs = ["gfx908", "gfx90a", "gfx942", "gfx950"]
+        for arch in arch_list:
+            # Add :xnack+ if it's an ASAN-compatible arch and doesn't already have xnack specified
+            if any(arch.startswith(asan_arch) for asan_arch in asan_archs) and ":xnack" not in arch:
+                modified_arch_list.append(f"{arch}:xnack+")
+            else:
+                modified_arch_list.append(arch)
+        args.gpu_architecture = ";".join(modified_arch_list)
+    
     # not just for tensile
     cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
 
