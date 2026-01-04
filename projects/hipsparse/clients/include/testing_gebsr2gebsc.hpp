@@ -464,11 +464,8 @@ void testing_gebsr2gebsc(Arguments argus)
 
     // Read or construct CSR matrix
     int nnzb = 0;
-    if(!generate_csr_matrix(filename, mb, nb, nnzb, hbsr_row_ptr, hbsr_col_ind, hbsr_val, base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, mb, nb, nnzb, hbsr_row_ptr, hbsr_col_ind, hbsr_val, base));
 
     m          = mb * row_block_dim;
     n          = nb * col_block_dim;
