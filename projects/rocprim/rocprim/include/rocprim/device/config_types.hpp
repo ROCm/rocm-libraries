@@ -161,6 +161,7 @@ using default_or_custom_config =
     typename std::conditional<std::is_same<Config, default_config>::value, Default, Config>::type;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
+// NOTE: When adding a new target_arch also add it to gen_from_target_arch and get_target_arch_from_name
 enum class target_arch : unsigned int
 {
     // This must be zero, to initialize the device -> architecture cache
@@ -350,42 +351,38 @@ constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
     return i == n && *lhs == '\0';
 }
 
-struct target_arch_descriptor
-{
-    target_arch arch;
-    const char *arch_name;
-};
-
-#define ROCPRIM_DEF_ARCH(ID) \
-    target_arch_descriptor   \
-    {                        \
-        target_arch::ID, #ID \
+#define ROCPRIM_RETURN_IF_ARCH(ID)       \
+    if(prefix_equals(#ID, arch_name, n)) \
+    {                                    \
+        return target_arch::ID;          \
     }
-// TEMP FIX: The size of the array should be 1 larger then the amount of items.
-constexpr std::array<target_arch_descriptor, 22> target_arch_descriptors = {
-    {
-     ROCPRIM_DEF_ARCH(gfx803), ROCPRIM_DEF_ARCH(gfx900), ROCPRIM_DEF_ARCH(gfx906),
-     ROCPRIM_DEF_ARCH(gfx908), ROCPRIM_DEF_ARCH(gfx90a), ROCPRIM_DEF_ARCH(gfx942),
-     ROCPRIM_DEF_ARCH(gfx950), ROCPRIM_DEF_ARCH(gfx1010), ROCPRIM_DEF_ARCH(gfx1011),
-     ROCPRIM_DEF_ARCH(gfx1012), ROCPRIM_DEF_ARCH(gfx1030), ROCPRIM_DEF_ARCH(gfx1100),
-     ROCPRIM_DEF_ARCH(gfx1101), ROCPRIM_DEF_ARCH(gfx1102), ROCPRIM_DEF_ARCH(gfx1103),
-     ROCPRIM_DEF_ARCH(gfx1150), ROCPRIM_DEF_ARCH(gfx1151), ROCPRIM_DEF_ARCH(gfx1152),
-     ROCPRIM_DEF_ARCH(gfx1153), ROCPRIM_DEF_ARCH(gfx1200), ROCPRIM_DEF_ARCH(gfx1201),
-     }
-};
-#undef ROCPRIM_DEF_ARCH
-
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
-    for (const auto& desc : target_arch_descriptors)
-    {
-        if(prefix_equals(desc.arch_name, arch_name, n))
-        {
-            return desc.arch;
-        }
-    }
+    ROCPRIM_RETURN_IF_ARCH(gfx803);
+    ROCPRIM_RETURN_IF_ARCH(gfx900);
+    ROCPRIM_RETURN_IF_ARCH(gfx906);
+    ROCPRIM_RETURN_IF_ARCH(gfx908);
+    ROCPRIM_RETURN_IF_ARCH(gfx90a);
+    ROCPRIM_RETURN_IF_ARCH(gfx942);
+    ROCPRIM_RETURN_IF_ARCH(gfx950);
+    ROCPRIM_RETURN_IF_ARCH(gfx1010);
+    ROCPRIM_RETURN_IF_ARCH(gfx1011);
+    ROCPRIM_RETURN_IF_ARCH(gfx1012);
+    ROCPRIM_RETURN_IF_ARCH(gfx1030);
+    ROCPRIM_RETURN_IF_ARCH(gfx1100);
+    ROCPRIM_RETURN_IF_ARCH(gfx1101);
+    ROCPRIM_RETURN_IF_ARCH(gfx1102);
+    ROCPRIM_RETURN_IF_ARCH(gfx1103);
+    ROCPRIM_RETURN_IF_ARCH(gfx1150);
+    ROCPRIM_RETURN_IF_ARCH(gfx1151);
+    ROCPRIM_RETURN_IF_ARCH(gfx1152);
+    ROCPRIM_RETURN_IF_ARCH(gfx1153);
+    ROCPRIM_RETURN_IF_ARCH(gfx1200);
+    ROCPRIM_RETURN_IF_ARCH(gfx1201);
+
     return target_arch::unknown;
 }
+#undef ROCPRIM_RETURN_IF_ARCH
 
 constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
 {
