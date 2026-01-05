@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -128,6 +128,7 @@ set( hipfft-test_source
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
   )
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
@@ -181,7 +182,7 @@ endif()
 
 foreach( target ${TEST_TARGETS} )
   set_target_properties( ${target} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     )
 

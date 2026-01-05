@@ -896,7 +896,7 @@ void testing_gebsr2gebsr_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gebsr2gebsr(Arguments argus)
+void testing_gebsr2gebsr(Arguments argus)
 {
     int                  m               = argus.M;
     int                  n               = argus.N;
@@ -923,7 +923,7 @@ hipsparseStatus_t testing_gebsr2gebsr(Arguments argus)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse does not support m == 0 for csr2bsr
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -936,11 +936,8 @@ hipsparseStatus_t testing_gebsr2gebsr(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base_A))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base_A));
 
     // mb and nb can be modified if reading from a file
     int mb   = (m + row_block_dim_A - 1) / row_block_dim_A;
@@ -1297,8 +1294,6 @@ hipsparseStatus_t testing_gebsr2gebsr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GEBSR2GEBSR_HPP

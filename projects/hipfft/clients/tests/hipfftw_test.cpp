@@ -1695,7 +1695,7 @@ namespace
                 = std::accumulate(batches.begin(),
                                   batches.end(),
                                   static_cast<ptrdiff_t>(1),
-                                  [](ptrdiff_t& acc, ptrdiff_t x) {
+                                  [](ptrdiff_t acc, ptrdiff_t x) {
                                       return acc * std::max(ptrdiff_t(1), std::abs(x));
                                   });
             const auto placement = get_random_element_in(place_range);
@@ -3057,7 +3057,7 @@ namespace
             = std::min(static_cast<ptrdiff_t>(max_length_for_hipfftw_test),
                        find_threshold_length_for_byte_size<prec>(
                            max_data_size_per_batch, rank, is_real(dft_kind)));
-        // The generation of random, contraints-abiding-yet-nembed-compliant data
+        // The generation of random, constraints-abiding-yet-nembed-compliant data
         // layouts may sometimes run into deadends (catch a valid_values_cannot_be_created
         // exception) --> try again until a valid (random) configuration is found, if so
         bool found_one = false;

@@ -60,6 +60,8 @@ public:
     virtual int64_t getEngineId() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend

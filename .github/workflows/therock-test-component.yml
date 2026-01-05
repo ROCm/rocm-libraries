@@ -64,7 +64,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: a1f6b57cc31890c05ab0094212ae0b269765db8e # 2025-11-25 commit
+          ref: 6a7013e09e0affe6e21bae3c0e0a7594180fb528 # 2025-12-30 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -75,6 +75,11 @@ jobs:
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: ${{ fromJSON(inputs.component).fetch_artifact_args }}
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      - name: Driver / GPU sanity check
+        timeout-minutes: 3
+        run: |
+          python ./build_tools/print_driver_gpu_info.py
 
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}

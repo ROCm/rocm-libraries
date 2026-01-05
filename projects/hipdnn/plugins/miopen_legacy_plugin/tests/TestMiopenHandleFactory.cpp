@@ -4,14 +4,14 @@
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenHandleFactory.hpp"
 
 using namespace miopen_legacy_plugin;
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 TEST(TestMiopenHandleFactory, ThrowsOnNullHandle)
 {

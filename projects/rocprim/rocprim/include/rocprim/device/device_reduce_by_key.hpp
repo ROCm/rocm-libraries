@@ -97,7 +97,8 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
 }
 
 template<lookback_scan_determinism Determinism,
-         typename config,
+         typename Config,
+         typename Selector,
          typename KeysInputIterator,
          typename ValuesInputIterator,
          typename UniqueOutputIterator,
@@ -136,8 +137,13 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
         {
             detail::target_arch target_arch;
             ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            const reduce_by_key_config_params params
-                = dispatch_target_arch<config, false>(target_arch);
+
+            gpu target_gpu;
+            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+            const target current_target(target_arch, target_gpu);
+
+            const auto params = get_config<Selector>(Config{}, current_target);
 
             using scan_state_type
                 = reduce_by_key::lookback_scan_state_t<accumulator_type, use_sleepy_scan>;
@@ -268,12 +274,13 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                         i > 0 ? d_previous_accumulated : nullptr,
                         ordered_bid);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    kernel,
-                                                                    dim3(number_of_blocks_launch),
-                                                                    dim3(block_size),
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(
+                    execute_launch_plan<Config, Selector>(current_target,
+                                                          kernel,
+                                                          dim3(number_of_blocks_launch),
+                                                          dim3(block_size),
+                                                          0,
+                                                          stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_kernel",
                                                             current_size,
                                                             start);
@@ -310,21 +317,21 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 {
     using key_type         = ::rocprim::detail::value_type_t<KeysInputIterator>;
     using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
+    using Selector = reduce_by_key_config_selector<key_type, accumulator_type, BinaryFunction>;
 
-    using config = wrapped_reduce_by_key_config<Config, key_type, accumulator_type, BinaryFunction>;
-
-    return detail::reduce_by_key_impl_wrapped_config<Determinism, config>(temporary_storage,
-                                                                          storage_size,
-                                                                          keys_input,
-                                                                          values_input,
-                                                                          size,
-                                                                          unique_output,
-                                                                          aggregates_output,
-                                                                          unique_count_output,
-                                                                          reduce_op,
-                                                                          key_compare_op,
-                                                                          stream,
-                                                                          debug_synchronous);
+    return detail::reduce_by_key_impl_wrapped_config<Determinism, Config, Selector>(
+        temporary_storage,
+        storage_size,
+        keys_input,
+        values_input,
+        size,
+        unique_output,
+        aggregates_output,
+        unique_count_output,
+        reduce_op,
+        key_compare_op,
+        stream,
+        debug_synchronous);
 }
 
 } // namespace detail

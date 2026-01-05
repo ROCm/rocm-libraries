@@ -321,7 +321,7 @@ void testing_csrsv2_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrsv2(Arguments argus)
+void testing_csrsv2(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                    m         = argus.M;
@@ -354,7 +354,7 @@ hipsparseStatus_t testing_csrsv2(Arguments argus)
     if(m == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -367,11 +367,8 @@ hipsparseStatus_t testing_csrsv2(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     std::vector<T> hx(m);
     std::vector<T> hy_1(m);
@@ -516,14 +513,14 @@ hipsparseStatus_t testing_csrsv2(Arguments argus)
         {
             verify_hipsparse_status_zero_pivot(pivot_status_1,
                                                "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
 
         if(hposition_2 != -1)
         {
             verify_hipsparse_status_zero_pivot(pivot_status_2,
                                                "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
 
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
@@ -608,8 +605,6 @@ hipsparseStatus_t testing_csrsv2(Arguments argus)
     }
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRSV2_HPP

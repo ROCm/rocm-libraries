@@ -5,10 +5,10 @@
 #include "hipdnn_backend.h"
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <span>
 #include <stdexcept>
 
@@ -25,16 +25,17 @@ void createTestHandle(hipdnnHandle_t* handle)
 void createTestGraph(hipdnnBackendDescriptor_t* descriptor, hipdnnHandle_t handle)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    auto graph
-        = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                      "Test GRAPH!",
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      hipdnn_sdk::data_objects::DataType::FLOAT,
-                                                      &tensorAttributes,
-                                                      &nodes);
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "Test GRAPH!",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
     builder.Finish(graph);
     flatbuffers::DetachedBuffer serializedGraph = builder.Release();
 
@@ -255,7 +256,7 @@ void createAndInitializeBackendDescriptor(hipdnnBackendDescriptor_t* backendDesc
 
 flatbuffers::FlatBufferBuilder createAndPopulateBatchnormNode()
 {
-    return hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    return hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 }
 
 void extractTensorInfoFromGraph(const flatbuffers::DetachedBuffer& serializedGraph,
@@ -267,7 +268,7 @@ void extractTensorInfoFromGraph(const flatbuffers::DetachedBuffer& serializedGra
     nameToUidMap.clear();
     uidToDimsMap.clear();
 
-    auto deserializedGraph = hipdnn_sdk::data_objects::UnPackGraph(serializedGraph.data());
+    auto deserializedGraph = hipdnn_data_sdk::data_objects::UnPackGraph(serializedGraph.data());
     ASSERT_NE(deserializedGraph, nullptr);
 
     // Extract all tensor information from the deserialized graph
@@ -330,7 +331,7 @@ std::vector<std::string> getLoadedPlugins(hipdnnHandle_t handle)
 
 static inline bool stemEq(const fs::path& pathFileName, const fs::path& suffixFileName)
 {
-    using hipdnn_sdk::utilities::pathCompEq;
+    using hipdnn_data_sdk::utilities::pathCompEq;
     if(pathCompEq(pathFileName, suffixFileName))
     {
         return true;
@@ -343,7 +344,7 @@ static inline bool stemEq(const fs::path& pathFileName, const fs::path& suffixFi
 
 static bool isPluginLoadedByRelativePathInternal(const fs::path& fullPath, const fs::path& suffix)
 {
-    using hipdnn_sdk::utilities::pathCompEq;
+    using hipdnn_data_sdk::utilities::pathCompEq;
 
     fs::path suffixNorm = suffix.lexically_normal();
     fs::path fullPathNorm = fullPath.lexically_normal();

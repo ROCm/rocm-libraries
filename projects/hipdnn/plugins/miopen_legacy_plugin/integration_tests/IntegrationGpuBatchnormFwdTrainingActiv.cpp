@@ -5,19 +5,19 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
-#include <hipdnn_sdk/test_utilities/Seeds.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
+#include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 
 namespace
@@ -31,16 +31,10 @@ struct BatchnormFwdTrainingActivTensorIds
     static constexpr int64_t X_UID = 1;
     static constexpr int64_t SCALE_UID = 2;
     static constexpr int64_t BIAS_UID = 3;
-    static constexpr int64_t EPSILON_UID = 4;
-    static constexpr int64_t PREV_RUNNING_MEAN_UID = 5;
-    static constexpr int64_t PREV_RUNNING_VARIANCE_UID = 6;
-    static constexpr int64_t MOMENTUM_UID = 7;
-    static constexpr int64_t Y_BN_UID = 8; // Virtual tensor between BN and activation
-    static constexpr int64_t Y_ACTIV_UID = 9; // Final activation output
-    static constexpr int64_t MEAN_UID = 10;
-    static constexpr int64_t INV_VARIANCE_UID = 11;
-    static constexpr int64_t NEXT_RUNNING_MEAN_UID = 12;
-    static constexpr int64_t NEXT_RUNNING_VARIANCE_UID = 13;
+    static constexpr int64_t PREV_RUNNING_MEAN_UID = 4;
+    static constexpr int64_t PREV_RUNNING_VARIANCE_UID = 5;
+    static constexpr int64_t NEXT_RUNNING_MEAN_UID = 6;
+    static constexpr int64_t NEXT_RUNNING_VARIANCE_UID = 7;
 };
 
 // Note: hipDNN BatchNorm implements Spatial normalization only (miopenBNSpatial).
@@ -74,31 +68,39 @@ protected:
     {
         const auto& [bnTestCase, activTestCase] = this->GetParam();
 
-        auto inputDataType = getDataTypeEnumFromType<InputType>();
-        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
-
         HIPDNN_LOG_INFO("Test is using {} for its random seed", bnTestCase.seed);
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormFwdTrainingActivTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+        auto inputDataType = getDataTypeEnumFromType<InputType>();
+        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(inputDataType);
 
         auto dims = bnTestCase.dims;
         auto derivedDims = getDerivedShape(dims);
 
         // Create input tensor attributes
-        auto xAttr = graph::makeTensorAttributes(
-            "X", inputDataType, dims, generateStrides(dims, layout.strideOrder));
+        auto xAttr
+            = graph::makeTensorAttributes("X", dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(BatchnormFwdTrainingActivTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto scaleAttr = graph::makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
+        auto scaleAttr
+            = graph::makeTensorAttributes("scale",
+                                          intermediateDataType,
+                                          derivedDims,
+                                          generateStrides(derivedDims, layout.strideOrder));
         scaleAttr.set_uid(BatchnormFwdTrainingActivTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = graph::makeTensorAttributes(
-            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
+        auto biasAttr
+            = graph::makeTensorAttributes("bias",
+                                          intermediateDataType,
+                                          derivedDims,
+                                          generateStrides(derivedDims, layout.strideOrder));
         biasAttr.set_uid(BatchnormFwdTrainingActivTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -106,9 +108,7 @@ protected:
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         std::mt19937 gen(bnTestCase.seed);
         std::uniform_real_distribution<double> epsilonDist(1e-6, 1e-4);
-        epsilonTensorAttr->set_value(epsilonDist(gen))
-            .set_name("epsilon")
-            .set_uid(BatchnormFwdTrainingActivTensorIds::EPSILON_UID);
+        epsilonTensorAttr->set_value(epsilonDist(gen)).set_name("epsilon");
 
         // Conditionally setup running statistics based on scenario
         std::shared_ptr<graph::TensorAttributes> prevRunningMeanTensorAttr;
@@ -117,10 +117,11 @@ protected:
 
         if(scenario == BatchnormTrainingScenario::FULL_TRAINING)
         {
-            auto prevRunningMeanAttr = graph::makeTensorAttributes("prev_running_mean",
-                                                                   intermediateDataType,
-                                                                   derivedDims,
-                                                                   generateStrides(derivedDims));
+            auto prevRunningMeanAttr
+                = graph::makeTensorAttributes("prev_running_mean",
+                                              intermediateDataType,
+                                              derivedDims,
+                                              generateStrides(derivedDims, layout.strideOrder));
             prevRunningMeanAttr.set_uid(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID);
             prevRunningMeanTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningMeanAttr));
@@ -129,7 +130,7 @@ protected:
                 = graph::makeTensorAttributes("prev_running_variance",
                                               intermediateDataType,
                                               derivedDims,
-                                              generateStrides(derivedDims));
+                                              generateStrides(derivedDims, layout.strideOrder));
             prevRunningVarianceAttr.set_uid(
                 BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID);
             prevRunningVarianceTensorAttr
@@ -138,14 +139,11 @@ protected:
             // Momentum: use pass-by-value with double (matches MIOpen API)
             momentumTensorAttr = std::make_shared<graph::TensorAttributes>();
             std::uniform_real_distribution<double> momentumDist(0.05, 0.15);
-            momentumTensorAttr->set_value(momentumDist(gen))
-                .set_name("momentum")
-                .set_uid(BatchnormFwdTrainingActivTensorIds::MOMENTUM_UID);
+            momentumTensorAttr->set_value(momentumDist(gen)).set_name("momentum");
         }
 
         // Create batchnorm attributes
         graph::BatchnormAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_training");
 
         if(prevRunningMeanTensorAttr && prevRunningVarianceTensorAttr && momentumTensorAttr)
         {
@@ -162,19 +160,10 @@ protected:
               nextRunningVarianceTensorAttr]
             = graphObj.batchnorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
 
-        // Set BN output tensor as virtual (intermediate between BN and activation)
-        if(!yBnTensorAttr->has_uid())
-        {
-            yBnTensorAttr->set_uid(BatchnormFwdTrainingActivTensorIds::Y_BN_UID);
-        }
-        yBnTensorAttr->set_is_virtual(true); // VIRTUAL - fusion key point
         yBnTensorAttr->set_data_type(inputDataType);
-        yBnTensorAttr->set_dim(dims);
-        yBnTensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
 
         // Add activation node with parameters from test case
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_name("activation");
         activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
 
         // Set activation-specific parameters
@@ -206,68 +195,38 @@ protected:
         auto yActivTensorAttr = graphObj.pointwise(yBnTensorAttr, activAttrs);
 
         // Set final activation output tensor
-        if(!yActivTensorAttr->has_uid())
-        {
-            yActivTensorAttr->set_uid(BatchnormFwdTrainingActivTensorIds::Y_ACTIV_UID);
-        }
         yActivTensorAttr->set_output(true);
-        yActivTensorAttr->set_data_type(inputDataType);
-        yActivTensorAttr->set_dim(dims);
-        yActivTensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
 
         // Configure batch statistics outputs
         if(meanTensorAttr)
         {
-            if(!meanTensorAttr->has_uid())
-            {
-                meanTensorAttr->set_uid(BatchnormFwdTrainingActivTensorIds::MEAN_UID);
-            }
             meanTensorAttr->set_output(true);
             meanTensorAttr->set_data_type(intermediateDataType);
-            meanTensorAttr->set_dim(derivedDims);
-            meanTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         if(invVarianceTensorAttr)
         {
-            if(!invVarianceTensorAttr->has_uid())
-            {
-                invVarianceTensorAttr->set_uid(
-                    BatchnormFwdTrainingActivTensorIds::INV_VARIANCE_UID);
-            }
             invVarianceTensorAttr->set_output(true);
             invVarianceTensorAttr->set_data_type(intermediateDataType);
-            invVarianceTensorAttr->set_dim(derivedDims);
-            invVarianceTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         // Configure running statistics outputs if they exist
         if(nextRunningMeanTensorAttr)
         {
-            if(!nextRunningMeanTensorAttr->has_uid())
-            {
-                nextRunningMeanTensorAttr->set_uid(
-                    BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_MEAN_UID);
-            }
+            nextRunningMeanTensorAttr->set_uid(
+                BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_MEAN_UID);
             nextRunningMeanTensorAttr->set_name("next_running_mean");
             nextRunningMeanTensorAttr->set_output(true);
             nextRunningMeanTensorAttr->set_data_type(intermediateDataType);
-            nextRunningMeanTensorAttr->set_dim(derivedDims);
-            nextRunningMeanTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         if(nextRunningVarianceTensorAttr)
         {
-            if(!nextRunningVarianceTensorAttr->has_uid())
-            {
-                nextRunningVarianceTensorAttr->set_uid(
-                    BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_VARIANCE_UID);
-            }
+            nextRunningVarianceTensorAttr->set_uid(
+                BatchnormFwdTrainingActivTensorIds::NEXT_RUNNING_VARIANCE_UID);
             nextRunningVarianceTensorAttr->set_name("next_running_variance");
             nextRunningVarianceTensorAttr->set_output(true);
             nextRunningVarianceTensorAttr->set_data_type(intermediateDataType);
-            nextRunningVarianceTensorAttr->set_dim(derivedDims);
-            nextRunningVarianceTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         // Register validators for all output tensors

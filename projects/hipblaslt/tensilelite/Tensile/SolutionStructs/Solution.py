@@ -798,8 +798,8 @@ class Solution(collections.abc.Mapping):
     MT = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
 
     if (MT & (MT-1)) != 0 and not state["UseGeneralizedNLCOne%s"%tc]: # Check of MT not power of 2
-      # so far, numBytesAB<4 case, TLU=False only (continue with False)
-      if (numBytesAB < 4 or state["UseF32XEmulation"]) and state["ProblemType"]["TLU%c"%tc]:
+      # so far, numBytesAB<=4 case, TLU=False only (continue with False)
+      if (numBytesAB <= 4) and state["ProblemType"]["TLU%c"%tc]:
         return False
 
     # x2 DTL is not supported
@@ -1429,6 +1429,16 @@ class Solution(collections.abc.Mapping):
           and (state["ProblemType"]["DataTypeA"].isSingle() and state["ProblemType"]["DataTypeB"].isSingle()):
           reject(state, printRejectionReason, "ConvertAfterDS doesn't support SS_BSS type")
           return
+      
+    # Complex datatype restrictions.
+    if state["ProblemType"]["DataType"].isComplex():
+      if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
+        reject(state, printRejectionReason, "Complex datatype kernel does not support GSU yet.")
+        return
+      if state["MIArchVgpr"]:
+        reject(state, printRejectionReason, "Complex datatype kernel does not support MIArchVgpr yet.")
+        return
+
 
     # DepthU == -1?
     if state["DepthU"] == -1:
@@ -1769,6 +1779,7 @@ class Solution(collections.abc.Mapping):
           if state["UseGeneralizedNLCOneA"]:
             LdsBlockSizePerPadA = MinLdsBlockSizePerPadA
           else:
+            LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
             LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
 
         if state["DirectToLdsB"]:
@@ -1778,6 +1789,7 @@ class Solution(collections.abc.Mapping):
           if state["UseGeneralizedNLCOneB"]:
             LdsBlockSizePerPadB = MinLdsBlockSizePerPadB
           else:
+            LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
             LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
 
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
@@ -1860,6 +1872,8 @@ class Solution(collections.abc.Mapping):
           if state["LocalReadVectorWidth"] // state["MIInputPerThread"] > 1:
             padA, padB, padM = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
             ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
+            ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
+            ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
             ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
             if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               state["LocalReadVectorWidth"] //= 2
@@ -2753,6 +2767,11 @@ class Solution(collections.abc.Mapping):
         state["LdsBlockSizePerPadB"] = 128
     assert(state["LdsPadB"] >= 0)
 
+    # set ldsbspp = 0 for ldspad = 0
+    for tc in ['A', 'B']:
+      if state["LdsPad%s"%tc] == 0:
+        state["LdsBlockSizePerPad%s"%tc] = 0
+
     if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
 
@@ -3157,10 +3176,9 @@ class Solution(collections.abc.Mapping):
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
     if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["ScheduleIterAlg"] == 2:
-      # 1 or 2 Byte input + DTVA or DTVB case, does not work with PLR=0. Reject it here.
-      if state["ProblemType"]["DataType"].numBytes() < 4 and \
-         (state["ProblemType"]["TLUA"] and state["DirectToVgprA"] or state["ProblemType"]["TLUB"] and state["DirectToVgprB"]):
-        reject(state, printRejectionReason, "DirectToVgpr does not work with 1 or 2 Byte input + TLU + PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
+      # Reject configuration: DTV enabled on one side is incompatible with PLR = 0
+      if state["DirectToVgprA"] ^ state["DirectToVgprB"]:
+        reject(state, printRejectionReason, "DirectToVgpr does not work with PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
         return
       state["ClusterLocalRead"] = 0
       state["PrefetchLocalRead"] = 0

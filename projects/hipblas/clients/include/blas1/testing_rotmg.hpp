@@ -77,7 +77,7 @@ void testing_rotmg(const Arguments& arg)
     auto hipblasRotmgFn_64
         = arg.api == FORTRAN_64 ? hipblasRotmg_64<T, true> : hipblasRotmg_64<T, false>;
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     hipblasLocalHandle handle(arg);
 

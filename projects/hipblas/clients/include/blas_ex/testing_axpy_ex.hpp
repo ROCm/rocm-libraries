@@ -62,7 +62,7 @@ void testing_axpy_ex_bad_arg(const Arguments& arg)
         device_vector<Tx> dx(N, incx);
         device_vector<Ty> dy(N, incy);
 
-        const Ts  h_alpha{1}, h_zero{0};
+        const Ts  h_alpha{1.0f}, h_zero{0.0f};
         const Ts* alpha = &h_alpha;
         const Ts* zero  = &h_zero;
 
@@ -220,7 +220,7 @@ void testing_axpy_ex(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dy.memcheck());
     CHECK_DEVICE_ALLOCATION(d_alpha.memcheck());
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);
