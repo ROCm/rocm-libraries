@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <math.h>
