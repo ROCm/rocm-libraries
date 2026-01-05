@@ -2504,9 +2504,8 @@ class Solution(collections.abc.Mapping):
 
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.
-    # Unless kernel is Stream-K; Stream-K always requires TailLoop to handle work division.
     state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 and state["StreamK"] == 0:
+    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
 
     # TailloopInNll optimization check
@@ -2515,9 +2514,11 @@ class Solution(collections.abc.Mapping):
       # - (not MFMA) or WMMA
       # - PrefetchGlobalRead is 0
       # - NoTailLoop
+      # - DepthU is not power of 2
       if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
          (state["PrefetchGlobalRead"] == 0) or \
-         state["NoTailLoop"]:
+         state["NoTailLoop"] or \
+         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)):
         state["TailloopInNll"] = False
 
       # need restrictions for TailloopInNll
@@ -2531,11 +2532,6 @@ class Solution(collections.abc.Mapping):
         # disable UseCustomMainLoopSchedule
         state["UseCustomMainLoopSchedule"] = False
         state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
-        # disable GSU>1 (TODO: enable TIN+GSU>1)
-        if state["GlobalSplitU"] > 1:
-          state["GlobalSplitU"] = 1
-        # disable UserGSU (tentative)
-        state["InternalSupportParams"]["SupportUserGSU"] = False
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
