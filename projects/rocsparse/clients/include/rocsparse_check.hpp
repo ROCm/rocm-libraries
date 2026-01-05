@@ -47,7 +47,9 @@ struct default_tolerance<_Float16>
 template <>
 struct default_tolerance<rocsparse_bfloat16>
 {
-    static inline const rocsparse_bfloat16 value = 1.0e-2f;
+    // Higher tolerance for bfloat16 due to lower precision (7-bit mantissa)
+    // and atomic operation accumulation errors on some architectures
+    static inline const rocsparse_bfloat16 value = 5.0e-2f;
 };
 
 template <>
