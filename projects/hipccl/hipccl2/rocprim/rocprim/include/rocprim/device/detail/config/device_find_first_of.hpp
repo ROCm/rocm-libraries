@@ -40,397 +40,381 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {256, 10}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {256, 12}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {256, 12}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {64, 15}
+        };
+    }
+    // Based on value_type = rocprim::int128_t
+    if constexpr(((sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return find_first_of_config_params{
+            {256, 4}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-template<unsigned int arch, class value_type, class enable = void>
-struct default_find_first_of_config : default_find_first_of_config_base<value_type>::type
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {256, 9}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {128, 13}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {256, 9}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {64, 13}
+        };
+    }
+    // Based on value_type = rocprim::int128_t
+    if constexpr(((sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return find_first_of_config_params{
+            {256, 4}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<256, 10>
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {128, 15}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {256, 12}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {128, 16}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {256, 16}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<256, 12>
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {256, 6}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {256, 10}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {128, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t
+    if constexpr(((sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return find_first_of_config_params{
+            {256, 3}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<256, 12>
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {256, 15}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {1024, 14}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {256, 11}
+        };
+    }
+    // Based on value_type = rocprim::int128_t
+    if constexpr(((sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return find_first_of_config_params{
+            {256, 4}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx1030),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<64, 15>
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {256, 10}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {256, 11}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {256, 10}
+        };
+    }
+    // Based on value_type = rocprim::int128_t
+    if constexpr(((sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return find_first_of_config_params{
+            {256, 4}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<256, 4>
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {256, 6}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {128, 9}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {256, 15}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {256, 10}
+        };
+    }
+    // Based on value_type = rocprim::int128_t
+    if constexpr(((sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return find_first_of_config_params{
+            {256, 4}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<256, 9>
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    // Based on value_type = rocprim::int128_t
+    if constexpr(((sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return find_first_of_config_params{
+            {1024, 6}
+        };
+    }
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return find_first_of_config_params{
+            {1024, 7}
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return find_first_of_config_params{
+            {1024, 6}
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return find_first_of_config_params{
+            {1024, 9}
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return find_first_of_config_params{
+            {1024, 11}
+        };
+    }
+    // Default case if none of the conditions match
+    return find_first_of_config_params_base<value_type>();
+}
 
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<128, 13>
-{};
+template<class Target, class value_type>
+constexpr auto find_first_of_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+    find_first_of_config_params>
+{
+    return find_first_of_config_picker<
+        comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+        value_type>();
+}
 
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<256, 9>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx1100),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<64, 13>
-{};
-
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<256, 4>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<128, 15>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<256, 12>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<128, 16>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx1200),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<256, 16>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<256, 6>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<256, 10>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<64, 8>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx1201),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<128, 16>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<256, 15>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<1024, 14>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<64, 16>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx906),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<256, 11>
-{};
-
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<256, 4>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<256, 8>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<256, 10>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<256, 11>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx908),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<256, 10>
-{};
-
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<256, 4>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<256, 6>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<128, 9>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<256, 15>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx90a),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<256, 10>
-{};
-
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<256, 4>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<256, 8>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<256, 10>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<256, 11>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::unknown),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<256, 10>
-{};
-
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<256, 4>
-{};
-
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<1024, 6>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<1024, 7>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : find_first_of_config<1024, 6>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<1024, 9>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx942),
-                                    value_type,
-                                    std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<1024, 11>
-{};
-
-// Based on value_type = rocprim::int128_t
-template<class value_type>
-struct default_find_first_of_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : find_first_of_config<256, 3>
-{};
+// All the existing configs should be auto generated
+using find_first_of_targets
+    = comp_targets<comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
+                   comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
+                   comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>,
+                   comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
+                   comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
+                   comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+                   comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
+                   comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+                   comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
 

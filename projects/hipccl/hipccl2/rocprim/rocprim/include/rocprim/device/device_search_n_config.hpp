@@ -30,40 +30,18 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// generic struct that instantiates custom configurations
-template<typename Config, typename>
-struct wrapped_search_n_config
+template<class Value>
+struct search_n_config_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr search_n_config_params params = Config{};
-    };
+    using targets    = search_n_targets;
+    using param_type = search_n_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr search_n_config_selector(Target) : params(search_n_config_picker<Target, Value>())
+    {}
 };
-
-// specialized for rocprim::default_config, which instantiates the default_search_n_config
-template<typename Value>
-struct wrapped_search_n_config<default_config, Value>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr search_n_config_params params
-            = default_search_n_config<static_cast<unsigned int>(Arch), Value>{};
-    };
-};
-
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-template<typename Config, typename Type>
-template<target_arch Arch>
-constexpr search_n_config_params
-    wrapped_search_n_config<Config, Type>::architecture_config<Arch>::params;
-
-template<typename Type>
-template<target_arch Arch>
-constexpr search_n_config_params
-    wrapped_search_n_config<default_config, Type>::architecture_config<Arch>::params;
-#endif // DOXYGEN_DOCUMENTATION_BUILD
 
 } // namespace detail
 

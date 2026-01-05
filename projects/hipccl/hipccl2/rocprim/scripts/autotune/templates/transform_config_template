@@ -5,16 +5,21 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-transform_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
+transform_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} } }
 {%- endmacro %}
 
-{% macro general_case() -%}
-template<unsigned int arch, class data_type, class enable = void>
-struct default_transform_config : default_transform_config_base<data_type>::type
-{};
+{% macro config_picker() -%}
+template<class Target, class value_type> constexpr auto transform_config_picker()
 {%- endmacro %}
 
-{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
-// Based on {{ based_on_type }}
-template<class value_type> struct default_transform_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), value_type, {{ fallback_selection_criteria }}> :
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("transform_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return transform_config_params_base<value_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return transform_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, value_type>();
 {%- endmacro %}

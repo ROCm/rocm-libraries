@@ -40,4045 +40,2756 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<unsigned int arch, class value_type, class output_type, class enable = void>
-struct default_lower_bound_config : default_binary_search_config_base<value_type, output_type>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<128, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<128, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<128, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 16>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 8>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 8>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<256, 8>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 8>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<256, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 2>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<128, 2>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 16>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 8>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 2>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 16>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 8>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<128, 2>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<128, 2>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 2>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<64, 4>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 8>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = double, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = rocprim::half, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<256, 8>
-{};
-
-// Based on value_type = rocprim::half, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = rocprim::half, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int64_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = int, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = short, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<256, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 8)
-                      && (sizeof(output_type) > 4))>> : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = int8_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 4)
-                      && (sizeof(output_type) > 2))>> : lower_bound_config<64, 1>
-{};
-
-// Based on value_type = int8_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 2)
-                      && (sizeof(output_type) > 1))>> : lower_bound_config<64, 8>
-{};
-
-// Based on value_type = int8_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 1))>>
-    : lower_bound_config<128, 4>
-{};
-
-// Based on value_type = double, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = float, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::half, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int64_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = short
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1))>>
-    : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = rocprim::int128_t, output_type = int8_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)
-                      && (sizeof(output_type) <= 1))>> : lower_bound_config<256, 16>
-{};
-
-// Based on value_type = int64_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 1>
-{};
-
-// Based on value_type = int, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<128, 1>
-{};
-
-// Based on value_type = short, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)
-                      && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8))>>
-    : lower_bound_config<256, 2>
-{};
-
-// Based on value_type = int8_t, output_type = rocprim::int128_t
-template<class value_type, class output_type>
-struct default_lower_bound_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    output_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1) && (sizeof(output_type) <= 16)
-                      && (sizeof(output_type) > 8))>> : lower_bound_config<128, 1>
-{};
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = short, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = double, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 16}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = short, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 2}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {128, 2}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = short, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = double, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 16}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {128, 2}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = double, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 16}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = int, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = short, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 4}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 16}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 8}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 2}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 2}
+        };
+    }
+    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 2}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    // Based on value_type = double, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = double, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = float, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = float, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 8}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = short
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 2}
+        };
+    }
+    // Based on value_type = rocprim::half, output_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int64_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 1}
+        };
+    }
+    // Based on value_type = short, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
+                  && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
+                  && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
+                  && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
+                  && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = short, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {256, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
+    {
+        return transform_config_params{
+            {256, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
+    {
+        return transform_config_params{
+            {64, 1}
+        };
+    }
+    // Based on value_type = int8_t, output_type = short
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
+    {
+        return transform_config_params{
+            {64, 8}
+        };
+    }
+    // Based on value_type = int8_t, output_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                  && (sizeof(output_type) <= 1)))
+    {
+        return transform_config_params{
+            {128, 4}
+        };
+    }
+    // Default case if none of the conditions match
+    return binary_search_config_params_base<value_type, output_type>();
+}
+
+template<class Target, class value_type, class output_type>
+constexpr auto lower_bound_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+    transform_config_params>
+{
+    return lower_bound_config_picker<
+        comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+        value_type,
+        output_type>();
+}
+
+// All the existing configs should be auto generated
+using lower_bound_targets
+    = comp_targets<comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
+                   comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
+                   comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>,
+                   comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
+                   comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
+                   comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+                   comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
+                   comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+                   comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
 

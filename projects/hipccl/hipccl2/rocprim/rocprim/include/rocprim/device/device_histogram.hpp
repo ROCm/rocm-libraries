@@ -124,63 +124,6 @@ struct HistogramSharedOp
     }
 };
 
-template<typename Kernel>
-struct histogram_launch_plan
-{
-    using kernel_type = void (*)(Kernel);
-
-    kernel_type kernel;
-    Kernel      device_callback;
-
-    unsigned int shared_impl_histograms = 0;
-    unsigned int max_grid_size          = 0;
-
-    void launch(dim3 grid, dim3 block, size_t shmem, hipStream_t stream) const
-    {
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel), grid, block, shmem, stream, device_callback);
-    }
-};
-
-template<class Config,
-         class Kernel,
-         template<typename, rocprim::detail::target_arch>
-         class LaunchSelector>
-auto make_histogram_launch_plan(rocprim::detail::target_arch arch, Kernel kernel)
-    -> histogram_launch_plan<Kernel>
-{
-    histogram_launch_plan<Kernel> plan{nullptr, std::move(kernel), 0u, 0u};
-
-    bool found = false;
-
-    for_each_arch(
-        [&](auto arch_tag)
-        {
-            constexpr auto Arch = decltype(arch_tag)::value;
-            if(Arch != arch || found)
-                return;
-
-            plan.kernel = trampoline_kernel<Config, Arch, Kernel, LaunchSelector>;
-
-            constexpr auto params = Config::template architecture_config<Arch>::params;
-
-            plan.shared_impl_histograms = params.shared_impl_histograms;
-            plan.max_grid_size          = params.max_grid_size;
-
-            found = true;
-        });
-    if(!found)
-    {
-        constexpr auto Arch = rocprim::detail::target_arch::unknown;
-
-        plan.kernel = trampoline_kernel<Config, Arch, Kernel, LaunchSelector>;
-
-        constexpr auto params       = Config::template architecture_config<Arch>::params;
-        plan.shared_impl_histograms = params.shared_impl_histograms;
-        plan.max_grid_size          = params.max_grid_size;
-    }
-    return plan;
-}
-
 template<unsigned int Channels,
          unsigned int ActiveChannels,
          class Config,
@@ -200,17 +143,16 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                                  bool           debug_synchronous)
 {
     using sample_type = typename std::iterator_traits<SampleIterator>::value_type;
-
-    using config = wrapped_histogram_config<Config, sample_type, Channels, ActiveChannels>;
+    using selector    = histogram_config_selector<sample_type, Channels, ActiveChannels>;
 
     detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const histogram_config_params params = dispatch_target_arch<config, false>(target_arch);
+    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+    detail::gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
+    const target current_target(target_arch, target_gpu);
+
+    const auto         params               = get_config<selector>(Config{}, current_target);
     const unsigned int block_size           = params.histogram_config.block_size;
     const unsigned int items_per_thread     = params.histogram_config.items_per_thread;
     const unsigned int shared_impl_max_bins = params.shared_impl_max_bins;
@@ -333,14 +275,13 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         init_histogram<params.histogram_config.block_size, ActiveChannels>(hist, bin_counts);
     };
 
-    ROCPRIM_RETURN_ON_ERROR(
-        execute_launch_plan<config, decltype(init_histogram_kernel), histogram_config_selector>(
-            target_arch,
-            init_histogram_kernel,
-            ::rocprim::detail::ceiling_div(max_bins, block_size),
-            block_size,
-            0,
-            stream));
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector, histogram_config_static_selector>(
+        current_target,
+        init_histogram_kernel,
+        ::rocprim::detail::ceiling_div(max_bins, block_size),
+        block_size,
+        0,
+        stream));
 
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram_kernel", max_bins, start);
 
@@ -367,9 +308,9 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             0,
             0};
 
-        auto plan = make_histogram_launch_plan<config, decltype(op), histogram_config_selector>(
-            target_arch,
-            op);
+        auto plan
+            = make_launch_plan<Config, selector, histogram_config_static_selector>(current_target,
+                                                                                   op);
 
         const size_t block_histogram_bytes = total_shared_bins * sizeof(unsigned int);
 
@@ -379,7 +320,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         // memory usage
         unsigned int chosen_shared_histograms = 0;
         int          max_blocks_per_mp        = 0;
-        for(unsigned int n = plan.shared_impl_histograms; n >= 1; n--)
+        for(unsigned int n = params.shared_impl_histograms; n >= 1; n--)
         {
             int blocks_per_mp;
             ROCPRIM_RETURN_ON_ERROR(hipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -466,15 +407,14 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                                                          block_id_count);
             };
 
-            ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config,
-                                                        decltype(histogram_private_global_kernel),
-                                                        histogram_global_config_selector>(
-                target_arch,
-                histogram_private_global_kernel,
-                dim3(global_histogram_grid_size),
-                dim3(params.histogram_global_config.block_size),
-                0,
-                stream));
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<Config, selector, histogram_global_config_static_selector>(
+                    current_target,
+                    histogram_private_global_kernel,
+                    dim3(global_histogram_grid_size),
+                    dim3(params.histogram_global_config.block_size),
+                    0,
+                    stream));
 
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_private_global_kernel",
                                                         blocks_x * block_size * rows,
@@ -502,14 +442,13 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             };
 
             ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<config,
-                                    decltype(histogram_global_kernel),
-                                    histogram_config_selector>(target_arch,
-                                                               histogram_global_kernel,
-                                                               dim3(blocks_x, rows),
-                                                               dim3(block_size, 1),
-                                                               0,
-                                                               stream));
+                execute_launch_plan<Config, selector, histogram_config_static_selector>(
+                    current_target,
+                    histogram_global_kernel,
+                    dim3(blocks_x, rows),
+                    dim3(block_size, 1),
+                    0,
+                    stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global_kernel",
                                                         blocks_x * block_size * rows,
                                                         start);

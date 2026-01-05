@@ -5,19 +5,21 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_REDUCE_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-reduce_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, ::rocprim::block_reduce_algorithm::{{ measurement['cfg']['method'] }}> { };
+reduce_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} }, ::rocprim::block_reduce_algorithm::{{ measurement['cfg']['method'] }} }
 {%- endmacro %}
 
-{% macro general_case() -%}
-template<unsigned int arch, class key_type, class enable = void> struct default_reduce_config :
-default_reduce_config_base<key_type>::type { };
+{% macro config_picker() -%}
+template<class Target, class key_type> constexpr auto reduce_config_picker()
 {%- endmacro %}
 
-{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
-// Based on {{ based_on_type }}
-template<class key_type> struct default_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, {{ fallback_selection_criteria }}> :
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("reduce_config_params") }}
 {%- endmacro %}
 
-  
+{% macro default_case() -%}
+return reduce_config_params_base<key_type>();
+{%- endmacro %}
 
-
+{% macro fallback_config(fallback_target) -%}
+    return reduce_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, key_type>();
+{%- endmacro %}

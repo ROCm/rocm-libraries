@@ -83,14 +83,14 @@ void asm_thread_store(void* ptr, T val)
                                                                                    type  val) \
         {                                                                                     \
             interim_type temp_val = *bit_cast<interim_type*>(&val);                           \
-            if ROCPRIM_AMDGCN_CONSTEXPR(IS_RDNA4())                                           \
+            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_RDNA4())                                   \
             {                                                                                 \
                 asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"        \
                                            "s_wait_storecnt_dscnt(%2)"                        \
                              :                                                                \
                              : "v"(ptr), "v"(temp_val), "I"(0x00));                           \
             }                                                                                 \
-            else if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())                                      \
+            else if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())                              \
             {                                                                                 \
                 asm volatile(#asm_operator " %0, %1 sc0 nt\n\t"                               \
                                            "s_waitcnt(%2)"                                    \

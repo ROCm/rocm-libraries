@@ -48,6 +48,7 @@ namespace detail
 
 template<bool IsPointer,
          class Config,
+         class Selector,
          class InputIterator,
          class OutputIterator,
          class UnaryFunction>
@@ -58,24 +59,23 @@ inline hipError_t transform_impl(InputIterator     input,
                                  const hipStream_t stream,
                                  bool              debug_synchronous)
 {
+    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
+    using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
+
     if(size == size_t(0))
     {
         return hipSuccess;
     }
 
-    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
-
-    using config = detail::wrapped_transform_config<Config, input_type, IsPointer>;
-
     detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const detail::transform_config_params params
-        = detail::dispatch_target_arch<config, false>(target_arch);
+    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+
+    detail::gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+    const target current_target(target_arch, target_gpu);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -123,12 +123,12 @@ inline hipError_t transform_impl(InputIterator     input,
                                                        transform_op);
         };
 
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                            transform_kernel,
-                                                            current_blocks,
-                                                            block_size,
-                                                            0,
-                                                            stream));
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      transform_kernel,
+                                                                      current_blocks,
+                                                                      block_size,
+                                                                      0,
+                                                                      stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
     }
 
@@ -204,13 +204,17 @@ inline hipError_t transform(InputIterator     input,
     constexpr bool is_pointer
         = std::is_pointer<InputIterator>::value && std::is_pointer<OutputIterator>::value;
 
-    return detail::transform_impl<is_pointer, Config, InputIterator, OutputIterator, UnaryFunction>(
-        input,
-        output,
-        size,
-        transform_op,
-        stream,
-        debug_synchronous);
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using selector   = detail::transform_config_selector<input_type, is_pointer>;
+
+    return detail::
+        transform_impl<is_pointer, Config, selector, InputIterator, OutputIterator, UnaryFunction>(
+            input,
+            output,
+            size,
+            transform_op,
+            stream,
+            debug_synchronous);
 }
 
 /// \brief Parallel device-level transform primitive for two inputs.

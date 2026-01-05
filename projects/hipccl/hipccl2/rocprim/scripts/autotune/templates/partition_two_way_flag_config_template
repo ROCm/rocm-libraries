@@ -5,16 +5,21 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_PARTITION_TWO_WAY_FLAG_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-select_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
+partition_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} } }
 {%- endmacro %}
 
-{% macro general_case() -%}
-template<unsigned int arch, class data_type, class enable = void>
-struct default_partition_two_way_flag_config : default_partition_config_base<data_type, false>::type
-{};
+{% macro config_picker() -%}
+template<class Target, class data_type> constexpr auto partition_two_way_flag_config_picker()
 {%- endmacro %}
 
-{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
-// Based on {{ based_on_type }}
-template<class data_type> struct default_partition_two_way_flag_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), data_type, {{ fallback_selection_criteria }}> :
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("partition_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return partition_config_params_base<data_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return partition_two_way_flag_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, data_type>();
 {%- endmacro %}
