@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <spdlog/fmt/fmt.h>
 
 struct hipdnnHandle // NOLINT
 {
@@ -17,8 +18,18 @@ public:
     virtual hipStream_t getStream() const;
     virtual std::shared_ptr<hipdnn_backend::plugin::EnginePluginResourceManager>
         getPluginResourceManager() const;
+    virtual std::string toString() const;
 
 private:
     hipStream_t _stream = nullptr;
     std::shared_ptr<hipdnn_backend::plugin::EnginePluginResourceManager> _pluginResourceManager;
+};
+
+template <>
+struct fmt::formatter<hipdnnHandle> : fmt::formatter<std::string>
+{
+    auto format(const hipdnnHandle& handle, format_context& ctx) const
+    {
+        return fmt::formatter<std::string>::format(handle.toString(), ctx);
+    }
 };

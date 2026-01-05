@@ -443,14 +443,6 @@ void testing_csr2gebsr(Arguments argus)
     hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
     hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
 
-    if(row_block_dim == 1 || m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // Do not test cusparse with block dim 1
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures
@@ -460,12 +452,8 @@ void testing_csr2gebsr(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(
-           filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, csr_idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, csr_idx_base));
 
     int mb = (m + row_block_dim - 1) / row_block_dim;
     int nb = (n + col_block_dim - 1) / col_block_dim;

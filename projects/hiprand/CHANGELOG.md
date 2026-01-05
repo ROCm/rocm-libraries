@@ -3,6 +3,18 @@
 Documentation for hipRAND is available at
 [https://rocm.docs.amd.com/projects/hipRAND/en/latest/](https://rocm.docs.amd.com/projects/hipRAND/en/latest/).
 
+## hipRAND 3.2.0 for ROCM 8.0
+
+### Added
+
+* Added a new cmake option, `ROCRAND_FETCH_METHOD`, which allows you to specify how you would like to fetch rocRAND.
+  * It may be set to one of the following:
+    * `PACKAGE` - (default) searches for a preinstalled packaged version of the dependency. If it is not found, the build will fall back using option `DOWNLOAD`, below.
+    * `DOWNLOAD` - downloads the dependency from the rocm-libraries repository. If git >= 2.25 is present, this option uses a sparse checkout that avoids downloading more than it needs to. If not, the whole monorepo is downloaded (this may take some time).
+    * `MONOREPO` - this options is intended to be used if you are building hipCUB from within a copy of the rocm-libraries repository that you have cloned (and therefore already contains rocRAND). When selected, the build will try find the dependency in the local repository tree. If it cannot be found, the build will attempt to use git to perform a sparse-checkout of rocRAND. If that also fails, it will fall back to using the `DOWNLOAD` option described above.
+    
+  * The existing `DEPENDENCIES_FORCE_DOWNLOAD` CMake option has been renamed `EXTERNAL_DEPS_FORCE_DOWNLOAD` and no longer affects rocRAND.
+
 ## hipRAND 3.1.0 for ROCm 7.1
 
 ### Resolved issues
