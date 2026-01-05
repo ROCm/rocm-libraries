@@ -76,23 +76,23 @@ hipError_t run_length_encode_impl(void*                     temporary_storage,
 {
     using key_type         = ::rocprim::detail::value_type_t<KeysInputIterator>;
     using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
-
-    using config = wrapped_trivial_runs_config<Config, key_type, accumulator_type, BinaryFunction>;
+    using Selector = run_length_encode_config_selector<key_type, accumulator_type, BinaryFunction>;
 
     return detail::reduce_by_key_impl_wrapped_config<
         detail::lookback_scan_determinism::nondeterministic,
-        config>(temporary_storage,
-                storage_size,
-                keys_input,
-                values_input,
-                size,
-                unique_output,
-                aggregates_output,
-                unique_count_output,
-                reduce_op,
-                key_compare_op,
-                stream,
-                debug_synchronous);
+        typename select_reduce_by_key_config<Config>::type,
+        Selector>(temporary_storage,
+                  storage_size,
+                  keys_input,
+                  values_input,
+                  size,
+                  unique_output,
+                  aggregates_output,
+                  unique_count_output,
+                  reduce_op,
+                  key_compare_op,
+                  stream,
+                  debug_synchronous);
 }
 
 template<typename Config,
@@ -115,6 +115,9 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
     using count_type  = unsigned int;
     using offset_count_pair_type
         = run_length_encode::offset_count_pair_type_t<offset_type, count_type>; // accumulator_type
+    // RLE config needs to be converted to non_trivial_runs_config.
+    using non_trivial_config = typename convert_to_non_trivial_config<Config>::type;
+    using Selector           = run_length_encode_non_trivial_config_selector<input_type>;
 
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
@@ -130,16 +133,19 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            using config = rocprim::detail::wrapped_non_trivial_runs_config<Config, input_type>;
+            target_arch target_arch;
+            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+
+            gpu target_gpu;
+            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+            const target current_target(target_arch, target_gpu);
+
+            const auto params = get_config<Selector>(non_trivial_config{}, current_target);
 
             using scan_state_type
                 = ::rocprim::detail::lookback_scan_state<offset_count_pair_type, use_sleepy_scan>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            const non_trivial_runs_config_params params
-                = dispatch_target_arch<config, false>(target_arch);
             const unsigned int block_size      = params.kernel_config.block_size;
             const unsigned int items_per_block = block_size * params.kernel_config.items_per_thread;
             const std::size_t  grid_size       = detail::ceiling_div(size, items_per_block);
@@ -221,12 +227,13 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                     ordered_bid);
             };
 
-            ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                non_trivial_kernel,
-                                                                dim3(grid_size),
-                                                                dim3(block_size),
-                                                                0,
-                                                                stream));
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<non_trivial_config, Selector>(current_target,
+                                                                  non_trivial_kernel,
+                                                                  dim3(grid_size),
+                                                                  dim3(block_size),
+                                                                  0,
+                                                                  stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("run_length_encode::non_trivial_kernel",
                                                         size,
                                                         start);
