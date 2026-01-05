@@ -379,7 +379,8 @@ TEST_CASE("Remove redundant edges fully described", "[kernel-graph]")
 
     auto isSequence = graph0.control.isElemType<Sequence>();
 
-    CHECK(rocRoller::Graph::findRedundantEdges(graph0.control, isSequence).to<std::vector>() == toss);
+    CHECK(rocRoller::Graph::findRedundantEdges(graph0.control, isSequence).to<std::vector>()
+          == toss);
 
     rocRoller::Graph::removeRedundantEdges(graph0.control, isSequence);
 
@@ -511,8 +512,8 @@ TEST_CASE("Multiple redundant Body", "[kernel-graph]")
     //
     removeRedundantBodyEdgesBaselineMethod(graph0);
 
-    CHECK(graph0.control.getEdges().to<std::vector>() ==
-          graph1.control.getEdges().to<std::vector>());
+    CHECK(graph0.control.getEdges().to<std::vector>()
+          == graph1.control.getEdges().to<std::vector>());
 
     //
     // Verify only the first Body edge remains
