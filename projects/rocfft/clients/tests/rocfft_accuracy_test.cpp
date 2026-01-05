@@ -43,12 +43,28 @@ struct user_mp_launch_command
 static user_mp_launch_command get_mp_launch_command()
 {
     user_mp_launch_command ret;
-    CLI::App               command_splitter;
-    command_splitter.allow_extras();
-    command_splitter.parse(mp_launch);
-    ret.user_mp_argv = command_splitter.remaining();
-    ret.exe          = ret.user_mp_argv.front();
-    ret.user_mp_argv.erase(ret.user_mp_argv.begin());
+    try
+    {
+        CLI::App command_splitter;
+        command_splitter.allow_extras();
+        command_splitter.parse(mp_launch, /*program_name_included = */ true);
+        ret.exe          = command_splitter.get_name();
+        ret.user_mp_argv = command_splitter.remaining();
+    }
+    catch(const CLI::Error& e)
+    {
+        if(verbose)
+        {
+            if(!mp_launch.empty())
+                std::cout << "CLI11 failed to parse the command " << mp_launch << "\n";
+            std::cout << "CLI11 exception name: " << e.get_name() << "\n"
+                      << "CLI11 exception info: " << e.what() << "\n"
+                      << "CLI11 error code:" << e.get_exit_code() << std::endl;
+        }
+        // returned empty struct
+        ret.exe.clear();
+        ret.user_mp_argv.clear();
+    }
     return ret;
 }
 
@@ -127,8 +143,8 @@ TEST_P(accuracy_test, vs_fftw)
         static const auto mp_launch_command = get_mp_launch_command();
 
         if(mp_launch_command.exe.empty())
-            GTEST_FAIL() << "Required multi-process executable to launch was omitted "
-                            "(\"--mp_launch\" option)";
+            GTEST_FAIL() << "Cannot proceed due to empty multi-process executable: omitted "
+                            "\"--mp_launch\" option or invalid value thereof.";
         auto argv = mp_launch_command.user_mp_argv;
 
         // append test token and ask for accuracy test
