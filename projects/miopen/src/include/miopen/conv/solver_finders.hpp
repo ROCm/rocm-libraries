@@ -185,7 +185,8 @@ MIOPEN_INTERNALS_EXPORT bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo);
 MIOPEN_INTERNALS_EXPORT bool IsEnoughWorkspace(std::string_view where,
                                                const miopen::solver::Id& solver_id,
                                                std::size_t required_size,
-                                               const miopen::AnyInvokeParams* invokeParams);
+                                               const miopen::AnyInvokeParams* invokeParams,
+                                               bool log_as_warning = true);
 
 struct ConvFindParameters : PrimitiveFindParameters
 {

@@ -85,7 +85,7 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.36" )
+set ( VERSION_STRING "1.0.37" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
@@ -134,6 +134,8 @@ set(DEFAULT_GPUS
   gfx1101
   gfx1102
   gfx1151
+  gfx1152
+  gfx1153
   gfx1200
   gfx1201)
 

@@ -255,6 +255,8 @@ Tests:
   matrix: [rocsparse_matrix_pentadiagonal]
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo, rocsparse_spmv_alg_coo_atomic]
+  host_memory_gb: 45
+  device_memory_gb: 45
 
 #
 # mixed precision

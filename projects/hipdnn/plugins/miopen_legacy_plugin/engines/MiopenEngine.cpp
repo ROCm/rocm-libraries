@@ -4,7 +4,7 @@
 #include "MiopenEngine.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
-#include <hipdnn_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 
 namespace miopen_legacy_plugin
 {
@@ -20,7 +20,7 @@ int64_t MiopenEngine::id() const
 }
 
 bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
-                                const hipdnn_plugin::IGraph& opGraph) const
+                                const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -38,7 +38,7 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_sdk::data_objects::CreateEngineDetails(builder, _id);
+    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -48,7 +48,7 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 }
 
 size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin::IGraph& opGraph) const
+                                      const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
@@ -63,7 +63,7 @@ size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
 
 void MiopenEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin::IGraph& opGraph,
+    const hipdnn_plugin_sdk::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     for(const auto& planBuilder : _planBuilders)

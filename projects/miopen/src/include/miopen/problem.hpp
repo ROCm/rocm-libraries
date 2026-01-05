@@ -245,6 +245,7 @@ struct FusedProblem
     [[nodiscard]] MIOPEN_INTERNALS_EXPORT fusion::FusionInvokeParams
     MakeInvokeParams(const std::function<Data_t(miopenTensorArgumentId_t, const TensorDescriptor&)>&
                          buffer_getter,
+                     const std::function<FindOptions::Workspace()>& workspace_getter,
                      OperatorArgs& operator_args) const;
 
 private:
