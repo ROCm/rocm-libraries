@@ -23,12 +23,12 @@ This document describes the decision flow for managing dependencies when buildin
       YES → Use system AOCL 5.x (done) ✓
 
 4. Is --skip-aocl flag set?
-   YES → Skip AOCL 5.1 build, CMake will search for:
+   YES → Skip AOCL 5.2 build, CMake will search for:
          - AOCL 4.x (if installed) ✓
          - System CBLAS via pkg-config ⚠
          - Error if nothing found ✗
 
-   NO → Build AOCL 5.1 as local dependency (done) ✓
+   NO → Build AOCL 5.2 as local dependency (done) ✓
         (CMake auto-downloaded if needed - no flag required)
 ```
 
@@ -41,7 +41,7 @@ Auto-Download Triggers:
 1. System CMake < 3.24.4 (rocBLAS minimum)
    → Downloads CMake 3.24.4 to ${build_dir}/deps/cmake-3.24.4/
 
-2. System CMake < 3.26.0 AND building AOCL 5.1
+2. System CMake < 3.26.0 AND building AOCL 5.2
    → Downloads CMake 3.26.0 to ${build_dir}/deps/cmake-3.26.0/
 
 3. --cmake_install flag specified
@@ -93,7 +93,7 @@ After install.sh completes, CMake searches for BLAS libraries in this order:
 - `install_cmake(version)` - Downloads CMake pre-built binary as local dependency
   - Downloads and extracts to ${build_dir}/deps/ (NOT a system install)
   - Updates cmake_executable variable to use local version
-- `build_aocl_5_1()` - Builds AOCL 5.1 from source
+- `build_aocl_5_2()` - Builds AOCL 5.2 from source
   - Uses cmake_executable (should already be 3.26+ at this point)
   - Clones, builds, and installs to ${build_dir}/deps/aocl/
 - `setup_aocl()` - Main orchestrator
@@ -105,7 +105,7 @@ After install.sh completes, CMake searches for BLAS libraries in this order:
 
 1. **Check if building clients** - AOCL/BLAS only needed for clients
    - If NOT building clients → Skip all AOCL logic
-2. **Early Detection** - Check if we'll need to build AOCL 5.1
+2. **Early Detection** - Check if we'll need to build AOCL 5.2
    - Call detect_aocl() silently
    - Check if --skip-aocl is set
 3. **Decide CMake Needs** - Will we need to download CMake?
