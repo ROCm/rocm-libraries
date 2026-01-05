@@ -158,7 +158,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     out_wgm = 1;
   // For tall cases (M >> N), if we have enough tiles to schedule, we use the number of tiles
   // in the smaller dimension as WGM value
-  else if (numMTs > 2 * numCUs && numMT_N <= 8)
+  else if (numMTs >= numCUs && numMT_N <= 8)
     out_wgm = numMT_N;
   else {
     // List of candidates for WGM values
