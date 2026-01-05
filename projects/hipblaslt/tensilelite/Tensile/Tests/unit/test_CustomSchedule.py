@@ -395,6 +395,36 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       False,       1),
+        # fmt: on
+        ])
+    def test_schedule_224x128x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
+        """Tests the 224x128x64 16-bit NN schedule."""
+        kernel = create_base_kernel()
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        kernel["ProblemType"].update({
+            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+            "TransposeA": transA, "TransposeB": transB
+        })
+        kernel.update({
+            "MacroTile0": 224, "MacroTile1": 128, "DepthU": 64,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 7, "MIWaveTileB": 4,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 1
+        assert schedule_info.numMfma == 56
+        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        assert valid, message
+
     def test_schedule_256x224x64_16bit_TN(self):
         """Tests the 256x224x64 16-bit TN schedule."""
         kernel = create_base_kernel()
@@ -520,6 +550,7 @@ class TestCustomScheduleBF16:
         # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds", [
         (  True,  False,       False,       1),
+        ( False,  False,        True,       1),
         # fmt: on
         ])
     def test_schedule_128x224x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
@@ -556,6 +587,7 @@ class TestCustomScheduleTF32:
         })
         kernel.update({
             "UseF32XEmulation": True,
+            "ForceUnrollSubIter": True,
             "MacroTile0": 192, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
             "DirectToLds": True,
