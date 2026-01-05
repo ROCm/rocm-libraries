@@ -71,31 +71,6 @@ bool PerformanceConfigPooling2d<OpType>::SetNextValue(const miopen::pooling::Pro
 }
 
 template <OperationType OpType>
-bool PerformanceConfigPooling2d<OpType>::IsValidValue() const
-{
-    if constexpr(OpType == OperationType::Backward)
-    {
-        // check out_pix_tile0 only for the backward solver
-        if(!IsTwoPower<min_out_pix_tile0, max_out_pix_tile0>(out_pix_tile0))
-            return false;
-    }
-    if(!IsTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
-        return false;
-    if(!IsTwoPower<min_local_size0, max_local_size0>(local_size0))
-        return false;
-    if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
-        return false;
-    if constexpr(OpType == OperationType::Forward)
-    {
-        // this constraint is enforced to avoid grp_tile1 becoming zero in GetSolutionImpl in the
-        // PoolingForward2d solver
-        if(local_size1 / out_pix_tile1 < 1)
-            return false;
-    }
-    return true;
-}
-
-template <OperationType OpType>
 bool PerformanceConfigPooling2d<OpType>::IsValid(
     const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
 {
@@ -107,7 +82,8 @@ bool PerformanceConfigPooling2d<OpType>::IsValid(
     {
     case miopenHalf:
     case miopenFloat:
-        return IsValidValue(); // perform further checks for problem & parameter set compatibility?
+        return IsValidValue(
+            problem); // perform further checks for problem & parameter set compatibility?
     case miopenBFloat16:
     case miopenDouble:
     case miopenFloat8_fnuz:
