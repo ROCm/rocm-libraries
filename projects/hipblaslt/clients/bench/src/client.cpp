@@ -507,7 +507,7 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),

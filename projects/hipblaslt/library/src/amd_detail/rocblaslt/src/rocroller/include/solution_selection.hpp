@@ -159,7 +159,7 @@ constexpr int
     // large.
     // There is an error with smaller tile sizes and larger prefetchInFlight.
     if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
-       && wgt.n > 32)
+       && wgt.n > 32 && wgt.k < 256)
         return 4;
     else
         return 2;

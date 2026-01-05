@@ -450,6 +450,8 @@ rocblaslt_status
         return rocblaslt_status_not_implemented;
     }
 
+    std::cout << "Generated kernel: " << params->toString() << std::endl;
+
     return rocblaslt_status_success;
 }
 
