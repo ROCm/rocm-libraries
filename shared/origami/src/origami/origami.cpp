@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <execution>
 #include <iomanip>
 #include <iostream>
 
@@ -228,8 +227,6 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
       }
 
       if (get_runtime_options(config).debug_enabled) {
-        config.logger.log("WGM", wgm);
-        config.logger.log("L2Estimate", wgmL2Estimate);
       }
     }
 
@@ -246,8 +243,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
   std::vector<prediction_result_t> results(configs.size());
 
-  std::transform(std::execution::seq,
-                 configs.begin(),
+  std::transform(configs.begin(),
                  configs.end(),
                  results.begin(),
                  [&](const config_t& config) -> prediction_result_t {

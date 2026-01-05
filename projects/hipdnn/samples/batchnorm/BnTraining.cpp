@@ -5,20 +5,20 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/utilities/Constants.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
@@ -96,20 +96,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
         nextRunningVariance->set_output(true);
     }
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
+    HIPDNN_FE_CHECK(graph->build(handle));
+    std::cout << "Graph build successful.\n";
 
     // Allocate tensors for BATCH_STATS_ONLY mode
     // Note: epsilon is pass-by-value, no buffer allocation needed
@@ -175,6 +163,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto savedMeanHostPtr = savedMeanTensor.memory().hostData();
     auto savedInvVarHostPtr = savedInvVarTensor.memory().hostData();
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation...\n";
@@ -189,7 +179,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
             utilities::Tensor<IntermediateType> nextMeanRefTensor(nextRunningMean->get_dim());
             utilities::Tensor<IntermediateType> nextVarRefTensor(nextRunningVariance->get_dim());
 
-            test_utilities::CpuFpReferenceBatchnorm::fwdTraining<
+            hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdTraining<
                 InputType, // XDataType
                 IntermediateType, // ScaleBiasDataType
                 IntermediateType, // MeanVarianceDataType
@@ -208,11 +198,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
                   &nextVarRefTensor // used
             );
 
-            auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
-            auto yValidator
-                = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-            auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
+            auto tolerance
+                = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+            auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
+                tolerance, tolerance);
+            auto statsValidator
+                = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
+                    static_cast<IntermediateType>(tolerance),
+                    static_cast<IntermediateType>(tolerance));
 
             bool yValid = yValidator.allClose(yRefTensor, yTensor);
             bool meanValid = statsValidator.allClose(savedMeanRefTensor, savedMeanTensor);
@@ -228,11 +221,13 @@ void SampleRunner::operator()(const TensorLayout& layout)
             std::cout << "  next_running_mean: " << (nextMeanValid ? "successful" : "failed")
                       << "\n";
             std::cout << "  next_running_var: " << (nextVarValid ? "successful" : "failed") << "\n";
+
+            validationPassed = yValid && meanValid && invVarValid && nextMeanValid && nextVarValid;
         }
         else
         {
             // BATCH_STATS_ONLY mode validation
-            test_utilities::CpuFpReferenceBatchnorm::fwdTraining<
+            hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdTraining<
                 InputType, // XDataType
                 IntermediateType, // ScaleBiasDataType
                 IntermediateType, // MeanVarianceDataType
@@ -251,11 +246,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
                   nullptr // nextRunningVariance (not used)
             );
 
-            auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
-            auto yValidator
-                = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-            auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
+            auto tolerance
+                = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+            auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
+                tolerance, tolerance);
+            auto statsValidator
+                = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
+                    static_cast<IntermediateType>(tolerance),
+                    static_cast<IntermediateType>(tolerance));
 
             bool yValid = yValidator.allClose(yRefTensor, yTensor);
             bool meanValid = statsValidator.allClose(savedMeanRefTensor, savedMeanTensor);
@@ -266,6 +264,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
             std::cout << "  saved_mean: " << (meanValid ? "successful" : "failed") << "\n";
             std::cout << "  saved_inv_variance: " << (invVarValid ? "successful" : "failed")
                       << "\n";
+
+            validationPassed = yValid && meanValid && invVarValid;
         }
     }
 
@@ -287,6 +287,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nBatch normalization training graph execution complete for " << inputType
               << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -299,9 +300,18 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All batch normalization training runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All batch normalization training runs completed successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout << "One or more batch normalization training runs failed validation.\n";
+        return 1;
+    }
 }

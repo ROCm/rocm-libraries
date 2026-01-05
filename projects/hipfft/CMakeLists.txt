@@ -89,6 +89,8 @@ set(DEFAULT_GPUS
   gfx1101
   gfx1102
   gfx1151
+  gfx1152
+  gfx1153
   gfx1200
   gfx1201)
 
@@ -175,7 +177,7 @@ endif()
 message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 
 # Version
-set( VERSION_STRING "1.0.22" )
+set( VERSION_STRING "1.0.23" )
 set( hipfft_SOVERSION 0.1 )
 set( hipfftw_SOVERSION 0.1 )
 

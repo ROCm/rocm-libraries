@@ -490,7 +490,7 @@ void testing_hemm_strided_batched(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(d_alpha.memcheck());
     CHECK_DEVICE_ALLOCATION(d_beta.memcheck());
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     T h_alpha = arg.get_alpha<T>();
     T h_beta  = arg.get_beta<T>();

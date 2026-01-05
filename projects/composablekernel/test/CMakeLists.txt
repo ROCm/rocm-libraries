@@ -33,12 +33,16 @@ set(REGRESSION_TESTS
     test_convnd_fwd
     test_convnd_bwd_data
     test_grouped_convnd_fwd
+    test_grouped_convnd_fwd_scaleadd_ab
     test_grouped_convnd_bwd_weight
     test_softmax_rank3
     test_softmax_rank4
     test_batchnorm_fwd_rank_4
     test_batchnorm_bwd_rank_4
     test_grouped_convnd_bwd_data_xdl
+    test_grouped_convnd_bwd_data_wmma
+    test_grouped_convnd_bwd_data_wmma_large_cases
+    test_grouped_conv_bwd_data_wmma_scale
     test_conv_tensor_rearrange
     test_gemm_mx
     test_ck_tile_batched_transpose
@@ -261,6 +265,7 @@ add_subdirectory(gemm_multiply_multiply_wp)
 add_subdirectory(gemm_split_k)
 add_subdirectory(gemm_universal)
 add_subdirectory(gemm_universal_preshuffle)
+add_subdirectory(gemm_ab_scale)
 add_subdirectory(gemm_b_scale)
 add_subdirectory(gemm_universal_streamk)
 add_subdirectory(gemm_reduce)
@@ -295,6 +300,7 @@ add_subdirectory(transpose)
 add_subdirectory(permute_scale)
 add_subdirectory(wrapper)
 add_subdirectory(quantization)
+add_subdirectory(device_memory)
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx11")
     add_subdirectory(wmma_op)
 endif()
@@ -310,3 +316,5 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx12")
 endif()
 add_subdirectory(position_embedding)
 add_subdirectory(scatter_gather)
+add_subdirectory(gpu_reference)
+add_subdirectory(util)

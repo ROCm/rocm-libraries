@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 
 #include "EngineManager.hpp"
 #include "MiopenContainer.hpp"

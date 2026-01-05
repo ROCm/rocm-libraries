@@ -276,7 +276,7 @@ void testing_gemmi_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gemmi(Arguments argus)
+void testing_gemmi(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int         M        = argus.M;
@@ -292,7 +292,7 @@ hipsparseStatus_t testing_gemmi(Arguments argus)
     if(M == 0 || N == 0 || K == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -305,12 +305,8 @@ hipsparseStatus_t testing_gemmi(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(
-           filename, N, K, nnz, hcsc_col_ptrB, hcsc_row_indB, hcsc_valB, HIPSPARSE_INDEX_BASE_ZERO))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, N, K, nnz, hcsc_col_ptrB, hcsc_row_indB, hcsc_valB, HIPSPARSE_INDEX_BASE_ZERO));
 
     int lda = std::max(1, M);
     int ldc = std::max(1, M);
@@ -509,8 +505,6 @@ hipsparseStatus_t testing_gemmi(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GEMMI_HPP

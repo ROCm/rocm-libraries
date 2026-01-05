@@ -53,7 +53,8 @@ namespace SwizzleScaleTest
         example.setMFMA(16, 16, 128, 1);
         example.setUseLDS(true, true, false);
         example.setUnroll(2, 2);
-        example.setScaling(true, false);
+        example.setScaling(
+            ScaleMode::Separate, ScaleMode::None, DataType::E8M0, DataType::None, 32);
 
         auto graph  = example.getKernelGraph();
         auto params = example.getCommandParameters();
