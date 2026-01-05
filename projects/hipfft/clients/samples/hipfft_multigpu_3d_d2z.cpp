@@ -37,7 +37,7 @@ DISABLE_WARNING_POP
 
 int main()
 {
-    std::cout << "Multi-gpu hipFFT in-place 2D double-precision real-to-complex transform\n";
+    std::cout << "Multi-gpu hipFFT in-place 3D double-precision real-to-complex transform\n";
 
     // 2D FFTs are encountered in diverse applications of image processing,
     // examples range from image denoising to RTM seismic imaging.
@@ -185,7 +185,12 @@ int main()
     std::cout << "Executing the plan...\n";
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtExecDescriptor failed.");
+    {
+        std::stringstream ss;
+        ss << "hipfftXtExecDescriptor failed with code ";
+        ss << std::to_string(hipfft_rt) << " : " << hipfftResult_to_name(hipfft_rt);
+        throw std::runtime_error(ss.str());
+    }
 
     std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
 

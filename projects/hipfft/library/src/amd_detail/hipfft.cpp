@@ -2347,8 +2347,8 @@ catch(...)
 }
 
 static hipfftResult hipfftXtExecDescriptorBase(hipfftHandle  plan,
-                                               hipLibXtDesc*                input,
-                                               hipLibXtDesc*                output,
+                                               hipLibXtDesc* input,
+                                               hipLibXtDesc* output,
                                                int           direction)
 {
     try
@@ -2364,6 +2364,7 @@ static hipfftResult hipfftXtExecDescriptorBase(hipfftHandle  plan,
             {
                 if(!inplace)
                 {
+                    // Real/complex plans must be in-place.
                     return HIPFFT_EXEC_FAILED;
                 }
             }
