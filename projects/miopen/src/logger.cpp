@@ -68,7 +68,13 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_ROCTX)
 /// Disable logging quieting.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LOGGING_QUIETING_DISABLE)
 
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 128);
+
 namespace miopen {
+
+size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
+size_t log_buffer_i    = 0;
+std::vector<std::string> log_buffer(log_buffer_size, "");
 
 namespace debug {
 

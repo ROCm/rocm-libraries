@@ -28,6 +28,7 @@
 
 #include <exception>
 #include <iostream>
+#include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/object.hpp>
 #include <miopen/returns.hpp>
@@ -63,6 +64,16 @@ MIOPEN_EXPORT std::string HIPErrorMessage(int error, const std::string& msg = ""
 template <class... Params>
 [[noreturn]] void MIOpenThrow(const std::string& file, int line, Params&&... args)
 {
+    size_t i = miopen::log_buffer_i;
+    std::cerr << "Buffered " << miopen::log_buffer_i << " messages." << std::endl;
+    do
+    {
+        if(miopen::log_buffer[i] != "")
+        {
+            std::cerr << miopen::log_buffer[i];
+        }
+        i = (i + 1) % miopen::log_buffer_size;
+    } while(i != miopen::log_buffer_i);
     throw miopen::Exception(std::forward<Params>(args)...).SetContext(file, line);
 }
 

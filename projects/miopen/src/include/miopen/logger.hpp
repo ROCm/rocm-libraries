@@ -139,6 +139,9 @@
 
 namespace miopen {
 
+extern size_t log_buffer_size, log_buffer_i;
+extern std::vector<std::string> log_buffer;
+
 template <class Range>
 std::ostream& LogRange(std::ostream& os, Range&& r, std::string delim)
 {
@@ -364,16 +367,18 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
 #define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
 #endif
 
-#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                \
-    do                                                                                      \
-    {                                                                                       \
-        if(miopen::IsLogging(level, disableQuieting))                                       \
-        {                                                                                   \
-            std::ostringstream miopen_log_ss;                                               \
-            miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
-                          << __VA_ARGS__ << std::endl;                                      \
-            std::cerr << miopen_log_ss.str();                                               \
-        }                                                                                   \
+#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                      \
+    do                                                                                            \
+    {                                                                                             \
+        std::ostringstream miopen_log_ss;                                                         \
+        miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] "           \
+                      << __VA_ARGS__ << std::endl;                                                \
+        miopen::log_buffer[miopen::log_buffer_i % miopen::log_buffer_size] = miopen_log_ss.str(); \
+        miopen::log_buffer_i++;                                                                   \
+        if(miopen::IsLogging(level, disableQuieting))                                             \
+        {                                                                                         \
+            std::cerr << miopen_log_ss.str();                                                     \
+        }                                                                                         \
     } while(false)
 
 #define MIOPEN_LOG_XQ_(level, disableQuieting, fn_name, ...) \
