@@ -1130,6 +1130,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
            - [16, 16, 32, 1,  1, 2, 1,  4, 1 ]
+           - [16, 16, 32, 1,  1, 2, 1,  2, 1 ]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
@@ -1158,6 +1159,9 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - TailloopInNll: [0, 1]
+        - WorkGroup:
+           - [64, 4, 1]
+           - [32, 4, 2]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

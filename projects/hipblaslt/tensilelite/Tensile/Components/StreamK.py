@@ -335,12 +335,15 @@ class StreamK(Component):
                 module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
                 module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="this WG runs tail loop"))
 
-            if writer.states.tailloopInNll and maxUnit > 1:
-                module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("SizesSum+%u" % unrollIdx), src1=maxUnit-1, \
-                                   comment="if summation is not multiple of %u, skip tailloopInNll"%maxUnit))
-                module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="do not decrement in tailloopInNll case"))
+                if writer.states.tailloopInNll and maxUnit > 1:
+                    # tailloopInNll + maxUnit > 1 case, we need to check if SizesSum is multiple of maxUnit at runtime.
+                    # if SizesSum is not multiple of maxUnit, we do not use tailloopInNll and need to decrement loopCounter for StreamK
+                    # if SizesSum is multiple of maxUnit, we  use tailloopInNll and need to increment loopCounter by 1.
+                    # With considering both increment and decrement, we do not need to adjust loopCounter.
+                    module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("SizesSum+%u" % unrollIdx), src1=maxUnit-1, \
+                                       comment="if summation is not multiple of %u, skip tailloopInNll"%maxUnit))
+                    module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="do not decrement in tailloopInNll case"))
 
-            if not (writer.states.tailloopInNll and maxUnit == 1):
                 module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), src1=sgpr(tmpSgpr), comment="Adjust loop counter for tail loop"))
                 module.add(SMaxI32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), src1=0, comment="Avoid setting negative value to loopCounter"))
 
