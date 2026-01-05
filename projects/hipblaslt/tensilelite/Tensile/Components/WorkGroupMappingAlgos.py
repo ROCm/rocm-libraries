@@ -303,63 +303,6 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     return module
 
-def chiplet_transform_chunked(writer, kernel, sgprIndex, sgprNumWG, sgprChunkSize):
-
-    numXCC = 8
-    module = Module()
-
-    sgprNumXCC = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprTmp  = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprTmp2 = writer.sgprPool.checkOut(1, preventOverflow=False)
-
-    sgprLocalId = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprChunkId = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprPosInChunk = writer.sgprPool.checkOut(1, preventOverflow=False)
-    sgprXCC = writer.sgprPool.checkOut(1, preventOverflow=False)
-
-    tmpVgpr = writer.vgprPool.checkOutAligned(6,2,"tmpVgpr")
-    tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
-
-    labelEnd = Label(writer.labels.getUniqueNamePrefix("ChipletTransformChunkEnd"), comment="")
-    module.addComment0("Chiplet Transform Chunked")
-
-    # Hard-coded for now, needs to be a run-time param
-    module.add(SMovB32(dst=sgpr(sgprNumXCC), src=numXCC, comment=""))
-
-    # Compute sgprTmp = numWG, sgprTmp2 = numXCC * chunk_size
-    module.add(SMulI32(dst=sgpr(sgprTmp2), src0=sgpr(sgprNumXCC), src1=sgpr(sgprChunkSize), comment="Compute total number of tiles"))
-    # compute (numWG // (numXCC * chunkSize)) and localId = index // numXCC, note: sgprPosInChunk is not used
-    module.add(scalarUInt24DivideAndRemainderPair(qReg=[sgprLocalId,sgprTmp], dReg=[sgprIndex,sgprNumWG], \
-                                                  divReg=[sgprNumXCC,sgprTmp2], rReg=[sgprXCC, sgprPosInChunk], tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
-    # (numWG // (numXCC * chunkSize)) * (numXCC * chunkSize)
-    module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr(sgprTmp), src1=sgpr(sgprTmp2), comment=""))
-    # check,     if index > (num_workgroups // (num_xcds * chunk_size)) * (num_xcds * chunk_size)
-    module.add(SCmpGtU32(src0=sgpr(sgprIndex), src1=sgpr(sgprTmp), comment=""))
-    module.add(SCBranchSCC1(labelEnd.getLabelName()))
-
-    # Calculate: index = chunk_idx * num_xcds * chunk_size + xcd * chunk_size + pos_in_chunk
-    # chunk ID, pos_in_chunk
-    module.add(scalarUInt24DivideAndRemainder(qReg=sgprChunkId, dReg=sgprLocalId, divReg=sgprChunkSize, rReg=sgprPosInChunk, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
-    # xcc * chunk_size
-    module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr(sgprXCC), src1=sgpr(sgprChunkSize), comment=""))
-    # chunkId * numxcc * chunk_size
-    module.add(SMulI32(dst=sgpr(sgprTmp2), src0=sgpr(sgprChunkId), src1=sgpr(sgprTmp2), comment=""))
-    module.add(SAddU32(dst=sgpr(sgprTmp), src0=sgpr(sgprTmp), src1=sgpr(sgprPosInChunk), comment=""))
-    module.add(SAddU32(dst=sgpr(sgprIndex), src0=sgpr(sgprTmp), src1=sgpr(sgprTmp2), comment=""))
-
-    module.add(labelEnd)
-
-    writer.sgprPool.checkIn(sgprXCC)
-    writer.sgprPool.checkIn(sgprPosInChunk)
-    writer.sgprPool.checkIn(sgprChunkId)
-    writer.sgprPool.checkIn(sgprLocalId)
-    writer.sgprPool.checkIn(sgprTmp)
-    writer.sgprPool.checkIn(sgprTmp2)
-    writer.sgprPool.checkIn(sgprNumXCC)
-    writer.vgprPool.checkIn(tmpVgpr)
-
-    return module
-
 # Remap 1D workgroup ID
 def chiplet_transform(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN):
 
