@@ -18,6 +18,7 @@ exclude: |
     projects/composablekernel/.*|
     projects/hipblas/.*|
     projects/hipblas-common/.*|
+    projects/hipblaslt/.*|
     projects/hipcub/.*|
     projects/hipfft/.*|
     projects/hiprand/.*|
