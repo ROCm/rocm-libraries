@@ -115,20 +115,20 @@ struct CKArgs
         }
 
         filter_strides   = {ProblemInterpreter::GetAdjustedConvolutionStrideD(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                            ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
+                            ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         filter_dilations = {ProblemInterpreter::GetAdjustedConvolutionDilationD(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding         = {ProblemInterpreter::GetInputLeftPadD(problem),
-                    ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
+                            ProblemInterpreter::GetInputLeftPadH(problem),
+                            ProblemInterpreter::GetInputLeftPadW(problem)};
         rPadding         = {ProblemInterpreter::GetAdjustedInputRightPadD(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                            ProblemInterpreter::GetAdjustedInputRightPadH(problem),
+                            ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
-    CKArgs(const CKArgs&) = default;
-    CKArgs(CKArgs&&)      = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&)                 = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>
@@ -402,10 +402,11 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
 {
     index     = 0;
     kernel_id = "None";
-    split_k   = 1; // This solver uses split_k, so initialize to 1
+    split_k   = 1;
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    // 1. AI heuristics (if enabled)
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
@@ -473,6 +474,14 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
         if(ai_success && !result.IsEmpty())
         {
             MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
+            if(is_deterministic && split_k != 1)
+            {
+                MIOPEN_LOG_W("Deterministic mode: Overriding AI-predicted split_k="
+                             << split_k << " to split_k=1");
+                split_k = 1;
+                if(!valid_kernels.empty())
+                    kernel_id = valid_kernels[index] + "+1";
+            }
             return;
         }
         else
@@ -493,7 +502,6 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     MIOPEN_LOG_I2("Step 1: AI heuristics not available (MIOPEN_ENABLE_AI_KERNEL_TUNING disabled)");
 #endif
 
-    // 2. Default: index remains 0, first valid_kernel will be used
     MIOPEN_LOG_I2("Step 2: Using default initialization (index=0)");
     InitValidKernels(problem);
     if(!valid_kernels.empty())
@@ -508,6 +516,13 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     {
         MIOPEN_LOG_W("Step 2: Default initialization failed - no valid kernels found");
     }
+
+    if(is_deterministic && split_k != 1)
+    {
+        split_k = 1;
+        if(!valid_kernels.empty())
+            kernel_id = valid_kernels[index] + "+1";
+    }
 #endif
 }
 
@@ -517,16 +532,30 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
 #if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
-        // For generic search, we want all available kernels, not heuristic selection
         InitValidKernels(problem);
         if(valid_kernels.empty())
         {
             return false;
         }
     }
+
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
     do
     {
         bool flag = NextCKSplitkValue<1, 128>(split_k);
+
+        if(is_deterministic && split_k > 1)
+        {
+            if(!NextLinear(0, valid_kernels.size() - 1, index))
+            {
+                return false;
+            }
+            split_k   = 1;
+            kernel_id = valid_kernels[index] + "+1";
+            break;
+        }
+
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
@@ -554,6 +583,29 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
     [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(problem.GetConv().attribute.deterministic)
+    {
+        size_t plus_pos = kernel_id.find_last_of('+');
+        if(plus_pos != std::string::npos)
+        {
+            try
+            {
+                int split_k_from_id = std::stoi(kernel_id.substr(plus_pos + 1));
+                if(split_k_from_id != 1)
+                {
+                    MIOPEN_LOG_I("Invalid configuration for deterministic mode: split_k="
+                                 << split_k_from_id << " (must be 1)");
+                    return false;
+                }
+            }
+            catch(const std::exception&)
+            {
+                MIOPEN_LOG_E("Failed to parse split_k from kernel_id: " << kernel_id);
+                return false;
+            }
+        }
+    }
+
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
@@ -656,8 +708,6 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
-        return false;
-    if(problem.GetConv().attribute.deterministic)
         return false;
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;

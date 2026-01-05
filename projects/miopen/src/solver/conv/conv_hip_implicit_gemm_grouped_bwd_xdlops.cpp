@@ -107,7 +107,7 @@ struct CKArgs
         }
 
         strides  = {ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                   ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                    ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         dilation = {ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                     ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding = {ProblemInterpreter::GetInputLeftPadH(problem),
@@ -116,8 +116,8 @@ struct CKArgs
                     ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
-    CKArgs(const CKArgs&) = default;
-    CKArgs(CKArgs&&)      = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&)                 = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>
@@ -409,23 +409,58 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     kernel_id = "";
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(IsModelApplicable(ctx, problem))
     {
         if(problem.GetInDataType() == miopenFloat)
         {
             if(RunParameterPredictionModel<float>(ctx, problem))
+            {
+                // Enforce split_k == 1 for deterministic mode
+                if(is_deterministic && split_k != 1)
+                {
+                    MIOPEN_LOG_W("Deterministic mode: Overriding AI-predicted split_k="
+                                 << split_k << " to split_k=1");
+                    split_k = 1;
+                    if(!valid_kernels.empty())
+                        kernel_id = valid_kernels[index] + "+1";
+                }
                 return;
+            }
         }
         else if(problem.GetInDataType() == miopenBFloat16)
         {
             if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
+            {
+                // Enforce split_k == 1 for deterministic mode
+                if(is_deterministic && split_k != 1)
+                {
+                    MIOPEN_LOG_W("Deterministic mode: Overriding AI-predicted split_k="
+                                 << split_k << " to split_k=1");
+                    split_k = 1;
+                    if(!valid_kernels.empty())
+                        kernel_id = valid_kernels[index] + "+1";
+                }
                 return;
+            }
         }
         else
         {
             if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
+            {
+                // Enforce split_k == 1 for deterministic mode
+                if(is_deterministic && split_k != 1)
+                {
+                    MIOPEN_LOG_W("Deterministic mode: Overriding AI-predicted split_k="
+                                 << split_k << " to split_k=1");
+                    split_k = 1;
+                    if(!valid_kernels.empty())
+                        kernel_id = valid_kernels[index] + "+1";
+                }
                 return;
+            }
         }
     }
 #endif
@@ -440,6 +475,14 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
+    }
+
+    // Ensure split_k == 1 for deterministic mode (redundant safety check)
+    if(is_deterministic && split_k != 1)
+    {
+        split_k = 1;
+        if(!valid_kernels.empty())
+            kernel_id = valid_kernels[index] + "+1";
     }
 #endif
 }
@@ -464,9 +507,27 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
         assert(!valid_kernels.empty());
         return true;
     }
+
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
     do
     {
         bool flag = NextTwoPower<1, 128>(split_k);
+
+        // Skip split_k > 1 for deterministic mode
+        if(is_deterministic && split_k > 1)
+        {
+            // Move to next kernel instead of continuing with split_k > 1
+            if(!NextLinear(0, valid_kernels.size() - 1, index))
+            {
+                // All kernels exhausted
+                return false;
+            }
+            split_k   = 1; // Reset to 1 for next kernel
+            kernel_id = valid_kernels[index] + "+1";
+            break;
+        }
+
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
@@ -494,6 +555,32 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(problem.GetConv().attribute.deterministic)
+    {
+        // Extract split_k from kernel_id
+        // kernel_id format: "KernelName+split_k"
+        size_t plus_pos = kernel_id.find_last_of('+');
+        if(plus_pos != std::string::npos)
+        {
+            try
+            {
+                int split_k_from_id = std::stoi(kernel_id.substr(plus_pos + 1));
+                if(split_k_from_id != 1)
+                {
+                    MIOPEN_LOG_I("Invalid configuration for deterministic mode: split_k="
+                                 << split_k_from_id << " (must be 1)");
+                    return false;
+                }
+            }
+            catch(const std::exception&)
+            {
+                // If parsing fails, reject the configuration
+                MIOPEN_LOG_E("Failed to parse split_k from kernel_id: " << kernel_id);
+                return false;
+            }
+        }
+    }
+
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
@@ -576,8 +663,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
-        return false;
-    if(problem.GetConv().attribute.deterministic)
         return false;
     if(problem.HasMixedDataTypes())
         return false;
