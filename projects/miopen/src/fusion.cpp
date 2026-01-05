@@ -1199,6 +1199,11 @@ miopenStatus_t FusionPlanDescriptor::Execute(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm, "The Fusion Plan was not compiled successfully");
     }
 
+    if(compiled_invoker->first < workspace_size)
+    {
+        MIOPEN_THROW(miopenStatusBadParm, "The provided workspace size is less than required.");
+    }
+
     const auto plan_params = fusion::FusionInvokeParams{
         op_args, inputDesc, input, outputDesc, output, false, workspace, workspace_size};
     (compiled_invoker->second)(handle, plan_params);
