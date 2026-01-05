@@ -24164,30 +24164,30 @@ HIPBLAS_EXPORT hipblasStatus_t
                                             hipblasGemmAlgo_t    algo,
                                             hipblasGemmFlags_t   flags);
 
-/*! \brief BLAS EX API
+/*! \brief <b> BLAS EX API </b>
 
     \details
 
-    syrkEx performs one of the matrix-matrix operations for a symmetric rank-k update
+    The syrkEx functions perform one of the matrix-matrix operations for a symmetric rank-k update:
 
-    C := alpha*op( A )*op( A )^T + beta*C
+        C := alpha*op( A )*op( A )^T + beta*C
 
-    where  alpha and beta are scalars, op(A) is an n by k matrix, and
-    C is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` is an ``n`` by ``k`` matrix, and
+    ``C`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A ) = A, and A is n by k if transA == HIPBLAS_OP_N
         op( A ) = A^T and A is k by n if transA == HIPBLAS_OP_T
 
-        - Supported types are determined by the backend. See rocBLAS/cuBLAS documentation.
+    - Supported types are determined by the backend. See the rocBLAS or cuBLAS documentation.
 
     @param[in]
     handle    [hipblasHandle_t]
-              handle to the hipblas library context queue.
+              handle to the hipBLAS library context queue.
     @param[in]
     uplo      [hipblasFillMode_t]
               Specifies whether the matrix C is an upper or lower triangular matrix as follows:
-              HIPBLAS_FILL_MODE_UPPER:  C is an upper triangular matrix.
-              HIPBLAS_FILL_MODE_LOWER:  C is a  lower triangular matrix.
+              - HIPBLAS_FILL_MODE_UPPER:  C is an upper triangular matrix.
+              - HIPBLAS_FILL_MODE_LOWER:  C is a  lower triangular matrix.
     @param[in]
     transA    [hipblasOperation_t]
               specifies the form of op( A ).
@@ -24245,7 +24245,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasSyrkEx(hipblasHandle_t    handle,
                                              int                ldc,
                                              hipDataType        computeType);
 
-/*! BLAS EX API
+/*! <b> BLAS EX API </b>
 
     \details
     The trsmEx functions solve:
