@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM x.y.z for ROCm 8.0
+
+### Optimizations
+
+* Updated config system to pick better fallback configs for untuned GPUs.
+
 ## rocPRIM 4.2.0 for ROCm 7.2
 
 ### Added

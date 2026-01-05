@@ -26,6 +26,8 @@
 #include <atomic>
 #include <limits>
 #include <optional>
+#include <string_view>
+#include <tuple>
 #include <type_traits>
 
 #include <cassert>
@@ -159,6 +161,7 @@ using default_or_custom_config =
     typename std::conditional<std::is_same<Config, default_config>::value, Default, Config>::type;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
+// NOTE: When adding a new target_arch also add it to gen_from_target_arch and get_target_arch_from_name
 enum class target_arch : unsigned int
 {
     // This must be zero, to initialize the device -> architecture cache
@@ -170,9 +173,16 @@ enum class target_arch : unsigned int
     gfx90a  = 910,
     gfx942  = 942,
     gfx950  = 950,
+    gfx1010 = 1010,
+    gfx1011 = 1011,
+    gfx1012 = 1012,
     gfx1030 = 1030,
     gfx1100 = 1100,
+    gfx1101 = 1101,
     gfx1102 = 1102,
+    gfx1103 = 1103,
+    gfx1150 = 1150,
+    gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
     gfx1200 = 1200,
@@ -180,6 +190,141 @@ enum class target_arch : unsigned int
     unknown = std::numeric_limits<unsigned int>::max(),
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
+
+enum class rep
+{
+    amdgcn,
+    spirv,
+};
+
+enum class gen
+{
+    unknown,
+    gcn3,
+    gcn5,
+    cdna1,
+    cdna2,
+    cdna3,
+    cdna4,
+    rdna1,
+    rdna2,
+    rdna3,
+    rdna4,
+};
+
+enum class gpu
+{
+    generic,
+    v620,
+    rx6900,
+    rx7900,
+    rx9060,
+    rx9070,
+    mi50,
+    mi100,
+    mi210,
+    mi300x,
+    mi300a,
+    mi308x,
+    mi325x,
+    mi350x
+};
+
+constexpr gen gen_from_target_arch(target_arch i)
+{
+    switch(i)
+    {
+        case target_arch::gfx803: return gen::gcn3;
+        case target_arch::gfx900:
+        case target_arch::gfx906: return gen::gcn5;
+        case target_arch::gfx908: return gen::cdna1;
+        case target_arch::gfx90a: return gen::cdna2;
+        case target_arch::gfx942: return gen::cdna3;
+        case target_arch::gfx950: return gen::cdna4;
+        case target_arch::gfx1010:
+        case target_arch::gfx1011:
+        case target_arch::gfx1012: return gen::rdna1;
+        case target_arch::gfx1030: return gen::rdna2;
+        case target_arch::gfx1100:
+        case target_arch::gfx1101:
+        case target_arch::gfx1102:
+        case target_arch::gfx1103:
+        case target_arch::gfx1150:
+        case target_arch::gfx1151:
+        case target_arch::gfx1152:
+        case target_arch::gfx1153: return gen::rdna3;
+        case target_arch::gfx1200:
+        case target_arch::gfx1201: return gen::rdna4;
+        case target_arch::unknown:
+        case target_arch::invalid: return gen::unknown;
+    }
+}
+
+constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
+    std::make_tuple<std::string_view, gpu>("MI350X", gpu::mi350x),
+    std::make_tuple<std::string_view, gpu>("MI325X", gpu::mi325x),
+    std::make_tuple<std::string_view, gpu>("MI308X", gpu::mi308x),
+    std::make_tuple<std::string_view, gpu>("MI300A", gpu::mi300a),
+    std::make_tuple<std::string_view, gpu>("MI300X", gpu::mi300x),
+    std::make_tuple<std::string_view, gpu>("MI210", gpu::mi210),
+    std::make_tuple<std::string_view, gpu>("MI100", gpu::mi100),
+    std::make_tuple<std::string_view, gpu>("RX 9060", gpu::rx9060),
+    std::make_tuple<std::string_view, gpu>("RX 9070", gpu::rx9070),
+    std::make_tuple<std::string_view, gpu>("V620", gpu::v620),
+    std::make_tuple<std::string_view, gpu>("RX 7900", gpu::rx7900),
+    std::make_tuple<std::string_view, gpu>("RX 6900", gpu::rx6900),
+};
+
+// TODO: Remove comp_target when adopting C++20 and dropping C++17 support.
+// comp_target exists, because target can not be passed as a template variable before C++20.
+template<gen g_, target_arch i_ = target_arch::unknown, gpu s_ = gpu::generic, rep r_ = rep::amdgcn>
+struct comp_target
+{
+    static constexpr gen         g = g_;
+    static constexpr target_arch i = i_;
+    static constexpr gpu         s = s_;
+    static constexpr rep         r = r_;
+};
+
+// Macro to have a singular place for conversion, limited by C++17.
+#define TARGET_TO_COMP_TARGET(CT) comp_target<(CT).g, (CT).i, (CT).s, (CT).r>
+
+struct target
+{
+    gen         g;
+    target_arch i;
+    gpu         s;
+    rep         r;
+
+    constexpr target(target_arch i, gpu s = gpu::generic, rep r = rep::amdgcn)
+        : g(gen_from_target_arch(i)), i(i), s(s), r(r){};
+
+    constexpr target(gen         g = gen::unknown,
+                     target_arch i = target_arch::unknown,
+                     gpu         s = gpu::generic,
+                     rep         r = rep::amdgcn)
+        : g(g), i(i), s(s), r(r){};
+
+    template<class CompTarget>
+    constexpr target(CompTarget)
+        : g(CompTarget::g), i(CompTarget::i), s(CompTarget::s), r(CompTarget::r)
+    {}
+
+    constexpr bool operator==(target other) const
+    {
+        return g == other.g && i == other.i && s == other.s && r == other.r;
+    }
+};
+
+template<typename... Ts>
+struct comp_targets
+{
+    template<typename F>
+    static constexpr void for_each(F f)
+    {
+        (f(Ts{}), ...);
+    }
+};
 
 /**
  * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
@@ -206,78 +351,54 @@ constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
     return i == n && *lhs == '\0';
 }
 
-struct target_arch_descriptor
-{
-    target_arch arch;
-    const char *arch_name;
-};
-
-#define X(ID) target_arch_descriptor{target_arch::ID, #ID}
-constexpr auto target_arch_descriptors = std::array{
-    X(gfx803),
-    X(gfx900),
-    X(gfx906),
-    X(gfx908),
-    X(gfx90a),
-    X(gfx942),
-    X(gfx950),
-    X(gfx1030),
-    X(gfx1100),
-    X(gfx1102),
-    X(gfx1152),
-    X(gfx1153),
-    X(gfx1200),
-    X(gfx1201),
-};
-#undef X
-
+#define ROCPRIM_RETURN_IF_ARCH(ID)       \
+    if(prefix_equals(#ID, arch_name, n)) \
+    {                                    \
+        return target_arch::ID;          \
+    }
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
-    for (const auto& desc : target_arch_descriptors)
-    {
-        if(prefix_equals(desc.arch_name, arch_name, n))
-        {
-            return desc.arch;
-        }
-    }
+    ROCPRIM_RETURN_IF_ARCH(gfx803);
+    ROCPRIM_RETURN_IF_ARCH(gfx900);
+    ROCPRIM_RETURN_IF_ARCH(gfx906);
+    ROCPRIM_RETURN_IF_ARCH(gfx908);
+    ROCPRIM_RETURN_IF_ARCH(gfx90a);
+    ROCPRIM_RETURN_IF_ARCH(gfx942);
+    ROCPRIM_RETURN_IF_ARCH(gfx950);
+    ROCPRIM_RETURN_IF_ARCH(gfx1010);
+    ROCPRIM_RETURN_IF_ARCH(gfx1011);
+    ROCPRIM_RETURN_IF_ARCH(gfx1012);
+    ROCPRIM_RETURN_IF_ARCH(gfx1030);
+    ROCPRIM_RETURN_IF_ARCH(gfx1100);
+    ROCPRIM_RETURN_IF_ARCH(gfx1101);
+    ROCPRIM_RETURN_IF_ARCH(gfx1102);
+    ROCPRIM_RETURN_IF_ARCH(gfx1103);
+    ROCPRIM_RETURN_IF_ARCH(gfx1150);
+    ROCPRIM_RETURN_IF_ARCH(gfx1151);
+    ROCPRIM_RETURN_IF_ARCH(gfx1152);
+    ROCPRIM_RETURN_IF_ARCH(gfx1153);
+    ROCPRIM_RETURN_IF_ARCH(gfx1200);
+    ROCPRIM_RETURN_IF_ARCH(gfx1201);
+
     return target_arch::unknown;
 }
+#undef ROCPRIM_RETURN_IF_ARCH
 
-template<class F, std::size_t... Is>
-constexpr void for_each_arch_impl(F&& f, std::index_sequence<Is...>)
+constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
 {
-    (f(std::integral_constant<target_arch, target_arch_descriptors[Is].arch>{}), ...);
-}
-
-template<class F>
-constexpr void for_each_arch(F&& f)
-{
-    for_each_arch_impl(std::forward<F>(f),
-                       std::make_index_sequence<std::size(target_arch_descriptors)>{});
-}
-
-constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_arch)
-{
-    switch(target_arch)
+    switch(gen)
     {
-        case target_arch::unknown: return arch::wavefront::get_target();
-        case target_arch::gfx803: return arch::wavefront::target::size64;
-        case target_arch::gfx900: return arch::wavefront::target::size64;
-        case target_arch::gfx906: return arch::wavefront::target::size64;
-        case target_arch::gfx908: return arch::wavefront::target::size64;
-        case target_arch::gfx90a: return arch::wavefront::target::size64;
-        case target_arch::gfx942: return arch::wavefront::target::size64;
-        case target_arch::gfx950: return arch::wavefront::target::size64;
-        case target_arch::gfx1030: return arch::wavefront::target::size32;
-        case target_arch::gfx1100: return arch::wavefront::target::size32;
-        case target_arch::gfx1102: return arch::wavefront::target::size32;
-        case target_arch::gfx1152: return arch::wavefront::target::size32;
-        case target_arch::gfx1153: return arch::wavefront::target::size32;
-        case target_arch::gfx1200: return arch::wavefront::target::size32;
-        case target_arch::gfx1201: return arch::wavefront::target::size32;
-
-        // Unreachable
-        case target_arch::invalid: return arch::wavefront::target::dynamic;
+        case gen::unknown: return arch::wavefront::get_target();
+        case gen::gcn3:
+        case gen::gcn5:
+        case gen::cdna1:
+        case gen::cdna2:
+        case gen::cdna3:
+        case gen::cdna4: return arch::wavefront::target::size64;
+        case gen::rdna1:
+        case gen::rdna2:
+        case gen::rdna3:
+        case gen::rdna4: return arch::wavefront::target::size32;
     }
 }
 
@@ -300,126 +421,6 @@ constexpr target_arch device_target_arch()
 #endif
 }
 
-template<typename Config, target_arch Arch>
-struct default_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.kernel_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct non_blev_batch_memcpy_config_selector
-{
-    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
-                                                   .non_blev_batch_memcpy_kernel_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct blev_batch_memcpy_config_selector
-{
-    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
-                                                   .blev_batch_memcpy_kernel_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct histogram_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.histogram_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct histogram_global_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.histogram_global_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct merge_oddeven_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.merge_oddeven_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct merge_mergepath_partition_config_selector
-{
-    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
-                                                   .merge_mergepath_partition_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct merge_mergepath_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.merge_mergepath_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct radix_sort_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct radix_sort_onesweep_histogram_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.histogram.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct radix_sort_onesweep_sort_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.sort.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct segmented_radix_sort_warp_sort_small_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_small;
-};
-
-template<typename Config, target_arch Arch>
-struct segmented_radix_sort_warp_sort_meduim_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_medium;
-};
-
-template<class Config, target_arch Arch>
-struct target_config
-{
-    constexpr static auto params    = Config::template architecture_config<Arch>::params;
-    constexpr static auto wavefront = arch_wavefront_size(Arch);
-    constexpr static auto arch      = Arch;
-};
-
-// trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
-// By instantiating this template once per supported `target_arch`,the correct tuned config
-// will be derived from the template.
-template<typename Config,
-         target_arch Arch,
-         class Kernel,
-         template<typename, target_arch>
-         class LaunchSelector>
-ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Arch>::block_size))
-void trampoline_kernel(Kernel kernel)
-{
-    using ArchConfig = target_config<Config, Arch>;
-
-#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
-    if constexpr(Arch == device_target_arch())
-#endif
-    {
-        kernel(ArchConfig{});
-    }
-}
-
 template<typename Kernel>
 struct launch_plan
 {
@@ -438,81 +439,165 @@ struct launch_plan
     }
 };
 
-template<class Config,
-         class Kernel,
-         template<typename, target_arch> class LaunchSelector = default_config_selector>
-auto make_launch_plan(target_arch arch, Kernel kernel) -> launch_plan<Kernel>
+template<class Targets>
+constexpr target most_common_config(target target_current)
 {
-    std::optional<void (*)(Kernel)> tuned_kernel = std::nullopt;
-
-    for_each_arch(
-        [&](auto arch_tag)
+    // Takes unknown as default.
+    target ret{};
+    Targets::for_each(
+        [&](auto t)
         {
-            if(arch_tag != arch || tuned_kernel)
-                return;
+            // Skip unknown target for picking.
+            if(!(target{} == t))
+            {
+                constexpr target_arch Arch = t.i;
+                constexpr gpu         GPU  = t.s;
+                constexpr gen         Gen  = t.g;
 
-            tuned_kernel = trampoline_kernel<Config, arch_tag, Kernel, LaunchSelector>;
+                // Update `ret` if the candidate `t` matches more specifically than the current `ret`.
+                // Priority order: prefer exact GPU match first; otherwise allow an Arch match (if GPU differs);
+                // finally allow a Gen match (if both Arch and GPU differ). This ensures we progressively
+                // refine the fallback from generic -> generation -> arch -> exact GPU.
+                if((GPU == target_current.s)
+                   || (Arch == target_current.i
+                       && (target_current.s != ret.s || ret.s == gpu::generic))
+                   || (Gen == target_current.g
+                       && ((target_current.s != ret.s || ret.s == gpu::generic)
+                           && (target_current.i != ret.i || ret.i == target_arch::unknown))))
+                {
+                    ret = target{t};
+                }
+            }
         });
 
-    if(!tuned_kernel)
+    return ret;
+}
+
+template<class Selector>
+constexpr typename Selector::param_type default_select_config(target t)
+{
+    using Targets = typename Selector::targets;
+    using Params  = typename Selector::param_type;
+
+    const target target_config = most_common_config<Targets>(t);
+
+    Params params{};
+
+    Targets::for_each(
+        [&](auto candidate)
+        {
+            if(target{candidate} == target_config)
+            {
+                params = Selector{candidate}.params;
+            }
+        });
+
+    return params;
+}
+
+template<class Selector, class Config>
+constexpr typename Selector::param_type get_config(Config config, target t)
+{
+    if constexpr(std::is_same_v<Config, default_config>)
     {
-        tuned_kernel = trampoline_kernel<Config, target_arch::unknown, Kernel, LaunchSelector>;
+        return default_select_config<Selector>(t);
     }
+    else
+    {
+        return config;
+    }
+};
+
+template<class Config, class Selector, class Target>
+struct target_config
+{
+    constexpr static target config_target = target{Target{}};
+    constexpr static auto   params        = get_config<Selector>(Config{}, config_target);
+    constexpr static auto   wavefront     = gen_wavefront_size(Target::g);
+};
+
+template<class Config, class Selector, class Target>
+struct default_config_static_selector
+{
+    static constexpr auto block_size
+        = target_config<Config, Selector, Target>::params.kernel_config.block_size;
+};
+
+// trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
+// By instantiating this template once per supported `target_arch`, the correct tuned config
+// will be derived from the template.
+template<class Config,
+         class Selector,
+         class Kernel,
+         class Target,
+         template<class, class, class>
+         class LaunchSelector>
+ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
+void trampoline_kernel(Kernel kernel)
+{
+    using ArchConfig = target_config<Config, Selector, Target>;
+
+#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
+    using Targets = typename Selector::targets;
+    // If the arch does not exist in the Targets it should run the arch for the most_common_config.
+    constexpr target device_arch_target = most_common_config<Targets>(target(device_target_arch()));
+    // If the build time arch from device_target_arch is a generic arch it is not the same as the runtime arch.
+    if constexpr(Target::i == device_arch_target.i)
+    {
+        kernel(ArchConfig{});
+    }
+    else if constexpr(ROCPRIM_IS_GENERIC())
+    {
+        kernel(ArchConfig{});
+    }
+    else
+    {
+        __builtin_unreachable();
+    }
+#else
+    kernel(ArchConfig{});
+#endif
+}
+
+template<class Config,
+         class ConfigSelector,
+         template<class, class, class> class LaunchSelector = default_config_static_selector,
+         class Kernel>
+auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kernel>
+{
+    using Targets = typename ConfigSelector::targets;
+
+    std::optional<void (*)(Kernel)> tuned_kernel = std::nullopt;
+
+    const target target_config = most_common_config<Targets>(target_current);
+
+    // The target config is always in Targets.
+    Targets::for_each(
+        [&](auto t)
+        {
+            if(target{t} == target_config)
+            {
+                tuned_kernel = trampoline_kernel<Config,
+                                                 ConfigSelector,
+                                                 Kernel,
+                                                 decltype(t),
+                                                 LaunchSelector>;
+            }
+        });
 
     return {tuned_kernel.value(), kernel};
 }
 
-// Host-side helper running at run-time, picking the trampoline_kernel whose template
-// argument `Arch` matches the actual GPU we are executing on.
 template<class Config,
-         class Kernel,
-         template<typename, target_arch> class LaunchSelector = default_config_selector>
-hipError_t execute_launch_plan(target_arch arch,
-                               Kernel      kernel,
-                               dim3        grid_size,
-                               dim3        block_size,
-                               size_t      shmem,
-                               hipStream_t stream)
+         class ConfigSelector,
+         template<class, class, class> class LaunchSelector = default_config_static_selector,
+         class Kernel>
+hipError_t execute_launch_plan(
+    target t, Kernel kernel, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream)
 {
-    const auto launch_plan = make_launch_plan<Config, Kernel, LaunchSelector>(arch, kernel);
+    const auto launch_plan = make_launch_plan<Config, ConfigSelector, LaunchSelector>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
-}
-
-#ifdef ROCPRIM_EXPERIMENTAL_SPIRV
-template<class Config, bool ForceUnknownArch = true>
-#else
-template<class Config, bool ForceUnknownArch = false>
-#endif
-auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
-{
-    if constexpr(!ForceUnknownArch)
-    {
-        switch(target_arch)
-        {
-        case target_arch::invalid:
-            assert(false && "Invalid target architecture selected at runtime.");
-            break;
-#define X(ID) case target_arch::ID: return Config::template architecture_config<target_arch::ID>::params
-            X(unknown);
-            X(gfx803);
-            X(gfx900);
-            X(gfx906);
-            X(gfx908);
-            X(gfx90a);
-            X(gfx942);
-            X(gfx950);
-            X(gfx1030);
-            X(gfx1100);
-            X(gfx1102);
-            X(gfx1152);
-            X(gfx1153);
-            X(gfx1200);
-            X(gfx1201);
-#undef X
-        }
-    }
-    return Config::template architecture_config<target_arch::unknown>::params;
 }
 
 inline target_arch parse_gcn_arch(const char* arch_name)
@@ -600,6 +685,33 @@ inline hipError_t host_target_arch(const hipStream_t stream, target_arch& arch)
     }
 
     return get_device_arch(device_id, arch);
+}
+
+constexpr gpu get_target_gpu_from_name(std::string_view name)
+{
+    for(const auto& each : target_gpu_names)
+    {
+        // Look for a substring in the marketing name, e.g.,
+        // "RX 7900" in "AMD Radeon RX 7900 XTX".
+        if(name.find(std::get<0>(each)) != name.npos)
+        {
+            return std::get<1>(each);
+        }
+    }
+    return gpu::generic;
+}
+
+inline hipError_t host_target_gpu(const hipStream_t stream, gpu& gpu)
+{
+    int device_id;
+    ROCPRIM_RETURN_ON_ERROR(get_device_from_stream(stream, device_id));
+
+    hipDeviceProp_t prop;
+    ROCPRIM_RETURN_ON_ERROR(hipGetDeviceProperties(&prop, device_id));
+
+    gpu = get_target_gpu_from_name(prop.name);
+
+    return hipSuccess;
 }
 
 } // end namespace detail

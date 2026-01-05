@@ -32,40 +32,18 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename ScanConfig, typename>
-struct wrapped_scan_config
+template<class Key>
+struct scan_config_selector
 {
-    static_assert(std::is_same<typename ScanConfig::tag, scan_config_tag>::value,
-                  "Config must be a specialization of struct template scan_config");
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr scan_config_params params = ScanConfig{};
-    };
+    using targets    = scan_targets;
+    using param_type = scan_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr scan_config_selector(Target) : params(scan_config_picker<Target, Key>())
+    {}
 };
-
-template<typename Value>
-struct wrapped_scan_config<default_config, Value>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr scan_config_params params
-            = default_scan_config<static_cast<unsigned int>(Arch), Value>{};
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename ScanConfig, typename Value>
-template<target_arch Arch>
-constexpr scan_config_params
-    wrapped_scan_config<ScanConfig, Value>::architecture_config<Arch>::params;
-
-template<typename Value>
-template<target_arch Arch>
-constexpr scan_config_params
-    wrapped_scan_config<default_config, Value>::architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // namespace detail
 

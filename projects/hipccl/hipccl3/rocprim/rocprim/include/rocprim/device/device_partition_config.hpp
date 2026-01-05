@@ -42,245 +42,108 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename PartitionConfig, partition_subalgo, typename, typename>
-struct wrapped_partition_config
+template<partition_subalgo Algo>
+constexpr auto algo_target_type()
 {
-    template<target_arch Arch>
-    struct architecture_config
+    if constexpr(Algo == partition_subalgo::partition_two_way_predicate)
     {
-        static constexpr partition_config_params params = PartitionConfig{};
-    };
-};
+        return type_identity<partition_two_way_predicate_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::partition_two_way_flag)
+    {
+        return type_identity<partition_two_way_flag_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::partition_flag)
+    {
+        return type_identity<partition_flag_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::partition_predicate)
+    {
+        return type_identity<partition_predicate_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::partition_three_way)
+    {
+        return type_identity<partition_three_way_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::select_flag)
+    {
+        return type_identity<select_flag_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::select_predicate)
+    {
+        return type_identity<select_predicate_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::select_predicated_flag)
+    {
+        return type_identity<select_predicated_flag_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::select_unique)
+    {
+        return type_identity<select_unique_targets>{};
+    }
+    else if constexpr(Algo == partition_subalgo::select_unique_by_key)
+    {
+        return type_identity<select_unique_by_key_targets>{};
+    }
+}
 
-template<typename KeyType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::partition_two_way_predicate,
-                                KeyType,
-                                empty_type>
+template<partition_subalgo SubAlgo, class Key, class Value, class Flag>
+struct partition_config_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
+    using targets    = typename decltype(algo_target_type<SubAlgo>())::type;
+    using param_type = partition_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr param_type picker_helper()
     {
-        static constexpr partition_config_params params
-            = default_partition_two_way_predicate_config<static_cast<unsigned int>(Arch),
-                                                         KeyType>{};
-    };
+        if constexpr(SubAlgo == partition_subalgo::partition_two_way_predicate)
+        {
+            return partition_two_way_predicate_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::partition_two_way_flag)
+        {
+            return partition_two_way_flag_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::partition_flag)
+        {
+            return partition_flag_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::partition_predicate)
+        {
+            return partition_predicate_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::partition_three_way)
+        {
+            return partition_three_way_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::select_flag)
+        {
+            return select_flag_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::select_predicate)
+        {
+            return select_predicate_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::select_predicated_flag)
+        {
+            return select_predicated_flag_config_picker<Target, Key, Flag>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::select_unique)
+        {
+            return select_unique_config_picker<Target, Key>();
+        }
+        else if constexpr(SubAlgo == partition_subalgo::select_unique_by_key)
+        {
+            return select_unique_by_key_config_picker<Target, Key, Value>();
+        }
+    }
+
+    template<class Target>
+    constexpr partition_config_selector(Target) : params(picker_helper<Target>())
+    {}
 };
-
-template<typename KeyType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::partition_two_way_flag,
-                                KeyType,
-                                empty_type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_partition_two_way_flag_config<static_cast<unsigned int>(Arch), KeyType>{};
-    };
-};
-
-template<typename KeyType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::partition_flag,
-                                KeyType,
-                                empty_type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_partition_flag_config<static_cast<unsigned int>(Arch), KeyType>{};
-    };
-};
-
-template<typename KeyType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::partition_predicate,
-                                KeyType,
-                                empty_type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_partition_predicate_config<static_cast<unsigned int>(Arch), KeyType>{};
-    };
-};
-
-template<typename KeyType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::partition_three_way,
-                                KeyType,
-                                empty_type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_partition_three_way_config<static_cast<unsigned int>(Arch), KeyType>{};
-    };
-};
-
-template<typename KeyType>
-struct wrapped_partition_config<default_config, partition_subalgo::select_flag, KeyType, empty_type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_select_flag_config<static_cast<unsigned int>(Arch), KeyType>{};
-    };
-};
-
-template<typename KeyType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::select_predicate,
-                                KeyType,
-                                empty_type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_select_predicate_config<static_cast<unsigned int>(Arch), KeyType>{};
-    };
-};
-
-template<typename KeyType, typename ValueType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::select_predicated_flag,
-                                KeyType,
-                                ValueType>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_select_predicated_flag_config<static_cast<unsigned int>(Arch),
-                                                    KeyType,
-                                                    ValueType>{};
-    };
-};
-
-template<typename KeyType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::select_unique,
-                                KeyType,
-                                empty_type>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_select_unique_config<static_cast<unsigned int>(Arch), KeyType>{};
-    };
-};
-
-template<typename KeyType, typename ValueType>
-struct wrapped_partition_config<default_config,
-                                partition_subalgo::select_unique_by_key,
-                                KeyType,
-                                ValueType>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr partition_config_params params
-            = default_select_unique_by_key_config<static_cast<unsigned int>(Arch),
-                                                  KeyType,
-                                                  ValueType>{};
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-
-template<typename PartitionConfig, partition_subalgo SubAlgo, typename KeyType, typename ValueType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<PartitionConfig, SubAlgo, KeyType, ValueType>::architecture_config<
-        Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::partition_two_way_predicate,
-                             KeyType,
-                             empty_type>::architecture_config<Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::partition_two_way_flag,
-                             KeyType,
-                             empty_type>::architecture_config<Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::partition_flag,
-                             KeyType,
-                             empty_type>::architecture_config<Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::partition_predicate,
-                             KeyType,
-                             empty_type>::architecture_config<Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::partition_three_way,
-                             KeyType,
-                             empty_type>::architecture_config<Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config, partition_subalgo::select_flag, KeyType, empty_type>::
-        architecture_config<Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::select_predicate,
-                             KeyType,
-                             empty_type>::architecture_config<Arch>::params;
-
-template<typename KeyType, typename ValueType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::select_predicated_flag,
-                             KeyType,
-                             ValueType>::architecture_config<Arch>::params;
-
-template<typename KeyType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::select_unique,
-                             KeyType,
-                             empty_type>::architecture_config<Arch>::params;
-
-template<typename KeyType, typename ValueType>
-template<target_arch Arch>
-constexpr partition_config_params
-    wrapped_partition_config<default_config,
-                             partition_subalgo::select_unique_by_key,
-                             KeyType,
-                             ValueType>::architecture_config<Arch>::params;
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail
 

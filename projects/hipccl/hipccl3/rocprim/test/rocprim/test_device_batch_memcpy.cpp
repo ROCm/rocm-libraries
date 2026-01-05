@@ -256,15 +256,20 @@ TYPED_TEST(RocprimDeviceBatchMemcpyTests, SizeAndTypeVariation)
     constexpr bool use_indirect_iterator = TestFixture::use_indirect_iterator;
     constexpr bool debug_synchronous     = TestFixture::debug_synchronous;
 
-    using config = rocprim::detail::
-        wrapped_batch_memcpy_config<rocprim::default_config, value_type, isMemCpy>;
+    using Selector = rocprim::detail::batch_memcpy_config_selector<value_type, isMemCpy>;
 
     rocprim::detail::target_arch target_arch;
-    hipError_t success = rocprim::detail::host_target_arch(hipStreamDefault, target_arch);
+    hipError_t                   success = host_target_arch(hipStreamDefault, target_arch);
+
+    rocprim::detail::gpu target_gpu;
+    success = host_target_gpu(hipStreamDefault, target_gpu);
+
     ASSERT_EQ(success, hipSuccess);
 
-    const rocprim::detail::batch_memcpy_config_params params
-        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+    const rocprim::detail::target get_target(target_arch, target_gpu);
+
+    const auto params
+        = rocprim::detail::get_config<Selector>(rocprim::default_config{}, get_target);
 
     const int32_t wlev_min_size = params.wlev_size_threshold;
     const int32_t blev_min_size = params.blev_size_threshold;
