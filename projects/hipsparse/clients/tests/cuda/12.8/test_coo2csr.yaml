@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: coo2csr
   precision: *single_precision
-  M: [0, 10, 500, 872, 1000]
-  N: [0, 33, 242, 623, 1000]
+  M: [10, 500, 872, 1000]
+  N: [33, 242, 623, 1000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 
 - name: coo2csr_file

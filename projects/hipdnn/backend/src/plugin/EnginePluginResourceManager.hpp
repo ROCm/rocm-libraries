@@ -84,6 +84,8 @@ public:
     virtual void
         getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
 
+    virtual std::string toString() const;
+
 private:
     // MT-unsafe instance methods
     // virtual for gMock testing

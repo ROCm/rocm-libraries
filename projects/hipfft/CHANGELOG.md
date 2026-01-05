@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.23
 
+### Changed
+
+* Moved library to C++20 standard.
+
 ### Resolved issues
 
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
@@ -31,6 +35,7 @@ Documentation for hipFFT is available at
 * Improved test coverage of user-specified work areas.
 * Improved test coverage of default stride calculation.
 * **[Experimental]** Introduced the hipFFTW library, interfacing rocFFT on AMD platforms using the same symbols as FFTW3 (with partial support).
+* Support for the gfx1152 and gfx1153 architectures
 
 ## hipFFT 1.0.20 for ROCm 7.0.0
 
