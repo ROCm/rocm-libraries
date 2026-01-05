@@ -56,7 +56,9 @@ Standardized template for recording and tracking test results:
 |-----------|--------------|------|
 | Backend | `backend/tests/` | Unit tests |
 | Frontend | `frontend/tests/` | Unit tests |
-| SDK | `data_sdk/tests/` | Unit tests |
+| Data SDK | `data_sdk/tests/` | Unit tests |
+| Plugin SDK | `plugin_sdk/tests/` | Unit tests |
+| Test SDK | `test_sdk/tests/` | Unit tests |
 | Plugins | `plugins/<name>/tests/` | Unit tests |
 | Plugins | `plugins/<name>/integration_tests/` | Integration tests |
 | API | `tests/backend/` | Black box API tests |

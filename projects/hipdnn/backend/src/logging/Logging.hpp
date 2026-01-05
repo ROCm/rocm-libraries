@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "EnumFormatters.hpp"
+#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <memory>
 #include <spdlog/spdlog.h>
@@ -43,5 +45,9 @@ std::shared_ptr<spdlog::logger> getBackendLogger();
 std::shared_ptr<spdlog::logger> getCallbackReceiverLogger();
 
 void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
+
+void logSystemInfo();
+
+void logHipDeviceInfo(hipStream_t stream);
 
 } // namespace hipdnn_backend::logging
