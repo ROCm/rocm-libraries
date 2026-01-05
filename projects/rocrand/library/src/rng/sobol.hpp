@@ -166,12 +166,13 @@ struct generate_sobol_host
             // On AMD GPUs we must use a constexpr size shared array for performance.
             // But this code won't compile with NVCC, because we are in a __host__ __device__
             // function.
-        __shared__ Constant shared_vectors[vector_size];
+        __shared__
+            Constant shared_vectors[vector_size];
 #else
-            // NVCC won't accept extern __shared__ Constant shared_bytes[];
-            // Thereby we must resort to aliasing.
-            extern __shared__ unsigned char shared_bytes[];
-            auto* shared_vectors = reinterpret_cast<Constant*>(&shared_bytes[0]);
+                // NVCC won't accept extern __shared__ Constant shared_bytes[];
+                // Thereby we must resort to aliasing.
+                extern __shared__ unsigned char shared_bytes[];
+                auto* shared_vectors = reinterpret_cast<Constant*>(&shared_bytes[0]);
 #endif
             if(thread_idx.x < vector_size)
             {
