@@ -1081,7 +1081,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for GRB to complete"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRA1 to complete"),
+                    SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRA1 to complete"),
                     SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for all LRA1 to complete"),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         if isTT(kernel):
