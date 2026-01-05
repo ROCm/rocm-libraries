@@ -6,9 +6,9 @@
 #include <functional>
 #include <variant>
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/IGraphNodePlanBuilder.hpp>
@@ -22,10 +22,10 @@ namespace hipdnn_test_sdk::utilities
 struct PointwiseParams
 {
     PointwiseParams() = default;
-    PointwiseParams(const hipdnn_sdk::data_objects::PointwiseMode pointwiseMode,
-                    const hipdnn_sdk::data_objects::TensorAttributes& in0Attributes,
-                    const hipdnn_sdk::data_objects::TensorAttributes* optionalIn1Attributes,
-                    const hipdnn_sdk::data_objects::TensorAttributes& out0Attributes,
+    PointwiseParams(const hipdnn_data_sdk::data_objects::PointwiseMode pointwiseMode,
+                    const hipdnn_data_sdk::data_objects::TensorAttributes& in0Attributes,
+                    const hipdnn_data_sdk::data_objects::TensorAttributes* optionalIn1Attributes,
+                    const hipdnn_data_sdk::data_objects::TensorAttributes& out0Attributes,
                     std::optional<float> reluLowerClipLocal,
                     std::optional<float> reluUpperClipLocal,
                     std::optional<float> reluLowerClipSlopeLocal,
@@ -48,10 +48,10 @@ struct PointwiseParams
         }
     }
 
-    hipdnn_sdk::data_objects::TensorAttributesT in0Tensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> in1Tensor;
-    hipdnn_sdk::data_objects::TensorAttributesT out0Tensor;
-    hipdnn_sdk::data_objects::PointwiseMode mode;
+    hipdnn_data_sdk::data_objects::TensorAttributesT in0Tensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> in1Tensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT out0Tensor;
+    hipdnn_data_sdk::data_objects::PointwiseMode mode;
 
     std::optional<float> reluLowerClip;
     std::optional<float> reluUpperClip;
@@ -92,12 +92,12 @@ private:
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
-        if(hipdnn_sdk::utilities::isUnaryPointwiseMode(_params.mode))
+        if(hipdnn_data_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
             CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
-        else if(hipdnn_sdk::utilities::isBinaryPointwiseMode(_params.mode))
+        else if(hipdnn_data_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
             if(!_params.in1Tensor.has_value())
             {
@@ -124,7 +124,7 @@ private:
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
-        if(hipdnn_sdk::utilities::isUnaryPointwiseMode(_params.mode))
+        if(hipdnn_data_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
             CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode,
@@ -139,7 +139,7 @@ private:
                                             ? _params.reluLowerClipSlope.value()
                                             : 0.0f));
         }
-        else if(hipdnn_sdk::utilities::isBinaryPointwiseMode(_params.mode))
+        else if(hipdnn_data_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
             if(!_params.in1Tensor.has_value())
             {
@@ -172,10 +172,10 @@ private:
     PointwiseParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
-          hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+template <hipdnn_data_sdk::data_objects::DataType Input0DataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType Input1DataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum>
 class PointwisePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -185,8 +185,8 @@ public:
     using OutputType = DataTypeToNative<OutputDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_data_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -203,13 +203,13 @@ public:
         // Check that the operation is implemented
         auto mode = nodeAttributes->operation();
         bool isImplemented = false;
-        if(hipdnn_sdk::utilities::isUnaryPointwiseMode(mode))
+        if(hipdnn_data_sdk::utilities::isUnaryPointwiseMode(mode))
         {
-            isImplemented = hipdnn_sdk::utilities::isImplementedUnaryPointwiseMode(mode);
+            isImplemented = hipdnn_data_sdk::utilities::isImplementedUnaryPointwiseMode(mode);
         }
-        else if(hipdnn_sdk::utilities::isBinaryPointwiseMode(mode))
+        else if(hipdnn_data_sdk::utilities::isBinaryPointwiseMode(mode))
         {
-            isImplemented = hipdnn_sdk::utilities::isImplementedBinaryPointwiseMode(mode);
+            isImplemented = hipdnn_data_sdk::utilities::isImplementedBinaryPointwiseMode(mode);
         }
 
         if(!isImplemented)
@@ -226,7 +226,7 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), OutputDataTypeEnum);
 
         // Check optional tensors based on operation mode
-        if(hipdnn_sdk::utilities::isBinaryPointwiseMode(mode))
+        if(hipdnn_data_sdk::utilities::isBinaryPointwiseMode(mode))
         {
             CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->in_1_tensor_uid());
             CHECK_OPTIONAL_TENSOR_TYPE(
@@ -238,7 +238,7 @@ public:
 
     std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_plugin_sdk::IGraph& graph,
-                      const hipdnn_sdk::data_objects::Node& node) const override
+                      const hipdnn_data_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_PointwiseAttributes();
         if(nodeAttributes == nullptr)

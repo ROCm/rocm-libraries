@@ -39,57 +39,32 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename TransformConfig, typename, bool>
-struct wrapped_transform_config
+template<class Value, bool IsPointer>
+struct transform_config_selector
 {
-    static_assert(std::is_base_of<transform_config_tag, typename TransformConfig::tag>::value,
-                  "Config must be a specialization of struct template transform_config");
+    using targets    = std::conditional_t<IsPointer, transform_pointer_targets, transform_targets>;
+    using param_type = transform_config_params;
 
-    template<target_arch Arch>
-    struct architecture_config
+    param_type params;
+
+    template<class Target>
+    constexpr param_type picker_helper()
     {
-        static constexpr transform_config_params params = TransformConfig{};
-    };
+        // Different configs if it is a pointer.
+        if constexpr(IsPointer)
+        {
+            return transform_pointer_config_picker<Target, Value>();
+        }
+        else
+        {
+            return transform_config_picker<Target, Value>();
+        }
+    }
+
+    template<class Target>
+    constexpr transform_config_selector(Target) : params(picker_helper<Target>())
+    {}
 };
-
-template<typename Value>
-struct wrapped_transform_config<default_config, Value, true>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr transform_config_params params
-            = default_transform_pointer_config<static_cast<unsigned int>(Arch), Value>{};
-    };
-};
-
-template<typename Value>
-struct wrapped_transform_config<default_config, Value, false>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr transform_config_params params
-            = default_transform_config<static_cast<unsigned int>(Arch), Value>{};
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename TransformConfig, typename Value, bool is_pointer>
-template<target_arch Arch>
-constexpr transform_config_params
-    wrapped_transform_config<TransformConfig, Value, is_pointer>::architecture_config<Arch>::params;
-
-template<typename Value>
-template<target_arch Arch>
-constexpr transform_config_params
-    wrapped_transform_config<default_config, Value, true>::architecture_config<Arch>::params;
-
-template<typename Value>
-template<target_arch Arch>
-constexpr transform_config_params
-    wrapped_transform_config<default_config, Value, false>::architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail
 

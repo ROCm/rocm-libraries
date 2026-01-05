@@ -14,7 +14,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PlanRegistrySignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwisePlan.hpp>
 
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {

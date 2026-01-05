@@ -30,6 +30,7 @@
 |------------|---------|-------------|
 | ROCm | Matching TheRock (ROCm version 7.0+) | AMD GPU programming stack (see [TheRock releases](https://github.com/ROCm/TheRock/releases)) |
 | CMake | 3.25.2+ | Build system generator |
+| Ninja | 1.12.1+ | Faster build system (recommended) |
 | C++ Compiler | C++17 compatible | hipDNN requires C++17 compatible AMD Clang (plugins using device code may require C++20)|
 | HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
 | clang-format | 18.x | Code formatting tool |
@@ -39,7 +40,6 @@
 #### Optional Dependencies
 | Dependency | Version | Description |
 |------------|---------|-------------|
-| Ninja | 1.12.1+ | Faster build system (recommended) |
 | Docker | Latest | For containerized build environment |
 | Python3 | Latest | For test name validation |
 
@@ -51,7 +51,7 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 
 ## Quick Start Guide
 
-Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies).
+Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies). Refer to the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) section later in this document for approaches to manage the multiple Clang toolchain versions required for hipDNN.
 
 > [!TIP]
 > 💡 See [Docker README](../dockerfiles/README.md) for details on using prebuilt binaries in Docker containers to ensure a consistent build environment.
@@ -83,14 +83,14 @@ git clone https://github.com/ROCm/rocm-libraries.git
    cmake -GNinja ..
 
    # Build and run all tests
-   # Note that this may take several minutes to complete
+   # Note that some tests may take several minutes to complete
    ninja check
    ```
    Refer to the [Build Targets](#build-targets) section below for additional build targets that can be used.
 
 #### 3. Install hipDNN
 
-   Refer to the [Build Configurations](#build-configurations) section below for details on using an install path other than the default `/opt/rocm`.
+   Refer to the [Build Configurations](#build-configurations) section below for details on setting the install path.
    ```bash
    sudo ninja install
    ```
@@ -110,8 +110,8 @@ cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
 ### Code Coverage Build
 ```bash
 cmake -GNinja -DHIPDNN_ENABLE_COVERAGE=ON ..
-ninja code_coverage
-# Coverage reports will be generated in build/coverage_report/
+ninja coverage
+# Unit tests will be run and coverage reports will be generated in build/coverage_report/
 ```
 
 ### Address Sanitizer Build
@@ -133,23 +133,49 @@ cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
 cmake -GNinja -DHIP_DNN_BUILD_BACKEND=OFF ..
 ```
 
-### ROCM_PATH & CMAKE_INSTALL_PREFIX
+### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
-- **`ROCM_PATH`**: Specifies where the build system looks for ROCm dependencies (default: `/opt/rocm` (Linux) / `C:/dist/therock` (Windows))
-- **`CMAKE_INSTALL_PREFIX`**: Specifies where hipDNN will be installed (defaults to `ROCM_PATH`)
+If the ROCm bin folder is included in your system path then the AMD toolchain should be detected automatically. If not, the following CMake variables can be used to assist CMake in the tool discovery.
 
-These variables can be set independently:
+- **`ROCM_PATH`**: Specifies the root ROCM folder location and the toolchain folders are hard-coded using that path, skipping auto-detection of the toolchain (does not have a default value). **DO NOT SET ROCM_PATH IN YOUR ENVIRONMENT.** Setting ROCM_PATH in the environment will cause the compiler check to fail. Instead, use the -D option to cmake. E.g.: `-DROCM_PATH=/path/to/rocm`.
+- **`ROCM_CMAKE_PATH`** (preferred): Similar to `ROCM_PATH` but relies on CMake's built-in detection to locate toolchain. (Default: `/opt/rocm` (Linux) / `C:/dist/therock` (Windows)). Can be set in your system environment. Will be set automatically if the ROCm bin folder is in your system path.
+
+If `ROCM_PATH` is set using the -D option to cmake then it will take precedence over `ROCM_CMAKE_PATH`.
+
+The HIP compiler is required to build some integration tests but is not required for the hipDNN library itself.
+
+Use the following CMake variable to control where the hipDNN library files will be installed when the `install` target is run:
+- **`CMAKE_INSTALL_PREFIX`**: Specifies where hipDNN will be installed (defaults to `ROCM_PATH` if `ROCM_PAth` is set, then `ROCM_CMAKE_PATH` if set, otherwise uses the CMake system default).
+
+These variables can all be set independently:
 
 ```bash
-# Default: Both use /opt/rocm
+# Default: Use system path to locate ROCm folder, install path is unset.
 cmake -GNinja ..
 
-# Install hipDNN to custom location, find ROCm dependencies in /opt/rocm
+# Install hipDNN to custom location, find ROCm dependencies in the default location
 cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
 
-# Both custom (if ROCm is in a non-standard location)
-cmake -GNinja -DROCM_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
+# Both custom
+cmake -GNinja -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
 ```
+
+### Clang Tools
+
+Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
+
+#### Version Suffix
+
+Before searching for the tool using it's standard name, a search will be made for a tool that has the version appended as a suffix. E.g. before looking for `clang-format` a search for a file named `clang-format-18` will be run first, and if that fails then a search will be made for `clang-format`. Similarly, `clang-tidy-20` will be searched-for first, and then `clang-tidy`. This approach can be used if it is possible to modify the Clang toolchain folder(s) on your system to give the tools the corresponding names.
+
+#### LLVM_TOOLS_SEARCH_PREFIX
+
+As an alternative to the above, `LLVM_TOOLS_SEARCH_PREFIX` can be set as a prefix for the folder path where the Clang tools are installed, such that `${LLVM_TOOLS_SEARCH_PREFIX}18/bin` is where the Clang version 18 tools are located, and `${LLVM_TOOLS_SEARCH_PREFIX}20/bin` is where the Clang version 20 tools are located. The CMake configuration step will automatically select the required version for each tool from these folders. For example with `-DLLVM_TOOLS_SEARCH_PREFIX=c:\tools\clang` the the following folders will be searched for Clang tools (depending on the version of each tool that is needed):
+* `c:\tools\clang18\bin`
+* `c:\tools\clang20\bin`
+* `c:\tools\clang\bin`
+
+
 ## Build Targets
 
 > [!NOTE]
@@ -160,18 +186,20 @@ All targets support parallel builds with ninja.
 | Target | Description |
 |--------|-------------|
 | \<no target\> | Build all components |
-| `check` | Build and run all tests (see [Testing](./Testing.md)) |
-| `unit-check` | Build and run exclusively the unit tests and API tests (minimal version of `check`) |
-| `integration-check` | Build and run exclusively the E2E integration tests (this is the bulk of the testing time) |
+| `check` or `check-verbose` | Build and run all tests (see [Testing](./Testing.md)) |
+| `unit-check` or `unit-check-verbose` | Build and run exclusively the unit tests and API tests (minimal version of `check`) |
+| `integration-check` or `integration-check-verbose` | Build and run exclusively the E2E integration tests (this is the bulk of the testing time) |
 | `install` | Install libraries and headers |
 | `format` | Auto-format all C++ source files |
 | `check_format` | Check code formatting compliance |
-| `code_coverage` | Generate test coverage reports (requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
+| `coverage` | Run `check` and generate test coverage reports (requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
+| `unit-coverage` or `integration-coverage` | Run `unit-check` or `integration-check` (respectively) and generate test coverage reports (requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
+| `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
-| `generate_hipdnn_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
+| `generate_hipdnn_data_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
 
-The following example build commands are equivalent (depending on which generator was used) and will build the `check` target to build and run all tests.
+The following example build commands are equivalent (depending on which generator was used) and will build the `check` target, to build and run all tests.
 
 Using `cmake` to invoke build (regardless of which generator was used):
 ```bash
@@ -327,9 +355,9 @@ Unzip the downloaded tarball to a path with no spaces. E.g. after unzipped to `C
    ```cmd
    set PATH=C:\dist\therock\bin;%PATH%
    ```
-   It isn't necessary to add the clang toolchain to your system PATH to perform the build as these can be specified using the `-D` option to cmake (see example below).
-   * ROCM_PATH -- Used by the hipDNN CMake project to determine where TheRock was installed (defaults to `c:/dist/therock`).
-   * CMAKE_PROGRAM_PATH -- Specifies the folder that CMake can use to find additional tools such as clang-format.
+   It isn't necessary to add the Clang toolchain to your system PATH to perform the build as these can be specified using the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) option to cmake (refer to that section for more details).
+
+   The AMD toolchain should be discovered automatically. If not, refer to the [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix) section for additional ways to locate the toolchain.
 
 * Set the HIP_PLATFORM environment varilable:
    ```cmd
@@ -348,26 +376,27 @@ c:\dist\therock
 c:\dist\therock\lib\llvm\bin
 ```
 
-Example CMake configure command (including `ROCM_PATH` for completeness even though it is not required when using the default value):
+Example CMake configure command (including `ROCM_CMAKE_PATH` for completeness even though it is not required when using the default value):
 ```
 projects\hipdnn\build>set CMAKE_GENERATOR=Ninja
-projects\hipdnn\build>cmake -DGPU_TARGETS=gfx1103 -DROCM_PATH=c:/dist/therock -DCMAKE_PROGRAM_PATH=c:/dist/clang/bin ..
+projects\hipdnn\build>cmake -DGPU_TARGETS=gfx1103 -DROCM_CMAKE_PATH=c:/dist/therock -DCMAKE_PROGRAM_PATH=c:/dist/clang/bin ..
 -- Building for: Ninja
 -- Using ROCm Clang compilers from c:/dist/therock/lib/llvm/bin
 ```
 
 See the note on setting `GPU_TARGETS` in the following section.
 
-If using custom paths, you may need to modify [ClangToolChain.cmake](../cmake/ClangToolChain.cmake).
 
 #### 9. Clone Repository and Build hipDNN
 
 From here, follow the instructions in the [Quick Start Guide](#quick-start-guide) section to clone the repository and build hipDNN, **keeping in mind the following notes**:
 * Do **NOT** open the "x64 Native Tools Command Prompt for VS 2022" as this will interfere with the ROCm SDK and Clang toolchain.
+* Do **NOT** set `ROCM_PATH` in your environment as this will interfere with toolchain detection. If used, specify it using the `-DROCM_PATH=` option to cmake.
 * When generating the project, be sure to set GPU_TARGETS to your GPU as auto-detection is not currently supported on Windows, e.g. `cmake -DGPU_TARGETS=gfx1103 ..` (replacing gfx1103 with your GPU)
-* When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That’s okay for now.
+* When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That's okay for now but it can be resolved by installing the missing version of the toolchain to a parallel directory and setting the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) variable accordingly.
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
+* To reduce build time, the `-DENABLE_CLANG_TIDY=OFF` option can be used to disable clang-tidy check during development. Similarly the `-DENABLE_CLANG_FORMAT=OFF` option can be used to disable clang-format.
 
 ## Troubleshooting
 
