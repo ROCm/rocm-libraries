@@ -58,8 +58,7 @@ struct kernel_params
     std::size_t grp_tile1;
 
     kernel_params(const miopen::pooling::ProblemDescription& problem,
-                  const std::optional<PerformanceConfigPooling2d<OperationType::Backward>>& config =
-                      std::nullopt)
+                  const std::optional<PerformanceConfigPooling2dBackward>& config = std::nullopt)
     {
         const auto& pd = problem.GetPooling();
 
@@ -132,30 +131,21 @@ inline std::size_t RoundUpToMultiple(std::size_t v, std::size_t m)
 
 // Compute amount of local memory required for holding the arrays defined
 // in the "mloPoolingAveBwd" and "mloPoolingMaxBwd" kernels.
-std::size_t sizeof_local_memory(const miopen::pooling::ProblemDescription& problem)
+std::size_t
+sizeof_local_memory(const miopen::pooling::ProblemDescription& problem,
+                    const std::optional<PerformanceConfigPooling2dBackward>& config = std::nullopt)
 {
-    const kernel_params kp(problem);
+    const kernel_params kp(problem, config);
 
     // aliases to ease programming
-    const auto& MLO_POOLING_KERNEL_SZ0 = kp.kernel_size_w;
-    const auto& MLO_POOLING_KERNEL_SZ1 = kp.kernel_size_h;
-    const auto& MLO_POOLING_STRIDE0    = kp.kernel_stride_w;
-    const auto& MLO_POOLING_STRIDE1    = kp.kernel_stride_h;
-    // safer estimates of memory with max values of tunable parameters
-    assert(kp.out_pix_tile0 <=
-           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0);
-    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0;
-    assert(kp.out_pix_tile1 <=
-           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1);
-    const auto& MLO_POOLBWD_N_VERT_OUT_PIX =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1;
-    assert(kp.grp_tile0 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0);
-    const auto& MLO_POOLBWD_GROUP_SZ0 =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0;
-    assert(kp.grp_tile1 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1);
-    const auto& MLO_POOLBWD_GROUP_SZ1 =
-        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1;
+    const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
+    const auto& MLO_POOLING_KERNEL_SZ1      = kp.kernel_size_h;
+    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX = kp.out_pix_tile0;
+    const auto& MLO_POOLBWD_N_VERT_OUT_PIX  = kp.out_pix_tile1;
+    const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
+    const auto& MLO_POOLING_STRIDE1         = kp.kernel_stride_h;
+    const auto& MLO_POOLBWD_GROUP_SZ0       = kp.grp_tile0;
+    const auto& MLO_POOLBWD_GROUP_SZ1       = kp.grp_tile1;
 
     const auto MLO_POOLBWD_LCL_DATA_WIDTH =
         (static_cast<std::size_t>(MLO_POOLBWD_GROUP_SZ0) * MLO_POOLBWD_N_HORIZ_OUT_PIX +
@@ -203,8 +193,7 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
             problem.GetPooling().GetMode() == miopenPoolingAverageInclusive) &&
            problem.GetXDesc().GetNumDims() == 4 &&
            problem.GetXDesc().IsPossibleLayout4D5D("NCHW", strict) &&
-           problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict) &&
-           sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize();
+           problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict);
 }
 
 ConvSolution PoolingBackward2d::GetSolution(
@@ -212,6 +201,13 @@ ConvSolution PoolingBackward2d::GetSolution(
     const miopen::pooling::ProblemDescription& problem,
     const PerformanceConfigPooling2d<OperationType::Backward>& config) const
 {
+    // check local memory requirement
+    if(sizeof_local_memory(problem, config) > TargetProperties::GetMaxLocalMemorySize())
+    {
+        MIOPEN_THROW(
+            "The local memory requirement in PoolingBackward2d solver exceeds the device limit.");
+    }
+
     auto result = ConvSolution{miopenStatusSuccess};
 
     const kernel_params kp(problem, config);
@@ -319,6 +315,23 @@ ConvSolution PoolingBackward2d::GetSolution(
     return result;
 }
 
+bool PerformanceConfigPooling2dBackward::IsValidValue(
+    const miopen::pooling::ProblemDescription& problem) const
+{
+    if(!IsTwoPower<min_out_pix_tile0, max_out_pix_tile0>(out_pix_tile0))
+        return false;
+    if(!IsTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
+        return false;
+    if(!IsTwoPower<min_local_size0, max_local_size0>(local_size0))
+        return false;
+    if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
+        return false;
+    // this constraint is enforced to avoid exceedance of local memory limit
+    if(sizeof_local_memory(problem, *this) > TargetProperties::GetMaxLocalMemorySize())
+        return false;
+    return true;
+}
+
 std::size_t
 PoolingBackward2d::GetWorkspaceSize(const ExecutionContext&,
                                     const miopen::pooling::ProblemDescription& problem) const
@@ -331,15 +344,15 @@ PoolingBackward2d::GetWorkspaceSize(const ExecutionContext&,
 bool PoolingBackward2d::IsValidPerformanceConfig(
     const ExecutionContext& context,
     const miopen::pooling::ProblemDescription& problem,
-    const PerformanceConfigPooling2d<OperationType::Backward>& config) const
+    const PerformanceConfigPooling2dBackward& config) const
 {
     return config.IsValid(context, problem);
 }
 
-PerformanceConfigPooling2d<OperationType::Backward> PoolingBackward2d::GetDefaultPerformanceConfig(
+PerformanceConfigPooling2dBackward PoolingBackward2d::GetDefaultPerformanceConfig(
     const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
 {
-    PerformanceConfigPooling2d<OperationType::Backward> config;
+    PerformanceConfigPooling2dBackward config;
     config.HeuristicInit(problem);
     return config;
 }

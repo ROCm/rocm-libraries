@@ -95,7 +95,10 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
 
     void HeuristicInit(const miopen::pooling::ProblemDescription&);
     bool SetNextValue(const miopen::pooling::ProblemDescription&);
-    bool IsValidValue() const;
+    virtual bool IsValidValue(const miopen::pooling::ProblemDescription&) const
+    {
+        throw std::runtime_error("IsValidValue is not implemented for the base struct");
+    }
     bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
     bool operator==(const PerformanceConfigPooling2d& other) const;
 
@@ -190,17 +193,15 @@ struct PoolingForward2d final
                 const PerformanceConfigPooling2d<OperationType::Forward>& config) const override;
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
-    PerformanceConfigPooling2d<OperationType::Forward>
+    PerformanceConfigPooling2dForward
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::pooling::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(
-        const ExecutionContext&,
-        const miopen::pooling::ProblemDescription&,
-        const PerformanceConfigPooling2d<OperationType::Forward>&) const override;
-    PerformanceConfigPooling2d<OperationType::Forward>
-    Search(const ExecutionContext& context,
-           const miopen::pooling::ProblemDescription& problem,
-           const AnyInvokeParams& invoke_context) const override
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPooling2dForward&) const override;
+    PerformanceConfigPooling2dForward Search(const ExecutionContext& context,
+                                             const miopen::pooling::ProblemDescription& problem,
+                                             const AnyInvokeParams& invoke_context) const override
     {
         return GenericSearch(*this, context, problem, invoke_context);
     }
@@ -397,8 +398,7 @@ struct TransposedPoolingFwdNd final : PoolingFwdNCHWTransposingSolver<PoolingFor
     }
 };
 
-struct PoolingBackward2d final
-    : PoolingTunableSolver<PerformanceConfigPooling2d<OperationType::Backward>>
+struct PoolingBackward2d final : PoolingTunableSolver<PerformanceConfigPooling2dBackward>
 {
     using PerformanceConfigType = PerformanceConfigPooling2d<OperationType::Backward>;
 
@@ -412,17 +412,15 @@ struct PoolingBackward2d final
                 const PerformanceConfigPooling2d<OperationType::Backward>& config) const override;
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
-    PerformanceConfigPooling2d<OperationType::Backward>
+    PerformanceConfigPooling2dBackward
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::pooling::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(
-        const ExecutionContext&,
-        const miopen::pooling::ProblemDescription&,
-        const PerformanceConfigPooling2d<OperationType::Backward>&) const override;
-    PerformanceConfigPooling2d<OperationType::Backward>
-    Search(const ExecutionContext& context,
-           const miopen::pooling::ProblemDescription& problem,
-           const AnyInvokeParams& invoke_context) const override
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPooling2dBackward&) const override;
+    PerformanceConfigPooling2dBackward Search(const ExecutionContext& context,
+                                              const miopen::pooling::ProblemDescription& problem,
+                                              const AnyInvokeParams& invoke_context) const override
     {
         return GenericSearch(*this, context, problem, invoke_context);
     }

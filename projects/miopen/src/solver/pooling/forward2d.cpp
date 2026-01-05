@@ -53,8 +53,7 @@ struct kernel_params
     int out_pix_tile1;
 
     kernel_params(const miopen::pooling::ProblemDescription& p,
-                  const std::optional<PerformanceConfigPooling2d<OperationType::Forward>>& config =
-                      std::nullopt)
+                  const std::optional<PerformanceConfigPooling2dForward>& config = std::nullopt)
     {
         const auto& pd  = p.GetPooling();
         const auto& yd  = p.GetYDesc();
@@ -123,10 +122,8 @@ std::size_t sizeof_private_memory(const miopen::pooling::ProblemDescription& pro
     const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
     const auto& MLO_POOLING_N_HORIZ_OUT_PIX = kp.out_pix_tile0;
     // safer estimate of memory with max_out_pix_tile1
-    assert(kp.out_pix_tile1 <=
-           PerformanceConfigPooling2d<OperationType::Forward>::max_out_pix_tile1);
-    const auto& MLO_POOLING_N_VERT_OUT_PIX =
-        PerformanceConfigPooling2d<OperationType::Forward>::max_out_pix_tile1;
+    assert(kp.out_pix_tile1 <= PerformanceConfigPooling2dForward::max_out_pix_tile1);
+    const auto& MLO_POOLING_N_VERT_OUT_PIX = PerformanceConfigPooling2dForward::max_out_pix_tile1;
 
     const auto MLO_BOT_DATA_SZ0 =
         (static_cast<std::size_t>(MLO_POOLING_N_HORIZ_OUT_PIX) - 1) * MLO_POOLING_STRIDE0 +
@@ -265,6 +262,21 @@ ConvSolution PoolingForward2d::GetSolution(
     return result;
 }
 
+bool PerformanceConfigPooling2dForward::IsValidValue(
+    const miopen::pooling::ProblemDescription&) const
+{
+    if(!IsTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
+        return false;
+    if(!IsTwoPower<min_local_size0, max_local_size0>(local_size0))
+        return false;
+    if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
+        return false;
+    // this constraint is enforced to avoid grp_tile1 becoming zero in GetSolutionImpl method
+    if(local_size1 / out_pix_tile1 < 1)
+        return false;
+    return true;
+}
+
 std::size_t
 PoolingForward2d::GetWorkspaceSize(const ExecutionContext&,
                                    const miopen::pooling::ProblemDescription& problem) const
@@ -277,15 +289,15 @@ PoolingForward2d::GetWorkspaceSize(const ExecutionContext&,
 bool PoolingForward2d::IsValidPerformanceConfig(
     const ExecutionContext& context,
     const miopen::pooling::ProblemDescription& problem,
-    const PerformanceConfigPooling2d<OperationType::Forward>& config) const
+    const PerformanceConfigPooling2dForward& config) const
 {
     return config.IsValid(context, problem);
 }
 
-PerformanceConfigPooling2d<OperationType::Forward> PoolingForward2d::GetDefaultPerformanceConfig(
+PerformanceConfigPooling2dForward PoolingForward2d::GetDefaultPerformanceConfig(
     const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
 {
-    PerformanceConfigPooling2d<OperationType::Forward> config;
+    PerformanceConfigPooling2dForward config;
     config.HeuristicInit(problem);
     return config;
 }
