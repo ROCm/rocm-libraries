@@ -602,7 +602,7 @@ void BestWGM(const origami::hardware_t& hardware,
     // Assume DP
     auto skGrid = (M + MT_M - 1) / MT_M * (N + MT_N - 1) / MT_N;
 
-    auto [best_wgmxccchunk_large_tile, best_wgmxcc_large_tile, best_wgm_large_tile] = 
+    auto [best_wgmxcc_large_tile, best_wgm_large_tile] = 
         select_best_wgm(hardware,
                         M,
                         N,
@@ -616,7 +616,7 @@ void BestWGM(const origami::hardware_t& hardware,
                         skGrid,
                         false);
 
-    auto [best_wgmxccchunk_small_tile, best_wgmxcc_small_tile, best_wgm_small_tile] = 
+    auto [best_wgmxcc_small_tile, best_wgm_small_tile] = 
         select_best_wgm(hardware,
                         M / 4,
                         N / 4,
@@ -630,7 +630,7 @@ void BestWGM(const origami::hardware_t& hardware,
                         skGrid,
                         false);
 
-    auto [best_wgmxccchunk_nonsquare_tile, best_wgmxcc_nonsquare_tile, best_wgm_nonsquare_tile] = 
+    auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare_tile] = 
         select_best_wgm(hardware,
                         1024,
                         5120,
