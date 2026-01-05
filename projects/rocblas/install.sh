@@ -273,22 +273,22 @@ install_cmake( )
     ${cmake_executable} --version
 }
 
-# Build AOCL 5.1 from source
+# Build AOCL 5.2 from source
 # INPUTS:  cmake_executable, build_dir, cxx, cc
-# OUTPUTS: AOCL 5.1 built in ${build_dir}/deps/aocl/install_package/
-build_aocl_5_1( )
+# OUTPUTS: AOCL 5.2 built in ${build_dir}/deps/aocl/install_package/
+build_aocl_5_2( )
 {
-    printf "\033[32mBuilding \033[33mAOCL 5.1\033[32m from source (preferred for testing)\033[0m\n"
+    printf "\033[32mBuilding \033[33mAOCL 5.2\033[32m from source (preferred for testing)\033[0m\n"
 
-    # Build AOCL 5.1 (cmake_executable should already be set to 3.26+ by this point)
+    # Build AOCL 5.2 (cmake_executable should already be set to 3.26+ by this point)
     pushd .
     mkdir -p ${build_dir}/deps
     cd ${build_dir}/deps
-    git clone --quiet -b AOCL-5.1-GA https://github.com/amd/aocl.git
+    git clone --quiet --depth 1 --branch AOCL-5.2 https://github.com/amd/aocl.git 2>&1 | grep -v "detached HEAD" || true
     cd aocl
     CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON  -DENABLE_ILP64=ON  -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
     elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
-    printf "\033[32m✓ AOCL 5.1 successfully built with ILP64 support\033[0m\n"
+    printf "\033[32m✓ AOCL 5.2 successfully built with ILP64 support\033[0m\n"
     printf "\033[32m  Location: \033[33m${build_dir}/deps/aocl/install_package/lib/libaocl.so\033[0m\n"
     popd
 }
@@ -321,20 +321,20 @@ setup_aocl( )
         none)
             # No existing AOCL found, decide what to do
             if [[ "${skip_aocl}" == true ]]; then
-                printf "\033[33mSkipping AOCL 5.1 build (--skip-aocl specified)\033[0m\n"
+                printf "\033[33mSkipping AOCL 5.2 build (--skip-aocl specified)\033[0m\n"
                 printf "\033[33mCMake will search for: AOCL 4.x → system CBLAS\033[0m\n"
                 return  # CMake will fall back to 4.x or system BLAS
             fi
 
-            # Default: Build AOCL 5.1 locally
+            # Default: Build AOCL 5.2 locally
             if [[ -d "${build_dir}/deps/aocl" ]]; then
-                printf "\033[32mAOCL 5.1 already built at \033[33m${build_dir}/deps/aocl\033[0m\n"
+                printf "\033[32mAOCL 5.2 already built at \033[33m${build_dir}/deps/aocl\033[0m\n"
                 printf "\033[32m(use --clean-deps to force rebuild)\033[0m\n"
                 return
             fi
 
-            # Build AOCL 5.1
-            build_aocl_5_1
+            # Build AOCL 5.2
+            build_aocl_5_2
             ;;
     esac
 }
@@ -527,7 +527,7 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
                                      Downloads pre-built binary to <builddir>/deps.
                                      Note: CMake is auto-installed when needed (no flag required):
                                        - If system CMake < 3.24.4 (rocBLAS minimum)
-                                       - If system CMake < 3.26.0 and building AOCL 5.1
+                                       - If system CMake < 3.26.0 and building AOCL 5.2
 
     -d, --dependencies               Build and install external dependencies.
                                      Dependencies are to be installed in /usr/local. This should be done only once.
@@ -552,7 +552,7 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
                                      Affects AOCL, googletest, and msgpack.
                                      Use with --skip-aocl to clean AOCL without rebuilding it.
 
-    --skip-aocl                      Skip AOCL 5.1 automatic build.
+    --skip-aocl                      Skip AOCL 5.2 automatic build.
                                      Falls back to AOCL 4.x (if installed) → system CBLAS.
                                      Use this if you want to use an existing AOCL 4.x installation.
 
@@ -562,21 +562,21 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
                                      Supports both AOCL 5.x and 4.x installations.
                                      install.sh validates AOCL_ROOT and errors if invalid.
                                      Example: export AOCL_ROOT=/usr/local
-                                              export AOCL_ROOT=$HOME/aocl/5.1.0/gcc
+                                              export AOCL_ROOT=$HOME/aocl/5.2.0/gcc
                                               export AOCL_ROOT=/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc
 
   BLAS Library Selection Logic (simplified):
 
     1. AOCL_ROOT set?        → Validate and use it (errors if invalid)
     2. System AOCL 5.x?      → Use system installation
-    3. --skip-aocl NOT set?  → Build AOCL 5.1 locally (default, preferred for testing)
+    3. --skip-aocl NOT set?  → Build AOCL 5.2 locally (default, preferred for testing)
     4. System AOCL 4.x?      → Use it (only if --skip-aocl was set)
     5. System CBLAS?         → Use via pkg-config (OpenBLAS, etc.)
 
   Notes:
 
-    - AOCL 5.1 with ILP64 support (64-bit integers) is preferred for testing/compatibility.
-    - CI/Docker: Pre-install AOCL 5.1+ for faster builds, or let install.sh build it automatically.
+    - AOCL 5.2 with ILP64 support (64-bit integers) is preferred for testing/compatibility.
+    - CI/Docker: Pre-install AOCL 5.2+ for faster builds, or let install.sh build it automatically.
     - CMake is automatically installed when needed - no --cmake_install flag required!
     - AOCL build takes ~5-10 minutes on first run; subsequent builds reuse existing build.
     - Without ILP64 support, stress tests may fail: use --gtest_filter=-*stress* when testing.
@@ -694,13 +694,13 @@ fc="gfortran"
 
 # Constants
 CMAKE_MIN_VERSION="3.24.4"  # Minimum for rocBLAS itself
-CMAKE_AOCL_MIN="3.26.0"     # Minimum for AOCL 5.1 build
+CMAKE_AOCL_MIN="3.26.0"     # Minimum for AOCL 5.2 build
 
 # #################################################
 # Dependency helper functions
 # #################################################
 
-# Detect if we'll need to build AOCL 5.1
+# Detect if we'll need to build AOCL 5.2
 # INPUTS:  build_clients, skip_aocl, AOCL_DETECTED (from detect_aocl), build_dir
 # OUTPUTS: will_build_aocl (true/false)
 determine_aocl_build_requirement( )
@@ -731,7 +731,7 @@ determine_aocl_build_requirement( )
 
     # Will need to build AOCL
     will_build_aocl=true
-    printf "\033[33mDetected: Will need to build AOCL 5.1 for clients\033[0m\n"
+    printf "\033[33mDetected: Will need to build AOCL 5.2 for clients\033[0m\n"
     return 0
 }
 
@@ -757,7 +757,7 @@ determine_cmake_requirements( )
     # Check if we need higher version for AOCL (3.26.0)
     if [[ "${will_build_aocl}" == true ]]; then
         if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_AOCL_MIN 2>/dev/null || [[ "$CMAKE_VERSION" < "$CMAKE_AOCL_MIN" ]]); then
-            printf "\033[33mAOCL 5.1 build requires CMake >= ${CMAKE_AOCL_MIN} - will auto-install\033[0m\n"
+            printf "\033[33mAOCL 5.2 build requires CMake >= ${CMAKE_AOCL_MIN} - will auto-install\033[0m\n"
             need_cmake_install=true
             cmake_target_version="${CMAKE_AOCL_MIN}"
         fi
