@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -89,14 +89,11 @@ std::size_t sizeof_private_memory(const miopen::pooling::ProblemDescription& pro
 
     // safer estimate of memory with max_pix_per_work
     const std::size_t bot_tile_w =
-        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_w +
-         kp.kernel_sz_w);
+        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_w + kp.kernel_sz_w);
     const std::size_t bot_tile_h =
-        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_h +
-         kp.kernel_sz_h);
+        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_h + kp.kernel_sz_h);
     const std::size_t bot_tile_d =
-        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_d +
-         kp.kernel_sz_d);
+        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_d + kp.kernel_sz_d);
 
     const auto sizeof_bot_data =
         sizeof_kernel_FLOAT(problem) * bot_tile_d * bot_tile_h * bot_tile_w;
@@ -267,8 +264,7 @@ PoolingForwardNd::GetWorkspaceSize(const ExecutionContext&,
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
 }
 
-bool PerformanceConfigPoolingNdForward::SetNextValue(
-    const miopen::pooling::ProblemDescription&)
+bool PerformanceConfigPoolingNdForward::SetNextValue(const miopen::pooling::ProblemDescription&)
 {
 #if !MIOPEN_BACKEND_HIP
     return false;

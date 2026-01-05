@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,7 @@ struct kernel_params
     std::size_t grp_tile1;
 
     kernel_params(const miopen::pooling::ProblemDescription& problem,
-                  const std::optional<PerformanceConfigPooling2dBackward>& config = std::nullopt)
+                  const PerformanceConfigPooling2dBackward& config)
     {
         const auto& pd = problem.GetPooling();
 
@@ -70,45 +70,10 @@ struct kernel_params
         std::tie(batch_sz, n_inputs, in_height, in_width) =
             miopen::tien<4>(problem.GetXDesc().GetLengths(), 1);
 
-        if(config)
-        {
-            out_pix_tile0 = config->out_pix_tile0;
-            out_pix_tile1 = config->out_pix_tile1;
-            grp_tile0     = config->local_size0;
-            grp_tile1     = config->local_size1;
-        }
-        else
-        {
-            out_pix_tile0 = 1;
-            out_pix_tile1 = 1;
-            if(pd.GetMode() == miopenPoolingMax)
-            {
-                out_pix_tile0 = in_width > 8 && in_width <= 24 ? 4 : 1;
-                out_pix_tile1 = in_width <= 24 ? 1 : (in_width > 64 && in_width <= 96 ? 4 : 8);
-            }
-
-            grp_tile0 = 8;
-            grp_tile1 = 8;
-            if(pd.GetMode() == miopenPoolingMax)
-            {
-                grp_tile0 = in_width <= 8     ? 8  //
-                            : in_width <= 16  ? 4  //
-                            : in_width <= 24  ? 8  //
-                            : in_width <= 32  ? 32 //
-                            : in_width <= 64  ? 8  //
-                            : in_width <= 96  ? 16 //
-                            : in_width <= 128 ? 16
-                                              : 32;
-                grp_tile1 = in_width <= 8     ? 8  //
-                            : in_width <= 16  ? 16 //
-                            : in_width <= 24  ? 8  //
-                            : in_width <= 32  ? 4  //
-                            : in_width <= 64  ? 8  //
-                            : in_width <= 96  ? 4  //
-                            : in_width <= 128 ? 16
-                                              : 4;
-            }
-        }
+        out_pix_tile0 = config.out_pix_tile0;
+        out_pix_tile1 = config.out_pix_tile1;
+        grp_tile0     = config.local_size0;
+        grp_tile1     = config.local_size1;
     }
 };
 
@@ -131,9 +96,8 @@ inline std::size_t RoundUpToMultiple(std::size_t v, std::size_t m)
 
 // Compute amount of local memory required for holding the arrays defined
 // in the "mloPoolingAveBwd" and "mloPoolingMaxBwd" kernels.
-std::size_t
-sizeof_local_memory(const miopen::pooling::ProblemDescription& problem,
-                    const std::optional<PerformanceConfigPooling2dBackward>& config = std::nullopt)
+std::size_t sizeof_local_memory(const miopen::pooling::ProblemDescription& problem,
+                                const PerformanceConfigPooling2dBackward& config)
 {
     const kernel_params kp(problem, config);
 
@@ -200,10 +164,9 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
            problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict);
 }
 
-ConvSolution PoolingBackward2d::GetSolution(
-    const ExecutionContext&,
-    const miopen::pooling::ProblemDescription& problem,
-    const PerformanceConfigPooling2d<OperationType::Backward>& config) const
+ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext&,
+                                            const miopen::pooling::ProblemDescription& problem,
+                                            const PerformanceConfigPooling2dBackward& config) const
 {
     // check local memory requirement
     if(sizeof_local_memory(problem, config) > TargetProperties::GetMaxLocalMemorySize())

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -161,10 +161,9 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
                TargetProperties::GetMaxWaveScratchSize() / context.GetStream().GetWavefrontWidth();
 }
 
-ConvSolution PoolingForward2d::GetSolution(
-    const ExecutionContext&,
-    const miopen::pooling::ProblemDescription& problem,
-    const PerformanceConfigPooling2d<OperationType::Forward>& config) const
+ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
+                                           const miopen::pooling::ProblemDescription& problem,
+                                           const PerformanceConfigPooling2dForward& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -272,7 +271,7 @@ bool PerformanceConfigPooling2dForward::IsValidValue(
         return false;
     if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
         return false;
-    // this constraint is enforced to avoid grp_tile1 becoming zero in GetSolutionImpl method
+    // this constraint is enforced to avoid grp_tile1 becoming zero in GetSolution
     if(local_size1 / out_pix_tile1 < 1)
         return false;
     return true;

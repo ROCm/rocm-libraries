@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -222,7 +222,7 @@ PoolingForwardNaive::GetSolution(const ExecutionContext& context,
     work_left /= w0;
     w1 = (g1 < work_left) ? g1 : work_left;
     work_left /= w1;
-    w2 = (g2 < work_left) ? g2 : work_left;
+    w2                     = (g2 < work_left) ? g2 : work_left;
 #endif
 
     {
@@ -341,8 +341,7 @@ void PerformanceConfigPoolingForwardNaive::HeuristicInit(
 #endif
 }
 
-bool PerformanceConfigPoolingForwardNaive::SetNextValue(
-    const miopen::pooling::ProblemDescription&)
+bool PerformanceConfigPoolingForwardNaive::SetNextValue(const miopen::pooling::ProblemDescription&)
 {
 #if !MIOPEN_BACKEND_HIP
     return false;

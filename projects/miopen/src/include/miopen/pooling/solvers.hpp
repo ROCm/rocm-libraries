@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -97,7 +97,9 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
     bool SetNextValue(const miopen::pooling::ProblemDescription&);
     virtual bool IsValidValue(const miopen::pooling::ProblemDescription&) const
     {
-        throw std::runtime_error("IsValidValue is not implemented for the base struct");
+        throw std::runtime_error(
+            "IsValidValue of PerformanceConfigPooling2d<OpType> is called, but it is not "
+            "implemented.");
     }
     bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
     bool operator==(const PerformanceConfigPooling2d& other) const;
@@ -117,6 +119,22 @@ private:
 
 extern template struct PerformanceConfigPooling2d<OperationType::Forward>;
 extern template struct PerformanceConfigPooling2d<OperationType::Backward>;
+
+struct PerformanceConfigPooling2dForward final
+    : public PerformanceConfigPooling2d<OperationType::Forward>
+{
+    using PerformanceConfigPooling2d<OperationType::Forward>::PerformanceConfigPooling2d;
+
+    bool IsValidValue(const miopen::pooling::ProblemDescription&) const override;
+};
+
+struct PerformanceConfigPooling2dBackward final
+    : public PerformanceConfigPooling2d<OperationType::Backward>
+{
+    using PerformanceConfigPooling2d<OperationType::Backward>::PerformanceConfigPooling2d;
+
+    bool IsValidValue(const miopen::pooling::ProblemDescription&) const override;
+};
 
 template <OperationType OpType>
 struct PerformanceConfigPoolingNd : PerfConfigBase<PerformanceConfigPoolingNd<OpType>>
@@ -178,19 +196,17 @@ private:
 extern template struct PerformanceConfigPoolingNd<OperationType::Forward>;
 extern template struct PerformanceConfigPoolingNd<OperationType::Backward>;
 
-struct PoolingForward2d final
-    : PoolingTunableSolver<PerformanceConfigPooling2d<OperationType::Forward>>
+struct PoolingForward2d final : PoolingTunableSolver<PerformanceConfigPooling2dForward>
 {
-    using PerformanceConfigType = PerformanceConfigPooling2d<OperationType::Forward>;
+    using PerformanceConfigType = PerformanceConfigPooling2dForward;
 
     const std::string& SolverDbId() const override { return GetSolverDbId<PoolingForward2d>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::pooling::ProblemDescription& problem) const override;
-    ConvSolution
-    GetSolution(const ExecutionContext& context,
-                const miopen::pooling::ProblemDescription& problem,
-                const PerformanceConfigPooling2d<OperationType::Forward>& config) const override;
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PerformanceConfigPooling2dForward& config) const override;
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
     PerformanceConfigPooling2dForward
@@ -230,14 +246,12 @@ struct PoolingForwardNd final : PoolingTunableSolver<PerformanceConfigPoolingNdF
     PerformanceConfigPoolingNdForward
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::pooling::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(
-        const ExecutionContext&,
-        const miopen::pooling::ProblemDescription&,
-        const PerformanceConfigPoolingNdForward&) const override;
-    PerformanceConfigPoolingNdForward
-    Search(const ExecutionContext& context,
-           const miopen::pooling::ProblemDescription& problem,
-           const AnyInvokeParams& invoke_context) const override
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPoolingNdForward&) const override;
+    PerformanceConfigPoolingNdForward Search(const ExecutionContext& context,
+                                             const miopen::pooling::ProblemDescription& problem,
+                                             const AnyInvokeParams& invoke_context) const override
     {
         return GenericSearch(*this, context, problem, invoke_context);
     }
@@ -354,10 +368,10 @@ struct TransposedPoolingFwd2d final : PoolingFwdNCHWTransposingSolver<PoolingFor
     {
         return PoolingForward2d{}.GetDefaultPerformanceConfig(ctx, problem);
     }
-    bool IsValidPerformanceConfig(
-        const ExecutionContext& ctx,
-        const miopen::pooling::ProblemDescription& problem,
-        const PoolingForward2d::PerformanceConfigType& config) const override
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingForward2d::PerformanceConfigType& config) const override
     {
         return PoolingForward2d{}.IsValidPerformanceConfig(ctx, problem, config);
     }
@@ -382,10 +396,10 @@ struct TransposedPoolingFwdNd final : PoolingFwdNCHWTransposingSolver<PoolingFor
     {
         return PoolingForwardNd{}.GetDefaultPerformanceConfig(ctx, problem);
     }
-    bool IsValidPerformanceConfig(
-        const ExecutionContext& ctx,
-        const miopen::pooling::ProblemDescription& problem,
-        const PoolingForwardNd::PerformanceConfigType& config) const override
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingForwardNd::PerformanceConfigType& config) const override
     {
         return PoolingForwardNd{}.IsValidPerformanceConfig(ctx, problem, config);
     }
@@ -400,16 +414,15 @@ struct TransposedPoolingFwdNd final : PoolingFwdNCHWTransposingSolver<PoolingFor
 
 struct PoolingBackward2d final : PoolingTunableSolver<PerformanceConfigPooling2dBackward>
 {
-    using PerformanceConfigType = PerformanceConfigPooling2d<OperationType::Backward>;
+    using PerformanceConfigType = PerformanceConfigPooling2dBackward;
 
     const std::string& SolverDbId() const override { return GetSolverDbId<PoolingBackward2d>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::pooling::ProblemDescription& problem) const override;
-    ConvSolution
-    GetSolution(const ExecutionContext& context,
-                const miopen::pooling::ProblemDescription& problem,
-                const PerformanceConfigPooling2d<OperationType::Backward>& config) const override;
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PerformanceConfigPooling2dBackward& config) const override;
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
     PerformanceConfigPooling2dBackward
@@ -426,7 +439,8 @@ struct PoolingBackward2d final : PoolingTunableSolver<PerformanceConfigPooling2d
     }
 };
 
-struct PerformanceConfigPoolingNdBackward final : PerformanceConfigPoolingNd<OperationType::Backward>
+struct PerformanceConfigPoolingNdBackward final
+    : PerformanceConfigPoolingNd<OperationType::Backward>
 {
     using PerformanceConfigPoolingNd::PerformanceConfigPoolingNd;
 
@@ -449,25 +463,24 @@ struct PoolingBackwardNd final : PoolingTunableSolver<PerformanceConfigPoolingNd
     PerformanceConfigPoolingNdBackward
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::pooling::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(
-        const ExecutionContext&,
-        const miopen::pooling::ProblemDescription&,
-        const PerformanceConfigPoolingNdBackward&) const override;
-    PerformanceConfigPoolingNdBackward
-    Search(const ExecutionContext& context,
-           const miopen::pooling::ProblemDescription& problem,
-           const AnyInvokeParams& invoke_context) const override
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPoolingNdBackward&) const override;
+    PerformanceConfigPoolingNdBackward Search(const ExecutionContext& context,
+                                              const miopen::pooling::ProblemDescription& problem,
+                                              const AnyInvokeParams& invoke_context) const override
     {
         return GenericSearch(*this, context, problem, invoke_context);
     }
 };
 
 template <class Inner>
-struct PoolingBwdNCHWTransposingSolver : TransposingSolver<PoolingBwdNCHWTransposingSolver<Inner>,
-                                                           PoolingTunableSolver<typename Inner::PerformanceConfigType>,
-                                                           miopen::pooling::ProblemDescription,
-                                                           miopen::pooling::BwdInvokeParams,
-                                                           Inner>
+struct PoolingBwdNCHWTransposingSolver
+    : TransposingSolver<PoolingBwdNCHWTransposingSolver<Inner>,
+                        PoolingTunableSolver<typename Inner::PerformanceConfigType>,
+                        miopen::pooling::ProblemDescription,
+                        miopen::pooling::BwdInvokeParams,
+                        Inner>
 {
     using Problem      = miopen::pooling::ProblemDescription;
     using InvokeParams = miopen::pooling::BwdInvokeParams;
@@ -512,10 +525,10 @@ struct TransposedPoolingBwd2d final : PoolingBwdNCHWTransposingSolver<PoolingBac
     {
         return PoolingBackward2d{}.GetDefaultPerformanceConfig(ctx, problem);
     }
-    bool IsValidPerformanceConfig(
-        const ExecutionContext& ctx,
-        const miopen::pooling::ProblemDescription& problem,
-        const PoolingBackward2d::PerformanceConfigType& config) const override
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingBackward2d::PerformanceConfigType& config) const override
     {
         return PoolingBackward2d{}.IsValidPerformanceConfig(ctx, problem, config);
     }
@@ -540,10 +553,10 @@ struct TransposedPoolingBwdNd final : PoolingBwdNCHWTransposingSolver<PoolingBac
     {
         return PoolingBackwardNd{}.GetDefaultPerformanceConfig(ctx, problem);
     }
-    bool IsValidPerformanceConfig(
-        const ExecutionContext& ctx,
-        const miopen::pooling::ProblemDescription& problem,
-        const PoolingBackwardNd::PerformanceConfigType& config) const override
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingBackwardNd::PerformanceConfigType& config) const override
     {
         return PoolingBackwardNd{}.IsValidPerformanceConfig(ctx, problem, config);
     }
