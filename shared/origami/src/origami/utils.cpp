@@ -362,28 +362,19 @@ constexpr N safe_ceil_div(N n, D d) {
 }
 
 /*!
-* \brief Selects the best WGM (maximizing L2 hit rate) given fixed macro tile sizes.
-*
-* \param[in] hardware          - Hardware
-* \param[in] M, N, K, batch    - Problem
-* \param[in] MT_M, MT_N, MT_K  - Solution
-* \param[in] print             - whether to print the final best result
-*
-* \return best WGMXCCCHUNK, WGMXCC, WGM.
-*/
-std::tuple<size_t, size_t, int32_t> select_best_wgm(const hardware_t& hardware,
-                                                    size_t            M,
-                                                    size_t            N,
-                                                    size_t            K,
-                                                    size_t            batch,
-                                                    size_t            MT_M,
-                                                    size_t            MT_N,
-                                                    size_t            MT_K,
-                                                    int               nta,
-                                                    int               ntb,
-                                                    size_t            skGrid,
-                                                    bool              print)
-{
+ * \brief Selects the best WGM (maximizing L2 hit rate) given fixed macro tile sizes.
+ *
+ * \param[in] hardware          - Hardware
+ * \param[in] M, N, K, batch    - Problem
+ * \param[in] MT_M, MT_N, MT_K  - Solution
+ * \param[in] print             - whether to print the final best result
+ *
+ * \return best WGMXCC, WGM.
+ */
+std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware, size_t M, size_t N,
+                                            size_t K, size_t batch, size_t MT_M, size_t MT_N,
+                                            size_t MT_K, int nta, int ntb, size_t skGrid,
+                                            bool print) {
     // Default is the closest we can get to a square
     size_t max_CU_XCD = hardware.N_CU / hardware.NUM_XCD;
     size_t defaultWGM = ceil(std::sqrt(max_CU_XCD));
@@ -401,19 +392,13 @@ std::tuple<size_t, size_t, int32_t> select_best_wgm(const hardware_t& hardware,
     // -------------------
     // NonTemporal Cases
     // -------------------
-    if(nta > 3 && ntb < 4)
-        return std::make_tuple(0, hardware.NUM_XCD, 1);
-    else if(nta < 4 && ntb > 3)
-        return std::make_tuple(0, hardware.NUM_XCD, std::min(max_CU_XCD, safe_ceil_div(numMTs, hardware.NUM_XCD)));
-    else if(nta > 3 && ntb > 3)
-        return std::make_tuple(0, hardware.NUM_XCD, 1);
-
-    // -------------------
-    // WGMXCCCHUNK Prediction
-    // -------------------
-    auto defaultWGMXCCCHUNK = 0;
-    bool isWGMXCCCHUNKset = false;
-    size_t out_wgmxccchunk = defaultWGMXCCCHUNK;
+    if (nta > 3 && ntb < 4)
+        return std::make_tuple(hardware.NUM_XCD, 1);
+    else if (nta < 4 && ntb > 3)
+        return std::make_tuple(hardware.NUM_XCD,
+                               std::min(max_CU_XCD, safe_ceil_div(numMTs, hardware.NUM_XCD)));
+    else if (nta > 3 && ntb > 3)
+        return std::make_tuple(hardware.NUM_XCD, 1);
 
     // -------------------
     // WGMXCC Prediction
@@ -574,8 +559,8 @@ std::tuple<size_t, size_t, int32_t> select_best_wgm(const hardware_t& hardware,
 
         out_wgm = bestWGM;
     }
-    
-    return std::make_tuple(out_wgmxccchunk, out_wgmxcc, out_wgm);
+
+    return std::make_tuple(out_wgmxcc, out_wgm);
 }
 
 // Logic to decide between two MT that are "tied"
