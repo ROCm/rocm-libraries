@@ -17,8 +17,6 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
-// Note: Sample temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
-
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
@@ -39,10 +37,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType);
-    auto bias = createTensor({1, c, 1, 1}, intermediateType);
-    auto mean = createTensor({1, c, 1, 1}, intermediateType);
-    auto invVariance = createTensor({1, c, 1, 1}, intermediateType);
+    auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto mean = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto invVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
 
     auto bnAttributes = graph::BatchnormInferenceAttributes();
     bnAttributes.set_name("bn_inference_node");
@@ -92,7 +90,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<InputType>();
-        double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInference(
             xTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, yRefTensor);

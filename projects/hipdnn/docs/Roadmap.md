@@ -69,7 +69,6 @@ Plugins extend hipDNN's computational capabilities. See [Design.md](./Design.md#
 #### Near-Term Priorities
 
 - **Fusion Support**: Complete integration for Convolution fusions
-- **Batchnorm Inference**: Re-enable support after resolving [known issues](https://github.com/ROCm/rocm-libraries/issues/2459)
 - **Batchnorm Running Stats**: Add support for running statistics in Batchnorm operations
 - **Code Refactoring**: Extract common MIOpen plugin code into reusable Plugin SDK and Test SDK components
 
