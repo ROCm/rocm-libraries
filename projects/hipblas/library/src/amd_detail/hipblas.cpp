@@ -33953,6 +33953,43 @@ catch(...)
     return hipblas_exception_to_status();
 }
 
+// herk_ex
+hipblasStatus_t hipblasHerkEx(hipblasHandle_t    handle,
+                              hipblasFillMode_t  uplo,
+                              hipblasOperation_t transa,
+                              int                n,
+                              int                k,
+                              const void*        alpha,
+                              const void*        A,
+                              hipDataType        a_type,
+                              int                lda,
+                              const void*        beta,
+                              void*              C,
+                              hipDataType        c_type,
+                              int                ldc,
+                              hipDataType        compute_type)
+try
+{
+    return hipblasConvertStatus(rocblas_herk_ex((rocblas_handle)handle,
+                                                hipblasConvertFill(uplo),
+                                                hipblasConvertOperation(transa),
+                                                n,
+                                                k,
+                                                alpha,
+                                                A,
+                                                hipblasConvertDatatype(a_type),
+                                                lda,
+                                                beta,
+                                                C,
+                                                hipblasConvertDatatype(c_type),
+                                                ldc,
+                                                hipblasConvertDatatype(compute_type)));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 // trsm_ex
 hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
                               hipblasSideMode_t  side,

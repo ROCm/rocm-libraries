@@ -12,6 +12,7 @@
 
 #include <bitset>
 #include <set>
+#include <spdlog/fmt/fmt.h>
 
 namespace hipdnn_frontend
 {
@@ -95,6 +96,13 @@ enum class HeuristicMode
     FALLBACK,
 };
 typedef HeuristicMode HeurMode_t; // NOLINT(readability-identifier-naming)
+
+enum class BuildPlanPolicy
+{
+    HEURISTICS_CHOICE, // Use heuristics to select the best plan
+    ALL // Build all available plans (currently unused)
+};
+typedef BuildPlanPolicy BuildPlanPolicy_t; // NOLINT(readability-identifier-naming)
 
 template <typename T>
 DataType getDataTypeEnumFromType()
@@ -335,6 +343,42 @@ inline std::ostream& operator<<(std::ostream& os, const DataType& type)
     return os << to_string(type);
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const BuildPlanPolicy& policy)
+{
+    switch(policy)
+    {
+    case BuildPlanPolicy::HEURISTICS_CHOICE:
+        return "HEURISTICS_CHOICE";
+    case BuildPlanPolicy::ALL:
+        return "ALL";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const BuildPlanPolicy& policy)
+{
+    return os << to_string(policy);
+}
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const HeuristicMode& mode)
+{
+    switch(mode)
+    {
+    case HeuristicMode::FALLBACK:
+        return "FALLBACK";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const HeuristicMode& mode)
+{
+    return os << to_string(mode);
+}
+
 // Frontend functions delegate to SDK for single source of truth
 // Convert frontend PointwiseMode to SDK type and call SDK validation functions
 
@@ -370,3 +414,33 @@ inline const auto& getTernaryModesBitset()
 }
 
 } // namespace hipdnn_frontend
+
+template <>
+struct fmt::formatter<hipdnn_frontend::DataType> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::DataType type, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(type), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_frontend::BuildPlanPolicy> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::BuildPlanPolicy policy, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(policy), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_frontend::HeuristicMode> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::HeuristicMode mode, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(mode), ctx);
+    }
+};

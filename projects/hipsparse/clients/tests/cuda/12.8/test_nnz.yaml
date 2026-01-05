@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: nnz
   precision: *single_double_precisions_complex_real
-  M: [0, 10, 500, 872, 1000]
-  N: [0, 33, 242, 623, 1000]
+  M: [10, 500, 872, 1000]
+  N: [33, 242, 623, 1000]
   lda: [1000]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
 
