@@ -46,24 +46,6 @@ add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(fused_conv_fprop_bias_activ convolution/FusedConvFpropBiasActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
 
-if(WIN32)
-    # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
-    # when consuming the hipdnn_data_sdk.  We need to clear these options Refer to issue:
-    # https://github.com/ROCm/TheRock/issues/2003
-
-    if(TARGET spdlog::spdlog_header_only)
-        # Can't do this to an alias
-        get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
-        message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
-
-        if(NOT aliased_target_name)
-            set_target_properties(
-                spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS ""
-            )
-        endif()
-    endif()
-endif()
-
 # Enable testing and add sample tests
 enable_testing()
 

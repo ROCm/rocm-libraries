@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #pragma once
+#include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
@@ -32,33 +33,42 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Generate Assign operations that have index expression from associated ComputeIndex
-     *
-     *   (1) Generate expressions for each ComputeIndex operation and write the expression to new Assign operation
-     *
-     *   (2) The new Assign operations are connected to a chain and placed in the downstream neighbor of the associate ComputeIndex
+         * @brief Rewrite KernelGraph to add index computation operations.
          *
-     * @ingroup Transformations
-    */
-        class AssignComputeIndex : public GraphTransform
+         * This transform adds operations to compute memory offsets and
+         * strides for load/store operations, so that indices do not
+         * need to be completely recalculated every time when iterating
+         * through a tile of data.
+         *
+         * Index computation operations are added before For Loops and
+         * calculate the first index in the loop.
+         *
+         * A new ForLoopIncrement is added to the loop as well to
+         * increment the index by the stride amount.
+         *
+         * Offset, Stride and Buffer edges are added to the DataFlow
+         * portion of the Coordinate graph to keep track of the data
+         * needed to perform the operations.
+         */
+        class AssignIndexExpressions : public GraphTransform
         {
         public:
-            AssignComputeIndex(ContextPtr context, CommandPtr command)
+            AssignIndexExpressions(ContextPtr context, CommandPtr command)
                 : m_context(context)
                 , m_command(command)
             {
             }
 
             KernelGraph apply(KernelGraph const& original) override;
-
             std::string name() const override
             {
-                return "AssignComputeIndex";
+                return "AssignIndexExpressions";
             }
 
         private:
             ContextPtr m_context;
             CommandPtr m_command;
         };
+
     }
 }
