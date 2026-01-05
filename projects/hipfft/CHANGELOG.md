@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.23
 
+### Changed
+
+* Moved library to C++20 standard.
+
 ### Resolved issues
 
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.

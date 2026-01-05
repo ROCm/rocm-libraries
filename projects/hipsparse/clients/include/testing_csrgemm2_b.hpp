@@ -856,12 +856,8 @@ void testing_csrgemm2_b(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz_D = 0;
-    if(!generate_csr_matrix(
-           filename, M, N, nnz_D, hcsr_row_ptr_D, hcsr_col_ind_D, hcsr_val_D, idx_base_D))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, M, N, nnz_D, hcsr_row_ptr_D, hcsr_col_ind_D, hcsr_val_D, idx_base_D));
 
     std::vector<int> hcsr_row_ptr_A;
     std::vector<int> hcsr_col_ind_A;

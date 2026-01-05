@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                         continue;
                     if(length % t == 0)
                     {
-                        if(std::all_of(factors.begin(), factors.end(), [=](unsigned int f) {
+                        if(std::all_of(factors.begin(), factors.end(), [=, this](unsigned int f) {
                                return (length / t) % f == 0;
                            }))
                             threads_per_transform = t;
