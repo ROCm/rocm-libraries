@@ -161,10 +161,10 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
                TargetProperties::GetMaxWaveScratchSize() / context.GetStream().GetWavefrontWidth();
 }
 
-ConvSolution PoolingForward2d::GetSolutionImpl(
+ConvSolution PoolingForward2d::GetSolution(
     const ExecutionContext&,
     const miopen::pooling::ProblemDescription& problem,
-    const std::optional<PerformanceConfigPooling2dForward>& config) const
+    const PerformanceConfigPooling2d<OperationType::Forward>& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -183,21 +183,8 @@ ConvSolution PoolingForward2d::GetSolutionImpl(
         const auto& pool_d   = problem.GetPooling();
         const auto wsp_index = pool_d.GetWorkspaceIndexMode();
 
-        int grp_tile0, grp_tile1;
-        if(config)
-        {
-            grp_tile0 = config->local_size0;
-            grp_tile1 = config->local_size1;
-        }
-        else
-        {
-            grp_tile0 = kp.out_width <= 8 ? 8 : (kp.out_width % 32 <= 16 ? 16 : 32);
-            grp_tile1 = kp.out_height <= 8    ? 8
-                        : kp.out_height < 16  ? 16
-                        : kp.out_height <= 32 ? 32
-                        : kp.out_height <= 64 ? 64
-                                              : 128;
-        }
+        int grp_tile0 = config.local_size0;
+        int grp_tile1 = config.local_size1;
         grp_tile1 /= kp.out_pix_tile1;
         while(grp_tile0 * grp_tile1 > 256 && grp_tile0 > 1)
             grp_tile0 >>= 1;

@@ -23,11 +23,9 @@ void PerformanceConfigPooling2d<OpType>::Init(const miopen::pooling::ProblemDesc
 
 template <OperationType OpType>
 void PerformanceConfigPooling2d<OpType>::HeuristicInit(
-    const miopen::pooling::ProblemDescription& problem)
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem)
 {
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-#else
+#if MIOPEN_BACKEND_HIP
     switch(problem.GetXDesc().GetType())
     {
     case miopenHalf:
@@ -50,32 +48,28 @@ bool PerformanceConfigPooling2d<OpType>::SetNextValue(const miopen::pooling::Pro
 #if !MIOPEN_BACKEND_HIP
     return false;
 #else
-    do
+    if constexpr(OpType == OperationType::Backward)
     {
-        if constexpr(OpType == OperationType::Backward)
-        {
-            // tune out_pix_tile0 only for the backward solver
-            if(!NextTwoPower<min_out_pix_tile0, max_out_pix_tile0>(out_pix_tile0))
-                break;
-        }
-        if(!NextTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
-            break;
-        if(!NextTwoPower<min_local_size0, max_local_size0>(local_size0))
-            break;
-        if(!NextTwoPower<min_local_size1, max_local_size1>(local_size1))
-            break;
-        return false;
-    } while(false);
-    return true;
+        // tune out_pix_tile0 only for the backward solver
+        if(!NextTwoPower<min_out_pix_tile0, max_out_pix_tile0>(out_pix_tile0))
+            return true;
+    }
+    if(!NextTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
+        return true;
+    if(!NextTwoPower<min_local_size0, max_local_size0>(local_size0))
+        return true;
+    if(!NextTwoPower<min_local_size1, max_local_size1>(local_size1))
+        return true;
+    return false;
 #endif
 }
 
 template <OperationType OpType>
 bool PerformanceConfigPooling2d<OpType>::IsValid(
-    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+    const ExecutionContext&,
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
     return false;
 #else
     switch(problem.GetXDesc().GetType())
