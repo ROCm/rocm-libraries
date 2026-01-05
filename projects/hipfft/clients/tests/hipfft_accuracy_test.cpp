@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/scope_exit.hpp>
 #include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -100,7 +99,7 @@ TEST_P(accuracy_test, vs_fftw)
         // test tokens (e.g., by using --gtest_also_run_disabled_tests)
         const char* test_suite_name
             = ::testing::UnitTest::GetInstance()->current_test_info()->test_suite_name();
-        if(!symptomatic_tokens.empty() && std::strstr(test_suite_name, "DISABLED") == nullptr
+        if(std::strstr(test_suite_name, "DISABLED") == nullptr
            && std::find(symptomatic_tokens.begin(), symptomatic_tokens.end(), params.token())
                   != symptomatic_tokens.end())
         {
