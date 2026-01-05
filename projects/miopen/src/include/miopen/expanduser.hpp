@@ -34,11 +34,6 @@ namespace miopen {
 
 MIOPEN_INTERNALS_EXPORT fs::path ExpandUser(const fs::path& path);
 
-// Check if a filesystem path is on a networked filesystem
-// Note: For better testability in new code, prefer using the IFilesystemChecker interface
-// (see src/include/miopen/filesystem_checker.hpp) which allows mocking in unit tests
-bool IsNetworkedFilesystem(const fs::path&);
-
 } // namespace miopen
 
 #endif
