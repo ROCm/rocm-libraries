@@ -23,6 +23,7 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_frontend::graph
 {
@@ -566,6 +567,31 @@ public:
         RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_executionPlanDesc->get()),
                                   "Failed to finalize execution plan descriptor");
 
+        return {ErrorCode::OK, ""};
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    Error build(hipdnnHandle_t handle,
+                std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
+                [[maybe_unused]] BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
+                [[maybe_unused]] bool do_multithreaded_builds = false)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        HIPDNN_FE_LOG_INFO("BUILD with handle for graph '{}', policy: {}, modes: [{}]",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name(),
+                           policy,
+                           fmt::join(modes, ", "));
+
+        HIPDNN_CHECK_ERROR(validate());
+        HIPDNN_CHECK_ERROR(build_operation_graph(handle));
+        HIPDNN_CHECK_ERROR(create_execution_plans(modes));
+        HIPDNN_CHECK_ERROR(check_support());
+        HIPDNN_CHECK_ERROR(build_plans());
+
+        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph {}",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name());
         return {ErrorCode::OK, ""};
     }
 
