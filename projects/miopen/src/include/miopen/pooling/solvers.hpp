@@ -67,7 +67,7 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
     static constexpr int min_out_pix_tile0 = 1;
     static constexpr int max_out_pix_tile0 = (OpType == OperationType::Forward) ? 1 : 4;
     static constexpr int min_out_pix_tile1 = 1;
-    static constexpr int max_out_pix_tile1 = (OpType == OperationType::Forward) ? 16 : 4;
+    static constexpr int max_out_pix_tile1 = (OpType == OperationType::Forward) ? 16 : 8;
     static constexpr int min_local_size0   = (OpType == OperationType::Forward) ? 8 : 4;
     static constexpr int max_local_size0   = 32;
     static constexpr int min_local_size1   = (OpType == OperationType::Forward) ? 8 : 4;
@@ -96,7 +96,10 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
 
     void HeuristicInit(const miopen::pooling::ProblemDescription&);
     bool SetNextValue(const miopen::pooling::ProblemDescription&);
-    bool IsValidValue() const;
+    virtual bool IsValidValue(const miopen::pooling::ProblemDescription&) const
+    {
+        throw std::runtime_error("IsValidValue is not implemented for the base struct");
+    }
     bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
     bool operator==(const PerformanceConfigPooling2d& other) const;
 
@@ -116,43 +119,55 @@ private:
 extern template struct PerformanceConfigPooling2d<OperationType::Forward>;
 extern template struct PerformanceConfigPooling2d<OperationType::Backward>;
 
-struct PoolingForward2d final
-    : PoolingTunableSolver<PerformanceConfigPooling2d<OperationType::Forward>>
+struct PerformanceConfigPooling2dForward final
+    : public PerformanceConfigPooling2d<OperationType::Forward>
+{
+    using PerformanceConfigPooling2d<OperationType::Forward>::PerformanceConfigPooling2d;
+
+    bool IsValidValue(const miopen::pooling::ProblemDescription&) const override;
+};
+
+struct PerformanceConfigPooling2dBackward final
+    : public PerformanceConfigPooling2d<OperationType::Backward>
+{
+    using PerformanceConfigPooling2d<OperationType::Backward>::PerformanceConfigPooling2d;
+
+    bool IsValidValue(const miopen::pooling::ProblemDescription&) const override;
+};
+
+struct PoolingForward2d final : PoolingTunableSolver<PerformanceConfigPooling2dForward>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<PoolingForward2d>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::pooling::ProblemDescription& problem) const override;
-    ConvSolution GetSolutionImpl(
-        const ExecutionContext& context,
-        const miopen::pooling::ProblemDescription& problem,
-        const std::optional<PerformanceConfigPooling2d<OperationType::Forward>>& config) const;
+    ConvSolution
+    GetSolutionImpl(const ExecutionContext& context,
+                    const miopen::pooling::ProblemDescription& problem,
+                    const std::optional<PerformanceConfigPooling2dForward>& config) const;
     // This method is added to maintain compatibility with TransposedPoolingFwd2d solver
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::pooling::ProblemDescription& problem) const
     {
         return GetSolutionImpl(context, problem, std::nullopt);
     }
-    ConvSolution
-    GetSolution(const ExecutionContext& context,
-                const miopen::pooling::ProblemDescription& problem,
-                const PerformanceConfigPooling2d<OperationType::Forward>& config) const override
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PerformanceConfigPooling2dForward& config) const override
     {
         return GetSolutionImpl(context, problem, config);
     }
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
-    PerformanceConfigPooling2d<OperationType::Forward>
+    PerformanceConfigPooling2dForward
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::pooling::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(
-        const ExecutionContext&,
-        const miopen::pooling::ProblemDescription&,
-        const PerformanceConfigPooling2d<OperationType::Forward>&) const override;
-    PerformanceConfigPooling2d<OperationType::Forward>
-    Search(const ExecutionContext& context,
-           const miopen::pooling::ProblemDescription& problem,
-           const AnyInvokeParams& invoke_context) const override
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPooling2dForward&) const override;
+    PerformanceConfigPooling2dForward Search(const ExecutionContext& context,
+                                             const miopen::pooling::ProblemDescription& problem,
+                                             const AnyInvokeParams& invoke_context) const override
     {
         return GenericSearch(*this, context, problem, invoke_context);
     }
@@ -237,43 +252,39 @@ struct TransposedPoolingFwdNd final : PoolingFwdNCHWTransposingSolver<PoolingFor
     }
 };
 
-struct PoolingBackward2d final
-    : PoolingTunableSolver<PerformanceConfigPooling2d<OperationType::Backward>>
+struct PoolingBackward2d final : PoolingTunableSolver<PerformanceConfigPooling2dBackward>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<PoolingBackward2d>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::pooling::ProblemDescription& problem) const override;
-    ConvSolution GetSolutionImpl(
-        const ExecutionContext& context,
-        const miopen::pooling::ProblemDescription& problem,
-        const std::optional<PerformanceConfigPooling2d<OperationType::Backward>>& config) const;
+    ConvSolution
+    GetSolutionImpl(const ExecutionContext& context,
+                    const miopen::pooling::ProblemDescription& problem,
+                    const std::optional<PerformanceConfigPooling2dBackward>& config) const;
     // This method is added to maintain compatibility with TransposedPoolingBwd2d solver
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::pooling::ProblemDescription& problem) const
     {
         return GetSolutionImpl(context, problem, std::nullopt);
     }
-    ConvSolution
-    GetSolution(const ExecutionContext& context,
-                const miopen::pooling::ProblemDescription& problem,
-                const PerformanceConfigPooling2d<OperationType::Backward>& config) const override
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PerformanceConfigPooling2dBackward& config) const override
     {
         return GetSolutionImpl(context, problem, config);
     }
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
-    PerformanceConfigPooling2d<OperationType::Backward>
+    PerformanceConfigPooling2dBackward
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::pooling::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(
-        const ExecutionContext&,
-        const miopen::pooling::ProblemDescription&,
-        const PerformanceConfigPooling2d<OperationType::Backward>&) const override;
-    PerformanceConfigPooling2d<OperationType::Backward>
-    Search(const ExecutionContext& context,
-           const miopen::pooling::ProblemDescription& problem,
-           const AnyInvokeParams& invoke_context) const override
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPooling2dBackward&) const override;
+    PerformanceConfigPooling2dBackward Search(const ExecutionContext& context,
+                                              const miopen::pooling::ProblemDescription& problem,
+                                              const AnyInvokeParams& invoke_context) const override
     {
         return GenericSearch(*this, context, problem, invoke_context);
     }
