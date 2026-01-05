@@ -24168,7 +24168,7 @@ HIPBLAS_EXPORT hipblasStatus_t
 
     \details
 
-    The syrkEx functions perform one of the matrix-matrix operations for a symmetric rank-k update:
+    The syrkEx function performs one of the matrix-matrix operations for a symmetric rank-k update:
 
         C := alpha*op( A )*op( A )^T + beta*C
 
@@ -24226,7 +24226,7 @@ HIPBLAS_EXPORT hipblasStatus_t
     @param[in]
     computeType
     [hipDataType]
-              specifies the datatype of computation.
+              specifies the datatype of the computation.
 
     ********************************************************************/
 
@@ -24388,7 +24388,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
 
     \details
 
-    The herkEx functions perform one of the matrix-matrix operations for a Hermitian rank-k update:
+    The herkEx function performs one of the matrix-matrix operations for a Hermitian rank-k update:
 
         C := alpha*op( A )*op( A )^H + beta*C
 
@@ -24398,7 +24398,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
         op( A ) = A, and A is n by k if transA == HIPBLAS_OP_N
         op( A ) = A^H and A is k by n if transA == HIPBLAS_OP_C
 
-    - Supported types are determined by the backend. See rocBLAS/cuBLAS documentation.
+    - Supported types are determined by the backend. See the rocBLAS or cuBLAS documentation.
 
     @param[in]
     handle    [hipblasHandle_t]
@@ -24446,7 +24446,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
     @param[in]
     computeType
     [hipDataType]
-              specifies the datatype of computation.
+              specifies the datatype of the computation.
 
     ********************************************************************/
 
