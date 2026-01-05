@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -70,8 +70,14 @@ typedef enum class _hipblaslt_scaling_format
 
 inline bool isBlockScaling(hipblaslt_scaling_format s)
 {
-    return !(s == hipblaslt_scaling_format::none || s == hipblaslt_scaling_format::Scalar
-             || s == hipblaslt_scaling_format::Vector);
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return true;
+    default:
+        return false;
+    }
 }
 
 inline int blockSize(hipblaslt_scaling_format s)

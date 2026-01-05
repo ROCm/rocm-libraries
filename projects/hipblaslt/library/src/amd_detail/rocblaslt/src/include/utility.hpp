@@ -3,7 +3,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -400,9 +400,14 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
 
 inline bool isBlockScaling(RocblasltContractionProblem::ScalingFormat s)
 {
-    return !(s == RocblasltContractionProblem::ScalingFormat::None
-             || s == RocblasltContractionProblem::ScalingFormat::Scalar
-             || s == RocblasltContractionProblem::ScalingFormat::Vector);
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return true;
+    default:
+        return false;
+    }
 }
 
 inline size_t blockSize(RocblasltContractionProblem::ScalingFormat s)
