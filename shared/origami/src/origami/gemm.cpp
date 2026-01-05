@@ -591,22 +591,10 @@ double compute_memory_latency(const problem_t& problem,
   double H_mem2 = estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor);
 
   // 3) Total loads are loads from A and loads from B
-  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, a_bits);
-  size_t MT_N_rounded_128bytes = round_elements_to_128B(MT_N, a_bits);
-  size_t MT_K_rounded_128bytes = round_elements_to_128B(MT_K, a_bits);
-
-  if (!a_trans && !b_trans) {
-    MT_N_rounded_128bytes = MT_N;
-    MT_K_rounded_128bytes = MT_K;
-  } else if (a_trans && !b_trans) {
-    MT_M_rounded_128bytes = MT_M;
-    MT_N_rounded_128bytes = MT_N;
-  } else if (!a_trans && b_trans) {
-    MT_K_rounded_128bytes = MT_K;
-  }
-
-  size_t Ld_A_value = MT_M_rounded_128bytes * MT_K_rounded_128bytes;
-  size_t Ld_B_value = MT_N_rounded_128bytes * MT_K_rounded_128bytes;
+  size_t Ld_A_value = a_trans ?
+      MT_M * round_elements_to_128B(MT_K, a_bits) : round_elements_to_128B(MT_M, a_bits) * MT_K;
+  size_t Ld_B_value = b_trans ?
+      round_elements_to_128B(MT_N, b_bits) * MT_K : MT_N * round_elements_to_128B(MT_K, b_bits);
   auto Ld_CU_bytes  = (Ld_A_value * a_bytes)    // A Bytes
                      + (Ld_B_value * b_bytes);  // B Bytes
 
