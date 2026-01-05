@@ -254,11 +254,8 @@ void testing_csrcolor(const Arguments& argus)
     int m;
     int k;
     int nnz;
-    if(!generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idxBase))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idxBase));
 
     hipsparseColorInfo_t colorInfo;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateColorInfo(&colorInfo));

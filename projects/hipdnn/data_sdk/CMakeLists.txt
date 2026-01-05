@@ -220,43 +220,4 @@ install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk COMPONENT Development
 )
 
-# =============================================================================
-# Backwards compatibility: Create hipdnn_sdk target and cmake config files
-# This allows the build system to still detect the old hipdnn_sdk target name
-# =============================================================================
-
-# Create hipdnn_sdk as a real INTERFACE library that links to hipdnn_data_sdk
-add_library(hipdnn_sdk INTERFACE)
-target_link_libraries(hipdnn_sdk INTERFACE hipdnn_data_sdk)
-
-# Set up old-style variables for backwards compatibility
-set(HIP_DNN_SDK_INSTALL_INCLUDE_DIR "${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}")
-set(HIP_DNN_SDK_INCLUDE_DIR "${HIP_DNN_DATA_SDK_INCLUDE_DIR}")
-
-# Export hipdnn_sdk target
-export(TARGETS hipdnn_sdk
-       FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkTargets.cmake"
-)
-
-# Install hipdnn_sdk target
-install(TARGETS hipdnn_sdk EXPORT hipdnn_sdk_targets COMPONENT Development)
-
-install(EXPORT hipdnn_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
-        FILE hipdnn_sdkTargets.cmake COMPONENT Development
-)
-
-# Generate old-style config file
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig.cmake.in"
-    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
-    PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR
-              HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
-)
-
-# Install old-style config files
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk COMPONENT Development
-)
-
 add_subdirectory(tests)

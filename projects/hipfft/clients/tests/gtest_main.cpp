@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -218,8 +218,8 @@ void precompile_test_kernels(const std::string& precompile_file)
               << std::accumulate(tokens.begin(),
                                  tokens.end(),
                                  static_cast<size_t>(0),
-                                 [](size_t& acc, const decltype(tokens)::value_type& tok) {
-                                     return acc += tok.second.size();
+                                 [](size_t acc, const decltype(tokens)::value_type& tok) {
+                                     return acc + tok.second.size();
                                  })
               << " tokens...\n";
     EnvironmentSetTemp env_compile_only{"ROCFFT_INTERNAL_COMPILE_ONLY", "1"};
