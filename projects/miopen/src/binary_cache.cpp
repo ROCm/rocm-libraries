@@ -90,8 +90,8 @@ static fs::path ComputeUserCachePath()
 
 namespace {
 // Use pointers to allow resetting for testing
-fs::path* g_user_cache_path = nullptr;
-fs::path* g_sys_cache_path  = nullptr;
+const fs::path* g_user_cache_path = nullptr;
+const fs::path* g_sys_cache_path  = nullptr;
 
 const fs::path& GetUserCachePathInternal()
 {

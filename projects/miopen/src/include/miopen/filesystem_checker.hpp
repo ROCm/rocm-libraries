@@ -1,8 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#ifndef MIOPEN_GUARD_MLOPEN_FILESYSTEM_CHECKER_HPP
-#define MIOPEN_GUARD_MLOPEN_FILESYSTEM_CHECKER_HPP
+#pragma once
 
 #include <miopen/config.hpp>
 #include <miopen/filesystem.hpp>
@@ -37,5 +36,3 @@ MIOPEN_INTERNALS_EXPORT IFilesystemChecker& GetFilesystemChecker();
 MIOPEN_INTERNALS_EXPORT void SetFilesystemChecker(IFilesystemChecker* checker);
 
 } // namespace miopen
-
-#endif

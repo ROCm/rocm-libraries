@@ -115,7 +115,7 @@ std::string GetSystemFindDbSuffix() { return "${MIOPEN_SYSTEM_FIND_DB_SUFFIX}"; 
 
 namespace {
 // Use pointer to allow resetting for testing
-fs::path* g_user_db_path = nullptr;
+const fs::path* g_user_db_path = nullptr;
 
 const fs::path& GetUserDbPathInternal()
 {

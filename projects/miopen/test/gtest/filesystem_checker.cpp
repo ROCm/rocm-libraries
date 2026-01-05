@@ -3,22 +3,16 @@
 
 #include <miopen/filesystem_checker.hpp>
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
+
+using ::testing::_;
+using ::testing::Return;
 
 // Mock implementation of IFilesystemChecker for testing
 class MockFilesystemChecker : public miopen::IFilesystemChecker
 {
 public:
-    // Control the return value for testing
-    bool should_return_networked = false;
-
-    // Track which paths were checked (useful for verification)
-    mutable std::vector<miopen::fs::path> checked_paths;
-
-    bool IsNetworkedFilesystem(const miopen::fs::path& path) const override
-    {
-        checked_paths.push_back(path);
-        return should_return_networked;
-    }
+    MOCK_METHOD(bool, IsNetworkedFilesystem, (const miopen::fs::path& path), (const, override));
 };
 
 // Helper to automatically restore the default checker after tests
@@ -50,44 +44,46 @@ TEST(CPU_FilesystemChecker_NONE, DefaultCheckerWorks)
 TEST(CPU_FilesystemChecker_NONE, MockCheckerCanBeInjected)
 {
     MockFilesystemChecker mock;
-    mock.should_return_networked = true;
+    miopen::fs::path test_path = "/some/test/path";
+
+    // Set expectation: IsNetworkedFilesystem will be called once with test_path and return true
+    EXPECT_CALL(mock, IsNetworkedFilesystem(test_path)).WillOnce(Return(true));
 
     FilesystemCheckerGuard guard(&mock);
 
-    auto& checker              = miopen::GetFilesystemChecker();
-    miopen::fs::path test_path = "/some/test/path";
+    auto& checker = miopen::GetFilesystemChecker();
+    bool result   = checker.IsNetworkedFilesystem(test_path);
 
-    bool result = checker.IsNetworkedFilesystem(test_path);
-
-    // Verify the mock was used
+    // Verify the mock returned the expected value
     EXPECT_TRUE(result);
-    ASSERT_EQ(mock.checked_paths.size(), 1);
-    EXPECT_EQ(mock.checked_paths[0], test_path);
+    // GMock automatically verifies the expectation was met
 }
 
 TEST(CPU_FilesystemChecker_NONE, MockCheckerReturnsNonNetworked)
 {
     MockFilesystemChecker mock;
-    mock.should_return_networked = false;
+    miopen::fs::path test_path = "/another/test/path";
+
+    // Set expectation: IsNetworkedFilesystem will be called once with test_path and return false
+    EXPECT_CALL(mock, IsNetworkedFilesystem(test_path)).WillOnce(Return(false));
 
     FilesystemCheckerGuard guard(&mock);
 
-    auto& checker              = miopen::GetFilesystemChecker();
-    miopen::fs::path test_path = "/another/test/path";
+    auto& checker = miopen::GetFilesystemChecker();
+    bool result   = checker.IsNetworkedFilesystem(test_path);
 
-    bool result = checker.IsNetworkedFilesystem(test_path);
-
-    // Verify the mock returned false
+    // Verify the mock returned the expected value
     EXPECT_FALSE(result);
-    ASSERT_EQ(mock.checked_paths.size(), 1);
-    EXPECT_EQ(mock.checked_paths[0], test_path);
+    // GMock automatically verifies the expectation was met
 }
 
 TEST(CPU_FilesystemChecker_NONE, DefaultCheckerRestoredAfterTest)
 {
     {
         MockFilesystemChecker mock;
-        mock.should_return_networked = true;
+
+        // Set expectation: IsNetworkedFilesystem will be called once and return true
+        EXPECT_CALL(mock, IsNetworkedFilesystem(miopen::fs::path("/test"))).WillOnce(Return(true));
 
         FilesystemCheckerGuard guard(&mock);
 
@@ -105,19 +101,19 @@ TEST(CPU_FilesystemChecker_NONE, DefaultCheckerRestoredAfterTest)
 TEST(CPU_FilesystemChecker_NONE, MultiplePathsCanBeChecked)
 {
     MockFilesystemChecker mock;
-    mock.should_return_networked = true;
+
+    // Set expectations: IsNetworkedFilesystem will be called three times with specific paths
+    EXPECT_CALL(mock, IsNetworkedFilesystem(miopen::fs::path("/path1"))).WillOnce(Return(true));
+    EXPECT_CALL(mock, IsNetworkedFilesystem(miopen::fs::path("/path2"))).WillOnce(Return(false));
+    EXPECT_CALL(mock, IsNetworkedFilesystem(miopen::fs::path("/path3"))).WillOnce(Return(true));
 
     FilesystemCheckerGuard guard(&mock);
 
     auto& checker = miopen::GetFilesystemChecker();
 
-    checker.IsNetworkedFilesystem("/path1");
-    checker.IsNetworkedFilesystem("/path2");
-    checker.IsNetworkedFilesystem("/path3");
+    EXPECT_TRUE(checker.IsNetworkedFilesystem("/path1"));
+    EXPECT_FALSE(checker.IsNetworkedFilesystem("/path2"));
+    EXPECT_TRUE(checker.IsNetworkedFilesystem("/path3"));
 
-    // Verify all paths were checked
-    ASSERT_EQ(mock.checked_paths.size(), 3);
-    EXPECT_EQ(mock.checked_paths[0], "/path1");
-    EXPECT_EQ(mock.checked_paths[1], "/path2");
-    EXPECT_EQ(mock.checked_paths[2], "/path3");
+    // GMock automatically verifies all three expectations were met
 }
