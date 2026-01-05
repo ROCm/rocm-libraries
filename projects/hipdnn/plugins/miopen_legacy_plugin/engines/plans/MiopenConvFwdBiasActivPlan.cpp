@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
@@ -20,22 +20,25 @@ namespace miopen_legacy_plugin
 {
 
 ConvFwdBiasActivParams::ConvFwdBiasActivParams(
-    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
     , _w(miopen_utils::createTensor(tensorMap, convAttr.w_tensor_uid()))
     , _y(miopen_utils::createTensor(tensorMap, activAttr.out_0_tensor_uid()))
 {
-    const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
-    const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
+    using namespace miopen_utils;
 
-    const auto xDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
-    const auto wDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
-    const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(xDims, wDims);
+    const auto& attrX = findTensorAttributes(tensorMap, _x.uid());
+    const auto& attrW = findTensorAttributes(tensorMap, _w.uid());
+
+    const auto xDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+    const auto wDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+    const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(xDims, wDims);
 
     _conv = MiopenConvDescriptor(_spatialDimCount, convAttr, static_cast<int>(groupCount));
 
@@ -43,35 +46,40 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     {
         if(!biasAttr->in_1_tensor_uid().has_value())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "ConvFwdBiasActivParams: biasAttr missing in_1_tensor_uid");
         }
 
         if(biasAttr->in_0_tensor_uid() == convAttr.y_tensor_uid())
         {
-            _bias = miopen_utils::createTensor(tensorMap, biasAttr->in_1_tensor_uid().value());
+            _bias = createTensor(tensorMap, biasAttr->in_1_tensor_uid().value());
         }
         else if(biasAttr->in_1_tensor_uid().value() == convAttr.y_tensor_uid())
         {
-            _bias = miopen_utils::createTensor(tensorMap, biasAttr->in_0_tensor_uid());
+            _bias = createTensor(tensorMap, biasAttr->in_0_tensor_uid());
         }
         else
         {
-            throw hipdnn_plugin::HipdnnPluginException(
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "ConvFwdBiasActivParams: biasAttr tensor UIDs do not match convAttr y_tensor_uid");
         }
     }
 
-    const auto activParams = miopen_utils::mapPointwiseModeToMiopenActivation(activAttr);
-    if(!activParams.has_value())
+    if(activAttr.elu_alpha().has_value() || activAttr.softplus_beta().has_value()
+       || activAttr.swish_beta().has_value() || activAttr.relu_lower_clip_slope().has_value())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "ConvFwdBiasActivParams: Unsupported activation mode in ConvFwdBiasActivParams");
+            "ConvFwdBiasActivParams: Fusion supports only relu, clipped relu "
+            "(relu_upper_clip set), "
+            "or CLAMP "
+            "(relu_upper_clip and relu_lower_clip set)");
     }
-    _activParams = activParams.value();
+
+    HIPDNN_PREPEND_MESSAGE_ON_THROW(_activParams = mapPointwiseModeToMiopenActivation(activAttr),
+                                    "ConvFwdBiasActivParams: ");
 }
 
 const MiopenTensor& ConvFwdBiasActivParams::x() const
@@ -113,7 +121,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(
         &fusePlanDesc, miopenVerticalFusion, _params.x().tensorDescriptor()));
-    _fusePlanDesc = hipdnn_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t>(
+    _fusePlanDesc = hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t>(
         fusePlanDesc, [](miopenFusionPlanDescriptor_t desc) {
             auto status = miopenDestroyFusionPlan(desc);
             if(status != miopenStatusSuccess)
@@ -197,7 +205,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
 {
     miopenOperatorArgs_t fusionArgs;
     THROW_ON_MIOPEN_FAILURE(miopenCreateOperatorArgs(&fusionArgs));
-    auto fusionArgsRes = hipdnn_sdk::utilities::ScopedResource<miopenOperatorArgs_t>(
+    auto fusionArgsRes = hipdnn_data_sdk::utilities::ScopedResource<miopenOperatorArgs_t>(
         fusionArgs, [](miopenOperatorArgs_t args) {
             auto status = miopenDestroyOperatorArgs(args);
             if(status != miopenStatusSuccess)

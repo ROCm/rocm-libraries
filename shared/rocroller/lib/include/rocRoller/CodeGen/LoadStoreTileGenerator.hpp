@@ -110,18 +110,6 @@ namespace rocRoller
                                                    CoordinateGraph::Transformer      coords);
 
             /**
-             * @brief Generate instructions needed to calculate offset and stride information
-             *
-             * @param tag The tag of the node in the control graph
-             * @param load The node in the control graph
-             * @param coords Known coordinates
-             * @return Generator<Instruction>
-             */
-            Generator<Instruction> genComputeIndex(int                               tag,
-                                                   ControlGraph::ComputeIndex const& ci,
-                                                   CoordinateGraph::Transformer      coords);
-
-            /**
              * @brief Information needed in order to load or store a tile.
              *
              * @field tag The tag of the control graph node generating the load or store
@@ -135,25 +123,25 @@ namespace rocRoller
              */
             struct LoadStoreTileInfo
             {
-                int                               tag  = -1;
-                MemoryInstructions::MemoryKind    kind = MemoryInstructions::MemoryKind::Count;
-                uint64_t                          m    = 0;
-                uint64_t                          n    = 0;
-                uint32_t                          elementBits    = 0;
-                uint32_t                          packedAmount   = 0;
-                uint32_t                          ldsWriteStride = 0;
-                Register::ValuePtr                data           = nullptr;
-                VariableType                      varType        = VariableType{DataType::Count};
-                Register::ValuePtr                rowOffsetReg   = nullptr;
-                Register::ValuePtr                rowStrideReg   = nullptr;
-                RegisterExpressionAttributes      rowStrideAttributes;
-                Register::ValuePtr                colStrideReg = nullptr;
-                RegisterExpressionAttributes      colStrideAttributes;
-                Register::ValuePtr                offset           = nullptr;
-                std::shared_ptr<BufferDescriptor> bufDesc          = nullptr;
-                BufferInstructionOptions          bufOpts          = {};
-                bool                              isTransposedTile = false;
-                bool                              isPadded         = false;
+                int                            tag          = -1;
+                MemoryInstructions::MemoryKind kind         = MemoryInstructions::MemoryKind::Count;
+                uint64_t                       m            = 0;
+                uint64_t                       n            = 0;
+                uint32_t                       elementBits  = 0;
+                uint32_t                       packedAmount = 0;
+                uint32_t                       ldsWriteStride = 0;
+                Register::ValuePtr             data           = nullptr;
+                VariableType                   varType        = VariableType{DataType::Count};
+                Register::ValuePtr             rowOffsetReg   = nullptr;
+                Register::ValuePtr             rowStrideReg   = nullptr;
+                RegisterExpressionAttributes   rowStrideAttributes;
+                Register::ValuePtr             colStrideReg = nullptr;
+                RegisterExpressionAttributes   colStrideAttributes;
+                Register::ValuePtr             offset           = nullptr;
+                Register::ValuePtr             bufDesc          = nullptr;
+                BufferInstructionOptions       bufOpts          = {};
+                bool                           isTransposedTile = false;
+                bool                           isPadded         = false;
             };
 
         private:
@@ -166,14 +154,14 @@ namespace rocRoller
                                                    Expression::ExpressionPtr expr) const;
 
             // Index calculation Helpers
-            std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
-            Expression::ExpressionPtr         getOffsetExpr(int  opTag,
-                                                            bool isStorePartOfGlobalToLDS,
-                                                            CoordinateGraph::Transformer const& coords);
-            Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
-                                                        CoordinateGraph::Transformer coords,
-                                                        bool                         preserveOffset,
-                                                        bool isStorePartOfGlobalToLDS = false);
+            Register::ValuePtr        getBufferDesc(int tag);
+            Expression::ExpressionPtr getOffsetExpr(int  opTag,
+                                                    bool isStorePartOfGlobalToLDS,
+                                                    CoordinateGraph::Transformer const& coords);
+            Generator<Instruction>    getOffset(LoadStoreTileInfo&           info,
+                                                CoordinateGraph::Transformer coords,
+                                                bool                         preserveOffset,
+                                                bool isStorePartOfGlobalToLDS = false);
 
             /**
              * @brief Generate stride (in bytes).

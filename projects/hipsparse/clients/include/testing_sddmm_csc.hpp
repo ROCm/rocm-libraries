@@ -185,7 +185,7 @@ void testing_sddmm_csc_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_sddmm_csc(Arguments argus)
+void testing_sddmm_csc(Arguments argus)
 {
 // only csr format supported when using cusparse backend
 #if(!defined(CUDART_VERSION))
@@ -221,11 +221,8 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
 
     // Read or construct CSR matrix
     I nnz = 0;
-    if(!generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base));
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;
@@ -453,8 +450,6 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SDDMM_CSC_HPP

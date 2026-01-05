@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/scope_exit.hpp>
 #include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -53,6 +52,8 @@ static const std::vector<std::string> symptomatic_tokens = {
     "real_forward_len_16384_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_16386_odist_8193_ioffset_0_0_ooffset_0_0",
     "real_forward_len_32768_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_32770_odist_16385_ioffset_0_0_ooffset_0_0",
     "real_forward_len_65536_half_ip_batch_2_istride_1_R_ostride_1_HI_idist_65538_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_65536_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_65538_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_16384_half_ip_batch_2_istride_1_R_ostride_1_HI_idist_16386_odist_8193_ioffset_0_0_ooffset_0_0",
 #endif
     // common  to both backends
 };
@@ -98,7 +99,7 @@ TEST_P(accuracy_test, vs_fftw)
         // test tokens (e.g., by using --gtest_also_run_disabled_tests)
         const char* test_suite_name
             = ::testing::UnitTest::GetInstance()->current_test_info()->test_suite_name();
-        if(!symptomatic_tokens.empty() && std::strstr(test_suite_name, "DISABLED") == nullptr
+        if(std::strstr(test_suite_name, "DISABLED") == nullptr
            && std::find(symptomatic_tokens.begin(), symptomatic_tokens.end(), params.token())
                   != symptomatic_tokens.end())
         {

@@ -3,13 +3,13 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <limits>
 #include <vector>
 
 // using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_data_sdk::data_objects;
 
 constexpr float PI_FLOAT = 3.14159265358979323846f;
 constexpr double PI_DOUBLE = 3.14159265358979323846;

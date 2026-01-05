@@ -226,6 +226,9 @@ try
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(4, y, (y->data_type != x->data_type), rocsparse_status_not_implemented);
 
+    ROCSPARSE_CHECKARG(2, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+
     rocsparse::axpby_t f;
     if(x->data_type == rocsparse_datatype_f16_r || x->data_type == rocsparse_datatype_bf16_r)
     {

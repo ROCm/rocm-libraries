@@ -370,4 +370,14 @@ namespace rocRoller
         return Expression::fromKernelArgument(m_arguments.back());
     }
 
+    void AssemblyKernel::setLaunchTimeOnlyArguments(std::set<std::string> args)
+    {
+        m_launchTimeOnlyArguments = std::move(args);
+    }
+
+    std::set<std::string> const& AssemblyKernel::launchTimeOnlyArguments() const
+    {
+        return m_launchTimeOnlyArguments;
+    }
+
 }

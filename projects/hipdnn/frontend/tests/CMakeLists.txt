@@ -20,7 +20,9 @@ add_executable(
     TestBatchnormBackwardAttributes.cpp
     TestBatchnormBackwardNode.cpp
     TestBatchnormInferenceAttributes.cpp
+    TestBatchnormInferenceAttributesVarianceExt.cpp
     TestBatchnormInferenceNode.cpp
+    TestBatchnormInferenceNodeVarianceExt.cpp
     TestBatchnormNode.cpp
     TestConvolutionDgradAttributes.cpp
     TestConvolutionFwdAttributes.cpp
@@ -33,6 +35,7 @@ add_executable(
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestINode.cpp
+    TestMatmulAttributes.cpp
     TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
@@ -47,13 +50,7 @@ add_executable(
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
-    hipdnn_frontend_tests
-    GTest::gtest
-    GTest::gmock
-    hip::host
-    Threads::Threads
-    hipdnn_sdk
-    hipdnn_frontend
+    hipdnn_frontend_tests GTest::gtest GTest::gmock hip::host Threads::Threads hipdnn_test_sdk
 )
 clang_tidy_check(hipdnn_frontend_tests)
 

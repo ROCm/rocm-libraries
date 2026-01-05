@@ -183,7 +183,7 @@ void testing_sddmm_coo_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_sddmm_coo(Arguments argus)
+void testing_sddmm_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
     I                    m        = argus.M;
@@ -217,11 +217,8 @@ hipsparseStatus_t testing_sddmm_coo(Arguments argus)
 
     // Read or construct CSR matrix
     I nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     std::vector<I> hrow_ind(nnz);
     // Convert to COO
@@ -453,8 +450,6 @@ hipsparseStatus_t testing_sddmm_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SDDMM_COO_HPP

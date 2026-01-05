@@ -46,6 +46,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Random.hpp>
@@ -619,5 +620,192 @@ TEST_CASE("AddStreamK with unroll K", "[streamk][kernel-graph]")
             auto increment  = getUnsignedInt(evaluate(rhs));
             CHECK(increment == unrollK);
         }
+    }
+}
+
+TEST_CASE("AddStreamK scratch policy usage", "[streamk][kernel-graph][scratch]")
+{
+    using namespace rocRoller;
+    using namespace rocRoller::Operations;
+    using namespace KernelGraph;
+    using namespace ControlGraph;
+    using namespace CoordinateGraph;
+
+    auto context = TestContext::ForDefaultTarget();
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
+    auto mode    = StreamKMode::Standard;
+
+    example.setTileSize(128, 256, 8);
+    example.setMFMA(32, 32, 2, 1);
+    example.setUseLDS(false, false, false);
+    example.setPrefetch(false, 0, 0, false);
+    example.setStreamK(mode);
+
+    auto numWGs     = example.getFlattenedWorkgroupSize();
+    auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
+
+    auto kgraph = example.getKernelGraph();
+    auto params = example.getCommandParameters();
+
+    // Apply transforms including AddStreamK
+    std::vector<GraphTransformPtr> transforms;
+    transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+    transforms.push_back(std::make_shared<OrderMemory>(false));
+    transforms.push_back(std::make_shared<UpdateParameters>(params));
+    transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+    transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+    transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+    transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+    transforms.push_back(std::make_shared<Simplify>());
+    transforms.push_back(std::make_shared<FuseExpressions>());
+    transforms.push_back(std::make_shared<AddStreamK>(
+        context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+    transforms.push_back(std::make_shared<ConnectWorkgroups>(context.get()));
+
+    for(auto& t : transforms)
+        kgraph = kgraph.transform(t);
+
+    SECTION("Tile data uses None policy")
+    {
+        // After AddStreamK, the None policy should have non-zero scratch allocation
+        // (used for tile data exchange between workgroups)
+        auto amountNone = context->getScratchAmount(ScratchPolicy::None);
+        auto valueNone  = Expression::evaluate(amountNone);
+        // Tile data scratch should be allocated
+        CHECK(getUnsignedInt(valueNone) > 0);
+    }
+
+    SECTION("Flags use ZeroedBeforeAndAfter policy")
+    {
+        // After AddStreamK, the ZeroedBeforeAndAfter policy should have non-zero scratch
+        // allocation (used for synchronization flags that must be zeroed before/after kernel)
+        auto amountZeroed = context->getScratchAmount(ScratchPolicy::ZeroedBeforeAndAfter);
+        auto valueZeroed  = Expression::evaluate(amountZeroed);
+        // Flags scratch should be allocated for sync purposes
+        CHECK(getUnsignedInt(valueZeroed) > 0);
+    }
+
+    SECTION("Different policies have different allocations")
+    {
+        auto amountNone   = context->getScratchAmount(ScratchPolicy::None);
+        auto amountZeroed = context->getScratchAmount(ScratchPolicy::ZeroedBeforeAndAfter);
+
+        auto valueNone   = Expression::evaluate(amountNone);
+        auto valueZeroed = Expression::evaluate(amountZeroed);
+
+        // Both should have allocations, but they should be independent
+        // (flags are typically smaller - one uint32 per WG, while tile data is larger)
+        CHECK(getUnsignedInt(valueNone) > 0);
+        CHECK(getUnsignedInt(valueZeroed) > 0);
+        // Tile data should typically be larger than flags
+        CHECK(getUnsignedInt(valueNone) > getUnsignedInt(valueZeroed));
+    }
+
+    SECTION("Only has one scratch coordinate for tile data")
+    {
+
+        auto findScratchNone = [&](int tag) {
+            auto maybeUser = kgraph.coordinates.get<User>(tag);
+            if(!maybeUser)
+                return false;
+            return maybeUser->argumentName == getScratchName(ScratchPolicy::None);
+        };
+
+        auto scratchNoneCoordinates
+            = kgraph.coordinates.findElements(findScratchNone).to<std::vector>();
+        CHECK(scratchNoneCoordinates.size() == 1);
+    }
+
+    SECTION("Load, store, and reset flags scratch space correctly")
+    {
+        auto findScratchZeroed = [&](int tag) {
+            auto maybeUser = kgraph.coordinates.get<User>(tag);
+            if(!maybeUser)
+                return false;
+            return maybeUser->argumentName == getScratchName(ScratchPolicy::ZeroedBeforeAndAfter);
+        };
+
+        auto scratchZeroedCoordinates
+            = kgraph.coordinates.findElements(findScratchZeroed).to<std::vector>();
+        CHECK(scratchZeroedCoordinates.size() == 2);
+
+        // Verify the reset flags coordinate connects to the original flags coordinate via a duplicate edge
+        auto resetFlagsCoordinate = -1, originalFlagsCoordinate = -1;
+        for(const auto& tag : scratchZeroedCoordinates)
+        {
+            // Duplicate edge connects the reset flags coordinate to the original flags coordinate
+            auto isDuplicate = isEdge<Duplicate>;
+            auto outDuplicates
+                = kgraph.coordinates.getOutputNodeIndices(tag, isDuplicate).to<std::vector>();
+
+            CHECK((outDuplicates.size() == 1 || outDuplicates.empty()));
+            if(outDuplicates.size() == 1)
+            {
+                resetFlagsCoordinate    = tag;
+                originalFlagsCoordinate = outDuplicates[0];
+            }
+        }
+        CHECK(resetFlagsCoordinate != -1);
+        CHECK(originalFlagsCoordinate != -1);
+
+        // Duplicate coordinate should have a higher tag than the original flags coordinate
+        CHECK(resetFlagsCoordinate > originalFlagsCoordinate);
+
+        // Verify the graph of flags scratch coordinates matches AddStreamK implementation
+        auto isPassThroughEdge = isEdge<PassThrough>;
+        auto isJoinEdge        = isEdge<Join>;
+        auto isSplitEdge       = isEdge<Split>;
+        auto maybeNextWorkgroupTag
+            = kgraph.coordinates.getOutputNodeIndices(originalFlagsCoordinate, isPassThroughEdge)
+                  .to<std::vector>();
+        CHECK(maybeNextWorkgroupTag.size() == 1);
+        auto nextWorkgroupTag = maybeNextWorkgroupTag[0];
+        auto maybeSplit = kgraph.coordinates.getOutputNodeIndices(nextWorkgroupTag, isSplitEdge)
+                              .to<std::vector>();
+        CHECK(maybeSplit.size() == 3);
+        auto maybeResetNextWorkgroupTag0
+            = kgraph.coordinates.getOutputNodeIndices(maybeSplit[0], isJoinEdge).to<std::vector>();
+        auto maybeResetNextWorkgroupTag1
+            = kgraph.coordinates.getOutputNodeIndices(maybeSplit[1], isJoinEdge).to<std::vector>();
+        auto maybeResetNextWorkgroupTag2
+            = kgraph.coordinates.getOutputNodeIndices(maybeSplit[2], isJoinEdge).to<std::vector>();
+        CHECK(maybeResetNextWorkgroupTag0.size() == 1);
+        CHECK(maybeResetNextWorkgroupTag1.size() == 1);
+        CHECK(maybeResetNextWorkgroupTag2.size() == 1);
+        CHECK(maybeResetNextWorkgroupTag0[0] == maybeResetNextWorkgroupTag1[0]);
+        CHECK(maybeResetNextWorkgroupTag1[0] == maybeResetNextWorkgroupTag2[0]);
+        auto maybeResetFlagsCoordinate
+            = kgraph.coordinates
+                  .getOutputNodeIndices(maybeResetNextWorkgroupTag0[0], isPassThroughEdge)
+                  .to<std::vector>();
+        CHECK(maybeResetFlagsCoordinate.size() == 1);
+        CHECK(maybeResetFlagsCoordinate[0] == resetFlagsCoordinate);
+
+        // Verify there are two store flags operations
+        auto storeFlagsOps
+            = kgraph.control.findElements(kgraph.control.isElemType<StoreSGPR>()).to<std::vector>();
+        CHECK(storeFlagsOps.size() == 2);
+
+        // Verify one StoreSGPR is stores the flags and the other resets the flags
+        auto storeFlagsTag = -1, resetFlagsTag = -1;
+        for(auto const tag : storeFlagsOps)
+        {
+            auto flagCoordinateTag = kgraph.mapper.get<User>(tag);
+            if(flagCoordinateTag == resetFlagsCoordinate)
+            {
+                resetFlagsTag = tag;
+            }
+            else
+            {
+                storeFlagsTag = tag;
+            }
+        }
+        CHECK(storeFlagsTag != -1);
+        CHECK(resetFlagsTag != -1);
+
+        // Verify the reset flags happens after the store flags
+        auto order
+            = kgraph.control.compareNodes(rocRoller::UpdateCache, storeFlagsTag, resetFlagsTag);
+        CHECK(order == NodeOrdering::LeftFirst);
     }
 }

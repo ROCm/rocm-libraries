@@ -32,41 +32,19 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename ScanByKeyConfig, typename, typename>
-struct wrapped_scan_by_key_config
+template<class Key, class Value>
+struct scan_by_key_config_selector
 {
-    static_assert(std::is_same<typename ScanByKeyConfig::tag, scan_by_key_config_tag>::value,
-                  "Config must be a specialization of struct template scan_by_key_config");
+    using targets    = scan_by_key_targets;
+    using param_type = scan_by_key_config_params;
 
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr scan_by_key_config_params params = ScanByKeyConfig{};
-    };
+    param_type params;
+
+    template<class Target>
+    constexpr scan_by_key_config_selector(Target)
+        : params(scan_by_key_config_picker<Target, Key, Value>())
+    {}
 };
-
-template<typename Key, typename Value>
-struct wrapped_scan_by_key_config<default_config, Key, Value>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr scan_by_key_config_params params
-            = default_scan_by_key_config<static_cast<unsigned int>(Arch), Key, Value>{};
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename ScanByKeyConfig, typename Key, typename Value>
-template<target_arch Arch>
-constexpr scan_by_key_config_params
-    wrapped_scan_by_key_config<ScanByKeyConfig, Key, Value>::architecture_config<Arch>::params;
-
-template<typename Key, typename Value>
-template<target_arch Arch>
-constexpr scan_by_key_config_params
-    wrapped_scan_by_key_config<default_config, Key, Value>::architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // namespace detail
 
