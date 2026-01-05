@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <math.h>
 #include <stdexcept>
@@ -27,6 +26,7 @@
 
 #include "../../shared/rocfft_accuracy_test.h"
 
+#include "../../shared/CLI11.hpp"
 #include "../../shared/client_except.h"
 #include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
@@ -35,6 +35,22 @@
 #include "rocfft/rocfft.h"
 
 extern std::string mp_launch;
+struct user_mp_launch_command
+{
+    std::string              exe;
+    std::vector<std::string> user_mp_argv;
+};
+static user_mp_launch_command get_mp_launch_command()
+{
+    user_mp_launch_command ret;
+    CLI::App               command_splitter;
+    command_splitter.allow_extras();
+    command_splitter.parse(mp_launch);
+    ret.user_mp_argv = command_splitter.remaining();
+    ret.exe          = ret.user_mp_argv.front();
+    ret.user_mp_argv.erase(ret.user_mp_argv.begin());
+    return ret;
+}
 
 extern last_cpu_fft_cache last_cpu_fft_data;
 
@@ -108,22 +124,13 @@ TEST_P(accuracy_test, vs_fftw)
     case fft_params::fft_mp_lib_mpi:
     {
         // Multi-proc FFT.
-        // Split launcher into tokens since the first one is the exe
-        // and the remainder is the start of its argv
-        boost::escaped_list_separator<char>                   sep('\\', ' ', '\"');
-        boost::tokenizer<boost::escaped_list_separator<char>> tokenizer(mp_launch, sep);
-        std::string                                           exe;
-        std::vector<std::string>                              argv;
-        for(auto t : tokenizer)
-        {
-            if(t.empty())
-                continue;
+        static const auto mp_launch_command = get_mp_launch_command();
 
-            if(exe.empty())
-                exe = t;
-            else
-                argv.push_back(t);
-        }
+        if(mp_launch_command.exe.empty())
+            GTEST_FAIL() << "Required multi-process executable to launch was omitted "
+                            "(\"--mp_launch\" option)";
+        auto argv = mp_launch_command.user_mp_argv;
+
         // append test token and ask for accuracy test
         argv.push_back("--token");
         argv.push_back(testcase_token);
@@ -131,7 +138,7 @@ TEST_P(accuracy_test, vs_fftw)
 
         // throws an exception if launch fails or if subprocess
         // returns nonzero exit code
-        execute_subprocess(exe, argv, {});
+        execute_subprocess(mp_launch_command.exe, argv, {});
         break;
     }
     default:
