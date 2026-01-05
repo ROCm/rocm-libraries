@@ -30,6 +30,8 @@
 #include "kernel_type.hpp"
 #include "solution_selection.hpp"
 
+#include <optional>
+
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 
@@ -122,13 +124,13 @@ std::shared_ptr<SolutionParameters>
  * @param workgroupSizeX Workgroup size in X dimension
  * @param workgroupSizeY Workgroup size in Y dimension
  * @param preSwizzleTileSize Pre-swizzle tile configuration {tileMN, tileK, subTileK}, or empty if no pre-swizzle
- * @return Selected swizzle tile MN size, or -1 if no valid size found
+ * @return Selected swizzle tile MN size, or std::nullopt if no valid size found
  */
-inline int selectSwizzleTileMN(const WorkGroupTileSize&      workgroupTile,
-                               const MachineInstructionSize& mi,
-                               int                           workgroupSizeX,
-                               int                           workgroupSizeY,
-                               const std::vector<size_t>&    preSwizzleTileSize)
+inline std::optional<int> selectSwizzleTileMN(const WorkGroupTileSize&      workgroupTile,
+                                              const MachineInstructionSize& mi,
+                                              int                           workgroupSizeX,
+                                              int                           workgroupSizeY,
+                                              const std::vector<size_t>&    preSwizzleTileSize)
 {
     // For pre-swizzled data, return tileMN from preSwizzleTileSize
     if(preSwizzleTileSize.size() == 3)
@@ -139,7 +141,7 @@ inline int selectSwizzleTileMN(const WorkGroupTileSize&      workgroupTile,
     // Validate inputs
     if(mi.m <= 0 || mi.n <= 0 || workgroupSizeX <= 0 || workgroupSizeY <= 0)
     {
-        return 0;
+        return std::nullopt;
     }
 
     // Number of waves: {workgroupSizeX / 64, workgroupSizeY}
@@ -149,7 +151,7 @@ inline int selectSwizzleTileMN(const WorkGroupTileSize&      workgroupTile,
 
     if(numWavesX <= 0 || numWavesY <= 0)
     {
-        return 0;
+        return std::nullopt;
     }
 
     // Compute number of tiles per wave in M and N dimensions
@@ -180,7 +182,7 @@ inline int selectSwizzleTileMN(const WorkGroupTileSize&      workgroupTile,
 
     if(validSwizzleTileMN.empty())
     {
-        return 0; // Error: no valid swizzle tile size
+        return std::nullopt; // Error: no valid swizzle tile size
     }
 
     // If both 32 and 64 are valid, prefer 64
@@ -199,14 +201,14 @@ inline int selectSwizzleTileMN(const WorkGroupTileSize&      workgroupTile,
  * @param scaleBlockSize Scale block size (e.g., 32)
  * @param swizzleTileMN The selected swizzle tile MN value
  * @param preSwizzleTileSize Pre-swizzle tile configuration {tileMN, tileK, subTileK}, or empty if no pre-swizzle
- * @return Selected swizzle tile K size, or -1 if no valid size found
+ * @return Selected swizzle tile K size, or std::nullopt if no valid size found
  */
-inline int selectSwizzleTileK(const WorkGroupTileSize&      workgroupTile,
-                              const MachineInstructionSize& mi,
-                              int                           unroll,
-                              int                           scaleBlockSize,
-                              int                           swizzleTileMN,
-                              const std::vector<size_t>&    preSwizzleTileSize)
+inline std::optional<int> selectSwizzleTileK(const WorkGroupTileSize&      workgroupTile,
+                                             const MachineInstructionSize& mi,
+                                             int                           unroll,
+                                             int                           scaleBlockSize,
+                                             int                           swizzleTileMN,
+                                             const std::vector<size_t>&    preSwizzleTileSize)
 {
     // For pre-swizzled data, return tileK from preSwizzleTileSize
     if(preSwizzleTileSize.size() == 3)
@@ -214,19 +216,19 @@ inline int selectSwizzleTileK(const WorkGroupTileSize&      workgroupTile,
         if(swizzleTileMN == 32)
             return 8;
         else
-            return 0;
+            return std::nullopt;
     }
 
     // Validate inputs
     if(mi.k <= 0 || scaleBlockSize <= 0 || unroll <= 0)
     {
-        return 0;
+        return std::nullopt;
     }
 
     int miKScale = mi.k / scaleBlockSize;
     if(miKScale <= 0)
     {
-        return 0;
+        return std::nullopt;
     }
 
     // Compute number of K tiles per wave
@@ -251,7 +253,7 @@ inline int selectSwizzleTileK(const WorkGroupTileSize&      workgroupTile,
 
     if(validSwizzleTileK.empty())
     {
-        return 0; // Error: no valid swizzle tile K size
+        return std::nullopt; // Error: no valid swizzle tile K size
     }
 
     return validSwizzleTileK.back();
@@ -270,7 +272,7 @@ inline int selectSwizzleTileK(const WorkGroupTileSize&      workgroupTile,
  * @param unroll Unroll factor (prefetchInFlight)
  * @param scaleBlockSize Scale block size (e.g., 32)
  * @param preSwizzleTileSize Pre-swizzle tile configuration {tileMN, tileK, subTileK}, or empty if no pre-swizzle
- * @return SwizzleTileSize with valid values, or all -1 if no valid size found
+ * @return SwizzleTileSize with valid values, or all 0 if no valid size found
  */
 inline SwizzleTileSize selectSwizzleTileSize(const WorkGroupTileSize&      workgroupTile,
                                              const MachineInstructionSize& mi,
@@ -282,25 +284,25 @@ inline SwizzleTileSize selectSwizzleTileSize(const WorkGroupTileSize&      workg
 {
     SwizzleTileSize result = {0, 0, 0, 0};
 
-    int swizzleTileMN = selectSwizzleTileMN(
+    auto swizzleTileMN = selectSwizzleTileMN(
         workgroupTile, mi, workgroupSizeX, workgroupSizeY, preSwizzleTileSize);
-    if(swizzleTileMN < 0)
+    if(!swizzleTileMN.has_value())
     {
         return result;
     }
 
-    int swizzleTileK = selectSwizzleTileK(
-        workgroupTile, mi, unroll, scaleBlockSize, swizzleTileMN, preSwizzleTileSize);
-    if(swizzleTileK < 0)
+    auto swizzleTileK = selectSwizzleTileK(
+        workgroupTile, mi, unroll, scaleBlockSize, swizzleTileMN.value(), preSwizzleTileSize);
+    if(!swizzleTileK.has_value())
     {
         return result;
     }
 
     // Set symmetric swizzle tile (m == n, k == l)
-    result.m = swizzleTileMN;
-    result.k = swizzleTileK;
-    result.n = swizzleTileMN;
-    result.l = swizzleTileK;
+    result.m = swizzleTileMN.value();
+    result.k = swizzleTileK.value();
+    result.n = swizzleTileMN.value();
+    result.l = swizzleTileK.value();
 
     return result;
 }

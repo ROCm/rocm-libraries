@@ -66,7 +66,7 @@ struct MachineInstructionSize
  * Uses {m, k, n, l} order to match rocRoller's MKNLTuple.
  *
  * Constraints:
- * - Now only supports m == n && k == l.
+ * - Currently only supports m == n && k == l because the kernel assumes the swizzle tile size is the same for matrix A and matrix B.
  * - The swizzle tile size has to be compatible with the pre-swizzled scale data when using pre-swizzled scale data.
  */
 struct SwizzleTileSize
