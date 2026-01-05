@@ -28,6 +28,15 @@
 #include "rocblas.h"
 #include "rocblas_vector.hpp"
 #include <cstdio>
+
+// Diagnostic: Print HIP version at compile time
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+#ifdef HIP_VERSION
+#pragma message("client_utility.hpp: Compiling with HIP_VERSION = " TOSTRING(HIP_VERSION))
+#else
+#pragma message("client_utility.hpp: HIP_VERSION not defined!")
+#endif
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -146,14 +155,17 @@ public:
 
     void pre_test(const Arguments& arg)
     {
-#if HIP_VERSION >= 50500000
+#if HIP_VERSION >= 50200000  // hipMallocAsync available since HIP 5.2
+#pragma message("client_utility.hpp: Graph capture support ENABLED (HIP >= 5.2.0)")
         arg.graph_test ? rocblas_stream_begin_capture() : NOOP;
+#else
+#pragma message("client_utility.hpp: Graph capture support DISABLED (HIP < 5.2.0)")
 #endif
     }
 
     void post_test(const Arguments& arg)
     {
-#if HIP_VERSION >= 50500000
+#if HIP_VERSION >= 50200000  // hipMallocAsync available since HIP 5.2
         arg.graph_test ? rocblas_stream_end_capture() : NOOP;
 #endif
     }
