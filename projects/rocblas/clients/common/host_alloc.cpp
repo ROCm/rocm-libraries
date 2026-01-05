@@ -62,11 +62,11 @@ void free_ptr_use(void* ptr, bool call_free)
     {
         if(it == mem_allocated.end() && call_free)
         {
-            rocblas_cerr << "WARNING: Freeing untracked pointer " << ptr 
-                        << " (potential double-free or memory corruption)" << std::endl;
+            rocblas_cerr << "WARNING: Freeing untracked pointer " << ptr
+                         << " (potential double-free or memory corruption)" << std::endl;
         }
     }
-    
+
     if(ptr && it != mem_allocated.end())
     {
         mem_used -= it->second;
