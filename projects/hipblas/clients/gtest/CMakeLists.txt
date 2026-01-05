@@ -169,8 +169,8 @@ else( )
   target_link_libraries( hipblas-test PRIVATE ${CUDA_LIBRARIES} )
 endif( )
 
-if (WIN32)
-# for now adding in all .dll as dependency chain is not cmake based on win32
+if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
+  # for now adding in all .dll as dependency chain is not cmake based on win32
   file( GLOB third_party_dlls
     LIST_DIRECTORIES OFF
     CONFIGURE_DEPENDS

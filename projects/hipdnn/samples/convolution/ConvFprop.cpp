@@ -18,7 +18,7 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
@@ -103,6 +103,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     }
     std::cout << '\n';
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation...\n";
@@ -121,9 +123,12 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+
+        validationPassed = yValid;
     }
 
     std::cout << "Convolution fprop graph execution complete for " << inputType << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -136,9 +141,18 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All convolution fprop runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All convolution fprop runs completed successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout << "One or more convolution fprop runs failed validation.\n";
+        return 1;
+    }
 }

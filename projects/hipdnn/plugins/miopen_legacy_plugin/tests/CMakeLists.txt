@@ -12,6 +12,7 @@ endif()
 
 add_executable(
     miopen_legacy_plugin_tests
+    engines/plans/TestMiopenBatchnormApplicabilityChecks.cpp
     engines/plans/TestMiopenBatchnormBwdPlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
     engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp

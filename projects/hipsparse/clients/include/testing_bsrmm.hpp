@@ -444,11 +444,8 @@ void testing_bsrmm(const Arguments& argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, k, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, k, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base));
 
     // m and k can be modifed if we read in a matrix from a file
     int mb = (m + block_dim - 1) / block_dim;
