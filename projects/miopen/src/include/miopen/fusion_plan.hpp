@@ -88,7 +88,7 @@ struct MIOPEN_INTERNALS_EXPORT FusionPlanDescriptor : miopenFusionPlanDescriptor
     miopenDataType_t data_type;
     std::vector<Exec_arg_t> arg_list;
 
-    std::optional<std::pair<solver::Id, Invoker>> compiled_invoker;
+    std::optional<std::pair<size_t, Invoker>> compiled_invoker;
     std::optional<miopenConvFwdAlgorithm_t> conv_fwd_algo;
 };
 

@@ -1004,7 +1004,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const FusionContext& ctx,
 
 } // namespace
 
-miopenStatus_t FusionPlanDescriptor::GetWorkspaceSizeImmed(const Handle& handle,
+miopenStatus_t FusionPlanDescriptor::GetWorkspaceSizeImmed(const Handle& /*handle*/,
                                                            size_t& workSpaceSize,
                                                            miopenConvFwdAlgorithm_t /*algo*/)
 {
@@ -1016,14 +1016,7 @@ miopenStatus_t FusionPlanDescriptor::GetWorkspaceSizeImmed(const Handle& handle,
             "GetWorkspaceSizeImmed was called, but The Fusion Plan was not compiled successfully");
     }
 
-    workSpaceSize = 0;
-
-    const auto ctx             = FusionContext{handle};
-    const auto& fusion_problem = FusionDescription{this};
-
-    GetAllFusionSolvers().FindById(compiled_invoker->first, [&](auto solver) {
-        workSpaceSize = solver.GetWorkspaceSize(ctx, fusion_problem);
-    });
+    workSpaceSize = compiled_invoker->first;
 
     return miopenStatusSuccess;
 }
@@ -1043,7 +1036,21 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     {
         auto id_str = handle.GetFound1_0SolverId(network_config, AlgorithmName{"fusion"});
         // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
-        compiled_invoker = std::make_pair(solver::Id(*id_str), std::move(*cached_invoker));
+        size_t reqWorkSpaceSize = 0;
+        bool found              = false;
+        const auto ctx          = FusionContext{handle};
+        GetAllFusionSolvers().FindById(solver::Id(*id_str), [&](auto solver) {
+            reqWorkSpaceSize = solver.GetWorkspaceSize(ctx, fusion_problem);
+            found            = true;
+        });
+
+        if(!found)
+        {
+            MIOPEN_LOG_E("Cached solver id is not valid anymore: " << *id_str);
+            return miopenStatusInternalError;
+        }
+
+        compiled_invoker = std::make_pair(reqWorkSpaceSize, std::move(*cached_invoker));
         return miopenStatusSuccess;
     }
 
@@ -1141,7 +1148,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         handle.RegisterInvoker(*invoker, network_config, id.ToString());
         handle.SetAsFound1_0(network_config, AlgorithmName{"fusion"}, id.ToString());
 
-        compiled_invoker = std::make_pair(id, std::move(*invoker));
+        compiled_invoker = std::make_pair(result.GetWorkspaceSize(), std::move(*invoker));
 
         MIOPEN_LOG_I2(miopen::ConvolutionAlgoToString(algorithm));
 
