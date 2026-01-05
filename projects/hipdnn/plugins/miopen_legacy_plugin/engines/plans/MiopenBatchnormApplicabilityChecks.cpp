@@ -148,28 +148,11 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
         return;
     }
 
-    // Tensors are layout-agnostic if they have at most one non-trivial dimension.
-    // This includes:
-    // - Degenerate tensors (all dims=1): scalars like epsilon
-    // - Channel-only/derived tensors (dims like {1, C, 1, 1}): scale, bias, mean, variance
-    // For these tensors, the stride order is ambiguous and doesn't affect memory access patterns.
-    auto isLayoutAgnostic = [](const BatchnormTensorDescriptor& tensor) {
-        size_t nonTrivialDims = 0;
-        for(const auto dim : tensor.dims)
-        {
-            if(dim > 1)
-            {
-                ++nonTrivialDims;
-            }
-        }
-        return nonTrivialDims <= 1;
-    };
-
     // Use first tensor with meaningful layout as reference
     int64_t referenceIndex = -1;
     for(size_t i = 0; i < tensors.size(); ++i)
     {
-        if(isLayoutAgnostic(tensors[i]))
+        if(hipdnn_data_sdk::utilities::isLayoutAgnostic(tensors[i].dims))
         {
             continue;
         }
