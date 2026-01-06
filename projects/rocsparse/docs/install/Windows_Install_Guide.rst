@@ -159,6 +159,10 @@ The following table lists the common ways to use ``rmake.py`` to build the rocSP
 
    You can run ``rmake.py`` from the ``projects\rocsparse`` directory.
 
+   When rocBLAS is specifically requested, it's considered a mandatory requirement.
+   To opt out of using rocBLAS when building from source with
+   the ``rmake.py`` script, use the ``no-rocblas`` option. 
+
 .. csv-table::
    :header: "Command","Description"
    :widths: 40, 90
