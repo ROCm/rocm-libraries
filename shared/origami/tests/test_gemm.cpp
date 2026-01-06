@@ -682,7 +682,7 @@ TEST_CASE("GEMM: compute_mem_bw_from_occupancy unit test", "[gemm]") {
       else if (gpu_arch == 950)
         hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
 
-      // Test 3: Verify calculation correctness (TODO)
+      // Test 4: Verify calculation correctness (TODO)
     }
   }
 }
@@ -762,7 +762,7 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
           .batch           = 1,
           .a_transpose     = origami::transpose_t::N,
           .b_transpose     = origami::transpose_t::T,
-          .a_dtype         = origami::data_type_t::Float,  // element_size_A = 32
+          .a_dtype         = origami::data_type_t::Float,
           .b_dtype         = origami::data_type_t::Float,
           .mi_dtype        = origami::data_type_t::Float,
           .a_mx_block_size = 0,
@@ -880,6 +880,10 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
         REQUIRE(result_different_data_type == true);
 
         result_different_data_type = origami::check_lds_capacity(
+            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
+        REQUIRE(result_different_data_type == false);
+
+        result_different_data_type = origami::check_lds_capacity(
             hardware, {128, 128, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
         REQUIRE(result_different_data_type == true);
 
@@ -930,6 +934,10 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
         auto result_different_data_type = origami::check_lds_capacity(
             hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
         REQUIRE(result_different_data_type == true);
+
+        result_different_data_type = origami::check_lds_capacity(
+            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
+        REQUIRE(result_different_data_type == false);
 
         result_different_data_type = origami::check_lds_capacity(
             hardware, {256, 256, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);

@@ -240,7 +240,7 @@ TEST_CASE("origami: negative_occupancy", "[origami]") {
           .batch           = 1,
           .a_transpose     = origami::transpose_t::N,
           .b_transpose     = origami::transpose_t::T,
-          .a_dtype         = origami::data_type_t::XFloat32,  // element_size_A = 32
+          .a_dtype         = origami::data_type_t::XFloat32,
           .b_dtype         = origami::data_type_t::XFloat32,
           .mi_dtype        = origami::data_type_t::XFloat32,
           .a_mx_block_size = 0,
