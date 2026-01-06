@@ -58,8 +58,8 @@ namespace
             instPosition.clear();
             instructions.clear();
 
-            // Use shared buildUseDefChain to populate inst->sources and inst->users
-            buildUseDefChain(bb);
+            // Use-def chains are already built by OptimizationPipeline
+            // inst->sources and inst->users are ready to use
 
             // Build instruction position map for ordering queries
             IRList& irList = bb.getIR();

@@ -29,6 +29,7 @@
 #include <unordered_set>
 
 #include "ErrorHandling.hpp"
+#include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/IRParser.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
@@ -234,6 +235,10 @@ namespace stinkytofu
     void PassManager::run()
     {
         Function& func = passCtx.getFunction();
+
+        // Build use-def chains once before running passes
+        // TODO: Remove this once all IR generation uses automatic builder setters
+        buildUseDefChain(func);
 
         for(const auto& pass : passes)
         {

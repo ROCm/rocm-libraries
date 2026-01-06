@@ -459,6 +459,35 @@ namespace stinkytofu
                   bool               printDetails = false,
                   const std::string& prefix       = "") const;
 
+        //----------------------------------------------------------------------
+        // Automatic Use-Def Chain Maintenance (LLVM-style)
+        //----------------------------------------------------------------------
+        // These methods automatically maintain use-def chains when operands change.
+        // Following LLVM/MLIR design: mutation methods are on the Instruction itself,
+        // not on the builder.
+        //
+        // Usage:
+        //   auto* inst = builder.createStinkyInstBefore(pos, mcid);
+        //   inst->setSrcRegs({v1, v2});   // Automatically links to v1/v2 definitions
+        //   inst->setDestRegs({v0});      // Automatically tracks v0 users
+        //
+        // Performance: O(R) where R = number of registers (typically 2-4)
+        //              Much faster than O(N) full buildUseDefChain() scan
+
+        /// Set source registers and automatically update use-def chains.
+        /// Removes old use-def links and establishes new ones.
+        void setSrcRegs(const std::vector<StinkyRegister>& srcRegs);
+
+        /// Set destination registers and automatically update use-def chains.
+        /// Removes old use-def links and establishes new ones for users.
+        void setDestRegs(const std::vector<StinkyRegister>& destRegs);
+
+        /// Add a single source register and update use-def chain.
+        void addSrcReg(const StinkyRegister& srcReg);
+
+        /// Add a single destination register and update use-def chain.
+        void addDestReg(const StinkyRegister& destReg);
+
         /**
          * @brief Clone this instruction (deep copy)
          *
@@ -604,6 +633,27 @@ namespace stinkytofu
             }
         }
 
+    private:
+        //----------------------------------------------------------------------
+        // Use-Def Chain Maintenance Helpers
+        //----------------------------------------------------------------------
+        /// Update this->sources by scanning backwards for register definitions.
+        /// Only updates for the registers currently in srcRegs.
+        void updateSourcesForInst();
+
+        /// Update use-def chains for all instructions that use the registers
+        /// defined by this instruction. Scans forward to find users.
+        void updateUsersForInst();
+
+        /// Remove this instruction from all its sources' user lists.
+        void unlinkFromSources();
+
+        /// Remove this instruction from all its users' source lists.
+        void unlinkFromUsers();
+
+        // Allow builder to call private unlink methods during erase()
+        friend class StinkyInstIRBuilder;
+
     public:
         static bool classof(const IRBase* ir)
         {
@@ -611,7 +661,11 @@ namespace stinkytofu
         }
     };
 
-    // Builder for StinkyTofu IR.
+    // Builder for StinkyTofu IR (LLVM-style).
+    //
+    // Following LLVM/MLIR design principles:
+    // - Builder is for CREATION and DELETION only
+    // - Mutation methods (setSrcRegs, setDestRegs) are on StinkyInstruction itself
     //
     // All creation and deletion of StinkyTofu IR in **Passes** should be
     // handled **exclusively** through this class.
@@ -619,10 +673,13 @@ namespace stinkytofu
     // Note that PassContext owns the IRList, PassContext will delete IRBase
     // when PassContext is destructed.
     //
-    // It provides methods to:
-    //   1. create StinkyInstructions.
-    //   2. erase StinkyInstructions from the IRList, and delete that
-    //      StinkyInst because it is no longer needed.
+    // Usage:
+    //   auto builder = StinkyInstIRBuilder(bb.getIR(), arch);
+    //   auto* inst = builder.createStinkyInstBefore(pos, mcid);
+    //   inst->setSrcRegs({v1, v2});   // Mutation is on the instruction
+    //   inst->setDestRegs({v0});
+    //   ...
+    //   builder.erase(inst);  // Deletion through builder
     class StinkyInstIRBuilder : public IRBuilder
     {
     public:

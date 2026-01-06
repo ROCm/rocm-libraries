@@ -25,6 +25,7 @@
 #include <memory>
 #include <sstream>
 
+#include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/PeepholeOptimizationPass.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
@@ -312,6 +313,11 @@ protected:
     {
         PassContext ctx;
         ctx.addKernelInfo(kernelInfo);
+
+        // Build use-def chains before running the pass (standalone test mode)
+        // In production, OptimizationPipeline builds this once at the start
+        buildUseDefChain(*func);
+
         peepholePass->run(*func, ctx);
     }
 };
