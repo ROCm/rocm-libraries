@@ -88,10 +88,10 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", aReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", bReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", cReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
+        inst->addSrcReg(StinkyRegister("v", cReg, 1));
         return inst;
     }
 
@@ -104,15 +104,15 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", aReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", bReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         // Add constant operand
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->srcRegs.push_back(constReg);
+        inst->addSrcReg(constReg);
         return inst;
     }
 
@@ -124,14 +124,14 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f16, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", aReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", bReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->srcRegs.push_back(constReg);
+        inst->addSrcReg(constReg);
         return inst;
     }
 
@@ -143,9 +143,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src0Reg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -157,13 +157,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->srcRegs.push_back(constRegister);
-        inst->srcRegs.push_back(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -175,13 +175,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f16, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->srcRegs.push_back(constRegister);
-        inst->srcRegs.push_back(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -194,13 +194,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", srcReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->srcRegs.push_back(constRegister);
+        inst->addSrcReg(constRegister);
         return inst;
     }
 
@@ -212,9 +212,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src0Reg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -226,13 +226,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->srcRegs.push_back(constRegister);
-        inst->srcRegs.push_back(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -244,9 +244,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f16, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src0Reg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -258,13 +258,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f16, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->srcRegs.push_back(constRegister);
-        inst->srcRegs.push_back(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -276,10 +276,10 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f16, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", aReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", bReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", cReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
+        inst->addSrcReg(StinkyRegister("v", cReg, 1));
         return inst;
     }
 
@@ -291,8 +291,8 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mov_b32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", srcReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -349,11 +349,11 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_InPlace)
     auto* fma  = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
-    EXPECT_EQ(fma->destRegs[0].reg.idx, 0u);
-    EXPECT_EQ(fma->srcRegs[0].reg.idx, 1u);
-    EXPECT_EQ(fma->srcRegs[1].reg.idx, 2u);
-    EXPECT_EQ(fma->srcRegs[2].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(fma->srcRegs[2].literalDouble, 2.0f);
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 0u);
+    EXPECT_EQ(fma->getSrcRegs()[0].reg.idx, 1u);
+    EXPECT_EQ(fma->getSrcRegs()[1].reg.idx, 2u);
+    EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 2.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_NonInPlace)
@@ -377,11 +377,11 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F32_NonInPlace)
     auto* fma  = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
-    EXPECT_EQ(fma->destRegs[0].reg.idx, 3u); // Destination changed to v3
-    EXPECT_EQ(fma->srcRegs[0].reg.idx, 1u);
-    EXPECT_EQ(fma->srcRegs[1].reg.idx, 2u);
-    EXPECT_EQ(fma->srcRegs[2].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(fma->srcRegs[2].literalDouble, 2.0f);
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 3u); // Destination changed to v3
+    EXPECT_EQ(fma->getSrcRegs()[0].reg.idx, 1u);
+    EXPECT_EQ(fma->getSrcRegs()[1].reg.idx, 2u);
+    EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 2.0f);
 }
 
 // ============================================================================
@@ -409,9 +409,9 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_InPlace)
     auto* fma  = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f16));
-    EXPECT_EQ(fma->destRegs[0].reg.idx, 10u);
-    EXPECT_EQ(fma->srcRegs[2].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(fma->srcRegs[2].literalDouble, 1.0f);
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 10u);
+    EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 1.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_NonInPlace)
@@ -435,9 +435,9 @@ TEST_F(PeepholeOptimizationPassTest, AddFMAFusion_F16_NonInPlace)
     auto* fma  = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f16));
-    EXPECT_EQ(fma->destRegs[0].reg.idx, 8u);
-    EXPECT_EQ(fma->srcRegs[2].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(fma->srcRegs[2].literalDouble, 5.0f);
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 8u);
+    EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 5.0f);
 }
 
 // ============================================================================
@@ -607,8 +607,8 @@ TEST_F(PeepholeOptimizationPassTest, NegativeConstants)
     auto& inst = *getIRList().begin();
     auto* fma  = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
-    EXPECT_EQ(fma->srcRegs[2].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(fma->srcRegs[2].literalDouble, -3.0f);
+    EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, -3.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, ZeroConstants)
@@ -630,8 +630,8 @@ TEST_F(PeepholeOptimizationPassTest, ZeroConstants)
     auto& inst = *getIRList().begin();
     auto* fma  = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(fma, nullptr);
-    EXPECT_EQ(fma->srcRegs[2].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(fma->srcRegs[2].literalDouble, 0.0f);
+    EXPECT_EQ(fma->getSrcRegs()[2].dataType, StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 0.0f);
 }
 
 // ============================================================================
@@ -718,8 +718,8 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_WithRegisterReuse)
     auto  it  = getIRList().begin();
     auto* fma = static_cast<StinkyInstruction*>(&*it);
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
-    EXPECT_EQ(fma->destRegs[0].reg.idx, 10u);
-    EXPECT_FLOAT_EQ(fma->srcRegs[2].literalDouble, 2.0f); // 1.0 + 1.0 = 2.0
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 10u);
+    EXPECT_FLOAT_EQ(fma->getSrcRegs()[2].literalDouble, 2.0f); // 1.0 + 1.0 = 2.0
 }
 
 TEST_F(PeepholeOptimizationPassTest, NoFusion_RegisterReuseWithMultipleUsesBeforeRedef)
@@ -793,14 +793,14 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", aReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", bReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->srcRegs.push_back(constReg);
+        inst->addSrcReg(constReg);
         return inst;
     }
 
@@ -811,13 +811,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->srcRegs.push_back(constRegister);
-        inst->srcRegs.push_back(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -863,13 +863,13 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeOperandOrder)
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
 
     // Check destination
-    ASSERT_EQ(fma->destRegs.size(), 1);
-    EXPECT_EQ(fma->destRegs[0].reg.idx, 11u);
+    ASSERT_EQ(fma->getDestRegs().size(), 1);
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 11u);
 
     // Check constant is folded: 1.0 + 1.0 = 2.0
-    ASSERT_EQ(fma->srcRegs.size(), 3);
-    EXPECT_TRUE(fma->srcRegs[2].dataType == StinkyRegister::Type::LiteralDouble);
-    EXPECT_DOUBLE_EQ(fma->srcRegs[2].literalDouble, 2.0);
+    ASSERT_EQ(fma->getSrcRegs().size(), 3);
+    EXPECT_TRUE(fma->getSrcRegs()[2].dataType == StinkyRegister::Type::LiteralDouble);
+    EXPECT_DOUBLE_EQ(fma->getSrcRegs()[2].literalDouble, 2.0);
 }
 
 TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeInPlace)
@@ -896,12 +896,12 @@ TEST_F(PeepholeOptimizationPassTest, Fusion_CommutativeInPlace)
     EXPECT_EQ(fma->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
 
     // Check destination is v10
-    ASSERT_EQ(fma->destRegs.size(), 1);
-    EXPECT_EQ(fma->destRegs[0].reg.idx, 10u);
+    ASSERT_EQ(fma->getDestRegs().size(), 1);
+    EXPECT_EQ(fma->getDestRegs()[0].reg.idx, 10u);
 
     // Check constant is folded
-    ASSERT_EQ(fma->srcRegs.size(), 3);
-    EXPECT_DOUBLE_EQ(fma->srcRegs[2].literalDouble, 2.0);
+    ASSERT_EQ(fma->getSrcRegs().size(), 3);
+    EXPECT_DOUBLE_EQ(fma->getSrcRegs()[2].literalDouble, 2.0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -930,10 +930,10 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_Basic)
     auto* mul  = static_cast<StinkyInstruction*>(&inst);
     ASSERT_NE(mul, nullptr);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
-    EXPECT_EQ(mul->destRegs[0].reg.idx, 2u); // Destination is v2
-    EXPECT_EQ(mul->srcRegs[1].reg.idx, 1u); // Source is v1
-    EXPECT_EQ(mul->srcRegs[0].dataType, StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(mul->srcRegs[0].literalDouble, 6.0f); // 2.0 * 3.0 = 6.0
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u); // Destination is v2
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u); // Source is v1
+    EXPECT_EQ(mul->getSrcRegs()[0].dataType, StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 6.0f); // 2.0 * 3.0 = 6.0
 }
 
 TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_InPlace)
@@ -955,9 +955,9 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F32_InPlace)
     auto& inst = *getIRList().begin();
     auto* mul  = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
-    EXPECT_EQ(mul->destRegs[0].reg.idx, 0u); // Destination is v0
-    EXPECT_EQ(mul->srcRegs[1].reg.idx, 1u); // Source is v1
-    EXPECT_FLOAT_EQ(mul->srcRegs[0].literalDouble, 6.0f);
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 0u); // Destination is v0
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u); // Source is v1
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 6.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F16_Basic)
@@ -979,9 +979,9 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_F16_Basic)
     auto& inst = *getIRList().begin();
     auto* mul  = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f16));
-    EXPECT_EQ(mul->destRegs[0].reg.idx, 2u);
-    EXPECT_EQ(mul->srcRegs[1].reg.idx, 1u);
-    EXPECT_FLOAT_EQ(mul->srcRegs[0].literalDouble, 10.0f); // 2.5 * 4.0 = 10.0
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u);
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 10.0f); // 2.5 * 4.0 = 10.0
 }
 
 TEST_F(PeepholeOptimizationPassTest, NoFusion_MUL_MultipleUses)
@@ -1038,7 +1038,7 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_WithZero)
 
     auto& inst = *getIRList().begin();
     auto* mul  = static_cast<StinkyInstruction*>(&inst);
-    EXPECT_FLOAT_EQ(mul->srcRegs[0].literalDouble, 0.0f); // 5.0 * 0.0 = 0.0
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, 0.0f); // 5.0 * 0.0 = 0.0
 }
 
 TEST_F(PeepholeOptimizationPassTest, MULMULFusion_Negative)
@@ -1059,7 +1059,7 @@ TEST_F(PeepholeOptimizationPassTest, MULMULFusion_Negative)
 
     auto& inst = *getIRList().begin();
     auto* mul  = static_cast<StinkyInstruction*>(&inst);
-    EXPECT_FLOAT_EQ(mul->srcRegs[0].literalDouble, -6.0f); // -2.0 * 3.0 = -6.0
+    EXPECT_FLOAT_EQ(mul->getSrcRegs()[0].literalDouble, -6.0f); // -2.0 * 3.0 = -6.0
 }
 
 //===----------------------------------------------------------------------===//
@@ -1076,8 +1076,12 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Basic)
     createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
 
     // Create v_fma_f32 v2, 3.0, v0, v3
-    auto* fma       = createVFmaF32(2, 10, 0, 3); // Base FMA: v2 = v10 * v0 + v3
-    fma->srcRegs[0] = StinkyRegister(3.0); // Change to: v2 = 3.0 * v0 + v3
+    auto* fma = createVFmaF32(2, 10, 0, 3); // Base FMA: v2 = v10 * v0 + v3
+    {
+        auto regs = fma->getSrcRegs();
+        regs[0]   = StinkyRegister(3.0);
+        fma->setSrcRegs(regs);
+    } // Change to: v2 = 3.0 * v0 + v3
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1094,19 +1098,19 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Basic)
     EXPECT_EQ(fma_result->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f32));
 
     // Check destination is v2
-    ASSERT_EQ(fma_result->destRegs.size(), 1);
-    EXPECT_EQ(fma_result->destRegs[0].reg.idx, 2u);
+    ASSERT_EQ(fma_result->getDestRegs().size(), 1);
+    EXPECT_EQ(fma_result->getDestRegs()[0].reg.idx, 2u);
 
     // Check constant is folded: 2.0 * 3.0 = 6.0
-    ASSERT_EQ(fma_result->srcRegs.size(), 3);
-    EXPECT_TRUE(fma_result->srcRegs[0].dataType == StinkyRegister::Type::LiteralDouble);
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, 6.0f);
+    ASSERT_EQ(fma_result->getSrcRegs().size(), 3);
+    EXPECT_TRUE(fma_result->getSrcRegs()[0].dataType == StinkyRegister::Type::LiteralDouble);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 6.0f);
 
     // Check that v1 is the operand (from original MUL)
-    EXPECT_EQ(fma_result->srcRegs[1].reg.idx, 1u);
+    EXPECT_EQ(fma_result->getSrcRegs()[1].reg.idx, 1u);
 
     // Check that v3 is preserved as the addend
-    EXPECT_EQ(fma_result->srcRegs[2].reg.idx, 3u);
+    EXPECT_EQ(fma_result->getSrcRegs()[2].reg.idx, 3u);
 }
 
 TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Commutative_MulOperand)
@@ -1119,8 +1123,12 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Commutative_MulOperand)
     createVMulF32WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
 
     // Create v_fma_f32 v2, v0, 3.0, v3
-    auto* fma       = createVFmaF32(2, 0, 10, 3); // v2 = v0 * v10 + v3
-    fma->srcRegs[1] = StinkyRegister(3.0); // Change to: v2 = v0 * 3.0 + v3
+    auto* fma = createVFmaF32(2, 0, 10, 3); // v2 = v0 * v10 + v3
+    {
+        auto regs = fma->getSrcRegs();
+        regs[1]   = StinkyRegister(3.0);
+        fma->setSrcRegs(regs);
+    } // Change to: v2 = v0 * 3.0 + v3
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1133,7 +1141,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F32_Commutative_MulOperand)
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     // Check constant is folded: 2.0 * 3.0 = 6.0
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, 6.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 6.0f);
 }
 
 // NOTE: Commutative matching only works for the ROOT instruction being matched,
@@ -1149,8 +1157,12 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F16_Basic)
 
     createVMulF16WithConst(0, 2.0f, 1); // v0 = 2.0 * v1
 
-    auto* fma       = createVFmaF16(2, 10, 0, 3); // v2 = v10 * v0 + v3
-    fma->srcRegs[0] = StinkyRegister(3.0); // Change: v2 = 3.0 * v0 + v3
+    auto* fma = createVFmaF16(2, 10, 0, 3); // v2 = v10 * v0 + v3
+    {
+        auto regs = fma->getSrcRegs();
+        regs[0]   = StinkyRegister(3.0);
+        fma->setSrcRegs(regs);
+    } // Change: v2 = 3.0 * v0 + v3
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1162,7 +1174,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_F16_Basic)
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
     EXPECT_EQ(fma_result->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_fma_f16));
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, 6.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 6.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MultipleUses)
@@ -1174,8 +1186,12 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MultipleUses)
 
     createVMulF32WithConst(0, 2.0f, 1);
 
-    auto* fma       = createVFmaF32(2, 10, 0, 3);
-    fma->srcRegs[0] = StinkyRegister(3.0);
+    auto* fma = createVFmaF32(2, 10, 0, 3);
+    {
+        auto regs = fma->getSrcRegs();
+        regs[0]   = StinkyRegister(3.0);
+        fma->setSrcRegs(regs);
+    }
 
     // Extra use of v0
     createVAddF32(4, 0, 5);
@@ -1196,8 +1212,12 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_MULFMA_MissingConstant)
 
     createVMulF32(0, 1, 2); // v0 = v1 * v2 (no constant)
 
-    auto* fma       = createVFmaF32(3, 10, 0, 4);
-    fma->srcRegs[0] = StinkyRegister(3.0);
+    auto* fma = createVFmaF32(3, 10, 0, 4);
+    {
+        auto regs = fma->getSrcRegs();
+        regs[0]   = StinkyRegister(3.0);
+        fma->setSrcRegs(regs);
+    }
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1216,8 +1236,12 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_WithNegative)
 
     createVMulF32WithConst(0, -2.0f, 1);
 
-    auto* fma       = createVFmaF32(2, 10, 0, 3);
-    fma->srcRegs[0] = StinkyRegister(3.0);
+    auto* fma = createVFmaF32(2, 10, 0, 3);
+    {
+        auto regs = fma->getSrcRegs();
+        regs[0]   = StinkyRegister(3.0);
+        fma->setSrcRegs(regs);
+    }
 
     ASSERT_EQ(countInstructions(), 2);
 
@@ -1228,7 +1252,7 @@ TEST_F(PeepholeOptimizationPassTest, MULFMAFusion_WithNegative)
     auto& inst       = *getIRList().begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, -6.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, -6.0f);
 }
 
 // ============================================================================
@@ -1261,8 +1285,8 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F32_Basic)
     // Check that constants were folded: 3.0 * 2.0 = 6.0
     // srcRegs[0] should be 3.0 (mul_const)
     // srcRegs[2] should be 6.0 (mul_const * add_const)
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, 3.0f);
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[2].literalDouble, 6.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 3.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[2].literalDouble, 6.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F16_Basic)
@@ -1284,8 +1308,8 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_F16_Basic)
     auto& inst       = *getIRList().begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, 3.0f);
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[2].literalDouble, 6.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 3.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[2].literalDouble, 6.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, NoFusion_ADDMUL_MultipleUses)
@@ -1362,8 +1386,8 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_WithNegative)
     auto& inst       = *getIRList().begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, 3.0f);
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[2].literalDouble, -6.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, 3.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[2].literalDouble, -6.0f);
 }
 
 TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_BothNegative)
@@ -1386,8 +1410,8 @@ TEST_F(PeepholeOptimizationPassTest, ADDMULFusion_BothNegative)
     auto& inst       = *getIRList().begin();
     auto* fma_result = static_cast<StinkyInstruction*>(&inst);
 
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[0].literalDouble, -3.0f);
-    EXPECT_FLOAT_EQ(fma_result->srcRegs[2].literalDouble, 6.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[0].literalDouble, -3.0f);
+    EXPECT_FLOAT_EQ(fma_result->getSrcRegs()[2].literalDouble, 6.0f);
 }
 
 // ============================================================================
@@ -1412,8 +1436,8 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Add_Basic)
     auto& inst = *getIRList().begin();
     auto* add  = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(add->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_add_f32));
-    EXPECT_EQ(add->destRegs[0].reg.idx, 2u);
-    EXPECT_EQ(add->srcRegs[1].reg.idx, 0u); // Should use v0, not v1
+    EXPECT_EQ(add->getDestRegs()[0].reg.idx, 2u);
+    EXPECT_EQ(add->getSrcRegs()[1].reg.idx, 0u); // Should use v0, not v1
 }
 
 TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Add_Basic)
@@ -1434,8 +1458,8 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Add_Basic)
     auto& inst = *getIRList().begin();
     auto* add  = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(add->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_add_f16));
-    EXPECT_EQ(add->destRegs[0].reg.idx, 2u);
-    EXPECT_EQ(add->srcRegs[1].reg.idx, 0u);
+    EXPECT_EQ(add->getDestRegs()[0].reg.idx, 2u);
+    EXPECT_EQ(add->getSrcRegs()[1].reg.idx, 0u);
 }
 
 TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Mul_Basic)
@@ -1456,8 +1480,8 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F32_Mul_Basic)
     auto& inst = *getIRList().begin();
     auto* mul  = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
-    EXPECT_EQ(mul->destRegs[0].reg.idx, 2u);
-    EXPECT_EQ(mul->srcRegs[1].reg.idx, 0u);
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 0u);
 }
 
 TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Mul_Basic)
@@ -1478,8 +1502,8 @@ TEST_F(PeepholeOptimizationPassTest, MovPropagation_F16_Mul_Basic)
     auto& inst = *getIRList().begin();
     auto* mul  = static_cast<StinkyInstruction*>(&inst);
     EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f16));
-    EXPECT_EQ(mul->destRegs[0].reg.idx, 2u);
-    EXPECT_EQ(mul->srcRegs[1].reg.idx, 0u);
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u);
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 0u);
 }
 
 TEST_F(PeepholeOptimizationPassTest, NoMovPropagation_MultipleUses)

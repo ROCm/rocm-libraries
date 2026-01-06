@@ -79,7 +79,7 @@ namespace
     bool CDNA3ReadyQueue::isMFMALatencyFree()
     {
         DAGNode* node = mfmaQueue.top();
-        for(const StinkyRegister& dstReg : node->inst->srcRegs)
+        for(const StinkyRegister& dstReg : node->inst->getSrcRegs())
         {
             if(!dstReg.isRegister())
                 continue;
@@ -171,7 +171,7 @@ namespace
             // Ignore global read for now
             if(isDSRead(*node->inst))
             {
-                for(const StinkyRegister& dstReg : node->inst->destRegs)
+                for(const StinkyRegister& dstReg : node->inst->getDestRegs())
                 {
                     if(!dstReg.isRegister())
                         continue;

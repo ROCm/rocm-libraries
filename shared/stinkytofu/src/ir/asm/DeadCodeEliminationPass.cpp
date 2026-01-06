@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -119,7 +119,7 @@ namespace
                 if(mustPreserveInstruction(*inst))
                 {
                     // Record that sources are used
-                    for(const StinkyRegister& srcReg : inst->srcRegs)
+                    for(const StinkyRegister& srcReg : inst->getSrcRegs())
                     {
                         if(srcReg.isRegister())
                         {
@@ -127,7 +127,7 @@ namespace
                         }
                     }
                     // Record that destinations are redefined
-                    for(const StinkyRegister& destReg : inst->destRegs)
+                    for(const StinkyRegister& destReg : inst->getDestRegs())
                     {
                         if(destReg.isRegister())
                         {
@@ -139,18 +139,18 @@ namespace
 
                 // Check if this is a dead store
                 bool isDeadStore = false;
-                if(!inst->destRegs.empty())
+                if(!inst->getDestRegs().empty())
                 {
                     // A dead store is when a destination is:
                     // 1. Redefined later (in redefinedRegs)
                     // 2. NOT used before that redefinition (NOT in usedRegs)
-                    for(const StinkyRegister& destReg : inst->destRegs)
+                    for(const StinkyRegister& destReg : inst->getDestRegs())
                     {
                         if(destReg.isRegister())
                         {
                             if(redefinedRegs.count(destReg) > 0 && usedRegs.count(destReg) == 0)
                             {
-                                // Overwritten before use → dead store!
+                                // Overwritten before use -> dead store!
                                 isDeadStore = true;
                                 break;
                             }
@@ -167,7 +167,7 @@ namespace
                 {
                     // Not a dead store - update tracking sets
                     // Record sources as used
-                    for(const StinkyRegister& srcReg : inst->srcRegs)
+                    for(const StinkyRegister& srcReg : inst->getSrcRegs())
                     {
                         if(srcReg.isRegister())
                         {
@@ -176,7 +176,7 @@ namespace
                     }
                     // Record destinations as redefined
                     // IMPORTANT: Only clear from usedRegs if NOT also a source (in-place ops!)
-                    for(const StinkyRegister& destReg : inst->destRegs)
+                    for(const StinkyRegister& destReg : inst->getDestRegs())
                     {
                         if(destReg.isRegister())
                         {
@@ -184,7 +184,7 @@ namespace
 
                             // Check if this destination is also a source (in-place operation)
                             bool isAlsoSource = false;
-                            for(const StinkyRegister& srcReg : inst->srcRegs)
+                            for(const StinkyRegister& srcReg : inst->getSrcRegs())
                             {
                                 if(srcReg.isRegister() && srcReg.reg.type == destReg.reg.type
                                    && srcReg.reg.idx == destReg.reg.idx)

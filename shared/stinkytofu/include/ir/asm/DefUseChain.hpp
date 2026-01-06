@@ -92,7 +92,7 @@ namespace stinkytofu
             auto* inst = cast<StinkyInstruction>(&ir);
 
             // Link sources: for each source register, find its most recent definition
-            for(const auto& srcReg : inst->srcRegs)
+            for(const auto& srcReg : inst->getSrcRegs())
             {
                 if(!srcReg.isRegister())
                     continue;
@@ -114,7 +114,7 @@ namespace stinkytofu
             }
 
             // Update lastDef: mark this instruction as the defining instruction for its destinations
-            for(const auto& destReg : inst->destRegs)
+            for(const auto& destReg : inst->getDestRegs())
             {
                 if(!destReg.isRegister())
                     continue;

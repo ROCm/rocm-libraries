@@ -347,8 +347,8 @@ namespace stinkytofu
                     = irBuilder.createStinkyInstBefore(irlist.end(), hwInstDesc);
 
                 // Move destination and source registers
-                stinkyInst->destRegs = inst->destRegs;
-                stinkyInst->srcRegs  = inst->srcRegs;
+                stinkyInst->setDestRegs(inst->destRegs);
+                stinkyInst->setSrcRegs(inst->srcRegs);
 
                 // Overwrite cycles when valid (> 0), otherwise use default from HwInstDesc
                 if(inst->issueCycles > 0)

@@ -102,7 +102,7 @@ namespace
             {
                 // Check if this source instruction defines the requested register
                 bool definesReg = false;
-                for(const auto& destReg : srcInst->destRegs)
+                for(const auto& destReg : srcInst->getDestRegs())
                 {
                     if(destReg.isRegister() && destReg.reg.type == reg.reg.type
                        && destReg.reg.idx == reg.reg.idx)
@@ -154,7 +154,7 @@ namespace
             for(size_t i = defPos + 1; i < instructions.size(); ++i)
             {
                 StinkyInstruction* inst = instructions[i];
-                for(const auto& destReg : inst->destRegs)
+                for(const auto& destReg : inst->getDestRegs())
                 {
                     if(destReg.isRegister() && destReg.reg.type == reg.reg.type
                        && destReg.reg.idx == reg.reg.idx)
@@ -180,7 +180,7 @@ namespace
                 {
                     // Verify this user actually uses the register
                     bool usesReg = false;
-                    for(const auto& srcReg : userInst->srcRegs)
+                    for(const auto& srcReg : userInst->getSrcRegs())
                     {
                         if(srcReg.isRegister() && srcReg.reg.type == reg.reg.type
                            && srcReg.reg.idx == reg.reg.idx)
@@ -210,7 +210,7 @@ namespace
             for(StinkyInstruction* srcInst : beforeInst->sources)
             {
                 // Add all registers defined by this source instruction
-                for(const auto& destReg : srcInst->destRegs)
+                for(const auto& destReg : srcInst->getDestRegs())
                 {
                     if(destReg.isRegister())
                     {
@@ -373,10 +373,12 @@ namespace
                     // For commutative binary operations, try swapping operands if the first match failed
                     // This allows patterns to match regardless of operand order for commutative ops
                     bool isCommutative = inst->is(IF_Commutative);
-                    if(isCommutative && inst->srcRegs.size() >= 2)
+                    if(isCommutative && inst->getSrcRegs().size() >= 2)
                     {
                         // Swap first two source operands
-                        std::swap(inst->srcRegs[0], inst->srcRegs[1]);
+                        StinkyRegister temp = inst->getSrcReg(0);
+                        inst->setSrcReg(0, inst->getSrcReg(1));
+                        inst->setSrcReg(1, temp);
 
                         // Try matching again with swapped operands
                         if(auto result = pattern->tryMatchAndRewrite(inst, context))
@@ -394,7 +396,8 @@ namespace
                         }
 
                         // Restore original operand order if pattern didn't match
-                        std::swap(inst->srcRegs[0], inst->srcRegs[1]);
+                        inst->setSrcReg(1, inst->getSrcReg(0));
+                        inst->setSrcReg(0, temp);
                     }
                 }
             }

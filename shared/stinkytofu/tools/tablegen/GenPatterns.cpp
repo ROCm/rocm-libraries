@@ -185,8 +185,8 @@ public:
         oss << "        StinkyInstruction* " << lastMatch.instVar << " = inst;\n\n";
 
         oss << "        // Extract operands from " << lastMatch.opcode << "\n";
-        oss << "        const auto& destRegs = " << lastMatch.instVar << "->destRegs;\n";
-        oss << "        const auto& srcRegs = " << lastMatch.instVar << "->srcRegs;\n";
+        oss << "        const auto& destRegs = " << lastMatch.instVar << "->getDestRegs();\n";
+        oss << "        const auto& srcRegs = " << lastMatch.instVar << "->getSrcRegs();\n";
         oss << "        if (destRegs.empty() || srcRegs.size() < "
             << (lastMatch.operands.size() - 1) << ")\n";
         oss << "            return std::nullopt;\n\n";
@@ -231,7 +231,7 @@ public:
                 // Extract operands from this instruction (direct field access)
                 oss << "        // Extract operands from " << matchStmt.opcode << "\n";
                 oss << "        const auto& " << matchStmt.instVar << "_src = " << matchStmt.instVar
-                    << "->srcRegs;\n";
+                    << "->getSrcRegs();\n";
                 oss << "        if (" << matchStmt.instVar << "_src.size() < "
                     << (matchStmt.operands.size() - 1) << ")\n";
                 oss << "            return std::nullopt;\n\n";
@@ -357,9 +357,9 @@ public:
             // Pattern syntax: $dst = opcode $operands... or opcode $operands...
             // First operand is destination if the instruction writes to a register
             oss << "        // Update destination register\n";
-            oss << "        if (!" << instToModify << "->destRegs.empty()) {\n";
-            oss << "            " << instToModify << "->destRegs[0] = " << createStmt->operands[0]
-                << ";\n";
+            oss << "        if (!" << instToModify << "->getDestRegs().empty()) {\n";
+            oss << "            " << instToModify << "->setDestReg(0, " << createStmt->operands[0]
+                << ");\n";
             oss << "        }\n\n";
 
             // Calculate number of source operands
@@ -367,11 +367,11 @@ public:
             // Otherwise, all operands are sources (for instructions like stores)
             oss << "        // Update source registers\n";
             oss << "        size_t firstSrcIdx = " << instToModify
-                << "->destRegs.empty() ? 0 : 1;\n";
+                << "->getDestRegs().empty() ? 0 : 1;\n";
             oss << "        size_t numSrcRegs = " << createStmt->operands.size()
                 << " - firstSrcIdx;\n";
-            oss << "        if (" << instToModify << "->srcRegs.size() < numSrcRegs) {\n";
-            oss << "            " << instToModify << "->srcRegs.resize(numSrcRegs);\n";
+            oss << "        if (" << instToModify << "->getSrcRegs().size() < numSrcRegs) {\n";
+            oss << "            " << instToModify << "->resizeSrcRegs(numSrcRegs);\n";
             oss << "        }\n\n";
 
             // Update source registers based on the rewrite statement
@@ -388,8 +388,8 @@ public:
                     if(stmt.kind == RewriteStmt::Kind::BuiltinCall && stmt.lhs == operand)
                     {
                         oss << "        " << instToModify
-                            << "->srcRegs[srcIdx++] = StinkyRegister(static_cast<double>("
-                            << operand << "));\n";
+                            << "->setSrcReg(srcIdx++, StinkyRegister(static_cast<double>("
+                            << operand << ")));\n";
                         isBuiltinResult = true;
                         break;
                     }
@@ -398,24 +398,24 @@ public:
                 // If not a builtin result, it's a direct operand reference
                 if(!isBuiltinResult)
                 {
-                    oss << "        " << instToModify << "->srcRegs[srcIdx++] = " << operand
-                        << ";\n";
+                    oss << "        " << instToModify << "->setSrcReg(srcIdx++, " << operand
+                        << ");\n";
                 }
             }
         }
         else
         {
             // Fallback: old behavior for backward compatibility
-            oss << "        " << instToModify << "->destRegs[0] = " << lastMatch.operands[0]
-                << ";\n";
+            oss << "        " << instToModify << "->setDestReg(0, " << lastMatch.operands[0]
+                << ");\n";
 
             for(const auto& stmt : pattern.rewrite)
             {
                 if(stmt.kind == RewriteStmt::Kind::BuiltinCall)
                 {
                     oss << "        " << instToModify
-                        << "->srcRegs[0] = StinkyRegister(static_cast<double>(" << stmt.lhs
-                        << "));\n";
+                        << "->setSrcReg(0, StinkyRegister(static_cast<double>(" << stmt.lhs
+                        << ")));\n";
                     break;
                 }
             }

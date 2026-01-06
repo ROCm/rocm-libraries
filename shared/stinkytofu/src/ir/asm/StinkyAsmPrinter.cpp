@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,7 @@ namespace stinkytofu
             }
             else
             {
-                os << prefix << "[" << reg.reg.idx << ":"
-                   << (reg.reg.idx + reg.reg.num - 1) << "]";
+                os << prefix << "[" << reg.reg.idx << ":" << (reg.reg.idx + reg.reg.num - 1) << "]";
             }
             break;
         }
@@ -92,13 +91,13 @@ namespace stinkytofu
         // destRegs = "operation.mnemonic"(srcRegs) { attributes }
 
         // Print destination registers
-        if(!inst.destRegs.empty())
+        if(!inst.getDestRegs().empty())
         {
-            for(size_t i = 0; i < inst.destRegs.size(); ++i)
+            for(size_t i = 0; i < inst.getDestRegs().size(); ++i)
             {
                 if(i > 0)
                     os << ", ";
-                regPrinter.print(inst.destRegs[i]);
+                regPrinter.print(inst.getDestRegs()[i]);
             }
             os << " = ";
         }
@@ -110,13 +109,13 @@ namespace stinkytofu
 
         // Print source registers as operands
         os << "(";
-        if(!inst.srcRegs.empty())
+        if(!inst.getSrcRegs().empty())
         {
-            for(size_t i = 0; i < inst.srcRegs.size(); ++i)
+            for(size_t i = 0; i < inst.getSrcRegs().size(); ++i)
             {
                 if(i > 0)
                     os << ", ";
-                regPrinter.print(inst.srcRegs[i]);
+                regPrinter.print(inst.getSrcRegs()[i]);
             }
         }
         os << ")";

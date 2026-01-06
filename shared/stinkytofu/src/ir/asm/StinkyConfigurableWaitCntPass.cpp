@@ -49,7 +49,7 @@ namespace
             if(isGlobalMemLoad(inst))
             {
                 // Track destination registers - remove any previous load to same register
-                for(const auto& destReg : inst.destRegs)
+                for(const auto& destReg : inst.getDestRegs())
                 {
                     // Check if this register already has an outstanding load
                     auto oldSize = outstandingGlobalLoads.size();
@@ -72,7 +72,7 @@ namespace
             else if(isDSRead(inst))
             {
                 // Track destination registers - remove any previous load to same register
-                for(const auto& destReg : inst.destRegs)
+                for(const auto& destReg : inst.getDestRegs())
                 {
                     // Check if this register already has an outstanding load
                     auto oldSize = outstandingDSLoads.size();
@@ -448,7 +448,7 @@ namespace
                 {
                     // We have register tracking - compute precise dlcnt
                     int latestNeededIndex = -1;
-                    for(const auto& srcReg : inst.srcRegs)
+                    for(const auto& srcReg : inst.getSrcRegs())
                     {
                         if(srcReg.dataType != StinkyRegister::Type::Register)
                             continue;
@@ -489,7 +489,7 @@ namespace
                 {
                     // We have register tracking - compute precise vlcnt
                     int latestNeededIndex = -1;
-                    for(const auto& srcReg : inst.srcRegs)
+                    for(const auto& srcReg : inst.getSrcRegs())
                     {
                         if(srcReg.dataType != StinkyRegister::Type::Register)
                             continue;
@@ -590,7 +590,7 @@ namespace
                     continue;
 
                 // Check if this instruction uses any registers
-                if(inst.srcRegs.empty())
+                if(inst.getSrcRegs().empty())
                     continue;
 
                 // Check if ANY path (or currentState after first wait) has outstanding operations
@@ -623,7 +623,7 @@ namespace
 
                 // Check if any source registers are VGPRs or AGPRs
                 bool usesVGPR = false;
-                for(const auto& reg : inst.srcRegs)
+                for(const auto& reg : inst.getSrcRegs())
                 {
                     if(reg.dataType == StinkyRegister::Type::Register
                        && (reg.reg.type == RegType::V || reg.reg.type == RegType::A))
@@ -960,7 +960,7 @@ namespace
 
         void buildLoadDependencies(IRList::iterator it, const StinkyInstruction& inst)
         {
-            for(const StinkyRegister& destReg : inst.destRegs)
+            for(const StinkyRegister& destReg : inst.getDestRegs())
             {
                 IRList::iterator useIt = findFirstRegisterUse(it, destReg);
 
@@ -1119,7 +1119,7 @@ namespace
             {
                 StinkyInstruction& inst = getStinkyInst(it);
 
-                for(const StinkyRegister& srcReg : inst.srcRegs)
+                for(const StinkyRegister& srcReg : inst.getSrcRegs())
                 {
                     if(reg.isOverlap(srcReg))
                         return it;

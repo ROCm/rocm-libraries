@@ -315,7 +315,7 @@ namespace
             StinkyRegister symbolicOperand;
             symbolicOperand.dataType     = StinkyRegister::Type::LiteralString;
             symbolicOperand.literalValue = operand;
-            inst->srcRegs.push_back(symbolicOperand);
+            inst->addSrcReg(symbolicOperand);
 
             return true;
         }

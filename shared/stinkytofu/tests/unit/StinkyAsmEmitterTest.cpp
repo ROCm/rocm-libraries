@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,8 +88,8 @@ TEST_F(AsmEmitterTest, EmitSingleInstruction)
     ASSERT_NE(inst, nullptr);
 
     // Add destination and source registers
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4)); // v[0:3]
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1)); // v[40]
+    inst->addDestReg(StinkyRegister("v", 0, 4)); // v[0:3]
+    inst->addSrcReg(StinkyRegister("v", 40, 1)); // v[40]
 
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
@@ -108,8 +108,8 @@ TEST_F(AsmEmitterTest, EmitWithCycleInfo)
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 
@@ -128,8 +128,8 @@ TEST_F(AsmEmitterTest, EmitWithoutCycleInfo)
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
@@ -150,7 +150,7 @@ TEST_F(AsmEmitterTest, EmitVectorRegisterRange)
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 10, 4)); // v[10:13]
+    inst->addDestReg(StinkyRegister("v", 10, 4)); // v[10:13]
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
@@ -167,8 +167,8 @@ TEST_F(AsmEmitterTest, EmitSingleVectorRegister)
     StinkyInstruction* inst = createInstruction("v_mov_b32");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 5, 1)); // v[5]
-    inst->srcRegs.push_back(StinkyRegister("v", 3, 1)); // v[3]
+    inst->addDestReg(StinkyRegister("v", 5, 1)); // v[5]
+    inst->addSrcReg(StinkyRegister("v", 3, 1)); // v[3]
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
@@ -185,10 +185,10 @@ TEST_F(AsmEmitterTest, EmitAccumulatorRegister)
     StinkyInstruction* inst = createInstruction("v_mfma_f32_16x16x16_f16");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("acc", 0, 16)); // acc[0:15]
-    inst->srcRegs.push_back(StinkyRegister("v", 6, 2)); // v[6:7]
-    inst->srcRegs.push_back(StinkyRegister("v", 22, 2)); // v[22:23]
-    inst->srcRegs.push_back(StinkyRegister("acc", 0, 16)); // acc[0:15]
+    inst->addDestReg(StinkyRegister("acc", 0, 16)); // acc[0:15]
+    inst->addSrcReg(StinkyRegister("v", 6, 2)); // v[6:7]
+    inst->addSrcReg(StinkyRegister("v", 22, 2)); // v[22:23]
+    inst->addSrcReg(StinkyRegister("acc", 0, 16)); // acc[0:15]
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
@@ -205,7 +205,7 @@ TEST_F(AsmEmitterTest, EmitScalarRegister)
     StinkyInstruction* inst = createInstruction("s_add_i32");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("s", 10, 1)); // s10
+    inst->addDestReg(StinkyRegister("s", 10, 1)); // s10
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
@@ -222,7 +222,7 @@ TEST_F(AsmEmitterTest, EmitLiteralInt)
     StinkyInstruction* inst = createInstruction("s_waitcnt");
     ASSERT_NE(inst, nullptr);
 
-    inst->srcRegs.push_back(StinkyRegister(0)); // literal int 0
+    inst->addSrcReg(StinkyRegister(0)); // literal int 0
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
@@ -266,13 +266,13 @@ TEST_F(AsmEmitterTest, EmitIRList)
     // Create two ds_read instructions
     StinkyInstruction* inst1 = createInstruction("ds_read_b128");
     ASSERT_NE(inst1, nullptr);
-    inst1->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst1->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst1->addDestReg(StinkyRegister("v", 0, 4));
+    inst1->addSrcReg(StinkyRegister("v", 40, 1));
 
     StinkyInstruction* inst2 = createInstruction("ds_read_b128");
     ASSERT_NE(inst2, nullptr);
-    inst2->destRegs.push_back(StinkyRegister("v", 4, 4));
-    inst2->srcRegs.push_back(StinkyRegister("v", 41, 1));
+    inst2->addDestReg(StinkyRegister("v", 4, 4));
+    inst2->addSrcReg(StinkyRegister("v", 41, 1));
 
     ASSERT_EQ(insts.size(), 3);
 
@@ -298,8 +298,8 @@ TEST_F(AsmEmitterTest, EmitIRListWithoutComments)
 {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
 
     AsmEmitterOptions options;
     options.emitComments  = false;
@@ -320,7 +320,7 @@ TEST_F(AsmEmitterTest, CustomIndentation)
 {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
 
     AsmEmitterOptions options;
     options.indent        = 8;
@@ -341,8 +341,8 @@ TEST_F(AsmEmitterTest, EmitToStream)
 {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 
@@ -359,8 +359,8 @@ TEST_F(AsmEmitterTest, EmitToStreamWithCycleInfo)
 {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 
@@ -384,8 +384,8 @@ TEST_F(AsmEmitterTest, ToAssemblyUtility)
 {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 
@@ -401,8 +401,8 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithCycleInfo)
 {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 
@@ -419,8 +419,8 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithOptions)
 {
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 
@@ -463,8 +463,8 @@ TEST_F(AsmEmitterTest, EmitWithUserComment)
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
 
     // Add a user comment
     inst->addModifier(CommentData("load C"));
@@ -485,8 +485,8 @@ TEST_F(AsmEmitterTest, EmitWithCycleInfoAndUserComment)
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 
@@ -510,8 +510,8 @@ TEST_F(AsmEmitterTest, EmitUserCommentDisabled)
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
 
     // Add a user comment
     inst->addModifier(CommentData("load C"));
@@ -533,8 +533,8 @@ TEST_F(AsmEmitterTest, EmitCycleInfoOnlyWithUserComment)
     StinkyInstruction* inst = createInstruction("ds_read_b128");
     ASSERT_NE(inst, nullptr);
 
-    inst->destRegs.push_back(StinkyRegister("v", 0, 4));
-    inst->srcRegs.push_back(StinkyRegister("v", 40, 1));
+    inst->setDestRegs({StinkyRegister("v", 0, 4)});
+    inst->setSrcRegs({StinkyRegister("v", 40, 1)});
     inst->issueCycles   = 4;
     inst->latencyCycles = 52;
 

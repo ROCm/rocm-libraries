@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,17 +29,17 @@ namespace
 {
     using namespace stinkytofu;
 
-    static int getLRDistance(IRList&                      insts,
-                             IRList::iterator             regStart,
-                             IRList::iterator             instsBegin,
-                             IRList::iterator             instsEnd,
-                             std::vector<StinkyRegister>& lrDst)
+    static int getLRDistance(IRList&                            insts,
+                             IRList::iterator                   regStart,
+                             IRList::iterator                   instsBegin,
+                             IRList::iterator                   instsEnd,
+                             const std::vector<StinkyRegister>& lrDst)
     {
         int cycles = 0;
         for(IRList::iterator it = regStart; it != instsEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
-            for(const StinkyRegister& reg : inst.srcRegs)
+            for(const StinkyRegister& reg : inst.getSrcRegs())
             {
                 // check overlap
                 for(const StinkyRegister& dst : lrDst)
@@ -63,10 +63,10 @@ namespace
         for(IRList::iterator it = instsBegin; it != regStart; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
-            for(StinkyRegister& reg : inst.srcRegs)
+            for(const StinkyRegister& reg : inst.getSrcRegs())
             {
                 // check overlap
-                for(StinkyRegister& dst : lrDst)
+                for(const StinkyRegister& dst : lrDst)
                 {
                     if(reg.isOverlap(dst))
                     {
@@ -144,7 +144,7 @@ namespace
             if(isDSRead(inst))
             {
                 numLR++;
-                auto dist = getLRDistance(insts, it, beginIt, endIt, inst.destRegs);
+                auto dist = getLRDistance(insts, it, beginIt, endIt, inst.getDestRegs());
                 if(dist < inst.latencyCycles)
                 {
                     // issue asap

@@ -242,7 +242,7 @@ namespace
                     if(uniqueDstRegs.find(reg) == uniqueDstRegs.end())
                     {
                         uniqueDstRegs.insert(reg);
-                        stinkyInst->destRegs.push_back(reg);
+                        stinkyInst->addDestReg(reg);
                     }
                 }
 
@@ -252,18 +252,18 @@ namespace
                     if(reg.isValid() && uniqueSrcRegs.find(reg) == uniqueSrcRegs.end())
                     {
                         uniqueSrcRegs.insert(reg);
-                        stinkyInst->srcRegs.push_back(reg);
+                        stinkyInst->addSrcReg(reg);
                     }
                 }
 
                 if(doesReadSCC(inst))
                 {
-                    stinkyInst->srcRegs.push_back(StinkyRegister::getSCCRegister());
+                    stinkyInst->addSrcReg(StinkyRegister::getSCCRegister());
                 }
 
                 if(doesWriteSCC(inst))
                 {
-                    stinkyInst->destRegs.push_back(StinkyRegister::getSCCRegister());
+                    stinkyInst->addDestReg(StinkyRegister::getSCCRegister());
                 }
 
                 if(isBranch(*stinkyInst))
@@ -281,7 +281,7 @@ namespace
                     {
                         lastBarrierInst         = stinkyInst;
                         StinkyInstruction* prev = cast<StinkyInstruction>(stinkyInst->getPrev());
-                        stinkyInst->destRegs.push_back(StinkyRegister::getBarrierRegister());
+                        stinkyInst->addDestReg(StinkyRegister::getBarrierRegister());
                         while(prev != nullptr)
                         {
                             if(isMUBUFLoad(*prev))
@@ -290,30 +290,30 @@ namespace
                                     = prev->getModifier<stinkytofu::MUBUFModifiers>();
                                 if(mubuf && mubuf->glc)
                                 {
-                                    stinkyInst->srcRegs.push_back(prev->destRegs[0]);
-                                    prev->srcRegs.push_back(stinkyInst->destRegs[0]);
+                                    stinkyInst->addSrcReg(prev->getDestRegs()[0]);
+                                    prev->addSrcReg(stinkyInst->getDestRegs()[0]);
                                 }
                             }
                             else if(isTensorLoad(*prev))
                             {
-                                prev->destRegs.push_back(StinkyRegister::getTensorLoadRegister());
-                                stinkyInst->srcRegs.push_back(prev->destRegs[0]);
-                                prev->srcRegs.push_back(stinkyInst->destRegs[0]);
+                                prev->addDestReg(StinkyRegister::getTensorLoadRegister());
+                                stinkyInst->addSrcReg(prev->getDestRegs()[0]);
+                                prev->addSrcReg(stinkyInst->getDestRegs()[0]);
                             }
                             else if(isDSRead(*prev))
                             {
-                                stinkyInst->srcRegs.push_back(prev->destRegs[0]);
-                                prev->srcRegs.push_back(stinkyInst->destRegs[0]);
+                                stinkyInst->addSrcReg(prev->getDestRegs()[0]);
+                                prev->addSrcReg(stinkyInst->getDestRegs()[0]);
                             }
                             else if(isDSWrite(*prev))
                             {
-                                prev->destRegs.push_back(StinkyRegister::getDSWriteRegister());
-                                stinkyInst->srcRegs.push_back(prev->destRegs[0]);
-                                prev->srcRegs.push_back(stinkyInst->destRegs[0]);
+                                prev->addDestReg(StinkyRegister::getDSWriteRegister());
+                                stinkyInst->addSrcReg(prev->getDestRegs()[0]);
+                                prev->addSrcReg(stinkyInst->getDestRegs()[0]);
                             }
                             else if(isBarrier(*prev))
                             {
-                                stinkyInst->srcRegs.push_back(prev->destRegs[0]);
+                                stinkyInst->addSrcReg(prev->getDestRegs()[0]);
                                 break;
                             }
 
@@ -347,12 +347,12 @@ namespace
                         = next->getModifier<stinkytofu::MUBUFModifiers>();
                     if(mubuf && mubuf->glc)
                     {
-                        next->srcRegs.push_back(StinkyRegister::getBarrierRegister());
+                        next->addSrcReg(StinkyRegister::getBarrierRegister());
                     }
                 }
                 else if(isDSRead(*next) || isDSWrite(*next))
                 {
-                    next->srcRegs.push_back(StinkyRegister::getBarrierRegister());
+                    next->addSrcReg(StinkyRegister::getBarrierRegister());
                 }
                 nextIR = next->getNext();
             }
