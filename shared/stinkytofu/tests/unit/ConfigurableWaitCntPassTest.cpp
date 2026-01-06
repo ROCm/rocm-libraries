@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -76,8 +76,8 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b64, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 2));
-        inst->srcRegs.push_back(StinkyRegister("v", addrReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 2));
+        inst->addSrcReg(StinkyRegister("v", addrReg, 1));
         return inst;
     }
 
@@ -89,8 +89,8 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b128, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 4));
-        inst->srcRegs.push_back(StinkyRegister("v", addrReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 4));
+        inst->addSrcReg(StinkyRegister("v", addrReg, 1));
         return inst;
     }
 
@@ -102,8 +102,8 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_write_b64, arch));
 
-        inst->srcRegs.push_back(StinkyRegister("v", addrReg, 2));
-        inst->srcRegs.push_back(StinkyRegister("v", dataReg, 1));
+        inst->addSrcReg(StinkyRegister("v", addrReg, 2));
+        inst->addSrcReg(StinkyRegister("v", dataReg, 1));
         return inst;
     }
 
@@ -115,8 +115,8 @@ protected:
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::global_load_dword, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("s", addrReg, 4));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("s", addrReg, 4));
         return inst;
     }
 
@@ -128,8 +128,8 @@ protected:
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::global_store_dword, arch));
 
-        inst->srcRegs.push_back(StinkyRegister("v", addrReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("s", dataReg, 4));
+        inst->addSrcReg(StinkyRegister("v", addrReg, 1));
+        inst->addSrcReg(StinkyRegister("s", dataReg, 4));
         return inst;
     }
 
@@ -140,8 +140,8 @@ protected:
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::tensor_load_to_lds, arch));
 
-        inst->srcRegs.push_back(StinkyRegister("s", src0Reg, 4));
-        inst->srcRegs.push_back(StinkyRegister("s", src1Reg, 8));
+        inst->addSrcReg(StinkyRegister("s", src0Reg, 4));
+        inst->addSrcReg(StinkyRegister("s", src1Reg, 8));
         return inst;
     }
 
@@ -153,9 +153,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src0Reg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -167,9 +167,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f32, arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src0Reg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -191,10 +191,10 @@ protected:
         StinkyInstruction* inst    = builder.createStinkyInstBefore(
             insts.end(), getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch));
 
-        inst->destRegs.push_back(StinkyRegister("a", destReg, 8));
-        inst->srcRegs.push_back(StinkyRegister("v", src0Reg, 8));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 8));
-        inst->srcRegs.push_back(StinkyRegister("a", destReg, 8));
+        inst->addDestReg(StinkyRegister("a", destReg, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 8));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 8));
+        inst->addSrcReg(StinkyRegister("a", destReg, 8));
         return inst;
     }
 
@@ -684,8 +684,8 @@ StinkyInstruction* createDSReadB32InBlock(BasicBlock* bb, GfxArchID arch, int de
     StinkyInstruction*  inst
         = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::ds_load_b32, arch));
 
-    inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-    inst->srcRegs.push_back(StinkyRegister("v", addrReg, 1)); // DS address is 1 VGPR
+    inst->addDestReg(StinkyRegister("v", destReg, 1));
+    inst->addSrcReg(StinkyRegister("v", addrReg, 1)); // DS address is 1 VGPR
     return inst;
 }
 
@@ -698,9 +698,9 @@ StinkyInstruction*
     StinkyInstruction*  inst
         = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-    inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-    inst->srcRegs.push_back(StinkyRegister("v", src0Reg, 1));
-    inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
+    inst->addDestReg(StinkyRegister("v", destReg, 1));
+    inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+    inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
     return inst;
 }
 
@@ -713,8 +713,8 @@ StinkyInstruction*
     StinkyInstruction*  inst
         = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::s_sub_u32, arch));
 
-    inst->destRegs.push_back(StinkyRegister("s", destReg, 1));
-    inst->srcRegs.push_back(StinkyRegister("s", src0Reg, 1));
+    inst->addDestReg(StinkyRegister("s", destReg, 1));
+    inst->addSrcReg(StinkyRegister("s", src0Reg, 1));
     // For simplicity, we won't add the immediate value in this test
     return inst;
 }
@@ -727,7 +727,7 @@ StinkyInstruction* createSCmpEqU32InBlock(BasicBlock* bb, GfxArchID arch, int sr
     StinkyInstruction*  inst
         = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::s_cmp_eq_u32, arch));
 
-    inst->srcRegs.push_back(StinkyRegister("s", src0Reg, 1));
+    inst->addSrcReg(StinkyRegister("s", src0Reg, 1));
     // For simplicity, we won't add the immediate value in this test
     return inst;
 }
@@ -939,9 +939,9 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     // Expected behavior with iterative dataflow and register-level tracking:
     // - Loop converges: entry state = exit state from previous iteration
     // - Exit state has 4 outstanding ds_loads (v0, v2, v1, v3 in that order)
-    // - First v_add uses v0, v2 → need to wait for loads up to v2 (index 1) → leaves v1, v3 → dlcnt=2
+    // - First v_add uses v0, v2 -> need to wait for loads up to v2 (index 1) -> leaves v1, v3 -> dlcnt=2
     EXPECT_EQ(waitBeforeFmac1->dlcnt, 2)
-        << "Should wait for v0,v2 from previous iteration (leave v1,v3) → dlcnt=2";
+        << "Should wait for v0,v2 from previous iteration (leave v1,v3) -> dlcnt=2";
 
     // Find waitcnt before fmac2 (second v_add) - must be different from first waitcnt
     SWaitCntData* waitBeforeFmac2    = nullptr;
@@ -965,12 +965,12 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
         }
     }
 
-    // Second v_add uses v1, v3 → after first wait, we have v1, v3 outstanding
-    // Need to wait for v3 (latest), which also waits for v1 → dlcnt=0
+    // Second v_add uses v1, v3 -> after first wait, we have v1, v3 outstanding
+    // Need to wait for v3 (latest), which also waits for v1 -> dlcnt=0
     if(waitBeforeFmac2)
     {
         EXPECT_EQ(waitBeforeFmac2->dlcnt, 0)
-            << "Should wait for v1,v3 (all remaining loads) → dlcnt=0";
+            << "Should wait for v1,v3 (all remaining loads) -> dlcnt=0";
     }
 }
 
@@ -985,8 +985,8 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
     //   ds_load_b32 v3  (issued, outstanding)
     //
     // Block 2 (loop with back-edge):
-    //   v_add_f32 v4, v0, v2  ← Should have s_waitcnt dlcnt=1 before this
-    //   v_add_f32 v4, v1, v3  ← May have additional waitcnt if needed
+    //   v_add_f32 v4, v0, v2  <- Should have s_waitcnt dlcnt=1 before this
+    //   v_add_f32 v4, v1, v3  <- May have additional waitcnt if needed
     //   ds_load_b32 v0
     //   ds_load_b32 v2
     //   ds_load_b32 v1
@@ -994,7 +994,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
     //
     // Expected:
     // - Block 2 entry state: 4 outstanding ds_loads from Block 1
-    // - First v_add uses v0,v2 → wait for v0,v1,v2 (v1 is between) → dlcnt=1
+    // - First v_add uses v0,v2 -> wait for v0,v1,v2 (v1 is between) -> dlcnt=1
 
     TearDown();
     func = std::make_unique<Function>("test_two_block_chain");
@@ -1097,9 +1097,9 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
         << "Should insert waitcnt before first v_add (cross-block dependency)";
 
     // Verify: Entry state has 4 outstanding (v0,v1,v2,v3 from block1 in that order)
-    // First v_add uses v0,v2 → need to wait for loads up to v2 (index 2) → leaves v3 → dlcnt=1
+    // First v_add uses v0,v2 -> need to wait for loads up to v2 (index 2) -> leaves v3 -> dlcnt=1
     EXPECT_EQ(waitBeforeFmac1->dlcnt, 1)
-        << "Should wait for v0,v1,v2 from Block 1 (leave v3) → dlcnt=1";
+        << "Should wait for v0,v1,v2 from Block 1 (leave v3) -> dlcnt=1";
 
     // Find waitcnt before fmac2 (second v_add) - must be different from first waitcnt
     SWaitCntData* waitBeforeFmac2    = nullptr;
@@ -1123,12 +1123,12 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
         }
     }
 
-    // Second v_add uses v1, v3 → after first wait (dlcnt=1), we have v3 outstanding
-    // Need to wait for v3 → dlcnt=0 (MUST exist!)
+    // Second v_add uses v1, v3 -> after first wait (dlcnt=1), we have v3 outstanding
+    // Need to wait for v3 -> dlcnt=0 (MUST exist!)
     ASSERT_NE(waitBeforeFmac2, nullptr)
         << "MUST insert waitcnt before second v_add (v3 still outstanding)";
 
-    EXPECT_EQ(waitBeforeFmac2->dlcnt, 0) << "Should wait for remaining loads (v3) → dlcnt=0";
+    EXPECT_EQ(waitBeforeFmac2->dlcnt, 0) << "Should wait for remaining loads (v3) -> dlcnt=0";
 }
 
 TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
@@ -1142,8 +1142,8 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
     //   ds_load_b32 v3  (issued, outstanding)
     //
     // Block 2 (loop with back-edge):
-    //   v_add_f32 v4, v0, v2  ← Should have s_waitcnt dlcnt=1 before this
-    //   v_add_f32 v4, v1, v3  ← May have additional waitcnt if needed
+    //   v_add_f32 v4, v0, v2  <- Should have s_waitcnt dlcnt=1 before this
+    //   v_add_f32 v4, v1, v3  <- May have additional waitcnt if needed
     //   ds_load_b32 v0
     //   ds_load_b32 v1
     //   ds_load_b32 v2
@@ -1151,7 +1151,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
     //
     // Expected:
     // - Block 2 entry state: 4 outstanding ds_loads from Block 1
-    // - First v_add uses v0,v2 → wait for v0,v1,v2 (v1 is between) → dlcnt=1
+    // - First v_add uses v0,v2 -> wait for v0,v1,v2 (v1 is between) -> dlcnt=1
 
     TearDown();
     func = std::make_unique<Function>("test_two_block_chain");
@@ -1254,11 +1254,11 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
         << "Should insert waitcnt before first v_add (cross-block dependency)";
 
     // Verify: Entry state has 4 outstanding (v0,v2,v1,v3 from Block 1 in that order)
-    // First v_add uses v0,v2 → need to wait for loads up to v2 (index 1) → leaves v1,v3 → dlcnt=2
+    // First v_add uses v0,v2 -> need to wait for loads up to v2 (index 1) -> leaves v1,v3 -> dlcnt=2
     // HOWEVER: After loop convergence and proper merging, the state should reflect the union
     // For now, we expect the implementation to properly merge preloop and loop states
     EXPECT_EQ(waitBeforeFmac1->dlcnt, 1)
-        << "Should wait for v0,v1,v2 from itself (leave v3) → dlcnt=1";
+        << "Should wait for v0,v1,v2 from itself (leave v3) -> dlcnt=1";
 
     // Find waitcnt before fmac2 (second v_add) - must be different from first waitcnt
     SWaitCntData* waitBeforeFmac2    = nullptr;
@@ -1282,25 +1282,25 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
         }
     }
 
-    // Second v_add uses v1, v3 → after first wait (dlcnt=1), we have v3 outstanding
-    // Need to wait for v3 → dlcnt=0 (MUST exist!)
+    // Second v_add uses v1, v3 -> after first wait (dlcnt=1), we have v3 outstanding
+    // Need to wait for v3 -> dlcnt=0 (MUST exist!)
     ASSERT_NE(waitBeforeFmac2, nullptr)
         << "MUST insert waitcnt before second v_add (v3 still outstanding)";
 
-    EXPECT_EQ(waitBeforeFmac2->dlcnt, 0) << "Should wait for remaining loads (v3) → dlcnt=0";
+    EXPECT_EQ(waitBeforeFmac2->dlcnt, 0) << "Should wait for remaining loads (v3) -> dlcnt=0";
 }
 
 /**
  * @brief Test multi-predecessor with multi-path analysis
  *
- * b1: ds_read v0, v1 → b3
- * b2: ds_read v2, v3, v4 → b3
+ * b1: ds_read v0, v1 -> b3
+ * b2: ds_read v2, v3, v4 -> b3
  * b3: v_fmac v5, v0, v1
  *
  * Multi-path analysis:
- * - Path 1 (b1): [v0, v1] → fmac uses v0, v1 → needs dlcnt=0
- * - Path 2 (b2): [v2, v3, v4] → fmac uses v0, v1 (not present) → no wait needed
- * - Result: min(0, IGNORE) = 0 → Optimal for path 1, safe for path 2
+ * - Path 1 (b1): [v0, v1] -> fmac uses v0, v1 -> needs dlcnt=0
+ * - Path 2 (b2): [v2, v3, v4] -> fmac uses v0, v1 (not present) -> no wait needed
+ * - Result: min(0, IGNORE) = 0 -> Optimal for path 1, safe for path 2
  */
 TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerge)
 {
@@ -1327,7 +1327,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // Build Block 3: v_fmac v5, v0, v1
     StinkyInstruction* fmac = createVFmacInBlock(block3, arch, 5, 0, 1); // v5 = v0 * v1
 
-    // Set up CFG: entry → b1, entry → b2, b1 → b3, b2 → b3
+    // Set up CFG: entry -> b1, entry -> b2, b1 -> b3, b2 -> b3
     entry->addSuccessor(block1);
     entry->addSuccessor(block2);
     block1->addPredecessor(entry);
@@ -1389,30 +1389,30 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
         << "Should insert waitcnt before fmac (multi-predecessor merge)";
 
     // Verify: With multi-path analysis, we analyze each predecessor path separately:
-    // - Path 1 (b1): Has [v0, v1], fmac uses v0,v1 → needs dlcnt=0 (wait for both)
-    // - Path 2 (b2): Has [v2, v3, v4], fmac uses v0,v1 (not present) → no wait needed
-    // - Final: min(0, IGNORE) = 0 → Waits for path 1, path 2 unaffected
+    // - Path 1 (b1): Has [v0, v1], fmac uses v0,v1 -> needs dlcnt=0 (wait for both)
+    // - Path 2 (b2): Has [v2, v3, v4], fmac uses v0,v1 (not present) -> no wait needed
+    // - Final: min(0, IGNORE) = 0 -> Waits for path 1, path 2 unaffected
     // Expected: dlcnt=0 (optimal for both paths)
     EXPECT_EQ(waitBeforeFmac->dlcnt, 0)
-        << "Should wait for v0,v1 from path 1 (multi-path analysis) → dlcnt=0";
+        << "Should wait for v0,v1 from path 1 (multi-path analysis) -> dlcnt=0";
 }
 
 /**
  * @brief Test chained multi-predecessor - demonstrates multi-path analysis limitation
  *
  * CFG:
- *   entry → b1 (loads v0, v1, v2) → b3 (uses v3, v4) → b4 (uses v0, v1)
- *   entry → b2 (loads v3, v4, v5) ↗
+ *   entry -> b1 (loads v0, v1, v2) -> b3 (uses v3, v4) -> b4 (uses v0, v1)
+ *   entry -> b2 (loads v3, v4, v5) ?
  *
  * Block3 (multi-predecessor): Multi-path analysis works perfectly
- * - Path 1 (b1): [v0, v1, v2] → uses v3, v4 (not present) → no wait needed
- * - Path 2 (b2): [v3, v4, v5] → uses v3, v4 → wait for v3, v4 → dlcnt=1 (leaves v5)
- * - Result: min(IGNORE, 1) = 1 ✓ Optimal!
+ * - Path 1 (b1): [v0, v1, v2] -> uses v3, v4 (not present) -> no wait needed
+ * - Path 2 (b2): [v3, v4, v5] -> uses v3, v4 -> wait for v3, v4 -> dlcnt=1 (leaves v5)
+ * - Result: min(IGNORE, 1) = 1 ? Optimal!
  *
  * Block4 (single predecessor): Limitation revealed
  * - Block4 has only ONE predecessor (block3), so no multi-path analysis
  * - Block3's exit state (after conservative merge): dsLoadCount > 0, but outstandingDSLoads = []
- * - Block4 sees counts but no register lists → lost precision from conservative merge
+ * - Block4 sees counts but no register lists -> lost precision from conservative merge
  * - Current behavior: No wait inserted (or dlcnt=0 if conservative)
  * - Ideal behavior: Would need per-path exit states from block3 to maintain precision
  *
@@ -1447,7 +1447,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // Build Block 4: v_fmac v7, v0, v1
     StinkyInstruction* fmac2 = createVFmacInBlock(block4, arch, 7, 0, 1); // v7 = v0 * v1
 
-    // Set up CFG: entry → b1, entry → b2, b1 → b3, b2 → b3, b3 → b4
+    // Set up CFG: entry -> b1, entry -> b2, b1 -> b3, b2 -> b3, b3 -> b4
     entry->addSuccessor(block1);
     entry->addSuccessor(block2);
     block1->addPredecessor(entry);
@@ -1511,11 +1511,11 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
         << "Should insert waitcnt before fmac in block3 (multi-predecessor case)";
 
     // Verify block3: Multi-path analysis on [v0,v1,v2] vs [v3,v4,v5], uses v3,v4
-    // - Path 1 (b1): [v0, v1, v2] → v3, v4 not present → no wait
-    // - Path 2 (b2): [v3, v4, v5] → v3 at 0, v4 at 1 → dlcnt=1 (leaves v5)
+    // - Path 1 (b1): [v0, v1, v2] -> v3, v4 not present -> no wait
+    // - Path 2 (b2): [v3, v4, v5] -> v3 at 0, v4 at 1 -> dlcnt=1 (leaves v5)
     // - Result: min(IGNORE, 1) = 1
     EXPECT_EQ(waitBeforeFmac->dlcnt, 2)
-        << "Should wait for v3, v3 from path 2 (multi-path analysis) → dlcnt=2";
+        << "Should wait for v3, v3 from path 2 (multi-path analysis) -> dlcnt=2";
 
     // Collect all inserted waitcnts in block4
     IRList&                  insts4 = block4->getIR();
@@ -1564,8 +1564,8 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // - Path2 (via b2): After wait(dlcnt=2), [v4,v5] remain
     //
     // Block4 receives both path states and does multi-path analysis for v0,v1:
-    // - Path1: [v1,v2] → v1 at index 0 → dlcnt=1 (optimal!)
-    // - Path2: [v4,v5] → v0,v1 not in list → no wait needed
+    // - Path1: [v1,v2] -> v1 at index 0 -> dlcnt=1 (optimal!)
+    // - Path2: [v4,v5] -> v0,v1 not in list -> no wait needed
     // - Result: min(1, IGNORE) = 1
     //
     // This achieves the optimal wait count by maintaining per-path precision!
@@ -1573,5 +1573,5 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
         << "Should insert waitcnt before fmac2 in block4 (uses v0,v1)";
 
     EXPECT_EQ(waitBeforeFmac2->dlcnt, 1)
-        << "Per-path analysis: Path1 needs dlcnt=1, Path2 needs none → min=1";
+        << "Per-path analysis: Path1 needs dlcnt=1, Path2 needs none -> min=1";
 }

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -108,13 +108,14 @@ namespace
                     continue;
 
                 // Skip instructions with no destinations
-                if(inst->destRegs.empty())
+                if(inst->getDestRegs().empty())
                     continue;
 
                 // Build signature
                 InstructionSignature sig;
                 sig.opcode = inst->getUnifiedOpcode();
-                sig.srcRegs.insert(sig.srcRegs.end(), inst->srcRegs.begin(), inst->srcRegs.end());
+                sig.srcRegs.insert(
+                    sig.srcRegs.end(), inst->getSrcRegs().begin(), inst->getSrcRegs().end());
 
                 // Check if we've seen this signature before
                 auto it = signatureMap.find(sig);
@@ -140,7 +141,7 @@ namespace
                 }
 
                 // Track that this instruction's destinations are "killed" (redefined)
-                for(const StinkyRegister& destReg : inst->destRegs)
+                for(const StinkyRegister& destReg : inst->getDestRegs())
                 {
                     if(destReg.isRegister())
                     {
@@ -166,7 +167,7 @@ namespace
             int dupPos  = instPosition.at(duplicate);
 
             // Check each source operand of the duplicate
-            for(const StinkyRegister& srcReg : duplicate->srcRegs)
+            for(const StinkyRegister& srcReg : duplicate->getSrcRegs())
             {
                 if(!srcReg.isRegister())
                     continue;
@@ -243,11 +244,11 @@ namespace
             for(const auto& [duplicate, original] : duplicates)
             {
                 // Get the destination register of the duplicate and original
-                if(duplicate->destRegs.empty() || original->destRegs.empty())
+                if(duplicate->getDestRegs().empty() || original->getDestRegs().empty())
                     continue;
 
-                StinkyRegister dupDest  = duplicate->destRegs[0];
-                StinkyRegister origDest = original->destRegs[0];
+                StinkyRegister dupDest  = duplicate->getDestRegs()[0];
+                StinkyRegister origDest = original->getDestRegs()[0];
 
                 // Replace all uses of dupDest with origDest in subsequent instructions
                 replaceRegisterUses(irList, duplicate, dupDest, origDest);
@@ -287,12 +288,19 @@ namespace
                 }
 
                 // Replace uses in source registers
-                for(StinkyRegister& srcReg : inst->srcRegs)
+                auto srcRegs  = inst->getSrcRegs();
+                bool modified = false;
+                for(StinkyRegister& srcReg : srcRegs)
                 {
                     if(srcReg.isRegister() && srcReg == oldReg)
                     {
-                        srcReg = newReg;
+                        srcReg   = newReg;
+                        modified = true;
                     }
+                }
+                if(modified)
+                {
+                    inst->setSrcRegs(srcRegs);
                 }
             }
         }

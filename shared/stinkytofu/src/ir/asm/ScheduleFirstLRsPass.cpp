@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,7 @@ namespace
         for(IRList::iterator it = regStart; it != insts.end(); ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
-            for(const StinkyRegister& reg : inst.srcRegs)
+            for(const StinkyRegister& reg : inst.getSrcRegs())
             {
                 // check overlap
                 for(const StinkyRegister& dst : lrDst)

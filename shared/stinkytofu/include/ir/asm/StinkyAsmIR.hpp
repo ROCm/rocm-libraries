@@ -365,12 +365,6 @@ namespace stinkytofu
         std::vector<StinkyInstruction*> users;
         std::vector<StinkyInstruction*> sources;
 
-        // TODO: CMP instructions imply modify SCC register, but it's not tracked in
-        //       the frontend (e.g. SCmpKEQU32 struct), a workaround is to track it
-        //       here.
-        std::vector<StinkyRegister> destRegs;
-        std::vector<StinkyRegister> srcRegs;
-
         int issueCycles;
         int latencyCycles;
 
@@ -382,6 +376,14 @@ namespace stinkytofu
         // different opcode.
         std::vector<std::unique_ptr<Modifier>> modifiers;
 
+        // Register operands - private to enforce use-def chain maintenance
+        // Access through getters, mutate through setSrcRegs/setDestRegs
+        // TODO: CMP instructions imply modify SCC register, but it's not tracked in
+        //       the frontend (e.g. SCmpKEQU32 struct), a workaround is to track it
+        //       here.
+        std::vector<StinkyRegister> destRegs;
+        std::vector<StinkyRegister> srcRegs;
+
     public:
         StinkyInstruction(const HwInstDesc* mcid)
             : IRBase(IRType::StinkyTofu)
@@ -389,6 +391,45 @@ namespace stinkytofu
             , issueCycles(mcid->issue)
             , latencyCycles(mcid->latency)
         {
+        }
+
+        //----------------------------------------------------------------------
+        // Register Operand Access (LLVM-style getters)
+        //----------------------------------------------------------------------
+        /// Get destination registers (read-only)
+        const std::vector<StinkyRegister>& getDestRegs() const
+        {
+            return destRegs;
+        }
+
+        /// Get source registers (read-only)
+        const std::vector<StinkyRegister>& getSrcRegs() const
+        {
+            return srcRegs;
+        }
+
+        /// Get number of destination registers
+        size_t getNumDestRegs() const
+        {
+            return destRegs.size();
+        }
+
+        /// Get number of source registers
+        size_t getNumSrcRegs() const
+        {
+            return srcRegs.size();
+        }
+
+        /// Get destination register by index
+        const StinkyRegister& getDestReg(size_t idx) const
+        {
+            return destRegs.at(idx);
+        }
+
+        /// Get source register by index
+        const StinkyRegister& getSrcReg(size_t idx) const
+        {
+            return srcRegs.at(idx);
         }
 
         uint16_t getISAOpcode() const
@@ -487,6 +528,32 @@ namespace stinkytofu
 
         /// Add a single destination register and update use-def chain.
         void addDestReg(const StinkyRegister& destReg);
+
+        /// Set a specific source register by index (for pattern rewriting).
+        /// Note: Does NOT update use-def chains automatically - caller must rebuild if needed.
+        void setSrcReg(size_t idx, const StinkyRegister& srcReg)
+        {
+            srcRegs.at(idx) = srcReg;
+        }
+
+        /// Set a specific destination register by index (for pattern rewriting).
+        /// Note: Does NOT update use-def chains automatically - caller must rebuild if needed.
+        void setDestReg(size_t idx, const StinkyRegister& destReg)
+        {
+            destRegs.at(idx) = destReg;
+        }
+
+        /// Resize source registers array (for pattern rewriting).
+        void resizeSrcRegs(size_t size)
+        {
+            srcRegs.resize(size);
+        }
+
+        /// Resize destination registers array (for pattern rewriting).
+        void resizeDestRegs(size_t size)
+        {
+            destRegs.resize(size);
+        }
 
         /**
          * @brief Clone this instruction (deep copy)
@@ -653,6 +720,11 @@ namespace stinkytofu
 
         // Allow builder to call private unlink methods during erase()
         friend class StinkyInstIRBuilder;
+
+        // Temporary: Allow legacy IR creation code to access private fields
+        // TODO: Migrate these to use setSrcRegs/setDestRegs, then remove
+        friend class ToStinkyAsmPass;
+        friend class StinkyTofu; // For StinkyBuilder.cpp
 
     public:
         static bool classof(const IRBase* ir)
@@ -850,10 +922,10 @@ namespace stinkytofu
     inline std::string getBranchTarget(const StinkyInstruction& inst)
     {
         assert(isBranch(inst) && "Instruction must be a branch");
-        assert(!inst.srcRegs.empty()
+        assert(!inst.getSrcRegs().empty()
                && "Branch instruction must have at least one source register");
 
-        const StinkyRegister& targetReg = inst.srcRegs[0];
+        const StinkyRegister& targetReg = inst.getSrcRegs()[0];
         assert(targetReg.dataType == StinkyRegister::Type::LiteralString
                && "Branch target must be a LiteralString");
 

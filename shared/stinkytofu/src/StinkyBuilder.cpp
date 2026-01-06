@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,11 +102,8 @@ namespace stinkytofu
             std::vector<StinkyInstruction*> result;
             result.reserve(1);
             StinkyInstruction* inst = pImpl->createInstruction(opcode, name);
-            inst->destRegs.push_back(dst);
-            for(const auto& src : srcs)
-            {
-                inst->srcRegs.push_back(src);
-            }
+            inst->setDestRegs({dst});
+            inst->setSrcRegs(srcs);
             if(!comment.empty())
             {
                 inst->addModifier(CommentData(comment));
@@ -126,10 +123,7 @@ namespace stinkytofu
             std::vector<StinkyInstruction*> result;
             result.reserve(1);
             StinkyInstruction* inst = pImpl->createInstruction(opcode, name);
-            for(const auto& src : srcs)
-            {
-                inst->srcRegs.push_back(src);
-            }
+            inst->setSrcRegs(srcs);
             if(!comment.empty())
             {
                 inst->addModifier(CommentData(comment));
@@ -169,8 +163,8 @@ namespace stinkytofu
             std::vector<StinkyInstruction*> result;
             result.reserve(1);
             StinkyInstruction* inst = pImpl->createInstruction(opcode, name);
-            inst->destRegs.push_back(dst);
-            inst->srcRegs.push_back(base);
+            inst->setDestRegs({dst});
+            inst->setSrcRegs({base});
             inst->addModifier<SMEMModifiers>(SMEMModifiers(false, false, offset));
             if(!comment.empty())
             {

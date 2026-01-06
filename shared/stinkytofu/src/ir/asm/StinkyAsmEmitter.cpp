@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,8 +37,7 @@ namespace stinkytofu
             if(reg.reg.num > 1)
             {
                 // Register range: v[0:3]
-                os << "[" << reg.reg.idx << ":" << (reg.reg.idx + reg.reg.num - 1)
-                   << "]";
+                os << "[" << reg.reg.idx << ":" << (reg.reg.idx + reg.reg.num - 1) << "]";
             }
             else if(reg.reg.type == RegType::V || reg.reg.type == RegType::ACC
                     || reg.reg.type == RegType::A)
@@ -90,7 +89,7 @@ namespace stinkytofu
         bool firstOperand = true;
 
         // Emit destination registers
-        for(const auto& dest : inst.destRegs)
+        for(const auto& dest : inst.getDestRegs())
         {
             if(!firstOperand)
             {
@@ -101,7 +100,7 @@ namespace stinkytofu
         }
 
         // Emit source registers
-        for(const auto& src : inst.srcRegs)
+        for(const auto& src : inst.getSrcRegs())
         {
             if(!firstOperand)
             {
@@ -199,7 +198,8 @@ namespace stinkytofu
         emitMnemonic(os, inst);
 
         // Emit operands if any
-        if(!inst.destRegs.empty() || !inst.srcRegs.empty() || inst.getModifier<LabelData>())
+        if(!inst.getDestRegs().empty() || !inst.getSrcRegs().empty()
+           || inst.getModifier<LabelData>())
         {
             os << " ";
             emitOperands(os, inst);

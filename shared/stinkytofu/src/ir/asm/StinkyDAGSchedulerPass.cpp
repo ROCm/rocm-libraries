@@ -34,7 +34,7 @@ namespace
     static bool isMovableSideEffect(const StinkyInstruction& inst)
     {
         // This is a barrier and has manually defined dependencies.
-        return isBarrier(inst) && !inst.destRegs.empty();
+        return isBarrier(inst) && !inst.getDestRegs().empty();
     }
 
     // --- Region scheduler (does NOT move fences) ---
@@ -88,7 +88,7 @@ namespace
 
             // RAW deps:
             // For each source register, add an edge to the last writer of that register.
-            for(const StinkyRegister& srcReg : inst.srcRegs)
+            for(const StinkyRegister& srcReg : inst.getSrcRegs())
             {
                 if(!srcReg.isRegister())
                     continue;
@@ -109,7 +109,7 @@ namespace
             }
 
             // WAW/WAR deps for defs
-            for(const StinkyRegister& dstReg : inst.destRegs)
+            for(const StinkyRegister& dstReg : inst.getDestRegs())
             {
                 if(!dstReg.isRegister())
                     continue;
