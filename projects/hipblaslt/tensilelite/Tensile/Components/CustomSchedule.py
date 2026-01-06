@@ -772,7 +772,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    if isTN(kernel) and useLDSTr and TLDS == 1:
+    if isTN(kernel) and not useLDSTr and TLDS == 1:
         kernel["UsePLRPack"] = True
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index

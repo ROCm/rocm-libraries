@@ -100,7 +100,7 @@ BenchmarkProblems:
         - SourceSwap: [0]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - LDSTrInst: [1]
+        - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
