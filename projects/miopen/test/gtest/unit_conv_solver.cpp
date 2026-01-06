@@ -415,8 +415,7 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     auto output = tensor<Tout>{output_desc};
 
-    input.generate(
-        GenConvData<Tin, Tout>{weights.desc.GetLengths(), conv_config.GetConv().GetGroupCount()});
+    input.generate(GenConvData<Tin, Tout>{weights.desc.GetLengths()});
     weights.generate(GenConvData<Twei, Tout>{weights.desc.GetLengths()});
     std::fill(output.begin(), output.end(), Tout());
 
@@ -537,8 +536,7 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     auto output = tensor<Tout>{output_desc};
 
-    output.generate(
-        GenConvData<Tout, Tin>{weights.desc.GetLengths(), conv_config.GetConv().GetGroupCount()});
+    output.generate(GenConvData<Tout, Tin>{weights.desc.GetLengths()});
     weights.generate(GenConvData<Twei, Tin>{weights.desc.GetLengths()});
     std::fill(input.begin(), input.end(), Tin());
 
@@ -659,9 +657,8 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
 
     auto output = tensor<Tout>{output_desc};
 
-    const unsigned int group_count = conv_config.GetConv().GetGroupCount();
-    input.generate(GenConvData<Tin, Twei>{output_desc.GetLengths(), group_count});
-    output.generate(GenConvData<Tout, Twei>{output_desc.GetLengths(), group_count});
+    input.generate(GenConvData<Tin, Twei>{output_desc.GetLengths()});
+    output.generate(GenConvData<Tout, Twei>{output_desc.GetLengths()});
     std::fill(weights.begin(), weights.end(), Twei());
 
     auto&& handle = get_handle();
