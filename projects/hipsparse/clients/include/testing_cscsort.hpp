@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_cscsort_bad_arg(void)
+template <typename T>
+void testing_cscsort_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int m         = 100;
@@ -109,7 +110,8 @@ void testing_cscsort_bad_arg(void)
 #endif
 }
 
-hipsparseStatus_t testing_cscsort(Arguments argus)
+template <typename T>
+void testing_cscsort(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  m        = argus.M;
@@ -127,13 +129,6 @@ hipsparseStatus_t testing_cscsort(Arguments argus)
     // Set matrix index base
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
-    if(m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures
@@ -143,11 +138,8 @@ hipsparseStatus_t testing_cscsort(Arguments argus)
 
     // Read or construct CSC matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base));
 
     // Unsort CSC columns
     std::vector<int>   hperm(nnz);
@@ -299,8 +291,6 @@ hipsparseStatus_t testing_cscsort(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSCSORT_HPP

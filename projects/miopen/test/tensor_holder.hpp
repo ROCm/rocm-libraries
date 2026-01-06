@@ -26,8 +26,8 @@
 #ifndef GUARD_TENSOR_HOLDER_HPP
 #define GUARD_TENSOR_HOLDER_HPP
 
-#include "ford.hpp"
 #include "network_data.hpp"
+#include <miopen/ford.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/functional.hpp>
 #include <miopen/type_name.hpp>
@@ -338,7 +338,7 @@ struct tensor
     {
         visit_tensor_size(
             desc.GetLengths().size(),
-            std::bind(for_each_handler{}, this, ford, std::move(f), std::placeholders::_1));
+            std::bind(for_each_handler{}, this, miopen::ford, std::move(f), std::placeholders::_1));
     }
 
     template <class F>
@@ -346,7 +346,8 @@ struct tensor
     {
         visit_tensor_size(
             desc.GetLengths().size(),
-            std::bind(for_each_handler{}, this, par_ford, std::move(f), std::placeholders::_1));
+            std::bind(
+                for_each_handler{}, this, miopen::par_ford, std::move(f), std::placeholders::_1));
     }
 
     template <class... Ts>
@@ -386,6 +387,70 @@ struct tensor
     friend std::ostream& operator<<(std::ostream& stream, const tensor& t)
     {
         return stream << t.desc;
+    }
+
+    template <size_t N, typename Stream>
+    void dump_inner(size_t dim, std::array<size_t, N>& coord, Stream& stream) const
+    {
+        const auto lengths = this->desc.GetLengths();
+        if(lengths.size() == 0)
+        {
+            // 0D special case: Just print the one value that we have and return.
+            stream << (*this)(coord);
+        }
+        else if(dim + 1 == lengths.size())
+        {
+            // 1D special case: dump everything on one line
+            for(size_t i = 0; i < lengths[dim]; ++i)
+            {
+                if(i != 0)
+                    stream << ' ';
+
+                coord[dim] = i;
+                stream << std::setw(4) << (*this)(coord);
+            }
+
+            stream << '\n';
+        }
+        else
+        {
+            if(dim + 2 == lengths.size())
+            {
+                // 2D special case: Also print which 2D slice we are currently printing
+                // Note: this is not needed for higher dimensions, as they will also pass
+                // through this branch.
+                stream << "slice [";
+                for(size_t i = 0; i < dim; ++i)
+                {
+                    stream << coord[i] << ", ";
+                }
+                stream << ":, :]\n";
+            }
+
+            for(size_t i = 0; i < lengths[dim]; ++i)
+            {
+                coord[dim] = i;
+                this->dump_inner<N>(dim + 1, coord, stream);
+            }
+        }
+    }
+
+    template <typename Stream = decltype(std::cout)>
+    void dump(const char* name, Stream& stream = std::cout) const
+    {
+        const auto n = this->desc.GetLengths().size();
+        stream << "==== " << name << ": " << *this << n << '\n';
+        stream.fill(' ');
+
+        const auto flags = stream.flags();
+
+        visit_tensor_size(n, [&](const auto size) {
+            constexpr size_t N = decltype(size)::value;
+            std::array<size_t, N> coord;
+            this->dump_inner<N>(0, coord, stream);
+        });
+
+        stream.flags(flags);
     }
 };
 

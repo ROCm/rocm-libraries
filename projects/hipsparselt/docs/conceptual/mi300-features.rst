@@ -9,7 +9,7 @@ hipSPARSELt features for the Instinct MI300 series
 **********************************************************************
 
 hipSPARSELt provides hardware acceleration support for sparse matrix multiplication operations
-on AMD Instinct™ MI300 series accelerators using SMFMA (Sparse Matrix Fused Multiply Add) matrix instructions.
+on AMD Instinct™ MI300 series GPUs using SMFMA (Sparse Matrix Fused Multiply Add) matrix instructions.
 
 For hardware-accelerated sparse-dense matrix operations, the following conditions apply:
 

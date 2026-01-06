@@ -163,5 +163,3 @@ def test_cmp():
 def test_bounds():
     with pytest.raises(Exception):
         DataType(14)
-
-

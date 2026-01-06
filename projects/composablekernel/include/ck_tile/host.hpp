@@ -1,6 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
-
 #pragma once
 
 #include "ck_tile/host/arg_parser.hpp"
@@ -16,8 +15,11 @@
 #include "ck_tile/host/host_tensor.hpp"
 #include "ck_tile/host/joinable_thread.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/host/permute_pk_int4.hpp"
 #include "ck_tile/host/ranges.hpp"
+#include "ck_tile/host/reference/reference_batched_contraction.hpp"
 #include "ck_tile/host/reference/reference_batched_dropout.hpp"
+#include "ck_tile/host/reference/reference_batched_dropout_randval.hpp"
 #include "ck_tile/host/reference/reference_batched_elementwise.hpp"
 #include "ck_tile/host/reference/reference_batched_gemm.hpp"
 #include "ck_tile/host/reference/reference_batched_masking.hpp"
@@ -32,8 +34,10 @@
 #include "ck_tile/host/reference/reference_grouped_conv_fwd.hpp"
 #include "ck_tile/host/reference/reference_im2col.hpp"
 #include "ck_tile/host/reference/reference_layernorm2d_fwd.hpp"
+#include "ck_tile/host/reference/reference_moe_gemm.hpp"
 #include "ck_tile/host/reference/reference_moe_sorting.hpp"
 #include "ck_tile/host/reference/reference_permute.hpp"
+#include "ck_tile/host/reference/reference_pool.hpp"
 #include "ck_tile/host/reference/reference_reduce.hpp"
 #include "ck_tile/host/reference/reference_rmsnorm2d_fwd.hpp"
 #include "ck_tile/host/reference/reference_rowwise_quantization2d.hpp"
@@ -43,4 +47,5 @@
 #include "ck_tile/host/rotating_buffers.hpp"
 #include "ck_tile/host/stream_config.hpp"
 #include "ck_tile/host/stream_utils.hpp"
+#include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include "ck_tile/host/timer.hpp"

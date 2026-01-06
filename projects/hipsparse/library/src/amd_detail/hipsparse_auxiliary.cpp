@@ -39,17 +39,17 @@ hipsparseStatus_t hipsparseCreate(hipsparseHandle_t* handle)
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    int               deviceId;
-    hipError_t        err;
-    hipsparseStatus_t retval = HIPSPARSE_STATUS_SUCCESS;
+    int        deviceId;
+    hipError_t err;
 
     err = hipGetDevice(&deviceId);
     if(err == hipSuccess)
     {
-        retval = hipsparse::rocSPARSEStatusToHIPStatus(
+        return hipsparse::rocSPARSEStatusToHIPStatus(
             rocsparse_create_handle((rocsparse_handle*)handle));
     }
-    return retval;
+
+    return hipsparse::hipErrorToHIPSPARSEStatus(err);
 }
 
 hipsparseStatus_t hipsparseDestroy(hipsparseHandle_t handle)
@@ -107,13 +107,14 @@ hipsparseStatus_t hipsparseGetGitRevision(hipsparseHandle_t handle, char* rev)
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_version((rocsparse_handle)handle, &rocsparse_ver));
 
     // Combine
-    sprintf(rev,
-            "%s (rocSPARSE %d.%d.%d-%s)",
-            hipsparse_rev,
-            rocsparse_ver / 100000,
-            rocsparse_ver / 100 % 1000,
-            rocsparse_ver % 100,
-            rocsparse_rev);
+    snprintf(rev,
+             256,
+             "%.64s (rocSPARSE %d.%d.%d-%.64s)",
+             hipsparse_rev,
+             rocsparse_ver / 100000,
+             rocsparse_ver / 100 % 1000,
+             rocsparse_ver % 100,
+             rocsparse_rev);
 
     return HIPSPARSE_STATUS_SUCCESS;
 }

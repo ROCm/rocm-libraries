@@ -1,9 +1,10 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/gemm/block/block_wp_asmem_breg_creg.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
 namespace ck_tile {
@@ -89,14 +90,19 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
     CK_TILE_HOST_DEVICE static constexpr auto GetKBPerLoad()
     {
         using TileShape = typename Problem::BlockGemmShape;
+#if defined(__gfx11__)
+        constexpr index_t scale = 4;
+#else
+        constexpr index_t scale = get_warp_size() == 32 ? 2 : 1;
+#endif
         if constexpr(TileShape::WarpTile::at(I1) == 32)
         {
-            return TileShape::WarpTile::at(I2) / 2;
+            return TileShape::WarpTile::at(I2) * scale / 2;
         }
         else
         {
             static_assert(TileShape::WarpTile::at(I1) == 16);
-            return TileShape::WarpTile::at(I2) / 4;
+            return TileShape::WarpTile::at(I2) * scale / 4;
         }
     }
 
@@ -192,39 +198,49 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBFlatDramTileDistribution()
+    CK_TILE_DEVICE static constexpr auto MakeBFlatDramTileDistribution()
     {
         using TileShape = typename Problem::BlockGemmShape;
+
+        constexpr index_t kNPerBlock = TileShape::kN;
+        constexpr index_t kKPerBlock = TileShape::kK;
+        constexpr index_t NIterPerWarp =
+            kNPerBlock / TileShape::BlockWarps::at(I1) / TileShape::WarpTile::at(I1);
+        constexpr index_t KIterPerWarp = kKPerBlock / TileShape::WarpTile::at(I2);
 
         constexpr index_t BlockSize = Problem::kBlockSize;
         constexpr index_t WaveSize  = get_warp_size();
         constexpr index_t WaveNum   = BlockSize / WaveSize;
 
-        constexpr index_t KBPerLoad   = GetKBPerLoad<Problem>();
-        constexpr index_t KThdPerWave = WaveSize; // threads cnt in K dim
+        constexpr index_t KBPerLoad = GetKBPerLoad<Problem>();
+#if defined(__gfx11__)
+        constexpr index_t KRepeatInWave = 2;
+#else
+        constexpr index_t KRepeatInWave = 1;
+#endif
+        constexpr index_t KThdPerWave = WaveSize / KRepeatInWave; // threads cnt in K dim
         constexpr index_t KWavePerBlk = 1;
-        constexpr index_t KRepeat     = 1;
+        constexpr index_t KRepeat     = KIterPerWarp;
         static_assert(TileShape::flatKPerWarp == KThdPerWave * KBPerLoad, "wrong");
 
         constexpr index_t NBPerLoad   = 1;
         constexpr index_t NThdPerWave = 1;
         constexpr index_t NWavePerBlk = TileShape::BlockWarps::at(number<1>{}); // N_Warp
-        constexpr index_t NRepeat     = 1;
+        constexpr index_t NRepeat     = NIterPerWarp;
 
         constexpr index_t WaveRepeat = WaveNum / TileShape::flatNPerWarp;
-
         return make_static_tile_distribution(
             tile_distribution_encoding<
-                sequence<WaveRepeat>,                                          // ?
+                sequence<WaveRepeat, KRepeatInWave>,                           // ?
                 tuple<sequence<NRepeat, NWavePerBlk, NThdPerWave, NBPerLoad>,  // second direction
                       sequence<KRepeat, KWavePerBlk, KThdPerWave, KBPerLoad>>, // first  direction
                 // wave in blk,     // thd in wave
                 // <M, K>           // <M, K>
-                tuple<sequence<0, 1, 2>, sequence<1, 2>>, // which direction
-                tuple<sequence<0, 1, 1>, sequence<2, 2>>, // which index
+                tuple<sequence<0, 1, 2>, sequence<0, 1, 2>>, // which direction
+                tuple<sequence<0, 1, 1>, sequence<1, 2, 2>>, // which index
                 // <repeat, vec_load>
-                sequence<1, 1, 2, 2>,
-                sequence<0, 3, 0, 3>>{});
+                sequence<1, 2, 1, 2>,
+                sequence<0, 0, 3, 3>>{});
     }
 
     template <typename Problem>
@@ -280,13 +296,17 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
     {
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
-        using WarpGemm   = WarpGemmDispatcher<typename Problem::ADataType,
-                                              typename Problem::BDataType,
-                                              typename Problem::CDataType,
-                                              WarpTile::at(I0),
-                                              WarpTile::at(I1),
-                                              WarpTile::at(I2),
-                                              Problem::TransposeC>;
+        using BTypeToUse =
+            std::conditional_t<std::is_same_v<typename Problem::BDataType, ck_tile::pk_int4_t>,
+                               typename Problem::ADataType,
+                               typename Problem::BDataType>;
+        using WarpGemm = WarpGemmDispatcher<typename Problem::ADataType,
+                                            BTypeToUse,
+                                            typename Problem::CDataType,
+                                            WarpTile::at(I0),
+                                            WarpTile::at(I1),
+                                            WarpTile::at(I2),
+                                            Problem::TransposeC>;
 
         using BlockWeightPreshufflePolicy =
             BlockWeightPreshuffleASmemBSmemCRegV1CustomPolicy<typename Problem::ADataType,
@@ -294,7 +314,74 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
                                                               typename Problem::CDataType,
                                                               BlockWarps,
                                                               WarpGemm>;
-        return BlockWeightPreshuffleASmemBSmemCRegV1<Problem, BlockWeightPreshufflePolicy>{};
+        return BlockWeightPreshuffleASmemBRegCReg<Problem, BlockWeightPreshufflePolicy>{};
+    }
+    /**
+     * @brief Get the vector store size for C tensor.
+     *
+     * @tparam Problem - Gemm pipeline problem class.
+     *
+     * @note The vector store size for output C tensor would depend on multiple factors
+     *       like its data layout and warp gemm C transposition. In general it would
+     *       be the number of consecutive elements in contiguous C dimension hold by
+     *       single thread.
+     *
+     * @return The vector store size for C tensor.
+     */
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeC()
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetBlockWeightPreshuffle<Problem>())>;
+        using WG_       = typename BlockGemm::WarpGemm;
+
+        constexpr bool TransposeC = Problem::TransposeC;
+        using CLayout             = typename Problem::CLayout;
+        using CWarpDstr           = typename WG_::CWarpDstr;
+
+        // N is contiguous dimension
+        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
+        {
+            if constexpr(TransposeC)
+            {
+                // In this case each thread has multiple consecutive elements in
+                // N dimension, however consecutive threads' elements have stride.
+                constexpr index_t NDimY = CWarpDstr::NDimY;
+                constexpr auto c_warp_y_lengths =
+                    CWarpDstr{}.get_ys_to_d_descriptor().get_lengths();
+                static_assert(WG_::WarpGemmAttribute::Impl::kCM1PerLane ==
+                              c_warp_y_lengths.get(number<NDimY - 1>{}));
+                return c_warp_y_lengths.get(number<NDimY - 1>{});
+            }
+            else
+            {
+                // In this case each thread has just a single item in Ndim
+                return WG_::WarpGemmAttribute::Impl::kCNLane / WG_::kN;
+            }
+        }
+        // M is contiguous dimension
+        else if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::ColumnMajor>)
+        {
+            if constexpr(TransposeC)
+            {
+                // In this case each thread has just a single item in Mdim
+                return WG_::WarpGemmAttribute::Impl::kCNLane / WG_::kN;
+            }
+            else
+            {
+                // In this case each thread has multiple consecutive elements in
+                // M dimension, however consecutive threads' elements have stride.
+                constexpr index_t NDimY = CWarpDstr::NDimY;
+                constexpr auto c_warp_y_lengths =
+                    CWarpDstr{}.get_ys_to_d_descriptor().get_lengths();
+                static_assert(WG_::WarpGemmAttribute::Impl::kCM1PerLane ==
+                              c_warp_y_lengths.get(number<NDimY - 1>{}));
+                return c_warp_y_lengths.get(number<NDimY - 1>{});
+            }
+        }
+        else
+        {
+            static_assert(false, "Unsupported CLayout!");
+        }
     }
 };
 

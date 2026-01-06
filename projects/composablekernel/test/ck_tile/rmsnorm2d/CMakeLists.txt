@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 function(create_tile_rmsnorm2d_fwd SUFFIX)
     set(TILE_RMSNORM2D_FWD "test_ck_tile_rmsnorm2d_fwd_${SUFFIX}")
 
@@ -14,7 +17,7 @@ function(create_tile_rmsnorm2d_fwd SUFFIX)
     target_compile_options(${TILE_RMSNORM2D_FWD} PRIVATE ${TILE_RMSNORM2D_FWD_COMPILE_OPTIONS})
 endfunction()
 
-if(GPU_TARGETS MATCHES "gfx9")
+if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     set(RMSNORM2D_FWD_KNOWN_APIS "fwd;bwd")
     set(RMSNORM2D_FWD_ENABLE_APIS  "fwd" CACHE STRING
         "semicolon-separated list of APIs to generate (${RMSNORM2D_FWD_KNOWN_APIS}) & link, or \"all\".")

@@ -92,9 +92,13 @@ function(add_test_target test_src is_internal)
         GTest::Main
     )
   endif()
-  target_link_libraries(${test_name}
-      rocrand
-  )
+
+  if(USE_SYSTEM_LIB)
+      target_link_libraries(${test_name} roc::rocrand)
+  else()
+      target_link_libraries(${test_name} rocrand)
+  endif()
+
   if(HIP_COMPILER STREQUAL "clang")
       target_link_libraries(${test_name} hip::device)
   endif()

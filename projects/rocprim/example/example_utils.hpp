@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,21 +21,14 @@
 #ifndef ROCPRIM_EXAMPLE_UTILS_HPP_
 #define ROCPRIM_EXAMPLE_UTILS_HPP_
 
+#include <rocprim/rocprim.hpp>
+
+#include "../common/utils_device_ptr.hpp"
+
 #include <algorithm>
 #include <vector>
 #include <random>
 #include <type_traits>
-
-#include <rocprim/rocprim.hpp>
-
-#define HIP_CHECK(condition)         \
-{                                    \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-}
 
 #define OUTPUT_VALIDATION_CHECK(validation_result)               \
   {                                                              \
@@ -45,6 +38,13 @@
         return;                                                  \
     }                                                            \
   }
+
+#define ASSERT_TRUE(predicate)                                               \
+    if(!(predicate))                                                         \
+    {                                                                        \
+        std::cerr << "Predicate '" #predicate << "' was false" << std::endl; \
+        exit(1);                                                             \
+    }
 
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)

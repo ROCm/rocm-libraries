@@ -73,4 +73,3 @@ template<typename DerivedPolicy,
 } // end omp
 } // end system
 THRUST_NAMESPACE_END
-

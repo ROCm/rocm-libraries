@@ -21,7 +21,7 @@
 
 using thrust::system::detail::internal::uniform_decomposition;
 
-void TestUniformDecomposition(void)
+void TestUniformDecomposition()
 {
   {
     uniform_decomposition<int> ud(10, 10, 1);

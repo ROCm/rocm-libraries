@@ -166,22 +166,28 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
-        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
+        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
+        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+        if(workspace_size != 0)
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
     template <typename ConvPtr>
     bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
     {
-        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
-
-        if(CKWrwRequireWorkspace(G, C1, K1, data_type, alpha_beta_case))
-        {
-            // Creat dummy workspace to pass the ck IsSupportedArgument check.
-            int dummy_var = 1;
-            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &dummy_var);
-        }
+        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
+        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+        if(workspace_size != 0)
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
+    }
+
+    template <typename ConvPtr>
+    std::size_t GetCKSplitkWorkspaceSize(const ConvPtr& conv_ptr, int split_k) const
+    {
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
+        return conv_ptr->GetWorkSpaceSize(arg_ptr.get());
     }
 
     int G;
@@ -271,7 +277,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
         if(idx == 13)
             idx += 1; // skip
     }
-    if(arch == "gfx942")
+    if(arch == "gfx942" || arch == "gfx950")
     {
         if(idx < 3)
             idx += 0;
@@ -384,7 +390,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
     if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
-       !StartsWith(ctx.GetStream().GetDeviceName(), "gfx95"))
+       ctx.GetStream().GetDeviceName() != "gfx950")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -527,10 +533,33 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
     return config.IsValid(problem);
 }
 
+size_t
+ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf:
+        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::half_t>, CKArgs>(problem);
+    case miopenFloat: return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<float>, CKArgs>(problem);
+    case miopenInt8: return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<int8_t>, CKArgs>(problem);
+    case miopenBFloat16:
+        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::bhalf_t>, CKArgs>(problem);
+    case miopenInt64:
+    case miopenInt32:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenDouble: break;
+    }
+#endif
+    return 0; // other types not applicable for this solver
+}
+
 size_t ConvHipImplicitGemmGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
                                                            const ProblemDescription& problem) const
 {
-    return GetWorkspaceSizeLayoutTransformConv(problem);
+    auto ck_ws_size = GetCKMaxWorkspaceSize(problem);
+    return GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
 }
 
 PerformanceConfigHipImplicitGemmGroupBwdXdlops
@@ -548,6 +577,8 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
         return false;
+    if(problem.GetConv().attribute.deterministic)
+        return false;
     if(problem.HasMixedDataTypes())
         return false;
     if(!problem.AllTensorsDimsFitIntoInt())
@@ -564,6 +595,10 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
     if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
+        return false;
+    // CK support disabled on Navi3 and Navi4 due to missing instances for BWD
+    if(StartsWith(ctx.GetStream().GetDeviceName(), "gfx12") ||
+       StartsWith(ctx.GetStream().GetDeviceName(), "gfx11"))
         return false;
     switch(problem.GetInDataType())
     {

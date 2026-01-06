@@ -35,6 +35,8 @@
 #endif
 
 static constexpr size_t ONE_GiB = 1 << 30;
+static constexpr size_t ONE_MiB = 1 << 20;
+static constexpr size_t ONE_KiB = 1 << 10;
 
 inline size_t bytes_to_GiB(const size_t bytes)
 {
@@ -105,11 +107,11 @@ private:
 
     host_memory()
     {
-        update();
         // Note: passing (reading) a member variable as argument to a member routine that
         // requires a unique lock. This constructor is only possibly invoked at initialization
         // of the local static variable in the "singleton" public member function though, and
         // that initialization is guaranteed to be thread-safe in C++11.
+        update();
         set_limit_bytes(total_bytes);
     }
 

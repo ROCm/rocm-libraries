@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spmv_coo_bad_arg(void)
+template <typename I, typename T>
+void testing_spmv_coo_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -148,7 +149,7 @@ void testing_spmv_coo_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spmv_coo(Arguments argus)
+void testing_spmv_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -158,7 +159,7 @@ hipsparseStatus_t testing_spmv_coo(Arguments argus)
     T                    h_beta   = make_DataType<T>(argus.beta);
     hipsparseOperation_t transA   = argus.transA;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMVAlg_t   alg      = static_cast<hipsparseSpMVAlg_t>(argus.spmv_alg);
+    hipsparseSpMVAlg_t   alg      = argus.spmv_alg;
     std::string          filename = argus.filename;
 
     // Index and data type
@@ -178,11 +179,8 @@ hipsparseStatus_t testing_spmv_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base));
 
     std::vector<I> hrow_ind(nnz);
 
@@ -350,8 +348,6 @@ hipsparseStatus_t testing_spmv_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMV_COO_HPP

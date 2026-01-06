@@ -79,7 +79,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false) {
               --library-format=msgpack \
               --architecture=\$gfx_name
             mprof plot -o memeory_profile.svg
-            
+
             """
 
     platform.runCommand(this, command)
@@ -109,8 +109,5 @@ def ci() {
 
     // Sets this job to run every day at 10:00 PM
     properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 22 * * *')])]))
-
-    stage(urlJobName) {
-        runCI([ubuntu22:['gfx90a']], urlJobName)
-    }
+    runCI([ubuntu22:['gfx90a']], urlJobName)
 }

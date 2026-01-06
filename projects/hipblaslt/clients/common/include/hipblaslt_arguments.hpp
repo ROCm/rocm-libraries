@@ -156,6 +156,8 @@ struct Arguments
     bool                     gradient;
     bool                     norm_check_assert;
     bool                     swizzle_a;
+    bool                     swizzle_b;
+    bool                     dump_matrix;
 
     uint32_t scaleABlockRowSize;
     uint32_t scaleABlockColSize;
@@ -264,6 +266,8 @@ struct Arguments
     OPER(gradient) SEP               \
     OPER(norm_check_assert) SEP      \
     OPER(swizzle_a) SEP              \
+    OPER(swizzle_b) SEP              \
+    OPER(dump_matrix) SEP            \
     OPER(scaleABlockRowSize) SEP     \
     OPER(scaleABlockColSize) SEP     \
     OPER(scaleBBlockRowSize) SEP     \
@@ -864,7 +868,7 @@ namespace ArgumentsHelper
             func("beta", arg.get_beta<decltype(T)>());
         };
 };
-// clang-format on
+    // clang-format on
 
 #else
 #error "Unsupported C++ version"

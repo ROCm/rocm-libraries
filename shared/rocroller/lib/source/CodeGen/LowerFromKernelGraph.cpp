@@ -34,6 +34,7 @@
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
+#include <rocRoller/CodeGen/ExchangeGenerator.hpp>
 #include <rocRoller/CodeGen/GenerateNodes.hpp>
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Context.hpp>
@@ -76,6 +77,7 @@ namespace rocRoller
                 , m_fastArith{kernel->context()}
                 , m_loadStoreTileGenerator(
                       m_graph, kernel->context(), kernel->max_flat_workgroup_size())
+                , m_exchangeGenerator(m_graph, kernel->context())
                 , m_argumentTracer(std::move(argTracer))
             {
             }
@@ -87,7 +89,7 @@ namespace rocRoller
                 // TODO: Remove this when RemoveSetCoordinate transformation is enabled
                 //       as RemoveSetCoordinate will build all transformers.
                 //
-                if(m_graph->getAllTransformers().empty())
+                if(!m_context->kernelOptions()->removeSetCoordinate)
                     m_graph->buildAllTransformers();
 
                 //
@@ -627,56 +629,74 @@ namespace rocRoller
                     concatenate("Assign dim(", dimTag, ") = ", assign.expression));
 
                 auto scope = m_context->getScopeManager();
-                scope->addRegister(dimTag);
 
-                auto deferred = expressionHasNoneDT(assign.expression)
-                                && !m_context->registerTagManager()->hasRegister(dimTag);
-
-                Register::ValuePtr dest;
-                if(!deferred)
+                if(assign.strideExpressionAttributes)
                 {
-                    auto valueCount = assign.valueCount;
-                    if(valueCount == 0)
-                    {
-                        auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
-                        valueCount = tmp->valueCount();
-                    }
-
-                    auto varType = resultVariableType(assign.expression);
-                    if(assign.variableType)
-                    {
-                        varType = assign.variableType.value();
-                        // For non-packed types, the denominator is 1.
-                        valueCount /= DataTypeInfo::Get(varType).packing;
-                    }
-
-                    Log::debug("  immediate: count {}", assign.valueCount);
-                    if(assign.regType == Register::Type::Accumulator
-                       || assign.regType == Register::Type::Vector)
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag,
-                            assign.regType,
-                            varType,
-                            valueCount,
-                            Register::AllocationOptions{.contiguousChunkWidth
-                                                        = static_cast<int>(valueCount)});
-                    }
-                    else
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag, assign.regType, varType, valueCount);
-                    }
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
+                    co_yield Instruction::Comment("Assign stride expression");
+                    m_context->registerTagManager()->addExpression(
+                        dimTag,
+                        m_fastArith(assign.expression),
+                        assign.strideExpressionAttributes.value());
+                    scope->addRegister(dimTag);
                 }
-                co_yield Expression::generate(dest, assign.expression, m_context);
-
-                if(deferred)
+                else
                 {
-                    m_context->registerTagManager()->addRegister(dimTag, dest);
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
+                    scope->addRegister(dimTag);
+
+                    auto deferred = expressionHasNoneDT(assign.expression)
+                                    && !m_context->registerTagManager()->hasRegister(dimTag);
+
+                    Register::ValuePtr dest;
+                    if(!deferred)
+                    {
+                        auto valueCount = assign.valueCount;
+                        if(valueCount == 0)
+                        {
+                            auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
+                            valueCount = tmp->valueCount();
+                        }
+
+                        auto varType = resultVariableType(assign.expression);
+                        if(assign.variableType)
+                        {
+                            varType = assign.variableType.value();
+                            // For non-packed types, the denominator is 1.
+                            valueCount /= DataTypeInfo::Get(varType).packing;
+                        }
+
+                        Log::debug("  immediate: count {}", assign.valueCount);
+
+                        if(assign.regType == Register::Type::Accumulator
+                           || assign.regType == Register::Type::Vector)
+                        {
+                            auto const& typeInfo              = DataTypeInfo::Get(varType);
+                            int         physicalRegisterCount = valueCount * typeInfo.registerCount;
+
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag,
+                                assign.regType,
+                                varType,
+                                valueCount,
+                                Register::AllocationOptions{.contiguousChunkWidth
+                                                            = physicalRegisterCount});
+                        }
+                        else
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag, assign.regType, varType, valueCount);
+                        }
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
+
+                    co_yield Expression::generate(dest, assign.expression, m_context);
+
+                    if(deferred)
+                    {
+                        m_context->registerTagManager()->addRegister(dimTag, dest);
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
                 }
             }
 
@@ -708,12 +728,6 @@ namespace rocRoller
                 }
 
                 co_yield m_context->mem()->barrier(srcs);
-            }
-
-            Generator<Instruction> operator()(int tag, ComputeIndex const& ci)
-            {
-                co_yield m_loadStoreTileGenerator.genComputeIndex(
-                    tag, ci, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)
@@ -1098,141 +1112,8 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Exchange const& exchange)
             {
-                auto [waveTileTag, waveTile]   = m_graph->getDimension<WaveTile>(tag);
-                auto [macTileTag, macTile]     = m_graph->getDimension<MacroTile>(tag);
-                auto [vgprIndexTag, vgprIndex] = m_graph->getDimension<VGPRBlockIndex>(tag);
-                auto [simdBlockTag, simdBlock] = m_graph->getDimension<Adhoc>(tag, 0);
-
-                const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
-
-                auto                      coords = m_graph->buildTransformer(tag);
-                Expression::ExpressionPtr waveTileExpr, simdBlockExpr, vgprIndexExpr, expectedExpr;
-
-                {
-                    auto [required, path] = findRequiredCoordinates(
-                        waveTileTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    waveTileExpr = coords.reverse({waveTileTag})[0];
-                }
-
-                {
-                    auto [required, path] = findRequiredCoordinates(
-                        vgprIndexTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        if(r == vgprIndexTag)
-                            continue;
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    vgprIndexExpr = coords.reverse({vgprIndexTag})[0];
-                    expectedExpr
-                        = (waveTileExpr / (Expression::literal(waveTileSize) / vgprIndex.size));
-                    AssertFatal(Expression::identical(m_fastArith(vgprIndexExpr),
-                                                      m_fastArith(expectedExpr)),
-                                "Exchange: VGPRIndex must be the slowest running dimension");
-                }
-
-                {
-                    auto [required, path] = findRequiredCoordinates(
-                        simdBlockTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    simdBlockExpr = coords.reverse({simdBlockTag})[0];
-                    expectedExpr  = waveTileExpr % simdBlock.size;
-                    AssertFatal(Expression::identical(m_fastArith(simdBlockExpr),
-                                                      m_fastArith(expectedExpr)),
-                                "Exchange: SIMDBlock must be the fastest running dimension");
-                }
-
-                const uint wfs = m_context->kernel()->wavefront_size();
-                // Exchange tile fixed size: 64 x 4
-                const uint numVgpr = 64 * 4 / wfs;
-
-                auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
-
-                auto packedVariableType = DataTypeInfo::Get(exchange.varType).packedVariableType();
-
-                if(packedVariableType && !m_context->kernelOptions()->scaleSkipPermlane)
-                {
-                    auto allocOptions = Register::AllocationOptions::FullyContiguous();
-                    auto temp         = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, exchange.varType, numVgpr, allocOptions);
-                    for(auto index = 0; index < numVgpr; index++)
-                        co_yield generateOp<Expression::BitFieldExtract>(
-                            temp->element({index}),
-                            vgpr,
-                            Expression::BitFieldExtract{
-                                {}, exchange.varType.dataType, index * 8, 8});
-                    vgpr = temp;
-                }
-
-                auto oMacTileTag = m_graph->mapper.get(tag, NaryArgument::DEST);
-
-                if(m_context->kernelOptions()->scaleSkipPermlane)
-                {
-                    AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag),
-                                ShowValue(oMacTileTag));
-                }
-                else
-                {
-                    AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag),
-                                ShowValue(oMacTileTag));
-                    AssertFatal(vgpr->registerCount() == numVgpr);
-
-                    m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
-
-                    if(Expression::identical(vgprIndex.size, Expression::literal(4u)))
-                    {
-                        for(uint32_t i = 0; i < numVgpr; i += 2)
-                        {
-                            co_yield_(Instruction::InoutInstruction(
-                                "v_permlane16_swap_b32",
-                                {vgpr->element({i}), vgpr->element({i + 1})},
-                                {},
-                                ""));
-                        }
-                        for(uint32_t i = 0; i < numVgpr / 2; i++)
-                        {
-                            co_yield_(Instruction::InoutInstruction(
-                                "v_permlane32_swap_b32",
-                                {vgpr->element({i}), vgpr->element({i + 2})},
-                                {},
-                                ""));
-                        }
-                    }
-                    else if(Expression::identical(vgprIndex.size, Expression::literal(2u)))
-                    {
-                        for(uint32_t i = 0; i < numVgpr; i += 2)
-                        {
-                            co_yield_(Instruction::InoutInstruction(
-                                "v_permlane32_swap_b32",
-                                {vgpr->element({i}), vgpr->element({i + 1})},
-                                {},
-                                ""));
-                        }
-                    }
-                    else
-                    {
-                        Throw<FatalError>("Exchange for the given vgprIndex size not supported.");
-                    }
-                }
+                auto coords = m_graph->buildTransformer(tag);
+                co_yield m_exchangeGenerator.genExchange(tag, exchange, coords);
             }
 
             Generator<Instruction> operator()(int tag, SeedPRNG const& seedPRNG)
@@ -1271,6 +1152,7 @@ namespace rocRoller
 
             FastArithmetic         m_fastArith;
             LoadStoreTileGenerator m_loadStoreTileGenerator;
+            ExchangeGenerator      m_exchangeGenerator;
 
             std::optional<ControlFlowArgumentTracer> m_argumentTracer;
         };

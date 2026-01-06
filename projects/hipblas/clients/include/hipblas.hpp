@@ -29,7 +29,7 @@
 #include "hipblas.h"
 #include "type_utils.h"
 
-#ifndef WIN32
+#ifdef HIPBLAS_FORTRAN_CLIENTS
 #include "hipblas_fortran.hpp"
 #else
 #include "hipblas_no_fortran.hpp"
@@ -48,7 +48,7 @@
 #define MAP2CF_D64(...) \
     GET_MACRO(__VA_ARGS__, MAP2DCF5, MAP2DCF4, MAP2DCF3, dum2, dum1)(__VA_ARGS__)
 
-#if !defined(WIN32) // WIN doesn't have fortran tests
+#if defined(HIPBLAS_FORTRAN_CLIENTS)
 #define MAP2CF3(FN, A, PFN)  \
     template <>              \
     auto FN<A, false> = PFN; \
@@ -93,7 +93,7 @@
     template <>                              \
     auto FN##_64<A, B, C, true> = PFN##_64Fortran
 #else
-// mapping fortran and C to C API
+// mapping fortran and C to C API so we keep tests the same even without FORTRAN clients
 #define MAP2CF3(FN, A, PFN)  \
     template <>              \
     auto FN<A, false> = PFN; \

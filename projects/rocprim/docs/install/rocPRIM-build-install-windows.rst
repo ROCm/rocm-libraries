@@ -10,11 +10,7 @@ Installing rocPRIM on Windows
 
 rocPRIM is installed on Windows using the ``rmake.py`` Python script. ``rmake.py`` is also used to build rocPRIM examples, tests, and benchmarks.
 
-The rocPRIM source code is available from the `rocPRIM GitHub Repository <https://github.com/ROCm/rocPRIM>`_. 
-
-Use a branch that matches the version of HIP SDK for Windows installed on your system.
-
-Change directory to the cloned ``rocPRIM`` directory and run ``rmake.py -i`` to install rocPRIM to ``C:\hipSDK\include\``:
+In the :doc:`cloned <./rocPRIM-install-overview>` ``rocprim`` directory, run ``rmake.py -i`` to install rocPRIM to ``C:\hipSDK\include\``:
 
 .. code:: shell
 

@@ -30,21 +30,19 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(SequentialScheduler);
-
         static_assert(Component::Component<SequentialScheduler>);
 
-        inline SequentialScheduler::SequentialScheduler(ContextPtr ctx)
+        SequentialScheduler::SequentialScheduler(ContextPtr ctx)
             : Scheduler{ctx}
         {
         }
 
-        inline bool SequentialScheduler::Match(Argument arg)
+        bool SequentialScheduler::Match(Argument arg)
         {
             return std::get<0>(arg) == SchedulerProcedure::Sequential;
         }
 
-        inline std::shared_ptr<Scheduler> SequentialScheduler::Build(Argument arg)
+        std::shared_ptr<Scheduler> SequentialScheduler::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -52,7 +50,7 @@ namespace rocRoller
             return std::make_shared<SequentialScheduler>(std::get<2>(arg));
         }
 
-        inline std::string SequentialScheduler::name() const
+        std::string SequentialScheduler::name() const
         {
             return Name;
         }
@@ -62,7 +60,7 @@ namespace rocRoller
             return true;
         }
 
-        inline Generator<Instruction>
+        Generator<Instruction>
             SequentialScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
             bool yieldedAny = false;

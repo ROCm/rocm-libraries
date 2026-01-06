@@ -1,11 +1,11 @@
 .. meta::
-  :description: hipFFT documentation and API reference library
-  :keywords: FFT, hipFFT, rocFFT, ROCm, API, documentation
+  :description: hipFFT documentation, hipFFTW documentation, and API reference library
+  :keywords: FFT, hipFFT, hipFFTW, rocFFT, ROCm, API, documentation
 
-.. _hipfft-overview:
+.. _overview-of-hipfft-and-hipfftw:
 
 ********************************************************************
-hipFFT overview
+Overview of hipFFT and hipFFTW
 ********************************************************************
 
 hipFFT is a GPU FFT marshalling library that supports
@@ -15,6 +15,19 @@ hipFFT exports an interface that does not require the client to
 change, regardless of the chosen backend. It sits between the
 application and the backend FFT library, marshalling inputs into the
 backend and results back to the application.
+
+hipFFTW exports an interface that is a subset of FFTW_'s interface. Applications using
+the latter for computing discrete Fourier transforms (on CPUs) can use hipFFTW as a
+drop-in substitution to leverage GPU computations instead with minimal
+modifications to their source code. Namely, it is recommended to replace
+inclusions of ``fftw3.h`` with inclusions of ``hipfft/hipfftw.h`` and link
+with hipFFTW instead of fftw3 or fftw3f. For more details, see the
+:doc:`hipFFTW API reference <../reference/hipfftw-api-usage>`.
+
+.. note::
+   hipFFTW supports single- and double-precision calculations; long-double and
+   quad-precision floating point operations are not supported.
+
 
 =====================
 Basic hipFFT usage
@@ -175,10 +188,10 @@ Here's an example of a 2D single-precision real-to-complex transform using the h
       // Strides and distances
       int istride    = 1; // Stride between elements in input
       int ostride    = istride; // Stride between elements in output
-      int inembed[2] = {istride * n[0], istride * n1_padding_real_elements}; // Input layout
-      int onembed[2] = {ostride * n[0], ostride * n1_complex_elements}; // Output layout
-      int idist      = inembed[0] * inembed[1]; // Distance between batches in input
-      int odist      = onembed[0] * onembed[1]; // Distance between batches in output
+      int inembed[2] = {n[0], n1_padding_real_elements}; // Input layout
+      int onembed[2] = {n[0], n1_complex_elements};      // Output layout
+      int idist      = istride * inembed[0] * inembed[1]; // Distance between batches in input
+      int odist      = ostride * onembed[0] * onembed[1]; // Distance between batches in output
 
       // Print the layout parameters
       std::cout << "n: " << n[0] << " " << n[1] << "\n"
@@ -212,11 +225,11 @@ Here's an example of a 2D single-precision real-to-complex transform using the h
       for(int ibatch = 0; ibatch < howmany; ++ibatch)
       {
          std::cout << "batch: " << ibatch << "\n";
-         for(int i = 0; i < inembed[0]; i++)
+         for(int i = 0; i < n[0]; i++)
          {
-               for(int j = 0; j < inembed[1]; j++)
+               for(int j = 0; j < n[1]; j++)
                {
-                  const auto pos = ibatch * idist + i * inembed[1] + j;
+                  const auto pos = ibatch * idist + istride * (i * inembed[1] + j);
                   std::cout << data[pos] << " ";
                }
                std::cout << "\n";
@@ -268,11 +281,11 @@ Here's an example of a 2D single-precision real-to-complex transform using the h
       for(int ibatch = 0; ibatch < howmany; ++ibatch)
       {
          std::cout << "batch: " << ibatch << "\n";
-         for(int i = 0; i < onembed[0]; i++)
+         for(int i = 0; i < n[0]; i++)
          {
-               for(int j = 0; j < onembed[1]; j++)
+               for(int j = 0; j < n1_complex_elements; j++)
                {
-                  const auto pos = ibatch * odist + i * onembed[1] + j;
+                  const auto pos = ibatch * odist + ostride * (i * onembed[1] + j);
                   std::cout << output[pos] << " ";
                }
                std::cout << "\n";
@@ -332,14 +345,18 @@ the input data are reused across multiple FFT batches:
       // FFT configuration
       int rank = 2;
       int xformSz[2] = {512, 512};      // 2D FFT size: 512x512
-      int inEmbed[2] = {1, 2240};       // Input data layout
-      int onEmbed[2] = {1, 512};        // Output data layout
+      int inEmbed[2] = {512, 2240};     // Input data layout
+      int onEmbed[2] = {512, 512};      // Output data layout
       int istride = 1, ostride = 1;     // Stride for input and output
       int idist = 432, odist = 262144;  // Batch distance for input and output
       int batch = 5;                    // Number of FFTs to compute in parallel
 
       // Calculate input and output sizes in bytes
-      size_t inSize = idist * batch * sizeof(std::complex<float>);
+      // Input data sequences are all within an array of inEmbed[0] x inEmbed[1] complex
+      // floating-point values (of elementary stride istride):
+      size_t inSize = istride * inEmbed[0] * inEmbed[1] * sizeof(std::complex<float>);
+      // Output data sequences are made of odist complex floating-point values, stored
+      // contiguously without overlap:
       size_t outSize = odist * batch * sizeof(std::complex<float>);
 
       // Initialize HIP and hipFFT resources
@@ -366,14 +383,14 @@ the input data are reused across multiple FFT batches:
       }
 
       // Initialize input data on the host
-      std::vector<std::complex<float>> inputData(idist * batch, {0.0f, 0.0f});
+      std::vector<std::complex<float>> inputData(istride * inEmbed[0] * inEmbed[1], {0.0f, 0.0f});
       for (int ibatch = 0; ibatch < batch; ++ibatch)
       {
          for (int i = 0; i < xformSz[0]; ++i)
          {
                for (int j = 0; j < xformSz[1]; ++j)
                {
-                  int pos = ibatch * idist + i * inEmbed[1] + j;
+                  int pos = ibatch * idist + istride * (i * inEmbed[1] + j);
                   inputData[pos] = std::complex<float>(i + j, ibatch);
                }
          }
@@ -411,9 +428,9 @@ the input data are reused across multiple FFT batches:
          std::cout << "Batch " << ibatch << ":\n";
          for (int i = 0; i < xformSz[0]; ++i)
          {
-               for (int j = 0; j < xformSz[1] / 2 + 1; ++j)
+               for (int j = 0; j < xformSz[1]; ++j)
                {
-                  int pos = ibatch * odist + i * onEmbed[1] + j;
+                  int pos = ibatch * odist + ostride * (i * onEmbed[1] + j);
                   std::cout << outputData[pos] << " ";
                }
                std::cout << "\n";
@@ -434,13 +451,12 @@ the input data are reused across multiple FFT batches:
 Multi-GPU example
 =================
 
-The following example demonstrates a multi-GPU 2D double-precision complex-to-complex transform using the hipFFT library.
-It showcases how to perform a 2D Fast Fourier Transform (FFT) in double precision (complex-to-complex) across two GPUs.
+The following example illustrates how to compute a 2D double-precision complex-to-complex transform across two GPUs using the hipFFT library.
 The following concepts and API calls are used:
 
 *  ``hipfftXt``: This API lets users execute FFTs across multiple GPUs by managing multi-GPU plans.
    ``hipfftXt`` provides an extended version of the hipFFT API to handle GPU-specific operations, such as memory allocation
-   and execution across multiple devices. For more details, see the :doc:`API reference <../reference/fft-api-usage>`.
+   and execution across multiple devices. For more details, see the :doc:`hipFFT API reference <../reference/hipfft-api-usage>`.
 
 *  :cpp:func:`hipfftCreate`: Creates a hipFFT plan that contains the FFT configuration. This plan is used to configure
    the FFT transform operation.
@@ -472,8 +488,8 @@ For detailed API usage, see :ref:`hipfft-api-usage`.
    #include <iostream>
    #include <vector>
    #include <hipfft/hipfft.h>
+   #include <hipfft/hipfftXt.h>
    #include <hip/hip_runtime_api.h>
-   #include "../hipfft_params.h"
 
    int main()
    {
@@ -507,11 +523,11 @@ For detailed API usage, see :ref:`hipfft-api-usage`.
       }
 
       // Specify the GPUs you want to use for multi-GPU setup
-      std::array<int, 2> gpus = {0, 1};  // Use GPU 0 and GPU 1
+      std::vector<int> gpus = {0, 1};  // Use GPU 0 and GPU 1
 
       // Create a multi-GPU plan
       hipLibXtDesc* desc; // Input descriptor for the Xt format
-      hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;  // Initialize plan handle
+      hipfftHandle plan;  // Plan handle
 
       // Create the FFT plan
       if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
@@ -530,13 +546,13 @@ For detailed API usage, see :ref:`hipfft-api-usage`.
          throw std::runtime_error("hipfftXtSetGPUs failed.");
 
       // Make the 2D plan for FFT (this defines the 2D FFT using the specified dimensions)
-      size_t workSize[gpus.size()];
-      hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize);
+      std::vector<size_t> workSize(gpus.size());
+      hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
       if(hipfft_rt != HIPFFT_SUCCESS)
          throw std::runtime_error("hipfftMakePlan2d failed.");
 
       // Allocate memory for input data on the GPUs (Xt format handles the data distribution)
-      hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+      hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
       hipfft_rt = hipfftXtMalloc(plan, &desc, format);  // Allocate memory for the descriptor
       if(hipfft_rt != HIPFFT_SUCCESS)
          throw std::runtime_error("hipfftXtMalloc failed.");
@@ -591,7 +607,6 @@ For detailed API usage, see :ref:`hipfft-api-usage`.
       return 0;
    }
 
-
-
 .. _rocFFT: https://rocm.docs.amd.com/projects/rocFFT/en/latest/index.html
 .. _cuFFT: https://developer.nvidia.com/cufft
+.. _FFTW: https://www.fftw.org/

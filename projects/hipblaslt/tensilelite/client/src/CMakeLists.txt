@@ -22,4 +22,3 @@ target_sources(tensilelite-client
     "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIterator.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
 )
-

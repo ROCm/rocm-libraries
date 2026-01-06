@@ -215,4 +215,3 @@ template<typename ForwardIterator, typename T>
 
 
 THRUST_NAMESPACE_END
-

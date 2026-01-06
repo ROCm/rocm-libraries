@@ -56,7 +56,7 @@ namespace rocRoller
     /**
      * If [coordBegin, coordEnd) represents coordinate x within the
      * linearization, updates it to represent coordinate x+1.
-     * 
+     *
      * If [coordBegin, coordEnd) represents the last coordinate within the
      * linearization, it will be reset to all 0s and false will be returned.
      */
@@ -89,11 +89,6 @@ namespace rocRoller
         /**
          *  Allow directly specifying total number of elements instead of sizes
          */
-        TensorDescriptor(DataType                      t,
-                         size_t                        totalLogicalElements,
-                         std::initializer_list<size_t> strides,
-                         size_t                        offset = 0);
-
         TensorDescriptor(DataType t, std::initializer_list<size_t> sizes, size_t offset = 0);
 
         TensorDescriptor(DataType t, std::vector<size_t> sizes, size_t offset = 0);
@@ -225,9 +220,9 @@ namespace rocRoller
      * `dst` and `src` must be two TensorDescriptors with the same data type
      * and dimension sizes (i.e. dst.sizes() == src.sizes()). They should have
      * different strides (or this function is a no-op).
-     * 
+     *
      * `input` must contain data arranged according to `src`.
-     * 
+     *
      * Returns `input` rearranged according to the strides in `dst`.
      */
     template <typename T>

@@ -2,97 +2,14 @@
 Contributing to rocBLAS
 =======================
 
-We welcome contributions to rocBLAS. Please follow these details to help ensure your contributions will be successfully accepted.
+AMD welcomes community contributions to rocBLAS, including bug reports,
+bug fixes, documentation enhancements, performance notes, and other improvements.
 
-Issue Discussion
-================
+For information on how to contribute to the rocm-libraries repository,
+including guidelines for pull requests and testing,
+see `Contributing to the ROCm libraries <https://github.com/ROCm/rocm-libraries/blob/develop/CONTRIBUTING.md>`_.
 
-Please use the GitHub Issues tab to notify us of issues.
-
-- Use your best judgment for issue creation. If your issue is already listed, upvote the issue and
-  comment or post to provide additional details, such as how you reproduced this issue.
-- If you're not sure if your issue is the same, err on the side of caution and file your issue.
-  You can add a comment to include the issue number (and link) for the similar issue. If we evaluate
-  your issue as being the same as the existing issue, we'll close the duplicate.
-- If your issue doesn't exist, use the issue template to file a new issue.
-
-  - When filing an issue, be sure to provide as much information as possible, including script output so
-    we can collect information about your configuration. This helps reduce the time required to
-    reproduce your issue.
-  - Check your issue regularly, as we may require additional information to successfully reproduce the
-    issue.
-- You may also open an issue to ask questions to the maintainers about whether a proposed change
-  meets the acceptance criteria, or to discuss an idea pertaining to the library.
-
-Acceptance Criteria
-===================
-The aim of rocBLAS is to provide an optimized implementation of BLAS for ROCm.
-The library includes extensions like mixed precision and batched versions of
-functions.
-
-Contributors wanting to submit new implementations, improvements, or bug fixes
-should follow the below mentioned guidelines.
-
-Pull requests will be reviewed by members of
-`CODEOWNERS.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/.github/CODEOWNERS>`__
-Continuous Integration tests will be run on the pull request. Once the pull request
-is approved and tests pass it will be merged by a member of
-`CODEOWNERS.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/.github/CODEOWNERS>`__.
-Attribution for your commit will be preserved when it is merged.
-
-
-
-Pull-request guidelines
-=======================
-
-By creating a pull request, you agree to the statements made in the
-`Code License`_
-section. Your pull request should target the default branch. Our current
-default branch is the develop branch, which serves as our integration branch.
-
-Pull requests should:
-
--  ensure code builds successfully.
--  do not break existing test cases.
--  new functionality will only be merged with new unit tests.
--  new unit tests should integrate within the existing googletest framework.
--  tests must have good code coverage.
--  code must also have benchmark tests, and performance must approach.
-   the compute bound limit or memory bound limit.
-
-Code License
-============
-All code contributed to this project will be licensed under the license identified in the
-`LICENSE.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/LICENSE.md>`__.
-Your contribution will be accepted under the same license.
-
-For each new file in repository, please include the licensing header
-
-.. code:: cpp
-
-    /*******************************************************************************
-     * Copyright (c) 20xx Advanced Micro Devices, Inc.
-     *
-     * Permission is hereby granted, free of charge, to any person obtaining a copy
-     * of this software and associated documentation files (the "Software"), to deal
-     * in the Software without restriction, including without limitation the rights
-     * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-     * copies of the Software, and to permit persons to whom the Software is
-     * furnished to do so, subject to the following conditions:
-     *
-     * The above copyright notice and this permission notice shall be included in all
-     * copies or substantial portions of the Software.
-     *
-     * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-     * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-     * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-     * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-     * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-     * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-     * SOFTWARE.
-     *
-     *******************************************************************************/
-
+The following additional coding style guidelines apply to rocBLAS.
 
 Coding Style
 ============
@@ -872,7 +789,5 @@ Also, githooks can be installed to perform static analysis on new/modified files
 
 For more information on the command line options, refer to the cppcheck manual on the web.
 
-References
-==========
-
-`rocBLAS documentation <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html>`__
+For more information about rocBLAS, see the
+`rocBLAS documentation <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html>`__.

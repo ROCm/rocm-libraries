@@ -79,13 +79,11 @@ namespace rocRoller
             AddStreamK()                  = delete;
             AddStreamK(AddStreamK const&) = delete;
 
-            AddStreamK(std::vector<int> const&   dims,
+            AddStreamK(ContextPtr                context,
+                       CommandParametersPtr      params,
                        std::string const&        topLoop,
                        std::string const&        accumulatorLoop,
-                       bool                      twoTile,
-                       Expression::ExpressionPtr numWGs,
-                       CommandParametersPtr      params,
-                       ContextPtr                context);
+                       Expression::ExpressionPtr numWGs);
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;

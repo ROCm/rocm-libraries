@@ -73,7 +73,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
     endif()
 
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
-                PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION})
+                 PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION})
   endif()
 else()
   # rocPRIM (only for ROCm platform)

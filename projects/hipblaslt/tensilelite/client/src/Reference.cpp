@@ -730,15 +730,13 @@ namespace TensileLite
             bool aConjugate = false;
             bool bConjugate = false;
 
-            if(DataTypeInfo::Get(problem.a().dataType()).isComplex)
-            {
-                aConjugate = true;
-            }
+            for(auto const& op : problem.aOps())
+                if(op.type == TensorOp::Type::ComplexConjugate)
+                    aConjugate = true;
 
-            if(DataTypeInfo::Get(problem.b().dataType()).isComplex)
-            {
-                bConjugate = true;
-            }
+            for(auto const& op : problem.bOps())
+                if(op.type == TensorOp::Type::ComplexConjugate)
+                    bConjugate = true;
 
             std::vector<size_t> freeASize(freeIndicesA.size());
             std::vector<size_t> freeBSize(freeIndicesB.size());
@@ -1368,6 +1366,11 @@ namespace TensileLite
             case TypedGemm_I8_B_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_I8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_S_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_S_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
 #endif // TENSILE_USE_BF16

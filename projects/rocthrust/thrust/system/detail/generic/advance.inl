@@ -65,4 +65,3 @@ void advance(InputIterator& i, Distance n)
 } // end namespace generic
 } // end namespace system
 THRUST_NAMESPACE_END
-

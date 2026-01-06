@@ -15,7 +15,7 @@ The hipSPARSELt public repository is located at `<https://github.com/ROCm/rocm-l
 
 .. note::
 
-   The hipSPARSELt repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/hipSPARSELt>`_.
+   The hipSPARSELt repository for ROCm 6.4.3 and earlier is located at `<https://github.com/ROCm/hipSPARSELt>`_.
 
 .. grid:: 2
   :gutter: 3

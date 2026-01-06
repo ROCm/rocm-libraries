@@ -49,4 +49,3 @@ void free(pointer<void> ptr)
 
 } // end cuda_cub
 THRUST_NAMESPACE_END
-

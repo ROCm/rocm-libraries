@@ -39,6 +39,7 @@ enum class hipblaslt_initialization
     special    = 444,
     zero       = 555,
     norm_dist  = 666,
+    uniform_01 = 777,
 };
 
 typedef enum class _hipblaslt_activation_type
@@ -48,6 +49,7 @@ typedef enum class _hipblaslt_activation_type
     gelu  = 2,
     swish = 3,
     clamp = 4,
+    sigmoid = 5,
 } hipblaslt_activation_type;
 
 typedef enum class _hipblaslt_bias_source
@@ -85,6 +87,9 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
     case hipblaslt_activation_type::clamp:
         os << "clamp";
         break;
+    case hipblaslt_activation_type::sigmoid:
+	os << "sigmoid";
+	break;
     }
     return os;
 }
@@ -122,6 +127,8 @@ constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
         return "zero";
     case hipblaslt_initialization::norm_dist:
         return "norm_dist";
+    case hipblaslt_initialization::uniform_01:
+        return "uniform_01";
     }
     return "invalid";
 }
@@ -142,6 +149,7 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
         value == "special"    ? hipblaslt_initialization::special    :
         value == "zero"       ? hipblaslt_initialization::zero       :
         value == "norm_dist"  ? hipblaslt_initialization::norm_dist  :
+        value == "uniform_01" ? hipblaslt_initialization::uniform_01 :
         static_cast<hipblaslt_initialization>(0);
 }
 // clang-format on
@@ -152,6 +160,7 @@ inline const hipblaslt_activation_type string_to_hipblaslt_activation_type(const
            : value == "relu"  ? hipblaslt_activation_type::relu
            : value == "swish" ? hipblaslt_activation_type::swish
            : value == "clamp" ? hipblaslt_activation_type::clamp
+	   : value == "sigmoid" ? hipblaslt_activation_type::sigmoid
                               : static_cast<hipblaslt_activation_type>(-1);
 }
 
@@ -176,6 +185,8 @@ inline const char* hipblaslt_activation_type_to_string(hipblaslt_activation_type
         return "swish";
     case hipblaslt_activation_type::clamp:
         return "clamp";
+    case hipblaslt_activation_type::sigmoid:
+	return "sigmoid";
     case hipblaslt_activation_type::none:
         return "none";
     default:

@@ -1,287 +1,148 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
-*
-* Permission is hereby granted, free of charge, to any person obtaining a copy
-* of this software and associated documentation files (the "Software"), to deal
-* in the Software without restriction, including without limitation the rights
-* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-* copies of the Software, and to permit persons to whom the Software is
-* furnished to do so, subject to the following conditions:
-*
-* The above copyright notice and this permission notice shall be included in
-* all copies or substantial portions of the Software.
-*
-* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-* THE SOFTWARE.
-*
-* ************************************************************************ */
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
 
-#include "rocsparse_control.hpp"
 #include "rocsparse_coomm.hpp"
+#include "rocsparse_enum_utils.hpp"
 #include "rocsparse_utility.hpp"
+#include <map>
+#include <sstream>
 
 namespace rocsparse
 {
-    template <typename T, typename I, typename A>
-    static rocsparse_status coomm_analysis_quickreturn(rocsparse_handle          handle,
-                                                       rocsparse_operation       trans_A,
-                                                       rocsparse_coomm_alg       alg,
-                                                       I                         m,
-                                                       I                         n,
-                                                       I                         k,
-                                                       int64_t                   nnz,
-                                                       const rocsparse_mat_descr descr,
-                                                       const A*                  coo_val,
-                                                       const I*                  coo_row_ind,
-                                                       const I*                  coo_col_ind,
-                                                       void*                     temp_buffer)
+    typedef rocsparse_status (*coomm_analysis_t)(rocsparse_handle          handle,
+                                                 rocsparse_operation       trans_A,
+                                                 rocsparse_coomm_alg       alg,
+                                                 int64_t                   m,
+                                                 int64_t                   n,
+                                                 int64_t                   k,
+                                                 int64_t                   nnz,
+                                                 const rocsparse_mat_descr descr,
+                                                 const void*               coo_val,
+                                                 const void*               coo_row_ind,
+                                                 const void*               coo_col_ind,
+                                                 void*                     temp_buffer);
+
+    using coomm_analysis_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
+
+    // clang-format off
+#define COOMM_ANALYSIS_CONFIG(I_, A_)                                      \
+    {coomm_analysis_tuple(I_, A_),                                         \
+     coomm_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
+                             typename rocsparse::datatype_traits<A_>::type_t>}
+    // clang-format on
+
+    static const std::map<coomm_analysis_tuple, coomm_analysis_t> s_coomm_analysis_dispatch{
+        {// Uniform precisions
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_r),
+
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_r),
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_r),
+
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_c),
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_c),
+
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_c),
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_c),
+
+         // Mixed precisions
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_i8_r),
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_i8_r),
+
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f16_r),
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f16_r),
+
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_bf16_r),
+         COOMM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_bf16_r)}};
+
+    static rocsparse_status coomm_analysis_find(coomm_analysis_t*   function_,
+                                                rocsparse_indextype i_type_,
+                                                rocsparse_datatype  a_type_)
     {
-        ROCSPARSE_ROUTINE_TRACE;
+        const auto& it = rocsparse::s_coomm_analysis_dispatch.find(
+            rocsparse::coomm_analysis_tuple(i_type_, a_type_));
 
-        if(m == 0 || n == 0 || k == 0)
+        if(it != rocsparse::s_coomm_analysis_dispatch.end())
         {
-            return rocsparse_status_success;
-        }
-        return rocsparse_status_continue;
-    }
-
-    template <typename T, typename I, typename A>
-    static rocsparse_status coomm_analysis_checkarg(rocsparse_handle          handle, //0
-                                                    rocsparse_operation       trans_A, //1
-                                                    rocsparse_coomm_alg       alg, //2
-                                                    I                         m, //3
-                                                    I                         n, //4
-                                                    I                         k, //5
-                                                    int64_t                   nnz, //6
-                                                    const rocsparse_mat_descr descr, //7
-                                                    const A*                  coo_val, //8
-                                                    const I*                  coo_row_ind, //9
-                                                    const I*                  coo_col_ind, //10
-                                                    void*                     temp_buffer) //11
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        ROCSPARSE_CHECKARG_HANDLE(0, handle);
-        ROCSPARSE_CHECKARG_ENUM(1, trans_A);
-        ROCSPARSE_CHECKARG_ENUM(2, alg);
-        ROCSPARSE_CHECKARG_SIZE(3, m);
-        ROCSPARSE_CHECKARG_SIZE(4, n);
-        ROCSPARSE_CHECKARG_SIZE(5, k);
-        ROCSPARSE_CHECKARG_SIZE(6, nnz);
-        ROCSPARSE_CHECKARG_POINTER(7, descr);
-        ROCSPARSE_CHECKARG(7,
-                           descr,
-                           (descr->type != rocsparse_matrix_type_general),
-                           rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(7,
-                           descr,
-                           (descr->storage_mode != rocsparse_storage_mode_sorted),
-                           rocsparse_status_not_implemented);
-
-        ROCSPARSE_CHECKARG_ARRAY(8, nnz, coo_val);
-        ROCSPARSE_CHECKARG_ARRAY(9, nnz, coo_row_ind);
-        ROCSPARSE_CHECKARG_ARRAY(10, nnz, coo_col_ind);
-
-        const rocsparse_status status = rocsparse::coomm_analysis_quickreturn<T>(handle,
-                                                                                 trans_A,
-                                                                                 alg,
-                                                                                 m,
-                                                                                 n,
-                                                                                 k,
-                                                                                 nnz,
-                                                                                 descr,
-                                                                                 coo_val,
-                                                                                 coo_row_ind,
-                                                                                 coo_col_ind,
-                                                                                 temp_buffer);
-
-        if(status != rocsparse_status_continue)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(status);
-            return rocsparse_status_success;
-        }
-
-        ROCSPARSE_CHECKARG_POINTER(11, temp_buffer);
-        return rocsparse_status_continue;
-    }
-
-    template <typename T, typename I, typename A>
-    static rocsparse_status coomm_analysis_core(rocsparse_handle          handle,
-                                                rocsparse_operation       trans_A,
-                                                rocsparse_coomm_alg       alg,
-                                                I                         m,
-                                                I                         n,
-                                                I                         k,
-                                                int64_t                   nnz,
-                                                const rocsparse_mat_descr descr,
-                                                const A*                  coo_val,
-                                                const I*                  coo_row_ind,
-                                                const I*                  coo_col_ind,
-                                                void*                     temp_buffer)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        switch(alg)
-        {
-        case rocsparse_coomm_alg_default:
-        case rocsparse_coomm_alg_atomic:
-        {
-            return rocsparse_status_success;
-        }
-
-        case rocsparse_coomm_alg_segmented:
-        {
-            return rocsparse_status_success;
-        }
-
-        case rocsparse_coomm_alg_segmented_atomic:
-        {
-            return rocsparse_status_success;
-        }
+            function_[0] = it->second;
         }
         // LCOV_EXCL_START
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        else
+        {
+#ifndef NDEBUG
+            std::cout << "invalid precision configuration: "
+                      << "i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
+                      << ", a_type: " << rocsparse::enum_utils::to_string(a_type_) << std::endl;
+
+            std::cout << "available configuration are: " << std::endl;
+            for(const auto& p : rocsparse::s_coomm_analysis_dispatch)
+            {
+                const auto& t      = p.first;
+                const auto  i_type = std::get<0>(t);
+                const auto  a_type = std::get<1>(t);
+                std::cout << std::endl
+                          << std::endl
+                          << "i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl
+                          << ", a_type: " << rocsparse::enum_utils::to_string(a_type) << std::endl;
+            }
+#endif
+
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "i_type: " << rocsparse::enum_utils::to_string(i_type_)
+                 << ", a_type: " << rocsparse::enum_utils::to_string(a_type_);
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
+        }
         // LCOV_EXCL_STOP
+
+        return rocsparse_status_success;
     }
 }
 
-template <typename T, typename I, typename A>
-rocsparse_status rocsparse::coomm_analysis_template(rocsparse_handle          handle,
-                                                    rocsparse_operation       trans_A,
-                                                    rocsparse_coomm_alg       alg,
-                                                    I                         m,
-                                                    I                         n,
-                                                    I                         k,
-                                                    int64_t                   nnz,
-                                                    const rocsparse_mat_descr descr,
-                                                    const A*                  coo_val,
-                                                    const I*                  coo_row_ind,
-                                                    const I*                  coo_col_ind,
-                                                    void*                     temp_buffer)
+rocsparse_status rocsparse::coomm_analysis(rocsparse_handle          handle,
+                                           rocsparse_operation       trans_A,
+                                           rocsparse_coomm_alg       alg,
+                                           int64_t                   m,
+                                           int64_t                   n,
+                                           int64_t                   k,
+                                           int64_t                   nnz,
+                                           const rocsparse_mat_descr descr,
+                                           rocsparse_datatype        coo_val_datatype,
+                                           const void*               coo_val,
+                                           rocsparse_indextype       coo_row_ind_indextype,
+                                           const void*               coo_row_ind,
+                                           rocsparse_indextype       coo_col_ind_indextype,
+                                           const void*               coo_col_ind,
+                                           void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
-
-    const rocsparse_status status = rocsparse::coomm_analysis_quickreturn<T>(
-        handle, trans_A, alg, m, n, k, nnz, descr, coo_val, coo_row_ind, coo_col_ind, temp_buffer);
-
-    if(status != rocsparse_status_continue)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(status);
-        return rocsparse_status_success;
-    }
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomm_analysis_core<T>(
+    rocsparse::coomm_analysis_t f;
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::coomm_analysis_find(&f, coo_row_ind_indextype, coo_val_datatype));
+    RETURN_IF_ROCSPARSE_ERROR(f(
         handle, trans_A, alg, m, n, k, nnz, descr, coo_val, coo_row_ind, coo_col_ind, temp_buffer));
-
     return rocsparse_status_success;
 }
-
-namespace rocsparse
-{
-    template <typename T, typename I, typename A>
-    rocsparse_status coomm_analysis_impl(rocsparse_handle          handle,
-                                         rocsparse_operation       trans_A,
-                                         rocsparse_coomm_alg       alg,
-                                         I                         m,
-                                         I                         n,
-                                         I                         k,
-                                         int64_t                   nnz,
-                                         const rocsparse_mat_descr descr,
-                                         const A*                  coo_val,
-                                         const I*                  coo_row_ind,
-                                         const I*                  coo_col_ind,
-                                         void*                     temp_buffer)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        rocsparse::log_trace(handle,
-                             "rocsparse_coomm_analysis",
-                             trans_A,
-                             alg,
-                             m,
-                             n,
-                             k,
-                             nnz,
-                             (const void*&)descr,
-                             (const void*&)coo_val,
-                             (const void*&)coo_row_ind,
-                             (const void*&)coo_col_ind,
-                             (const void*&)temp_buffer);
-
-        const rocsparse_status status = rocsparse::coomm_analysis_checkarg<T>(handle,
-                                                                              trans_A,
-                                                                              alg,
-                                                                              m,
-                                                                              n,
-                                                                              k,
-                                                                              nnz,
-                                                                              descr,
-                                                                              coo_val,
-                                                                              coo_row_ind,
-                                                                              coo_col_ind,
-                                                                              temp_buffer);
-
-        if(status != rocsparse_status_continue)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(status);
-            return rocsparse_status_success;
-        }
-
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomm_analysis_core<T>(handle,
-                                                                    trans_A,
-                                                                    alg,
-                                                                    m,
-                                                                    n,
-                                                                    k,
-                                                                    nnz,
-                                                                    descr,
-                                                                    coo_val,
-                                                                    coo_row_ind,
-                                                                    coo_col_ind,
-                                                                    temp_buffer));
-
-        return rocsparse_status_success;
-    }
-}
-
-#define INSTANTIATE_ANALYSIS(TTYPE, ITYPE, ATYPE)                                      \
-    template rocsparse_status rocsparse::coomm_analysis_template<TTYPE, ITYPE, ATYPE>( \
-        rocsparse_handle          handle,                                              \
-        rocsparse_operation       trans_A,                                             \
-        rocsparse_coomm_alg       alg,                                                 \
-        ITYPE                     m,                                                   \
-        ITYPE                     n,                                                   \
-        ITYPE                     k,                                                   \
-        int64_t                   nnz,                                                 \
-        const rocsparse_mat_descr descr,                                               \
-        const ATYPE*              coo_val,                                             \
-        const ITYPE*              coo_row_ind,                                         \
-        const ITYPE*              coo_col_ind,                                         \
-        void*                     temp_buffer);
-
-// Uniform precisions
-INSTANTIATE_ANALYSIS(float, int32_t, float);
-INSTANTIATE_ANALYSIS(float, int64_t, float);
-INSTANTIATE_ANALYSIS(double, int32_t, double);
-INSTANTIATE_ANALYSIS(double, int64_t, double);
-INSTANTIATE_ANALYSIS(rocsparse_float_complex, int32_t, rocsparse_float_complex);
-INSTANTIATE_ANALYSIS(rocsparse_float_complex, int64_t, rocsparse_float_complex);
-INSTANTIATE_ANALYSIS(rocsparse_double_complex, int32_t, rocsparse_double_complex);
-INSTANTIATE_ANALYSIS(rocsparse_double_complex, int64_t, rocsparse_double_complex);
-
-// Mixed precisions
-INSTANTIATE_ANALYSIS(float, int32_t, _Float16);
-INSTANTIATE_ANALYSIS(float, int64_t, _Float16);
-INSTANTIATE_ANALYSIS(float, int32_t, rocsparse_bfloat16);
-INSTANTIATE_ANALYSIS(float, int64_t, rocsparse_bfloat16);
-INSTANTIATE_ANALYSIS(int32_t, int32_t, int8_t);
-INSTANTIATE_ANALYSIS(int32_t, int64_t, int8_t);
-INSTANTIATE_ANALYSIS(float, int32_t, int8_t);
-INSTANTIATE_ANALYSIS(float, int64_t, int8_t);
-#undef INSTANTIATE_ANALYSIS

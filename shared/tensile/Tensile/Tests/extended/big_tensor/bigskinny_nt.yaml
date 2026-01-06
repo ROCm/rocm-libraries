@@ -61,4 +61,3 @@ BenchmarkProblems:
 
 # Cijk_Ailk_Bljk_DB_MT064x064x04_AF0EM01_ASEM01_BL1_GRVW02_GSU01_ISA900_K1_KLA_LPB00_MGWVW01_NLCA01_NLCB01_PBC1_PGR1_PLR1_TT04_04_USFGRO00_VAW01_VW02_WG16_16_01_WGM08
 # ./rocblas-bench -f gemm -r d -m 11804 -n 25732 -k 384 --lda 31296 --ldb 31296 --ldc 31296    --transposeB N --transposeA N  -v 1
-

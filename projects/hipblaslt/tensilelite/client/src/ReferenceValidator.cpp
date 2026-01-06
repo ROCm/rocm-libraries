@@ -87,7 +87,7 @@ namespace TensileLite
             }
         }
 
-        void ReferenceValidator::preSolution(ContractionSolution const& solution)
+        void ReferenceValidator::preSolution(ContractionSolution* const solution)
         {
             m_validatedSolution = false;
             m_errorInSolution   = false;

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_coo2csr_bad_arg(void)
+template <typename T>
+void testing_coo2csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                  m         = 100;
@@ -72,7 +73,7 @@ void testing_coo2csr_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_coo2csr(Arguments argus)
+void testing_coo2csr(Arguments argus)
 {
     int                  m        = argus.M;
     int                  n        = argus.N;
@@ -81,13 +82,6 @@ hipsparseStatus_t testing_coo2csr(Arguments argus)
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
-
-    if(m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     srand(12345ULL);
 
@@ -101,7 +95,7 @@ hipsparseStatus_t testing_coo2csr(Arguments argus)
     if(!generate_coo_matrix(filename, m, n, nnz, hcoo_row_ind, hcoo_col_ind, hcoo_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     std::vector<int> hcsr_row_ptr(m + 1);
@@ -182,8 +176,6 @@ hipsparseStatus_t testing_coo2csr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_COO2CSR_HPP

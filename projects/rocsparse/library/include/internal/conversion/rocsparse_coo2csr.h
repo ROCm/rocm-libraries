@@ -40,8 +40,8 @@ extern "C" {
  *  CSR array of row offsets that point to the start of every row.
  *  It is assumed that the COO row index array is sorted.
  *
- *  \p rocsparse_coo2csr can also be used, to convert a COO array containing the column 
- *  indices into a CSC array of column offsets that point to the start of every column. 
+ *  \p rocsparse_coo2csr can also be used, to convert a COO array containing the column
+ *  indices into a CSC array of column offsets that point to the start of every column.
  *  In this case it is assumed that the COO column index array is sorted instead.
  *
  *  \note

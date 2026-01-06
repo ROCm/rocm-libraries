@@ -301,4 +301,172 @@ public:
 
         CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
     }
+
+    static void testing_spmv_analysis(const Arguments& arg)
+    {
+        J                      M           = arg.M;
+        J                      N           = arg.N;
+        rocsparse_operation    trans       = arg.transA;
+        rocsparse_index_base   base        = arg.baseA;
+        rocsparse_spmv_alg     alg         = arg.spmv_alg;
+        rocsparse_matrix_type  matrix_type = arg.matrix_type;
+        rocsparse_fill_mode    uplo        = arg.uplo;
+        rocsparse_storage_mode storage     = arg.storage;
+        rocsparse_datatype     ttype       = get_datatype<T>();
+
+        // Create rocsparse handle
+        rocsparse_local_handle handle(arg);
+
+        host_scalar<T> h_alpha(arg.get_alpha<T>());
+        host_scalar<T> h_beta(arg.get_beta<T>());
+
+        device_scalar<T> d_alpha(h_alpha);
+        device_scalar<T> d_beta(h_beta);
+
+#define PARAMS_ANALYSIS(alpha_, A_, x_, beta_, y_, stage) \
+    handle, trans, alpha_, A_, x_, beta_, y_, ttype, alg, stage, &buffer_size, dbuffer
+
+        //
+        // INITIALIZATE THE SPARSE MATRIX
+        //
+        host_sparse_matrix<A> hA;
+        {
+            int dev;
+            CHECK_HIP_ERROR(hipGetDevice(&dev));
+
+            hipDeviceProp_t prop;
+            CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
+
+            const bool has_datafile = rocsparse_arguments_has_datafile(arg);
+            bool       to_int       = false;
+            to_int |= (prop.warpSize == 32);
+            to_int |= (alg != rocsparse_spmv_alg_csr_stream);
+            to_int |= (trans != rocsparse_operation_none && has_datafile);
+            to_int |= (matrix_type == rocsparse_matrix_type_symmetric && has_datafile);
+            static constexpr bool             full_rank = false;
+            rocsparse_matrix_factory<A, I, J> matrix_factory(
+                arg, arg.unit_check ? to_int : false, full_rank);
+            traits::sparse_initialization(matrix_factory, hA, M, N, base);
+        }
+
+        if((matrix_type == rocsparse_matrix_type_symmetric && M != N)
+           || (matrix_type == rocsparse_matrix_type_triangular && M != N))
+        {
+            return;
+        }
+
+        device_sparse_matrix<A> dA(hA);
+
+        host_dense_matrix<X> hx((trans == rocsparse_operation_none) ? N : M, 1);
+        rocsparse_matrix_utils::init_exact(hx);
+        device_dense_matrix<X> dx(hx);
+
+        host_dense_matrix<Y> hy((trans == rocsparse_operation_none) ? M : N, 1);
+        rocsparse_matrix_utils::init_exact(hy);
+        device_dense_matrix<Y> dy(hy);
+
+        rocsparse_local_spmat matA(dA);
+        rocsparse_local_dnvec x(dx);
+        rocsparse_local_dnvec y(dy);
+
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spmat_set_attribute(
+                matA, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)),
+            rocsparse_status_success);
+
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spmat_set_attribute(matA, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)),
+            rocsparse_status_success);
+
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_set_attribute(
+                                    matA, rocsparse_spmat_storage_mode, &storage, sizeof(storage)),
+                                rocsparse_status_success);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+
+        // Run buffer size
+        void*  dbuffer     = nullptr;
+        size_t buffer_size = 0;
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmv(
+            PARAMS_ANALYSIS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_buffer_size)));
+        CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+        // Run preprocess
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmv(
+            PARAMS_ANALYSIS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_preprocess)));
+
+        if(arg.timing)
+        {
+            const int number_cold_calls = 2;
+            const int number_hot_calls  = arg.iters;
+
+            // Warm up
+            for(int iter = 0; iter < number_cold_calls; ++iter)
+            {
+                void*  dbuffer_iter;
+                size_t buffer_size;
+
+                dbuffer_iter = nullptr;
+                buffer_size  = 0;
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmv(PARAMS_ANALYSIS(
+                    h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_buffer_size)));
+
+                CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer_iter, buffer_size));
+
+                // Run preprocess
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmv(
+                    PARAMS_ANALYSIS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_preprocess)));
+
+                CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer_iter));
+            }
+
+            double gpu_time_used = get_time_us();
+
+            void*  dbuffer_iter;
+            size_t buffer_size;
+
+            // Performance run
+            for(int iter = 0; iter < number_hot_calls; ++iter)
+            {
+                CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(matA, dA.ptr, dA.ind, dA.val));
+
+                dbuffer_iter = nullptr;
+                buffer_size  = 0;
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmv(PARAMS_ANALYSIS(
+                    h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_buffer_size)));
+
+                CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer_iter, buffer_size));
+
+                // Run preprocess
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmv(
+                    PARAMS_ANALYSIS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_preprocess)));
+
+                CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer_iter));
+            }
+
+            gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+
+            const double gpu_gflops = 0;
+            const double gpu_gbyte  = 0;
+
+            traits::display_info(arg,
+                                 display_key_t::trans_A,
+                                 rocsparse_operation2string(trans),
+                                 dA,
+                                 display_key_t::alpha,
+                                 *h_alpha,
+                                 display_key_t::beta,
+                                 *h_beta,
+                                 display_key_t::algorithm,
+                                 rocsparse_spmvalg2string(alg),
+                                 display_key_t::gflops,
+                                 gpu_gflops,
+                                 display_key_t::bandwidth,
+                                 gpu_gbyte,
+                                 display_key_t::time_ms,
+                                 get_gpu_time_msec(gpu_time_used));
+        }
+
+        CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+    }
 };

@@ -42,6 +42,7 @@ The docstring for the module will be used as the description for the subcommand 
 
 import argparse
 import inspect
+
 import rrperf
 
 

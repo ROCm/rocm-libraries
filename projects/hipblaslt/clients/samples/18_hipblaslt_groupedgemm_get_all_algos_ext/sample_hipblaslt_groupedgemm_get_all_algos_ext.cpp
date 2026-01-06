@@ -154,6 +154,7 @@ void multipleGroupsGroupedGemmExt(hipblasLtHandle_t     handle,
         auto& groupedGemm = groupedGemms.at(i);
         // Make sure to initialize every time when algo changes
         // Run first valid solution in this sample
+        groupedGemm.setMaxWorkspaceBytes(max_workspace_size);
         CHECK_HIPBLASLT_ERROR(groupedGemm.initialize(
             heuristicResult[validIndices.at(i).at(i % NumGroups)].algo, d_workspace));
         CHECK_HIPBLASLT_ERROR(groupedGemm.run(groupedGemmUserArgs.at(i).get(), stream));
@@ -311,6 +312,7 @@ void simpleGroupedGemmExt(hipblasLtHandle_t     handle,
 
     // In this sample, the workspace is already allocated with max_workspace_size
     // If not, allocate d_workspace here
+    // Then initialize gemm with calculated d_workspace and workspace_size
     // CHECK_HIP_ERRORhipMalloc(&d_workspace, workspace_size));
 
     // Get the default values from the grouepdgemm object
@@ -326,6 +328,7 @@ void simpleGroupedGemmExt(hipblasLtHandle_t     handle,
                               hipMemcpyHostToDevice));
 
     // Make sure to initialize every time when algo changes
+    groupedgemm.setMaxWorkspaceBytes(max_workspace_size);
     CHECK_HIPBLASLT_ERROR(groupedgemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace));
     CHECK_HIPBLASLT_ERROR(groupedgemm.run(d_userArgs, stream));
 

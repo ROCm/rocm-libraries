@@ -24,6 +24,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_dichotomic_search.hpp"
 
 namespace rocsparse
 {
@@ -68,28 +69,17 @@ namespace rocsparse
         __shared__ J shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
 
-        J left  = row_limits[bid];
-        J right = row_limits[bid + 1];
-
         J row_ind = -1;
         J col_ind = 0;
         T val     = static_cast<T>(0);
 
         if((BLOCKSIZE * bid + tid) < nnz)
         {
-            while(left < right)
-            {
-                J mid = (left + right) / 2;
-                if((csr_row_ptr[mid + 1] - idx_base) <= (BLOCKSIZE * bid + tid))
-                {
-                    left = mid + 1;
-                }
-                else
-                {
-                    right = mid;
-                }
-            }
-            row_ind = left;
+            row_ind = dichotomic_search<I, J>(row_limits[bid],
+                                              row_limits[bid + 1],
+                                              BLOCKSIZE * bid + tid + idx_base,
+                                              nnz + idx_base,
+                                              csr_row_ptr);
             col_ind = rocsparse::nontemporal_load(&csr_col_ind[BLOCKSIZE * bid + tid]) - idx_base;
             val     = alpha
                   * conj_val(rocsparse::nontemporal_load(&csr_val[BLOCKSIZE * bid + tid]), conj_A);
@@ -216,28 +206,17 @@ namespace rocsparse
         __shared__ J shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
 
-        J left  = row_limits[bid];
-        J right = row_limits[bid + 1];
-
         J row_ind = -1;
         J col_ind = 0;
         T val     = static_cast<T>(0);
 
         if(BLOCKSIZE * bid + tid < nnz)
         {
-            while(left < right)
-            {
-                J mid = (left + right) / 2;
-                if((csr_row_ptr[mid + 1] - idx_base) <= (BLOCKSIZE * bid + tid))
-                {
-                    left = mid + 1;
-                }
-                else
-                {
-                    right = mid;
-                }
-            }
-            row_ind = left;
+            row_ind = dichotomic_search<I, J>(row_limits[bid],
+                                              row_limits[bid + 1],
+                                              BLOCKSIZE * bid + tid + idx_base,
+                                              nnz + idx_base,
+                                              csr_row_ptr);
             col_ind = rocsparse::nontemporal_load(&csr_col_ind[BLOCKSIZE * bid + tid]) - idx_base;
             val     = alpha
                   * conj_val(rocsparse::nontemporal_load(&csr_val[BLOCKSIZE * bid + tid]), conj_A);
@@ -482,30 +461,17 @@ namespace rocsparse
         const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
 
-        J left  = row_limits[bid];
-        J right = row_limits[bid + 1];
-
         J row = 0;
         J col = 0;
         T val = static_cast<T>(0);
 
         if((BLOCKSIZE * bid + tid) < nnz)
         {
-            // Compute COO row index on the fly
-            while(left < right)
-            {
-                J mid = (left + right) / 2;
-                if((csr_row_ptr[mid + 1] - idx_base) <= (BLOCKSIZE * bid + tid))
-                {
-                    left = mid + 1;
-                }
-                else
-                {
-                    right = mid;
-                }
-            }
-
-            row = left;
+            row = dichotomic_search<I, J>(row_limits[bid],
+                                          row_limits[bid + 1],
+                                          BLOCKSIZE * bid + tid + idx_base,
+                                          nnz + idx_base,
+                                          csr_row_ptr);
             col = rocsparse::nontemporal_load(&csr_col_ind[BLOCKSIZE * bid + tid]) - idx_base;
             val = conj_val(rocsparse::nontemporal_load(&csr_val[BLOCKSIZE * bid + tid]), conj_A);
         }
@@ -613,9 +579,6 @@ namespace rocsparse
         __shared__ J shared_row[(BLOCKSIZE / WF_SIZE) * WF_SIZE];
         __shared__ T shared_val[(BLOCKSIZE / WF_SIZE) * WF_SIZE];
 
-        J left  = row_limits[bid];
-        J right = row_limits[bid + 1];
-
         J row = 0;
         J col = 0;
         T val = static_cast<T>(0);
@@ -623,20 +586,11 @@ namespace rocsparse
         if((BLOCKSIZE * bid + tid) < nnz)
         {
             // Compute COO row index on the fly
-            while(left < right)
-            {
-                J mid = (left + right) / 2;
-                if((csr_row_ptr[mid + 1] - idx_base) <= (BLOCKSIZE * bid + tid))
-                {
-                    left = mid + 1;
-                }
-                else
-                {
-                    right = mid;
-                }
-            }
-
-            row = left;
+            row = dichotomic_search<I, J>(row_limits[bid],
+                                          row_limits[bid + 1],
+                                          BLOCKSIZE * bid + tid + idx_base,
+                                          nnz + idx_base,
+                                          csr_row_ptr);
             col = rocsparse::nontemporal_load(&csr_col_ind[BLOCKSIZE * bid + tid]) - idx_base;
             val = conj_val(rocsparse::nontemporal_load(&csr_val[BLOCKSIZE * bid + tid]), conj_A);
         }

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -59,6 +59,34 @@ INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_generator,
 INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_generator,
                                generator_prng_offset_tests,
                                philox_generator_prng_offset_tests_types);
+#ifdef CODE_COVERAGE_ENABLED
+#include "test_rocrand_host_prng.hpp"
+
+using rocrand_impl::host::philox4x32_10_generator_host;
+using philox4x32_10_generator_prng_host_tests_types
+    = ::testing::Types<generator_prng_host_tests_params<philox4x32_10_generator_host<true>,
+                                                        ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+using philox4x32_10_generator_prng_offset_host_tests_types
+    = ::testing::Types<generator_prng_offset_host_tests_params<unsigned int,
+                                                               philox4x32_10_generator_host<true>,
+                                                               ROCRAND_ORDERING_PSEUDO_DEFAULT>,
+                       generator_prng_offset_host_tests_params<float,
+                                                               philox4x32_10_generator_host<true>,
+                                                               ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_host_generator,
+                               generator_prng_host_tests,
+                               philox4x32_10_generator_prng_host_tests_types);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_host_generator,
+                               generator_prng_continuity_host_tests,
+                               philox4x32_10_generator_prng_host_tests_types);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_host_generator,
+                               generator_prng_offset_host_tests,
+                               philox4x32_10_generator_prng_offset_host_tests_types);
+#endif //CODE_COVERAGE_ENABLED
 
 // Engine API tests
 class philox4x32_10_engine_type_test : public philox4x32_10_generator::engine_type

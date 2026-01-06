@@ -16,7 +16,7 @@ subtrees:
     title: Installing on Windows
   - file: install/rocThrust-install-with-cmake
     title: Installing on Linux and Windows with CMake
-  
+
 
 - caption: How to
   entries:
@@ -25,17 +25,19 @@ subtrees:
   - file: how-to/run-rocThrust-tests-on-multiple-gpus
     title: Run tests on multiple GPUs
   - file: how-to/rocThrust-build-backends.rst
-    title: build on different backends
+    title: Build on different backends
+  - file: how-to/rocThrust-hipstdpar
+    title: Use HIPSTDPAR
 
-- caption: API reference
+- caption: Reference
   entries:
-  - file: reference/rocThrust-hipstdpar
-  - file: data-type-support
-  - file: bitwise-repro
-  - file: hipgraph-support
-  - file: hip-execution-policies
+  - file: reference/rocThrust-bitwise-repro
+    title: Bitwise reproducibility
+  - file: reference/rocThrust-hipgraph-support
+    title: hipGraph support
+  - file: reference/rocThrust-hip-policies
+    title: Policies
   - file: cpp_api
-  - file: genindex
 
 - caption: About
   entries:

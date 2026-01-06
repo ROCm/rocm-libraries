@@ -30,8 +30,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(ShiftLAddGenerator);
-
     template <>
     std::shared_ptr<TernaryArithmeticGenerator<Expression::ShiftLAdd>>
         GetGenerator<Expression::ShiftLAdd>(Register::ValuePtr dst,

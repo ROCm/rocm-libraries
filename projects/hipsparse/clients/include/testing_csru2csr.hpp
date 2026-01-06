@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_csru2csr_bad_arg(void)
+template <typename T>
+void testing_csru2csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int m         = 100;
@@ -243,7 +244,7 @@ void testing_csru2csr_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csru2csr(Arguments argus)
+void testing_csru2csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  m        = argus.M;
@@ -272,12 +273,8 @@ hipsparseStatus_t testing_csru2csr(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(
-           filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind_gold, hcsr_val_gold, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind_gold, hcsr_val_gold, idx_base));
 
     // Unsort CSR columns
     std::vector<int> hperm(nnz);
@@ -374,8 +371,6 @@ hipsparseStatus_t testing_csru2csr(Arguments argus)
         unit_check_general(1, nnz, 1, hcsr_val_unsorted.data(), hcsr_val_unsorted_gold.data());
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRU2CSR_HPP

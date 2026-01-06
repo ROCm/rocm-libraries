@@ -80,14 +80,21 @@ int main(int argc, char* argv[])
     benchmark_utils::executor executor(argc, argv, bytes, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    add_benchmarks<float>(executor, bytes);
-    add_benchmarks<double>(executor, bytes);
-    add_benchmarks<int8_t>(executor, bytes);
-    add_benchmarks<uint8_t>(executor, bytes);
-    add_benchmarks<rocprim::half>(executor, bytes);
-    add_benchmarks<int>(executor, bytes);
+    // Tuned types
     add_benchmarks<rocprim::int128_t>(executor, bytes);
+    add_benchmarks<int64_t>(executor, bytes);
+    add_benchmarks<int>(executor, bytes);
+    add_benchmarks<short>(executor, bytes);
+    add_benchmarks<int8_t>(executor, bytes);
+    add_benchmarks<double>(executor, bytes);
+    add_benchmarks<float>(executor, bytes);
+    add_benchmarks<rocprim::half>(executor, bytes);
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    add_benchmarks<uint8_t>(executor, bytes);
     add_benchmarks<rocprim::uint128_t>(executor, bytes);
+    #endif
 #endif
 
     executor.run();

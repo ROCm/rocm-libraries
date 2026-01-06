@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_spmm_coo_bad_arg(void)
+template <typename I, typename T>
+void testing_spmm_coo_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              n         = 100;
@@ -187,7 +188,7 @@ void testing_spmm_coo_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spmm_coo(Arguments argus)
+void testing_spmm_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     I                    m        = argus.M;
@@ -200,13 +201,13 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
     hipsparseOrder_t     orderB   = argus.orderB;
     hipsparseOrder_t     orderC   = argus.orderC;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMMAlg_t   alg      = static_cast<hipsparseSpMMAlg_t>(argus.spmm_alg);
+    hipsparseSpMMAlg_t   alg      = argus.spmm_alg;
     std::string          filename = argus.filename;
 
 #if(defined(CUDART_VERSION))
     if(orderB != orderC || orderB != HIPSPARSE_ORDER_COL)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 #endif
 
@@ -227,18 +228,15 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz_A;
-    if(!generate_csr_matrix(filename,
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m,
                             nnz_A,
                             hrow_ptr,
                             hcol_ind,
                             hval,
-                            idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+                            idx_base));
 
     std::vector<I> hrow_ind(nnz_A);
 
@@ -465,8 +463,6 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMM_COO_HPP

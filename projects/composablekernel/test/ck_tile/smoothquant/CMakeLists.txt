@@ -1,5 +1,7 @@
-# Currently ck_tile is only built on gfx9
-if(GPU_TARGETS MATCHES "gfx9")
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     function (add_smoothquant_test TARGET_NAME MAIN_SRC)
         message(DEBUG "adding ${TARGET_NAME}")
 

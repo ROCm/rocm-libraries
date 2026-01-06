@@ -156,28 +156,36 @@ std::shared_future<std::unique_ptr<RTCKernel>>
     {
         kernel_name = generator.generate_name();
 
-        auto compile = [=]() {
+        auto compile = [=](std::promise<std::unique_ptr<RTCKernel>> compile_promise) {
             if(hipSetDevice(deviceId) != hipSuccess)
             {
-                throw std::runtime_error("failed to set device");
+                compile_promise.set_exception(
+                    std::make_exception_ptr(std::runtime_error("failed to set device")));
             }
             try
             {
                 std::vector<char> code = RTCCache::cached_compile(
                     kernel_name, gpu_arch, generator.generate_src, generator_sum());
-                return generator.construct_rtckernel(
-                    kernel_name, code, generator.gridDim, generator.blockDim);
+                compile_promise.set_value(generator.construct_rtckernel(
+                    kernel_name, code, generator.gridDim, generator.blockDim));
             }
             catch(std::exception& e)
             {
                 if(LOG_RTC_ENABLED())
                     (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;
-                throw;
+                compile_promise.set_exception(std::current_exception());
             }
         };
 
         // compile to code object
-        return std::async(std::launch::async, compile);
+        std::promise<std::unique_ptr<RTCKernel>>       compile_promise;
+        std::shared_future<std::unique_ptr<RTCKernel>> compile_future
+            = compile_promise.get_future();
+        std::thread compile_thread(compile, std::move(compile_promise));
+        // we'll wait for the future so the thread can continue
+        // without being managed by this object
+        compile_thread.detach();
+        return compile_future;
     }
     // a pre-compiled rtc-stockham-kernel goes here
     else if(generator.is_pre_compiled())

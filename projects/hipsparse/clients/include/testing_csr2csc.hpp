@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csr2csc_bad_arg(void)
+void testing_csr2csc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int m         = 100;
@@ -165,7 +165,7 @@ void testing_csr2csc_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2csc(Arguments argus)
+void testing_csr2csc(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  m        = argus.M;
@@ -186,11 +186,8 @@ hipsparseStatus_t testing_csr2csc(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // Allocate memory on the device
     auto dcsr_row_ptr_managed
@@ -359,8 +356,6 @@ hipsparseStatus_t testing_csr2csc(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2CSC_HPP

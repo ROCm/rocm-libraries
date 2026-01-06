@@ -3,6 +3,7 @@ dash
 dash_bootstrap_components
 dash_svg
 flake8
+isort
 matplotlib
 msgpack
 pandas

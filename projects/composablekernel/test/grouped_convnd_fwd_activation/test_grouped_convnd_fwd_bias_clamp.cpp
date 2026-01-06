@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <cstdlib>
 #include <iostream>
@@ -10,8 +10,9 @@
 #include "profiler/profile_grouped_conv_fwd_bias_clamp_impl.hpp"
 
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
-
-using AddClamp = ck::tensor_operation::element_wise::AddClamp;
+static ck::index_t param_mask     = 0xffffff;
+static ck::index_t instance_index = -1;
+using AddClamp                    = ck::tensor_operation::element_wise::AddClamp;
 
 template <typename Tuple>
 class TestGroupedConvndFwd : public ::testing::Test
@@ -30,8 +31,13 @@ class TestGroupedConvndFwd : public ::testing::Test
     {
         EXPECT_FALSE(conv_params.empty());
         bool pass = true;
-        for(auto& param : conv_params)
+        for(size_t i = 0; i < conv_params.size(); i++)
         {
+            if((param_mask & (1 << i)) == 0)
+            {
+                continue;
+            }
+            auto& param = conv_params[i];
             pass = pass && ck::profiler::profile_grouped_conv_fwd_bias_clamp_impl<NDimSpatial,
                                                                                   InLayout,
                                                                                   WeiLayout,
@@ -47,7 +53,8 @@ class TestGroupedConvndFwd : public ::testing::Test
                                1,     // init_method: integer value
                                false, // do_log
                                false, // time_kernel
-                               param);
+                               param,
+                               instance_index);
         }
         EXPECT_TRUE(pass);
     }
@@ -80,18 +87,90 @@ TYPED_TEST(TestGroupedConvndFwd2d, Test2D)
 {
     this->conv_params.clear();
     this->conv_params.push_back(
+        {2, 3, 5, 96, 200, {1, 1}, {73, 128}, {1, 1}, {1, 1}, {0, 0}, {0, 0}});
+    this->conv_params.push_back(
+        {2, 1, 1, 32, 32, {1, 1}, {128, 128}, {1, 1}, {1, 1}, {0, 0}, {0, 0}});
+    this->conv_params.push_back(
+        {2, 1, 1, 32, 32, {2, 2}, {128, 128}, {1, 1}, {1, 1}, {0, 0}, {0, 0}});
+    this->conv_params.push_back(
+        {2, 1, 1, 32, 32, {3, 3}, {128, 128}, {1, 1}, {1, 1}, {0, 0}, {0, 0}});
+    this->conv_params.push_back(
+        {2, 1, 1, 32, 32, {5, 5}, {128, 128}, {1, 1}, {1, 1}, {0, 0}, {0, 0}});
+    this->conv_params.push_back(
+        {2, 1, 1, 32, 32, {9, 9}, {128, 128}, {1, 1}, {1, 1}, {0, 0}, {0, 0}});
+
+    this->conv_params.push_back(
         {2, 2, 32, 128, 256, {1, 1}, {7, 7}, {2, 2}, {1, 1}, {0, 0}, {0, 0}});
     this->conv_params.push_back(
         {2, 2, 32, 128, 256, {3, 3}, {14, 14}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+
+    this->conv_params.push_back(
+        {2, 2, 32, 128, 256, {1, 1}, {3, 3}, {1, 1}, {1, 1}, {0, 0}, {0, 0}});
+    this->conv_params.push_back({2, 1, 1, 1, 32, {3, 3}, {32, 32}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+    this->conv_params.push_back({2, 1, 1, 64, 3, {3, 3}, {32, 32}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+    this->conv_params.push_back({2, 1, 1, 1, 1, {3, 3}, {32, 32}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+
+    this->conv_params.push_back(
+        {2, 96, 1, 1, 1, {1, 1}, {120, 160}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+    this->conv_params.push_back(
+        {2, 96, 1, 1, 1, {3, 3}, {120, 160}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+
     this->template Run<2>();
 }
 
 TYPED_TEST(TestGroupedConvndFwd3d, Test3D)
 {
     this->conv_params.clear();
+
+    this->conv_params.push_back(
+        {3, 3, 5, 96, 200, {1, 1, 1}, {37, 37, 16}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+    this->conv_params.push_back(
+        {3, 1, 1, 32, 32, {1, 1, 1}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+    this->conv_params.push_back(
+        {3, 1, 1, 32, 32, {2, 2, 2}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+    this->conv_params.push_back(
+        {3, 1, 1, 32, 32, {3, 3, 3}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+    this->conv_params.push_back(
+        {3, 1, 1, 32, 32, {5, 5, 5}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+    this->conv_params.push_back(
+        {3, 1, 1, 32, 32, {9, 9, 9}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+
     this->conv_params.push_back(
         {3, 2, 32, 128, 256, {1, 1, 1}, {7, 7, 7}, {2, 2, 2}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
     this->conv_params.push_back(
         {3, 2, 32, 128, 256, {3, 3, 3}, {14, 14, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}});
+
+    this->conv_params.push_back(
+        {3, 2, 32, 128, 256, {1, 1, 1}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+    this->conv_params.push_back(
+        {3, 1, 1, 32, 32, {1, 1, 1}, {16, 16, 16}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}});
+
+    this->conv_params.push_back(
+        {3, 1, 1, 1, 32, {3, 3, 3}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}});
+    this->conv_params.push_back(
+        {3, 1, 1, 64, 3, {3, 3, 3}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}});
+    this->conv_params.push_back(
+        {3, 1, 1, 1, 1, {3, 3, 3}, {32, 32, 32}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}});
+
+    this->conv_params.push_back(
+        {3, 96, 1, 1, 1, {1, 1, 1}, {120, 40, 20}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}});
+    this->conv_params.push_back(
+        {3, 96, 1, 1, 1, {3, 3, 3}, {120, 40, 20}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}});
     this->template Run<3>();
+}
+int main(int argc, char** argv)
+{
+    testing::InitGoogleTest(&argc, argv);
+    if(argc == 1) {}
+    else if(argc == 3)
+    {
+        param_mask     = strtol(argv[1], nullptr, 0);
+        instance_index = atoi(argv[2]);
+    }
+    else
+    {
+        std::cout << "Usage of " << argv[0] << std::endl;
+        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
+    }
+    return RUN_ALL_TESTS();
 }

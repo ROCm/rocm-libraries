@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 /*
 Computes C_m_o = Relu(A0[m, k] * B0[n, k] + D00[m, n] + D01[mn]) * B1[n, o] + D1[m, o]
@@ -21,6 +21,10 @@ Computes C_m_o = Relu(A0[m, k] * B0[n, k] + D00[m, n] + D01[mn]) * B1[n, o] + D1
 #include "ck/library/utility/host_tensor_generator.hpp"
 #include "ck/library/utility/literals.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_batched_gemm.hpp"
+
+using ::ck::DeviceMem;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
 
 template <ck::index_t... Is>
 using S = ck::Sequence<Is...>;
@@ -154,11 +158,11 @@ using DeviceGemmInstance =
         8,           // AK1
         8,           // BK1
         2,           // B1K1
-        32,          // MPerXDL
-        32,          // NPerXDL
-        1,           // MXdlPerWave
-        4,           // NXdlPerWave
-        4,           // Gemm1NXdlPerWave
+        16,          // MPerXDL
+        16,          // NPerXDL
+        2,           // MXdlPerWave
+        8,           // NXdlPerWave
+        8,           // Gemm1NXdlPerWave
         S<4, 64, 1>, // ABlockTransfer
         S<1, 0, 2>,
         S<1, 0, 2>,
@@ -185,7 +189,7 @@ using DeviceGemmInstance =
         1,              // CShuffleMXdlPerWavePerShuffle
         2,              // CShuffleNXdlPerWavePerShuffle
         S<1, 32, 1, 8>, // CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
-        8>;             // CShuffleBlockTransferScalarPerVector_NPerBlock
+        4>;             // CShuffleBlockTransferScalarPerVector_NPerBlock
 
 int main(int argc, char* argv[])
 {
@@ -321,11 +325,13 @@ int main(int argc, char* argv[])
 
         if(std::is_same<decltype(layout), Row>::value)
         {
-            return HostTensorDescriptor({batch_count, row, col}, {batch_stride, stride, 1_uz});
+            return HostTensorDescriptor(
+                {batch_count, row, col}, {batch_stride, stride, 1_uz}, layout);
         }
         else
         {
-            return HostTensorDescriptor({batch_count, row, col}, {batch_stride, 1_uz, stride});
+            return HostTensorDescriptor(
+                {batch_count, row, col}, {batch_stride, 1_uz, stride}, layout);
         }
     };
 

@@ -112,9 +112,10 @@ private:
 struct UnitTestConvSolverParams
 {
     UnitTestConvSolverParams();
-    UnitTestConvSolverParams(Gpu supported_devs);
+    UnitTestConvSolverParams(Gpu supported_devs_);
 
     void UseCpuRef();
+    void UseGpuRef();
     void EnableDeprecatedSolvers();
     void Tunable(std::size_t iterations_max);
     void CheckXnackDisabled();
@@ -125,7 +126,7 @@ struct UnitTestConvSolverParams
 
     Gpu supported_devs;
     bool use_cpu_ref;
-    bool enable_deprecated_solvers;
+    bool use_gpu_ref;
     bool tunable;
     bool check_xnack_disabled;
     std::size_t tuning_iterations_max;

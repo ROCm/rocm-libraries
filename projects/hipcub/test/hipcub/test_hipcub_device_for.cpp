@@ -253,6 +253,7 @@ TEST(HipcubDeviceForTests, ForEachTempStore)
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_count));
         }
     }
 }
@@ -493,6 +494,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             }
 
             HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_count));
         }
     }
 
@@ -577,6 +579,7 @@ TEST(HipcubDeviceForTests, ForEachCopyTempStore)
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_count));
         }
     }
 }
@@ -655,6 +658,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             }
 
             HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_count));
         }
     }
 
@@ -709,6 +713,8 @@ TEST(HipcubDeviceForTests, ForCountingIterator)
 
             // Check if have same number of odd numbers
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_count, expected));
+
+            HIP_CHECK(hipFree(d_count));
         }
     }
 }
@@ -761,6 +767,8 @@ TEST(HipcubDeviceForTests, ForCopyCountingIterator)
 
             // Check if have same number of odd numbers
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_count, expected));
+
+            HIP_CHECK(hipFree(d_count));
         }
     }
 }
@@ -840,6 +848,7 @@ TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_count));
         }
     }
 }

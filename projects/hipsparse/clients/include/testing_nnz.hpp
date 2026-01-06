@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_nnz_bad_arg(void)
+void testing_nnz_bad_arg(const Arguments& argus)
 {
     static constexpr size_t               safe_size = 100;
     static constexpr int                  M         = 10;
@@ -153,7 +153,7 @@ void testing_nnz_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_nnz(Arguments argus)
+void testing_nnz(Arguments argus)
 {
     int                  M    = argus.M;
     int                  N    = argus.N;
@@ -165,13 +165,6 @@ hipsparseStatus_t testing_nnz(Arguments argus)
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descrA = unique_ptr_descr->descr;
-
-    if(M == 0 || N == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     // Create the dense matrix.
     int  MN        = (dirA == HIPSPARSE_DIRECTION_ROW) ? M : N;
@@ -302,8 +295,6 @@ hipsparseStatus_t testing_nnz(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_NNZ_HPP

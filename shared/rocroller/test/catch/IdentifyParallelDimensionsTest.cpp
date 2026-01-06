@@ -48,11 +48,6 @@ TEST_CASE("identifyParallelDimensionSets works for MatrixMultiply",
 
     auto kgraph = KernelGraph::translate(example.getCommand());
 
-    {
-        std::ofstream file("graph_mm.dot");
-        file << kgraph.toDOT(true);
-    }
-
     SECTION("reachableNodes")
     {
         auto sameDimensionLoadTiledNodes
@@ -80,11 +75,6 @@ TEST_CASE("identifyParallelDimensionSets works for GEMM", "[kernel-graph]")
     auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
     auto kgraph = KernelGraph::translate(example.getCommand());
-
-    {
-        std::ofstream file("graph_gemm.dot");
-        file << kgraph.toDOT(true);
-    }
 
     auto redundantArgs = KernelGraph::identifyParallelDimensionSets(kgraph);
 

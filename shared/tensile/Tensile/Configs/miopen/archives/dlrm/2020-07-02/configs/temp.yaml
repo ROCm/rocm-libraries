@@ -79,4 +79,3 @@ LibraryLogic:
     ScheduleName: "arcturus"
     DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
     ArchitectureName: "gfx908"
-

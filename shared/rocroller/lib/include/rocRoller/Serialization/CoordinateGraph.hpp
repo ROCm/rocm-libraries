@@ -71,7 +71,6 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "size", lds.size);
                 iot::mapRequired(io, "stride", lds.stride);
-                iot::mapRequired(io, "isDirect2LDS", lds.isDirect2LDS);
             }
 
             static void mapping(IO& io, KernelGraph::CoordinateGraph::LDS& lds)
@@ -242,8 +241,6 @@ namespace rocRoller
             : public EmptyMappingTraits<T, IO, Context>
         {
         };
-
-        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
 
         template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::CoordinateGraph::PiecewiseAffineJoin, IO, Context>

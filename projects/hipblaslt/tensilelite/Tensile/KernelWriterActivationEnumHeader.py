@@ -54,7 +54,7 @@ class KernelWriterActivationEnumHeader(KernelWriterBase):
   def getKernelName(self):
     return KernelWriterActivationEnumHeader.kernelName(self)
 
-   
+
 
   def getSourceFileString(self):
     fileString = "// This is a dummy file."

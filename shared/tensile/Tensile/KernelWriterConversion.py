@@ -80,7 +80,7 @@ class KernelWriterConversion(KernelWriterBase):
     if not self.state["ProblemType"]["StridedBatched"]:
       kStr += "  uint64_t offsetD,%s" % self.endLine
       kStr += "  uint64_t offsetC,%s" % self.endLine
-    
+
     # alpha & beta
     kStr += "  %s const alpha,%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
     kStr += "  %s const beta" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language))
@@ -233,7 +233,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  " + ptrStr + f" const* C = (beta == {zeroStr}) ? nullptr : BatchC[wg];" + self.endLine
 
       # apply offset only for general batch
-      kStr += self.endLine    
+      kStr += self.endLine
       kStr += "  D = D + offsetD;" + self.endLine
       kStr += "  C = C + offsetC;" + self.endLine
 
@@ -338,7 +338,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "    accum%d += beta * (%s)C[idxC+%d];%s" % (vi, self.datatype, vi, self.endLine)
     kStr += "  }%s" % self.endLine
 
-    # Stochastic Rounding? need to use explicit_downcast 
+    # Stochastic Rounding? need to use explicit_downcast
     if self.state["ProblemType"]["DestDataType"].is8bitFloat() \
             and self.state["ProblemType"]["StochasticRounding"]:
       for vi in range(self.state["VectorWidth"]):

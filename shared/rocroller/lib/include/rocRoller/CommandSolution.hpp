@@ -40,13 +40,15 @@
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
 namespace rocRoller
 {
-    KernelArguments  getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
-    KernelInvocation getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelArguments    getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelInvocation   getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    CommandArgumentPtr findArgumentByName(CommandPtr const command, std::string const& argName);
 
     /**
      * CommandParameters - tunable command parameters.
@@ -133,8 +135,7 @@ namespace rocRoller
         int  prefetchLDSFactor = 0;
         bool prefetchMixMemOps = false;
 
-        bool streamK        = false;
-        bool streamKTwoTile = false;
+        StreamKConfig streamK{StreamKMode::None};
 
         std::vector<int>  loopOverOutputTilesDimensions    = {};
         std::string       loopOverOutputTilesTopLoop       = XLOOP;
@@ -306,13 +307,17 @@ namespace rocRoller
 
         /**
          * @brief Returns the total number of bytes required for scratch space
+         *        for the specified scratch policy.
          *
-         * If this value is greather than 0, the user is required to allocate this
+         * If this value is greater than 0, the user is required to allocate this
          * amount of device memory and pass it into the kernel.
          *
+         * @param policy The scratch policy to query
+         * @param args The runtime arguments
          * @return size_t
          */
-        size_t scratchSpaceRequired(RuntimeArguments const& args) const;
+        size_t scratchSpaceRequired(Operations::ScratchPolicy policy,
+                                    RuntimeArguments const&   args) const;
 
         /**
          * @brief Returns the workgroup size

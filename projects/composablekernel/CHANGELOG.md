@@ -2,11 +2,78 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
-## Composable Kernel 1.2.0 for ROCm 7.0.0
+## (Unreleased) Composable Kernel 1.3.0
+
+### Added
+* Added support for explicit GEMM in CK_TILE grouped convolution forward and backward weight.
+* Added TF32 convolution support on gfx942 and gfx950 in CK. It could be enabled/disabled via `DTYPES` of "tf32".
+* Added attention sink support for FMHA FWD, include qr_ks_vs, qr_async and splitkv pipelines.
+* Added support for microscaling (MX) FP8/FP4 mixed data types to Flatmm pipeline.
+* Added support for fp8 dynamic tensor-wise quantization of fp8 fmha fwd kernel.
+* Added FP8 KV cache support for FMHA batch prefill.
+* Added support for gfx1153 target.
+* Added FMHA batch prefill kernel support for several KV cache layouts, flexible page sizes, and different lookup table configurations.
+
+### Changed
+
+### Upcoming changes
+
+## Composable Kernel 1.2.0 for ROCm 7.2.0
+
+### Added
+* Added support for bf16 data type to grouped_gemm and grouped_gemm_preshuffle.
+* Added Col-Col-Row-Col layout support for aquant mode in blockscale GEMM.
+* Added support for mixed precision fp8 x bf8 universal GEMM and weight preshuffle GEMM.
+* Added a compute async pipeline in the CK Tile universal GEMM on gfx950.
+* Added support for B Tensor type `pk_int4_t` in the CK Tile weight preshuffle GEMM.
+* Added the new api to load different memory sizes to SGPR.
+* Added support for B Tensor preshuffle in CK Tile grouped GEMM.
+* Added a basic copy kernel example and supporting documentation for new CK Tile developers.
+* Added support for grouped GEMM kernels to perform Multi D elementwise operation.
+* Added support for multiple ABD GEMM.
+* Added benchmarking support for tile engine GEMM Multi D.
+* Added block scaling support in CK Tile GEMM, allowing flexible use of quantization matrices from either A or B operands.
+* Added the row-wise column-wise quantization for CK Tile GEMM and CK Tile grouped GEMM.
+* Added support for f32 to FMHA (forward and backward).
+* Added tensor-wise quantization for CK Tile GEMM.
+* Added support for batched contraction kernel.
+* Added WMMA (gfx12) support for FMHA.
+* Added pooling kernel in CK_TILE
+* Added top-k sigmoid kernel in CK_TILE
+* Added the blockscale 2D support for CK_TILE GEMM.
+* Added Flatmm pipeline for microscaling (MX) FP8/FP4 data types
+
+### Changed
+
+* Removed `BlockSize` in `make_kernel` and `CShuffleEpilogueProblem` to support Wave32 in CK Tile (#2594)
+* Added an optional template parameter `Arch` (`gfx9_t`, `gfx12_t` etc.) to `make_kernel` to support linking multiple object files that have the same kernel compiled for different architectures.
+* FMHA examples and tests can be built for multiple architectures (gfx9, gfx950, gfx12) at the same time.
+
+### Upcoming changes
+
+* Composable Kernel will be adopting C++20 features in an upcoming ROCm release, updating the minimum compiler requirement to C++20. Ensure that your development environment complies with this requirement to facilitate a seamless transition.
+
+## Composable Kernel 1.1.0 for ROCm 7.1.1
+
+### Upcoming changes
+
+* Composable Kernel will be adopting C++20 features in an upcoming ROCm release, updating the minimum compiler requirement to C++20. Ensure that your development environment complies with this requirement to facilitate a seamless transition.
+
+## Composable Kernel 1.1.0 for ROCm 7.1.0
 
 ### Added
 
-* Added a basic copy kernel example and supporting documentation for new CK Tile developers.
+* Added support for hdim as a multiple of 32 for FMHA (fwd/fwd_splitkv/bwd)
+* Added support for elementwise kernel.
+
+### Upcoming changes
+
+* Non-grouped convolutions are deprecated. Their functionality is supported by grouped convolution.
+
+## Composable Kernel 1.1.0 for ROCm 7.0.0
+
+### Added
+
 * Added support for bf16, f32, and f16 for 2D and 3D NGCHW grouped convolution backward data
 * Added a fully asynchronous HOST (CPU) arguments copy flow for CK grouped GEMM kernels.
 * Added support GKCYX layout for grouped convolution forward (NGCHW/GKCYX/NGKHW, number of instances in instance factory for NGCHW/GKYXC/NGKHW has been reduced).
@@ -20,28 +87,19 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added support for Split K for grouped convolution backward data.
 * Added logit soft-capping support for fMHA forward kernels.
 * Added support for hdim as a multiple of 32 for FMHA (fwd/fwd_splitkv)
-* Added support for hdim as a multiple of 32 for FMHA (fwd/fwd_splitkv/bwd)
 * Added benchmarking support for tile engine GEMM.
 * Added Ping-pong scheduler support for GEMM operation along the K dimension.
 * Added rotating buffer feature for CK_Tile GEMM.
 * Added int8 support for CK_TILE GEMM.
-* Added support for elementwise kernel.
-* Added benchmarking support for tile engine GEMM Multi D.
-* Added block scaling support in CK_TILE GEMM, allowing flexible use of quantization matrices from either A or B operands.
+* Added CK Tile Epilogue Chainer framework for composable epilogue sequences in GEMM operations
 
 ### Optimized
 
+* Optimize the gemm multiply multiply preshuffle & lds bypass with Pack of KGroup and better instruction layout.
+* Added Vectorize Transpose optimization for CK Tile
+* Added the asynchronous copy for gfx950
 
-* Optimize the gemm multiply multiply preshuffle & lds bypass with Pack of KGroup and better instruction layout. (#2166)
-* Added Vectorize Transpose optimization for CK Tile (#2131)
-* Added the asynchronous copy for gfx950 (#2425)
-
-
-### Fixes
-
-None
-
-### Changes
+### Changed
 
 * Removed support for gfx940 and gfx941 targets (#1944)
 * Replaced the raw buffer load/store intrinsics with Clang20 built-ins (#1876)
@@ -49,15 +107,6 @@ None
 * Number of instances in instance factory for grouped convolution forward NGCHW/GKYXC/NGKHW has been reduced.
 * Number of instances in instance factory for grouped convolution backward weight NGCHW/GKYXC/NGKHW has been reduced.
 * Number of instances in instance factory for grouped convolution backward data NGCHW/GKYXC/NGKHW has been reduced.
-* Removed `BlockSize` in `make_kernel` and `CShuffleEpilogueProblem` to support Wave32 in CK_TILE (#2594)
-
-### Known issues
-
-None
-
-### Upcoming changes
-
-* Non-grouped convolutions are deprecated. All of their functionality is supported by grouped convolution.
 
 ## Composable Kernel 1.1.0 for ROCm 6.1.0
 

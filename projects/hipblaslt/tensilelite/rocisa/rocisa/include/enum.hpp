@@ -197,9 +197,11 @@ namespace rocisa
         INST_BF8        = 34,
         INST_F8_BF8     = 35,
         INST_BF8_F8     = 36,
-        INST_CVT        = 37,
-        INST_MACRO      = 38,
-        INST_NOTYPE     = 39
+        INST_TR8_B64    = 37,
+        INST_TR16_B128  = 38,
+        INST_CVT        = 39,
+        INST_MACRO      = 40,
+        INST_NOTYPE     = 41
     };
 
     enum class SelectBit : int
@@ -220,6 +222,15 @@ namespace rocisa
         UNUSED_PAD      = 1,
         UNUSED_SEXT     = 2,
         UNUSED_PRESERVE = 3
+    };
+
+    enum class CacheScope : int
+    {
+        SCOPE_NONE = 0,
+        SCOPE_CU   = 1,
+        SCOPE_SE   = 2,
+        SCOPE_DEV  = 3,
+        SCOPE_SYS  = 4,
     };
 
     enum class CvtType : int
@@ -247,7 +258,9 @@ namespace rocisa
         CVT_SCALEF32_SR_FP8_F16 = 21,
         CVT_SCALEF32_SR_BF8_F16 = 22,
         CVT_BF16_to_F32         = 23,
-        CVT_PK_F32_to_BF16      = 24
+        CVT_PK_F32_to_BF16      = 24,
+        CVT_U32_to_F64          = 25,
+        CVT_F64_to_U32          = 26,
     };
 
     enum class RoundType : int
@@ -289,6 +302,23 @@ namespace rocisa
             return "UNUSED_SEXT";
         case UnusedBit::UNUSED_PRESERVE:
             return "UNUSED_PRESERVE";
+        default:
+            return "";
+        }
+    }
+
+    inline std::string toString(CacheScope scope)
+    {
+        switch(scope)
+        {
+        case CacheScope::SCOPE_CU:
+            return "SCOPE_CU";
+        case CacheScope::SCOPE_SE:
+            return "SCOPE_SE";
+        case CacheScope::SCOPE_DEV:
+            return "SCOPE_DEV";
+        case CacheScope::SCOPE_SYS:
+            return "SCOPE_SYS";
         default:
             return "";
         }

@@ -177,10 +177,15 @@ namespace TensileLite
         {
             SolutionVector<MySolution> rv, solutions;
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
+            const bool                 predictionLib = Debug::Instance().usePredictionLibrary();
 
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                    continue;
+
+                if(predictionLib && ((row.first.value->type() == "EqualityMatching") 
+                                     || (row.first.value->type() == "RangeMatching")))
                     continue;
 
                 if(row.first(problem, hardware))

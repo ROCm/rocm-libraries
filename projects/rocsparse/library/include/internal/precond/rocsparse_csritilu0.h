@@ -188,17 +188,17 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
 *  \f]
 *  with \f$\epsilon\f$ = \p tol. Note that the calculation of \f$R_k\f$ is performed with no fill-in.
 *
-*  Computing the above iterative incomplete LU factorization requires three steps to complete. First, 
-*  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_csritilu0_buffer_size. 
-*  Once this buffer size has been determined, the user allocates the buffer and passes it to 
-*  \ref rocsparse_csritilu0_preprocess. This will perform analysis on the sparsity pattern of the matrix. Finally, 
-*  the user calls \p rocsparse_scsritilu0_compute, \p rocsparse_dcsritilu0_compute, \p rocsparse_ccsritilu0_compute, 
-*  or \p rocsparse_zcsritilu0_compute to perform the actual factorization. The calculation 
-*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
-*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+*  Computing the above iterative incomplete LU factorization requires three steps to complete. First,
+*  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_csritilu0_buffer_size.
+*  Once this buffer size has been determined, the user allocates the buffer and passes it to
+*  \ref rocsparse_csritilu0_preprocess. This will perform analysis on the sparsity pattern of the matrix. Finally,
+*  the user calls \p rocsparse_scsritilu0_compute, \p rocsparse_dcsritilu0_compute, \p rocsparse_ccsritilu0_compute,
+*  or \p rocsparse_zcsritilu0_compute to perform the actual factorization. The calculation
+*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
+*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
 *  to \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()" are complete, the temporary buffer can be deallocated.
 *
-*  \p rocsparse_csritilu0 has a number of options that can be useful for examining the convergence history, easily printing debug 
+*  \p rocsparse_csritilu0 has a number of options that can be useful for examining the convergence history, easily printing debug
 *  information, and for using COO internal format.
 *  <table>
 *  <caption id="csritilu0 options">Options</caption>
@@ -495,9 +495,9 @@ rocsparse_status rocsparse_zcsritilu0_compute_ex(rocsparse_handle               
 
 /*! \ingroup precond_module
 *  \details
-*  \p rocsparse_csritilu0_history fetches convergence history data if 
-*  \ref rocsparse_itilu0_option_convergence_history has been set when calling 
-*  \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute" or 
+*  \p rocsparse_csritilu0_history fetches convergence history data if
+*  \ref rocsparse_itilu0_option_convergence_history has been set when calling
+*  \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute" or
 *  \ref rocsparse_scsritilu0_compute_ex "rocsparse_Xcsritilu0_compute_ex":
 *
 *  \code{.c}

@@ -20,8 +20,8 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(setDifferenceByKeyTests, FullTestsParams);
@@ -108,28 +108,8 @@ TYPED_TEST(setDifferenceByKeyTests, TestSetDifferenceByKeySimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a_key(4), b_key(5);
-  Vector a_val(4), b_val(5);
-
-  a_key[0] = 0;
-  a_key[1] = 2;
-  a_key[2] = 4;
-  a_key[3] = 5;
-  a_val[0] = 0;
-  a_val[1] = 0;
-  a_val[2] = 0;
-  a_val[3] = 0;
-
-  b_key[0] = 0;
-  b_key[1] = 3;
-  b_key[2] = 3;
-  b_key[3] = 4;
-  b_key[4] = 6;
-  b_val[0] = 1;
-  b_val[1] = 1;
-  b_val[2] = 1;
-  b_val[3] = 1;
-  b_val[4] = 1;
+  Vector a_key{0, 2, 4, 5}, b_key{0, 3, 3, 4, 6};
+  Vector a_val(4, 0), b_val(5, 1);
 
   Vector ref_key(2), ref_val(2);
   ref_key[0] = 2;
@@ -149,8 +129,8 @@ TYPED_TEST(setDifferenceByKeyTests, TestSetDifferenceByKeySimple)
     result_key.begin(),
     result_val.begin());
 
-  EXPECT_EQ(result_key.end(), end.first);
-  EXPECT_EQ(result_val.end(), end.second);
+  ASSERT_EQ_QUIET(result_key.end(), end.first);
+  ASSERT_EQ_QUIET(result_val.end(), end.second);
   ASSERT_EQ(ref_key, result_key);
   ASSERT_EQ(ref_val, result_val);
 }
@@ -169,19 +149,10 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKey)
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      thrust::host_vector<T> temp = get_random_data<unsigned short int>(
-        size, std::numeric_limits<unsigned short int>::min(), std::numeric_limits<unsigned short int>::max(), seed);
-
-      thrust::host_vector<T> random_keys = get_random_data<unsigned short int>(
-        size,
-        std::numeric_limits<unsigned short int>::min(),
-        std::numeric_limits<unsigned short int>::max(),
-        seed + seed_value_addition);
-      thrust::host_vector<T> random_vals = get_random_data<unsigned short int>(
-        size,
-        std::numeric_limits<unsigned short int>::min(),
-        std::numeric_limits<unsigned short int>::max(),
-        seed + 2 * seed_value_addition);
+      thrust::host_vector<T> random_keys =
+        get_random_data<int8_t>(size, get_default_limits<int8_t>::min(), get_default_limits<int8_t>::max(), seed);
+      thrust::host_vector<T> random_vals = get_random_data<int8_t>(
+        size, get_default_limits<int8_t>::min(), get_default_limits<int8_t>::max(), seed + seed_value_addition);
 
       size_t denominators[]   = {1, 2, 3, 4, 5, 6, 7, 8, 9};
       size_t num_denominators = sizeof(denominators) / sizeof(size_t);
@@ -329,19 +300,19 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyMultiset)
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      thrust::host_vector<T> temp =
-        get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> vec =
+        get_random_data<int>(2 * size, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
 
       // restrict elements to [min,13)
-      for (typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
+      for (typename thrust::host_vector<T>::iterator i = vec.begin(); i != vec.end(); ++i)
       {
         int temp = static_cast<int>(*i);
         temp %= 13;
         *i = temp;
       }
 
-      thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
-      thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
+      thrust::host_vector<T> h_a_key(vec.begin(), vec.begin() + size);
+      thrust::host_vector<T> h_b_key(vec.begin() + size, vec.end());
 
       thrust::sort(h_a_key.begin(), h_a_key.end());
       thrust::sort(h_b_key.begin(), h_b_key.end());

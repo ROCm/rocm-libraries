@@ -248,6 +248,11 @@ rocsparse_create_bell_descr
 
 .. doxygenfunction:: rocsparse_create_bell_descr
 
+rocsparse_create_sell_descr
+---------------------------
+
+.. doxygenfunction:: rocsparse_create_sell_descr
+
 rocsparse_create_const_coo_descr
 --------------------------------
 
@@ -267,6 +272,11 @@ rocsparse_create_const_bell_descr
 ---------------------------------
 
 .. doxygenfunction:: rocsparse_create_const_bell_descr
+
+rocsparse_create_const_sell_descr
+---------------------------------
+
+.. doxygenfunction:: rocsparse_create_const_sell_descr
 
 rocsparse_destroy_spmat_descr
 -----------------------------
@@ -357,6 +367,11 @@ rocsparse_bell_get
 ------------------
 
 .. doxygenfunction:: rocsparse_bell_get
+
+rocsparse_sell_get
+------------------
+
+.. doxygenfunction:: rocsparse_sell_get
 
 rocsparse_coo_set_pointers
 --------------------------

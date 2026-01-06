@@ -32,7 +32,7 @@
  * A graph transformation...
  *
  * Lowering passes include:
- * - AddComputeIndex
+ * - AssignIndexExpressions
  * - AddConvert
  * - AddDeallocate
  * - AddLDS
@@ -51,9 +51,11 @@
  * - LowerTile
  * - OrderEpilogueBlocks
  * - OrderMemory
+ * - RemapOutputTiles
  * - Simplify
  * - UnrollLoops
  * - UpdateParameters
+ * - WorkgroupRemapXCC
  */
 
 #pragma once

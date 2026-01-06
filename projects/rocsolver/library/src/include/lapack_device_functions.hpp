@@ -805,7 +805,7 @@ __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval, I* si
 }
 
 /** NRM2 finds the euclidean norm of a given vector.
-    MAX_THDS should be 64, 128, 256, 512, or 1024, and sval should
+    MAX_THDS should be 128, 256, 512, or 1024, and sval should
     be a shared array of size MAX_THDS. **/
 template <int MAX_THDS, typename T>
 __device__ void nrm2(const rocblas_int tid, const rocblas_int n, T* A, const rocblas_int incA, T* sval)
@@ -889,48 +889,32 @@ __device__ void dot(const rocblas_int tid,
     // (each thread reduce as many elements as needed to cover the original array)
     for(int i = tid; i < n; i += MAX_THDS)
         val = val + x[i * incX] * (CONJY ? conj(y[i * incY]) : y[i * incY]);
-    sval[tid] = val;
-    __syncthreads();
 
     if(n <= 1)
-        return;
-
-        /** <========= Next do the reduction on the shared memory array =========>
-        (We halve the number of active threads at each step
-        reducing two elements in the shared array. **/
-
-#pragma unroll
-    for(int i = MAX_THDS / 2; i > warpSize; i /= 2)
     {
-        if(tid < i)
-            val = val + sval[tid + i];
-        __syncthreads();
-        if(tid < i)
-            sval[tid] = val;
-        __syncthreads();
+        if(tid == 0)
+            sval[0] = val;
+        return;
     }
 
-    // from this point, as all the active threads will form a single wavefront
-    // and work in lock-step, there is no need for synchronizations and barriers
-    if(tid < warpSize)
+    /** <========= Next do the reduction on the shared memory array =========> **/
+
+    val += shift_left(val, 1);
+    val += shift_left(val, 2);
+    val += shift_left(val, 4);
+    val += shift_left(val, 8);
+    val += shift_left(val, 16);
+    if(warpSize > 32)
+        val += shift_left(val, 32);
+    if(tid % warpSize == 0)
+        sval[tid / warpSize] = val;
+    __syncthreads();
+    if(tid == 0)
     {
-        if(warpSize >= 64 && MAX_THDS >= 128)
-        {
-            sval[tid] = sval[tid] + sval[tid + 64];
-            __threadfence();
-        }
-        sval[tid] = sval[tid] + sval[tid + 32];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 16];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 8];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 4];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 2];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 1];
-        __threadfence();
+        for(int k = 1; k < MAX_THDS / warpSize; k++)
+            val += sval[k];
+
+        sval[0] = val;
     }
 
     // after the reduction, the dot product is in sval[0]

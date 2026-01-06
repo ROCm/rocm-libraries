@@ -1,470 +1,370 @@
-# ########################################################################
-# Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-cmake_minimum_required( VERSION 3.16.8 )
+cmake_minimum_required(VERSION 3.25.2)
 
-# BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
-option(BUILD_SHARED_LIBS "Build hipSparseLt as a shared library" ON )
-option(BUILD_CLIENTS_TESTS "Build tests (requires googletest)" OFF)
-option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks" OFF)
-option(BUILD_CLIENTS_SAMPLES "Build examples" OFF)
-option(BUILD_VERBOSE "Output additional build information" OFF)
-option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
-option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
-# Find CUDA if the user wants a CUDA version.
-option(BUILD_CUDA "Look for CUDA and use that as a backend if found" OFF)
-option(BUILD_USE_LOCAL_TENSILE "Build hipSparseLt with local tensilelite" OFF)
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
+
+project(hipsparselt VERSION 0.2.6 LANGUAGES CXX)
+
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
+endif()
+
+if(POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW) # option() honors normal variables
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Set cpack license file here to avoid rocm-cmake warning
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+
+include(fetch_rocm_cmake)
+include(hipsparselt_supported_architectures)
+include(hipsparselt_link_blas_libraries)
 include(CMakeDependentOption)
-cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Enable roctx marker in hipSPARSELt" ON "BUILD_SHARED_LIBS" OFF)
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
 
-# IF cuda backend disable clients tests and marker.
-if(BUILD_CUDA)
-    set(BUILD_CLIENTS_TESTS OFF)
-    set(HIPSPARSELT_ENABLE_MARKER OFF)
-endif()
+rocm_setup_version(VERSION ${PROJECT_VERSION})
+set(hipsparselt_SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
-# This will add compile option: -std=c++17
-set(CMAKE_CXX_STANDARD 17 )
-# Without this line, it will add -std=gnu++17 instead, which may have issues.
-set(CMAKE_CXX_EXTENSIONS OFF )
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Consider removing this in the future
-# This should appear before the project command, because it does not use FORCE
-if(WIN32)
-  set(CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/package" CACHE PATH "Install path prefix, prepended onto install directories")
-else()
-  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
-endif()
-
-if(NOT BUILD_CUDA)
-# Adding CMAKE_PREFIX_PATH, needed for static builds
-list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip /opt/rocm/llvm /opt/rocm /opt/rocm/hip )
-endif()
-
-if( NOT DEFINED ENV{HIP_PATH})
-    set( HIP_PATH "/opt/rocm/hip" )
-else( )
-    set (HIP_PATH $ENV{HIP_PATH} )
-endif( )
-
-# Append our library helper cmake path and the cmake path for hip (for convenience)
-# Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake  ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip ${HIP_PATH}/cmake )
-
-# Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified.")
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
-
-# Honor per-config flags in try_compile() source-file signature. cmake v3.7 and up
-if(POLICY CMP0066)
-  cmake_policy(SET CMP0066 NEW)
-endif()
-
-project(hipsparselt LANGUAGES CXX)
-
-# force library install path to lib (CentOS 7 defaults to lib64)
-set(CMAKE_INSTALL_LIBDIR "lib" CACHE INTERNAL "Installation directory for libraries" FORCE)
-
-if(BUILD_ADDRESS_SANITIZER)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
-    add_link_options(-fuse-ld=lld)
-endif()
-
-if(NOT BUILD_CUDA)
-    # Determine if CXX Compiler is hip-clang
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        message(STATUS "Using amdclang to build for amdgpu backend")
-        if( CMAKE_CXX_COMPILER MATCHES ".*hipcc.*" )
-          message( STATUS "WARNING: hipcc compiler use is deprecated. Use amdclang++ directly." )
-        endif()
-        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_HCC_COMPAT_MODE__=1" )
-        if (CMAKE_BUILD_TYPE MATCHES "Debug" AND NOT WIN32)
-            set (CMAKE_CXX_FLAGS_DEBUG "-O1 ${CMAKE_CXX_FLAGS_DEBUG} -gsplit-dwarf -ggdb" )
-        endif()
-        if (CMAKE_BUILD_TYPE MATCHES "Release" AND NOT WIN32)
-            set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3" )
-        endif()
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(WIN32)
+        set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path prefix." FORCE)
     else()
-        message(FATAL_ERROR "'amdclang' compiler required to compile for ROCm software.")
-    endif()
-endif()
-# Dependencies
-include(cmake/Dependencies.cmake)
-
-if (BUILD_CUDA)
-    set (HIP_ROOT_DIR ${HIP_PATH})
-    find_package( CUDA REQUIRED )
-    # Hip headers required of all clients; clients use hip to allocate device memory
-    find_package( HIP MODULE REQUIRED )
-    list( APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include" )
-
-else()
-    if (BUILD_ADDRESS_SANITIZER)
-      #Set the AMDGPU_TARGETS for ASAN build
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx942:xnack+;gfx950:xnack+;"
-      )
-    else()
-      #Set the AMDGPU_TARGETS with backward compatiblity
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx942;gfx950;"
-      )
-    endif()
-
-    if (AMDGPU_TARGETS)
-        set(TMPAMDGPU_TARGETS "${AMDGPU_TARGETS}")
-        if(TMPAMDGPU_TARGETS STREQUAL "all" )
-            set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target" FORCE)
-        else()
-            set(AMDGPU_TARGETS "${TMPAMDGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
-        endif()
-    else()
-        set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-    endif()
-
-    message(STATUS "AMDGPU_TARGETS: ${AMDGPU_TARGETS}")
-
-    if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
-        find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
-    endif( )
-
-    option( BUILD_WITH_TENSILE "Build full functionality which requires tensile?" ON )
-
-    if( BUILD_WITH_TENSILE )
-      # we will have expanded "all" for tensile to ensure consistency as we have local rules
-      set( Tensile_ARCHITECTURE "${AMDGPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
-
-      set( Tensile_LOGIC "asm_full" CACHE STRING "Tensile to use which logic?")
-
-      if ((Tensile_CODE_OBJECT_VERSION MATCHES "default") OR (Tensile_CODE_OBJECT_VERSION MATCHES "V4"))
-        set( Tensile_CODE_OBJECT_VERSION "4" STRING "Tensile code_object_version")
-      elseif(Tensile_CODE_OBJECT_VERSION MATCHES "V5")
-        set( Tensile_CODE_OBJECT_VERSION "5" STRING "Tensile code_object_version")
-      else()
-        set( Tensile_CODE_OBJECT_VERSION "4" CACHE STRING "Tensile code_object_version")
-      endif()
-      set( Tensile_COMPILER "amdclang++" CACHE STRING "Tensile compiler")
-      set( Tensile_LIBRARY_FORMAT "msgpack" CACHE STRING "Tensile library format")
-      set( Tensile_CPU_THREADS "" CACHE STRING "Number of threads for Tensile parallel build")
-
-      option( Tensile_MERGE_FILES "Tensile to merge kernels and solutions files?" ON )
-      option( Tensile_SHORT_FILENAMES "Tensile to use short file names? Use if compiler complains they're too long." OFF )
-      option( Tensile_PRINT_DEBUG "Tensile to print runtime debug info?" OFF )
-
-      set( Tensile_TEST_LOCAL_PATH "" CACHE PATH "Use local Tensile directory instead of fetching a GitHub branch" )
-
-      set_property( CACHE Tensile_LOGIC PROPERTY STRINGS aldebaran asm_full asm_lite asm_miopen hip_lite other )
-      set_property( CACHE Tensile_CODE_OBJECT_VERSION PROPERTY STRINGS default V4 V5 )
-      set_property( CACHE Tensile_COMPILER PROPERTY STRINGS hcc amdclang++)
-      set_property( CACHE Tensile_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
-
-      if(Tensile_LIBRARY_FORMAT MATCHES "yaml")
-        option(TENSILE_USE_LLVM      "Use LLVM for parsing config files." ON)
-        option(TENSILE_USE_MSGPACK   "Use msgpack for parsing config files." OFF)
-      else()
-        option(TENSILE_USE_LLVM      "Use LLVM for parsing config files." OFF)
-        option(TENSILE_USE_MSGPACK   "Use msgpack for parsing config files." ON)
-      endif()
-
-      if (WIN32)
-        set( Tensile_ROOT "${CMAKE_BINARY_DIR}/virtualenv/Lib/site-packages/Tensile" )
-      endif()
-
-      if (NOT Tensile_BUILD_ID)
-        set(Tensile_BUILD_ID "sha1" CACHE STRING "Build ID Kind for Tensile" FORCE)
-      endif()
-
-      if ( NOT Tensile_TEST_LOCAL_PATH AND BUILD_USE_LOCAL_TENSILE )
-        find_path(TensileLite NAMES tensilelite PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../hipBLASLt")
-        if ( ${TensileLite} STREQUAL "TensileLite-NOTFOUND" )
-          find_path(TensileLite NAMES tensilelite PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt" REQUIRED)
-        endif()
-        set(Tensile_TEST_LOCAL_PATH "${TensileLite}/tensilelite")
-        message(STATUS "Found TensileLite: ${TensileLite}/tensilelite")
-        message(STATUS "Set Tensile_TEST_LOCAL_PATH: ${TensileLite}/tensilelite")
-      endif()
-
-      include(virtualenv)
-      if (Tensile_TEST_LOCAL_PATH)
-        virtualenv_install(${Tensile_TEST_LOCAL_PATH})
-        message (STATUS "using local Tensile from ${Tensile_TEST_LOCAL_PATH}, copied to ${Tensile_ROOT}")
-      else()
-        # Use the virtual-env setup and download package from specified repot:
-        set( tensile_fork "ROCm" CACHE STRING "Tensile fork to use" )
-        file (STRINGS "tensilelite_tag.txt" read_tensile_tag)
-        set( tensile_tag ${read_tensile_tag} CACHE STRING "Tensile tag to download" )
-        virtualenv_install("git+https://github.com/${tensile_fork}/hipBLASLt.git@${tensile_tag}#subdirectory=tensilelite")
-
-        message (STATUS "using GIT Tensile fork=${tensile_fork} from branch=${tensile_tag}")
-      endif()
-      add_subdirectory(${VIRTUALENV_SITE_PATH}/rocisa rocisa)
-      message(STATUS "Adding ${VIRTUALENV_HOME_DIR} to CMAKE_PREFIX_PATH")
-      list(APPEND CMAKE_PREFIX_PATH ${VIRTUALENV_HOME_DIR})
-      if (TENSILE_VERSION)
-        find_package(Tensile ${TENSILE_VERSION} EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
-      else()
-        find_package(Tensile 5.0.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
-      endif()
+        set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix." FORCE)
     endif()
 endif()
 
-find_package( hipsparse REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
+# --- Build options and validation ---
 
-# rocm-cmake helpers
-include( ROCMSetupVersion )
-include( ROCMCreatePackage )
-include( ROCMInstallTargets )
-include( ROCMPackageConfigHelpers )
-include( ROCMInstallSymlinks )
-include( ROCMCheckTargetIds )
-include( ROCMHeaderWrapper )
-include( ROCMClients )
+option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
+cmake_dependent_option(
+    HIPSPARSELT_ENABLE_HIP "Build hipSPARSELt with HIP backend." ON "NOT HIPSPARSELT_ENABLE_CUDA"
+    OFF
+)
+if(HIPSPARSELT_ENABLE_CUDA AND HIPSPARSELT_ENABLE_HIP)
+    message(STATUS "HIPSPARSELT_ENABLE_CUDA: ${HIPSPARSELT_ENABLE_CUDA}")
+    message(STATUS "HIPSPARSELT_ENABLE_HIP: ${HIPSPARSELT_ENABLE_HIP}")
+    message(FATAL_ERROR "Cannot enable CUDA and HIP support simultaneously.")
+endif()
 
+option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt shared library." ON)
+option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
+option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
-include (os-detection)
-get_os_id(OS_ID)
-message (STATUS "OS detected is ${OS_ID}")
+option(HIPSPARSELT_ENABLE_DEVICE "Build hipSPARSELt device libraries." ON)
+option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
+if(HIPSPARSELT_ENABLE_CLIENT)
+    option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
+    option(HIPSPARSELT_ENABLE_SAMPLES "Build client samples." ON)
+    option(HIPSPARSELT_ENABLE_FORTRAN "Build Fortran clients." OFF)
+    option(HIPSPARSELT_ENABLE_BLIS "Enable BLIS support for reference implementations." OFF)
+endif()
+
+cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
+option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
+option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
+option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
+option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
+
+set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
+    CACHE PATH "Path to hipblaslt directory."
+)
+set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
+
+if(NOT HIPSPARSELT_ENABLE_CUDA)
+    set(GPU_TARGETS "all" CACHE STRING "AMD GFX targets to cross-compile")
+
+    if(NOT GPU_TARGETS)
+        set(HIPSPARSELT_ENABLE_DEVICE OFF)
+        message(WARNING "No GPU targets specified, device libraries will not be built.")
+    elseif(GPU_TARGETS STREQUAL "all")
+        hipsparselt_get_base_architectures(GPU_TARGETS)
+    else()
+        hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
+    endif()
+    message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
+endif()
+
+if(HIPSPARSELT_ENABLE_FORTRAN AND HIPSPARSELT_ENABLE_ASAN)
+    message(FATAL_ERROR "Cannot enable fortran clients and address sanitizers.")
+endif()
+
+if(HIPSPARSELT_BUILD_COVERAGE)
+    if(HIPSPARSELT_ENABLE_FORTRAN)
+        message(FATAL_ERROR "Cannot enable fortran clients and code coverage.")
+    elseif(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(FATAL_ERROR "Code coverage is only supported for CMAKE_BUILD_TYPE=Debug.")
+    endif()
+endif()
+
+if(HIPSPARSELT_ENABLE_FORTRAN)
+    enable_language(Fortran)
+endif()
+
+if(HIPSPARSELT_ENABLE_OPENMP)
+    find_package(OpenMP REQUIRED)
+endif()
+
+# --- Dependency Setup ---
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(hip REQUIRED)
+find_package(hipsparse REQUIRED)
 
 if(HIPSPARSELT_ENABLE_MARKER)
-  find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h")
-  find_library(rocTracer roctx64 PATHS ${ROCM_PATH}/lib)
-  if(NOT rocTracer)
-    message(FATAL_ERROR "roctracer not found, but HIPSPARSELT_ENABLE_MARKER is enabled")
-  endif()
-  add_definitions(-DHIPSPARSELT_ENABLE_MARKER)
-  rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0")
-endif()
-
-# Setup version
-set (VERSION_STRING "0.2.5" )
-rocm_setup_version( VERSION ${VERSION_STRING} )
-set(hipsparselt_SOVERSION 0.2)
-
-# setup rocsparselt defines used for both the library and clients
-if( BUILD_WITH_TENSILE )
-    list(APPEND TENSILE_DEFINES BUILD_WITH_TENSILE=1)
-    if(Tensile_NO_LAZY_LIBRARY_LOADING)
-      list(APPEND TENSILE_DEFINES ROCSPARSELT_TENSILE_LAZY_LOAD=0)
+    if(HIPSPARSELT_ENABLE_CUDA)
+        message(FATAL_ERROR "rocTracer marker is not supported with CUDA backend.")
     else()
-      list(APPEND TENSILE_DEFINES ROCSPARSELT_TENSILE_LAZY_LOAD=1)
+        find_library(ROCTX64_LIBRARY REQUIRED HINTS lib NAMES roctx64 libroctx64)
     endif()
-else()
-    list(APPEND TENSILE_DEFINES BUILD_WITH_TENSILE=0)
 endif()
 
-if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
-  if(NOT CLIENTS_OS)
-    rocm_set_os_id(CLIENTS_OS)
-    string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
-    rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
-  endif()
-  message(STATUS "OS: ${CLIENTS_OS} ${CLIENTS_OS_VERSION}")
-  set(OPENMP_RPM "libgomp")
-  set(OPENMP_DEB "libomp-dev")
-  set(GFORTRAN_RPM "libgfortran4")
-  set(GFORTRAN_DEB "libgfortran4")
-  if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
-    if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-      set(GFORTRAN_RPM "libgfortran")
-    endif()
-  elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-  elseif(CLIENTS_OS STREQUAL "sles")
-    set(OPENMP_RPM "libgomp1")
-  elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
-  endif()
+if(HIPSPARSELT_ENABLE_CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    message(VERBOSE "CUDAToolkit_INCLUDE_DIRS: ${CUDAToolkit_INCLUDE_DIRS}")
+    find_path(cusparselt_INCLUDE_DIR REQUIRED NAMES cusparseLt.h)
+    message(VERBOSE "cusparselt_INCLUDE_DIR: ${cusparselt_INCLUDE_DIR}")
+    find_library(cusparselt_LIBRARY REQUIRED NAMES cusparseLt)
+    message(VERBOSE "cusparselt_LIBRARY: ${cusparselt_LIBRARY}")
 
-  set( BUILD_CLIENTS ON )
-  rocm_package_setup_component(clients)
-  rocm_package_setup_client_component( clients-common )
-  if(BUILD_CLIENTS_TESTS)
-    rocm_package_setup_client_component(
-      tests
-      DEPENDS
-        COMPONENT clients-common
-        DEB "${OPENMP_DEB}"
-        RPM "${OPENMP_RPM}"
+    message(STATUS "Found cusparseLt: ${cusparselt_LIBRARY}")
+endif()
+
+if(HIPSPARSELT_ENABLE_HIP)
+    set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
+    if(NOT EXISTS "${HIPBLASLT_PATH}")
+        message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
+    endif()
+
+    block(SCOPE_FOR VARIABLES)
+    set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
+    # Builds tensilelite's device libraries (.co/.dat)
+    set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
+    # Builds tensilelite::tensilelite-host target
+    set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
+    set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
+    set(HIPBLASLT_LIBLOGIC_PATH
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+        CACHE STRING "" FORCE
     )
-  endif()
-  if(BUILD_CLIENTS_BENCHMARKS)
-    rocm_package_setup_client_component(
-      benchmarks
-      DEPENDS
-        COMPONENT clients-common
-        DEB "${OPENMP_DEB}"
-        RPM "${OPENMP_RPM}"
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+        CACHE FILEPATH "License file for package" FORCE
     )
-  endif()
-  if(BUILD_CLIENTS_SAMPLES)
+
+    if(WIN32)
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
+            CACHE PATH "path to tensile library" FORCE
+        )
+    else()
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR
+            "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
+            CACHE PATH "path to tensile library" FORCE
+        )
+    endif()
+
+    set(ORIGAMI_ENABLE_INSTALL OFF)
+    add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+    endblock()
+endif()
+
+add_subdirectory(library)
+
+if(HIPSPARSELT_ENABLE_CLIENT)
+    add_subdirectory(clients)
+endif()
+
+# --- Packaging and installation ---
+
+if(HIPSPARSELT_ENABLE_CLIENT)
+    include(rocm_client_prerequisites)
+    rocm_set_client_package_prerequisites()
+    rocm_package_setup_component(clients)
+    rocm_package_setup_client_component(clients-common)
+endif()
+
+if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
+    rocm_package_setup_client_component(tests DEPENDS COMPONENT clients-common)
+endif()
+
+if(HIPSPARSELT_ENABLE_BENCHMARKS)
+    rocm_package_setup_client_component(benchmarks DEPENDS COMPONENT clients-common)
+endif()
+
+if(HIPSPARSELT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
-  endif()
 endif()
 
-add_subdirectory( library )
-
-# Trigger client builds if selected
-if(BUILD_CLIENTS)
-  add_subdirectory(clients)
+if(HIPSPARSELT_ENABLE_FORTRAN)
+    rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
+    rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
+    rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
+    rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
 endif()
 
-# The following code is setting variables to control the behavior of CPack to generate our
-if( WIN32 )
-    set( CPACK_SOURCE_GENERATOR "ZIP" )
-    set( CPACK_GENERATOR "ZIP" )
-endif( )
-
-# Package specific CPACK vars
-if( NOT BUILD_CUDA )
-  rocm_package_add_dependencies(DEPENDS "hipsparse >= 2.1.0")
-endif( )
-
-set( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" )
-set( CPACK_RPM_PACKAGE_LICENSE "MIT")
-
-if (WIN32)
-  SET( CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE )
-  SET( INSTALL_PREFIX "C:/hipSDK" )
-  SET( CPACK_SET_DESTDIR FALSE )
-  SET( CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK" )
-  SET( CPACK_PACKAGING_INSTALL_PREFIX "" )
-  set( CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF )
+# Work around code object stripping failure if using /usr/bin/strip
+find_program(LLVM_STRIP NAMES llvm-strip PATH_SUFFIXES lib/llvm/bin llvm/bin bin)
+if(LLVM_STRIP)
+    set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
 else()
-  if( NOT CPACK_PACKAGING_INSTALL_PREFIX )
-    set( CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" )
-  endif()
-endif( )
+    message(
+        WARNING
+            "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging."
+    )
+endif()
 
-set( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" "\${CPACK_PACKAGING_INSTALL_PREFIX}/lib" )
-
-# Give hipsparselt compiled for CUDA backend a different name
-if( NOT BUILD_CUDA )
-    set( package_name hipsparselt )
-else( )
-    set( package_name hipsparselt-alt )
-endif( )
-
-set( HIPSPARSELTS_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file" )
-
-rocm_create_package(
-    NAME ${package_name}
-    DESCRIPTION "ROCm Structured Sparsity Matrix Multiplication marshalling library"
-    MAINTAINER "hipSPARSELt Maintainer <hipsparselt-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${HIPSPARSELTS_CONFIG_DIR}
+rocm_install(
+    TARGETS
+    hipsparselt
+    EXPORT
+    hipsparselt-targets
+    ARCHIVE
+    COMPONENT
+    "devel"
+    LIBRARY
+    COMPONENT
+    "runtime"
+    RUNTIME
+    COMPONENT
+    "runtime"
 )
 
+rocm_install(
+    DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    COMPONENT "devel"
+)
 
-#
-# ADDITIONAL TARGETS FOR CODE COVERAGE
-#
-if(BUILD_CODE_COVERAGE)
-  #
-  # > make coverage_cleanup (clean coverage related files.)
-  # > make coverage GTEST_FILTER=<>
-  # will run:
-  #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
-  #  > make coverage_output (generate html documentation)
-  #
-  if(NOT DEFINED LLVM_COV_BIN_DIR)
-    message(STATUS "Hint: Use LLVM_COV_BIN_DIR to specify the desired versions of llvm-cov and llvm-profdata:")
-    message(STATUS "      -DLLVM_COV_BIN_DIR=/path/to/llvm/cov+profdata/bin")
-  endif()
+rocm_export_targets(
+    NAMESPACE
+    roc::
+    TARGETS
+    hipsparselt
+    EXPORT
+    hipsparselt-targets
+    DEPENDS
+    PACKAGE
+    hip
+)
 
-  find_program(LLVM_COV_EXECUTABLE llvm-cov HINTS ${LLVM_COV_BIN_DIR} REQUIRED)
-  message(STATUS "using llvm-cov: ${LLVM_COV_EXECUTABLE}")
+if(HIPSPARSELT_ENABLE_CLIENT)
+    if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
+        rocm_install(
+            TARGETS hipsparselt-test COMPONENT "tests" DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        )
 
-  find_program(LLVM_PROFDATA_EXECUTABLE llvm-profdata HINTS ${LLVM_COV_BIN_DIR} REQUIRED)
-  message(STATUS "using llvm-profdata: ${LLVM_PROFDATA_EXECUTABLE}")
+        if(TARGET hipsparselt-test-files)
+            get_target_property(
+                TEST_YAML_FILES hipsparselt-test-files HIPSPARSELT_INSTALL_YAML_FILES
+            )
+            get_target_property(TEST_DATA_FILE hipsparselt-test-files HIPSPARSELT_INSTALL_DATA_FILE)
+            get_target_property(TEST_PROGRAM hipsparselt-test-files HIPSPARSELT_INSTALL_PROGRAM)
+            if(TEST_YAML_FILES)
+                rocm_install(
+                    FILES ${TEST_YAML_FILES} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests
+                )
+            endif()
+            if(TEST_DATA_FILE)
+                rocm_install(
+                    FILES ${TEST_DATA_FILE} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests
+                )
+            endif()
+            if(TEST_PROGRAM)
+                rocm_install(
+                    PROGRAMS ${TEST_PROGRAM} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests
+                )
+            endif()
+        endif()
+    endif()
 
-  target_compile_options(hipsparselt PRIVATE
-    -fprofile-instr-generate
-    -fcoverage-mapping
-  )
+    if(HIPSPARSELT_ENABLE_BENCHMARKS)
+        rocm_install(
+            TARGETS hipsparselt-bench COMPONENT benchmarks DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        )
+    endif()
 
-  target_link_options(hipsparselt PUBLIC
-    -fprofile-instr-generate
-  )
+    if(HIPSPARSELT_ENABLE_SAMPLES)
+        rocm_install(
+            TARGETS
+            example_spmm_strided_batched
+            example_prune_strip
+            example_compress
+            COMPONENT
+            samples
+            DESTINATION
+            ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+endif()
 
-  #
-  # Run coverage analysis
-  #
-  set(coverage_test ./clients/staging/hipsparselt-test)
+if(ROCM_LIBS_SUPERBUILD OR NOT HIPSPARSELT_IS_SUBPROJECT)
+    # rocm_create_package makes decisions on what type of package to produce based on
+    # BUILD_SHARED_LIBS. If we don't set this here we will only get a dev package.
+    set(BUILD_SHARED_LIBS ${HIPSPARSELT_BUILD_SHARED_LIBS})
+    set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+        CACHE PATH "Path placed into ldconfig file"
+    )
+    rocm_create_package(
+        NAME hipsparselt
+        DESCRIPTION "ROCm structured sparsity matrix multiplication marshalling library"
+        MAINTAINER "hipSPARSELt Maintainer <hipsparselt-maintainer@amd.com>"
+        LDCONFIG
+        LDCONFIG_DIR ${HIPSPARSELT_CONFIG_DIR}
+    )
+endif()
 
-  add_custom_target(coverage_analysis
-    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${CMAKE_COMMAND} -E env
-            LLVM_PROFILE_VERBOSE=1
-            LLVM_PROFILE_FILE=./hipsparselt-test_%m.profraw
-            ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
+# --- Coverage setup ---
 
-  add_dependencies(coverage_analysis hipsparselt)
+if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
+    message(STATUS "Configuring code coverage target")
 
-  #
-  # Generate coverage output using llvm-cov
-  #
-  set(LLVM_COV_COMMON_ARGS
-    -object ./library/libhipsparselt.so
-    -instr-profile=./coverage_test.profdata
-    --ignore-filename-regex=.*/build/.*
-  )
+    # Apply coverage flags to library target
+    target_compile_options(hipsparselt PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipsparselt PRIVATE -fprofile-instr-generate)
 
-  add_custom_target(coverage_output
-    DEPENDS coverage_analysis
-    COMMAND ${CMAKE_COMMAND} -E env
-            /bin/sh -c
-            "\"${LLVM_PROFDATA_EXECUTABLE}\" merge -sparse \
-             \"${CMAKE_BINARY_DIR}\"/*.profraw \
-             -o \"${CMAKE_BINARY_DIR}/coverage_test.profdata\""
+    set(_coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    set(_coverage_test_arguments "--precompile=hipsparselt-test-precompile.db")
+    if(HIPSPARSELT_COVERAGE_GTEST_FILTER)
+        list(APPEND _coverage_test_arguments "--gtest_filter=${HIPSPARSELT_COVERAGE_GTEST_FILTER}")
+    endif()
 
-    COMMAND ${LLVM_COV_EXECUTABLE} report ${LLVM_COV_COMMON_ARGS}
-    COMMAND ${LLVM_COV_EXECUTABLE} show ${LLVM_COV_COMMON_ARGS}
-            -format=html -output-dir=coverage-report
+    add_custom_target(
+        code_cov_tests
+        DEPENDS hipsparselt-test
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_coverage_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_coverage_dir}/profraw"
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_FILE="${_coverage_dir}/profraw/hipsparselt-coverage_%p.profraw"
+            $<TARGET_FILE:hipsparselt-test> ${_coverage_test_arguments}
+        COMMENT
+            "Running coverage with test command: $<TARGET_FILE:hipsparselt-test> ${_coverage_test_arguments}"
+    )
 
-    COMMAND ${LLVM_COV_EXECUTABLE} export ${LLVM_COV_COMMON_ARGS}
-            -format=lcov > ${CMAKE_BINARY_DIR}/coverage_test.info
+    set(_llvm_tool_hints)
+    foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+        list(APPEND _llvm_tool_hints "${_prefix}/lib/llvm/bin")
+    endforeach()
 
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    VERBATIM
-  )
+    find_program(LLVM_PROFDATA llvm-profdata HINTS ${_llvm_tool_hints} REQUIRED)
+    find_program(LLVM_COV llvm-cov HINTS ${_llvm_tool_hints} REQUIRED)
 
-  add_custom_target(coverage DEPENDS coverage_output)
-
-  #
-  # Coverage cleanup
-  #
-  add_custom_target(coverage_cleanup
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/*.profraw
-                                      ${CMAKE_BINARY_DIR}/coverage_test.profdata
-                                      ${CMAKE_BINARY_DIR}/coverage_test.info
-
-    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/coverage-report
-  )
-endif() # BUILD_CODE_COVERAGE
+    add_custom_target(
+        coverage
+        DEPENDS code_cov_tests
+        COMMAND
+            ${LLVM_PROFDATA} merge -sparse "${_coverage_dir}/profraw/hipsparselt-coverage_*.profraw"
+            -o "${_coverage_dir}/hipsparselt.profdata"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipsparselt>
+                -instr-profile="${_coverage_dir}/hipsparselt.profdata"
+        COMMAND
+            ${LLVM_COV} show -object $<TARGET_FILE:hipsparselt>
+            -instr-profile="${_coverage_dir}/hipsparselt.profdata" -format=html
+            -output-dir="${_coverage_dir}"
+        COMMENT "Generating coverage... report can be found in ${_coverage_dir}/index.html"
+    )
+endif()

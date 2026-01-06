@@ -49,4 +49,3 @@ void free(pointer<void> ptr)
 } // end cpp
 } // end system
 THRUST_NAMESPACE_END
-

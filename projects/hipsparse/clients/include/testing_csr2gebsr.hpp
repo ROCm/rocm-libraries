@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csr2gebsr_bad_arg(void)
+void testing_csr2gebsr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
@@ -422,7 +422,7 @@ void testing_csr2gebsr_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2gebsr(Arguments argus)
+void testing_csr2gebsr(Arguments argus)
 {
     int                  m             = argus.M;
     int                  n             = argus.N;
@@ -443,14 +443,6 @@ hipsparseStatus_t testing_csr2gebsr(Arguments argus)
     hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
     hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
 
-    if(row_block_dim == 1 || m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // Do not test cusparse with block dim 1
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures
@@ -460,12 +452,8 @@ hipsparseStatus_t testing_csr2gebsr(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(
-           filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, csr_idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, csr_idx_base));
 
     int mb = (m + row_block_dim - 1) / row_block_dim;
     int nb = (n + col_block_dim - 1) / col_block_dim;
@@ -666,8 +654,6 @@ hipsparseStatus_t testing_csr2gebsr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2GEBSR_HPP

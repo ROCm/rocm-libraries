@@ -29,7 +29,7 @@
 #include <set>
 #include <vector>
 
-#include <Tensile/analytical/Utils.hpp>
+#include <Tensile/UtilsOrigami.hpp>
 
 namespace TensileLite
 {
@@ -45,9 +45,9 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct ProblemPredictionLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
-        std::unordered_map<int, std::shared_ptr<MySolution>>        solutionmap;
-        std::vector<TensileLite::analytical::TileTuple>             tile_list;
-        std::unordered_map<TensileLite::analytical::TileTuple, int> tile_map;
+        std::unordered_map<int, std::shared_ptr<MySolution>> solutionmap;
+        std::vector<origami::config_t>                       origami_config_list;
+        std::unordered_map<origami::config_t, int>           origami_config_map;
 
         static std::string Type()
         {
@@ -156,49 +156,35 @@ namespace TensileLite
                 batch *= problem.batchSize(i);
             }
 
-            bool                  debug   = Debug::Instance().printPropertyEvaluation();
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            size_t elementSizeA_bits
-                = problem.a().elementBytes() * 8;
-            size_t elementSizeB_bits
-                = problem.b().elementBytes() * 8;
-            size_t elementSizeC_bits
-                = problem.c().elementBytes() * 8;
-            const analytical::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
-            int WGM
-                = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
-            analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
+
+            const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
-                miDataType = analytical::DataType::XFloat32;
-            auto selected_tiles = analytical::select_best_macro_tile_size(
-                m,
-                n,
-                k,
-                batch,
-                problem.transA(),
-                problem.transB(),
-                *(pAMDGPU->analyticalHardware),
-                tile_list,
-                elementSizeA_bits,
-                elementSizeB_bits,
-                elementSizeC_bits,
-                miDataType,
-                0, //mx_block_size -> MX Data types come from rocroller.
-                0.8,
-                debug,
-                false,
-                WGM);
-            for(const auto& tile : selected_tiles)
+                miDataType = origami::data_type_t::XFloat32;
+            origami::problem_t origami_problem = {
+                .size        = {m, n, k},
+                .batch       = batch,
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                .mi_dtype    = miDataType,
+                .a_mx_block_size = 0, // MX Data types come from rocroller
+                .b_mx_block_size = 0, // MX Data types come from rocroller
+            };
+
+            auto prediction_result = origami::rank_configs(
+                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+
+            for(const auto& r : prediction_result)
             {
-                auto mapiter  = tile_map.find(std::make_tuple(std::get<1>(tile),
-                                                              std::get<2>(tile),
-                                                              std::get<3>(tile),
-                                                              std::get<4>(tile),
-                                                              std::get<5>(tile),
-                                                              std::get<6>(tile),
-                                                              std::get<7>(tile)));
+                auto mapiter  = origami_config_map.find(r.config);
                 auto smapiter = solutionmap.find(mapiter->second);
-                if(mapiter != tile_map.end() && smapiter != solutionmap.end())
+                if(mapiter != origami_config_map.end() && smapiter != solutionmap.end())
                 {
                     auto solution = smapiter->second;
                     if((*solution->hardwarePredicate)(hardware)

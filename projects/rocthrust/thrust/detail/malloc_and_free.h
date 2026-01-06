@@ -18,6 +18,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/malloc_and_free_fwd.h>
 #include <thrust/detail/pointer.h>
@@ -55,7 +63,9 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& exec, std::si
 }
 
 // XXX WAR nvbug 992955
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(__NVCC__) || defined(_NVHPC_CUDA)                                  \
+  || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
+  || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
 #  if CUDART_VERSION < 5000
 
 // cudafe generates unqualified calls to free(int *volatile)

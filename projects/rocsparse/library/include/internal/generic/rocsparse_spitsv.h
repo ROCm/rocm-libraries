@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -73,15 +73,15 @@ extern "C" {
 *  with \f$\epsilon\f$ = \p host_tol.
 *
 *  \p rocsparse_spitsv requires three stages to complete. First, the user passes the \ref rocsparse_spitsv_stage_buffer_size
-*  stage to determine the size of the required temporary storage buffer. Next, the user allocates this buffer and calls 
-*  \p rocsparse_spitsv again with the \ref rocsparse_spitsv_stage_preprocess stage which will preprocess data and store it 
-*  in the temporary buffer. Finally, the user calls \p rocsparse_spitsv with the \ref rocsparse_spitsv_stage_compute stage to 
+*  stage to determine the size of the required temporary storage buffer. Next, the user allocates this buffer and calls
+*  \p rocsparse_spitsv again with the \ref rocsparse_spitsv_stage_preprocess stage which will preprocess data and store it
+*  in the temporary buffer. Finally, the user calls \p rocsparse_spitsv with the \ref rocsparse_spitsv_stage_compute stage to
 *  perform the actual computation. Once all calls to \p rocsparse_spitsv are complete, the temporary buffer
 *  can be deallocated.
 *
-*  \p rocsparse_spitsv supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the 
-*  row pointer and column indices arrays of the sparse matrix. \p rocsparse_spitsv supports the following data types for 
-*  \f$op(A)\f$, \f$x\f$, \f$y\f$ and compute types for \f$\alpha\f$:  
+*  \p rocsparse_spitsv supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the
+*  row pointer and column indices arrays of the sparse matrix. \p rocsparse_spitsv supports the following data types for
+*  \f$op(A)\f$, \f$x\f$, \f$y\f$ and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -95,6 +95,9 @@ extern "C" {
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
+*
+*  \note
+*  This routine does not support batched computation.
 *
 *  @param[in]
 *  handle        handle to the rocsparse library context queue.

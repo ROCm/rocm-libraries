@@ -173,6 +173,10 @@ namespace TensileLite
                 {
                     success = mappingDistance<Key, Matching::Equality<Key>>(io, lib, properties);
                 }
+                else if(distanceType == "Range")
+                {
+                    success = mappingDistance<Key, Matching::Range<Key>>(io, lib, properties);
+                }
                 else if(distanceType == "JSD")
                 {
                     success

@@ -79,6 +79,7 @@ option(BUILD_SHARED_LIBS "Build rocSPARSE as a shared library" ON)
 option(BUILD_CLIENTS_TESTS "Build tests (requires googletest)" OFF)
 option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks" OFF)
 option(BUILD_CLIENTS_SAMPLES "Build examples" OFF)
+option(BUILD_CLIENTS_ONLY "Build only clients" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(BUILD_CODE_COVERAGE "Build rocSPARSE with code coverage enabled" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build rocSPARSE with address sanitizer enabled" OFF)
@@ -161,12 +162,12 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -197,12 +198,27 @@ endif()
 
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
+# Setup version
+set(VERSION_STRING "4.3.0")
+set(SOVERSION_STRING "1.0")
+set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
+set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
+
+rocm_setup_version(VERSION ${VERSION_STRING})
+set(rocsparse_SOVERSION ${SOVERSION_STRING})
+
 # Find rocprim package
-find_package(rocprim 4.0.0 REQUIRED)
+find_package(rocprim REQUIRED)
+if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_VERSION})
+  message(FATAL_ERROR "The version of rocPRIM found was incompatible. Found: ${rocprim_VERSION} Required: ${MIN_ROCPRIM_VERSION}")
+endif()
 
 # Find rocblas package
 if (BUILD_WITH_ROCBLAS)
-  find_package(rocblas 4.1.0 QUIET)
+  find_package(rocblas REQUIRED)
+  if (${rocblas_VERSION} VERSION_LESS ${MIN_ROCBLAS_VERSION})
+    message(FATAL_ERROR "The version of rocBLAS found was incompatible. Found: ${rocblas_VERSION} Required: ${MIN_ROCBLAS_VERSION}")
+  endif()
 else()
   message("-- Build rocSPARSE with rocBLAS is disabled")
 endif()
@@ -211,14 +227,7 @@ if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
   find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
 endif( )
 
-# Setup version
-set(VERSION_STRING "4.0.2")
-set(SOVERSION_STRING "1.0")
-
-rocm_setup_version(VERSION ${VERSION_STRING})
-set(rocsparse_SOVERSION ${SOVERSION_STRING})
-
-if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
+if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   set( BUILD_CLIENTS ON )
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
@@ -273,7 +282,9 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
 endif()
 
 # rocSPARSE library
-add_subdirectory(library)
+if (NOT BUILD_CLIENTS_ONLY)
+  add_subdirectory(library)
+endif()
 
 # Trigger client builds if selected
 if(BUILD_CLIENTS)

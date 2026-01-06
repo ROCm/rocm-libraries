@@ -85,6 +85,8 @@ namespace rocRoller
                                 ShowValue(dimensionWorkitem.dim),
                                 ShowValue(kernelWorkitemIndexes.size()));
                     auto expr = kernelWorkitemIndexes.at(dimensionWorkitem.dim)->expression();
+                    context->registerTagManager()->addRegister(
+                        tag, kernelWorkitemIndexes.at(dimensionWorkitem.dim));
                     setCoordinate(tag, expr);
                 }
             }

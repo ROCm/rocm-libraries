@@ -71,7 +71,8 @@ extern "C" {
 *  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>No</td>        <td>Is best suited for matrices with all rows having a similar number of non-zeros. Can out perform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>No</td>        <td>[Deprecated] old name for rocsparse_spmv_alg_csr_rowsplit.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Yes</td>       <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires a lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Yes</td>       <td>Like adaptive algorithm, generally performs well accross all matrix sparsity patterns. Generally not as fast as adaptive algorithm, however uses a much faster pre-processing step. Good for when only a few number of sparse vector products will be performed.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Yes</td>       <td>Like adaptive algorithm, generally performs well across all matrix sparsity patterns. Generally not as fast as adaptive algorithm, however uses a much faster pre-processing step. Good for when only a few number of sparse vector products will be performed.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_nnzsplit</td> <td>No</td>        <td>Yes</td>       <td>Like adaptive algorithm, generally performs well across all matrix sparsity patterns. Generally not as fast as adaptive algorithm but faster than LRB algorithm. It uses a much faster pre-processing step than LRB. Good for when the number of sparse vector products that will be performed is less than one hundred. If more products need to be computed, the adaptive algorithm is probably faster.</td>
 *  </table>
 *
 *  <table>
@@ -111,11 +112,13 @@ extern "C" {
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
-*  <tr><th>A / X                     <th>Y                        <th>compute_type
-*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
-*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
-*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
-*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><th>A / X                     <th>Y                         <th>compute_type
+*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_i32_r  <td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
 *  \par Mixed-regular real precisions

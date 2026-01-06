@@ -23,6 +23,55 @@
 #include "rocsparse_one.hpp"
 #include "rocsparse_handle.hpp"
 
+rocsparse_status rocsparse::set_minus_one_async(rocsparse_pointer_mode pointer_mode,
+                                                rocsparse_indextype    data_indextype,
+                                                void*                  data,
+                                                hipStream_t            stream)
+{
+    switch(pointer_mode)
+    {
+    case rocsparse_pointer_mode_device:
+    {
+        RETURN_IF_HIP_ERROR(
+            hipMemsetAsync(data, 0xFF, rocsparse::indextype_sizeof(data_indextype), stream));
+        return rocsparse_status_success;
+    }
+    case rocsparse_pointer_mode_host:
+    {
+        memset(data, 0xFF, rocsparse::indextype_sizeof(data_indextype));
+        return rocsparse_status_success;
+        // LCOV_EXCL_START
+    }
+    }
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+rocsparse_status rocsparse::set_minus_one_async(rocsparse_pointer_mode pointer_mode,
+                                                rocsparse_indextype    data_indextype,
+                                                int64_t                data_size,
+                                                void*                  data,
+                                                hipStream_t            stream)
+{
+    switch(pointer_mode)
+    {
+    case rocsparse_pointer_mode_device:
+    {
+        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+            data, 0xFF, rocsparse::indextype_sizeof(data_indextype) * data_size, stream));
+        return rocsparse_status_success;
+    }
+    case rocsparse_pointer_mode_host:
+    {
+        memset(data, 0xFF, rocsparse::indextype_sizeof(data_indextype) * data_size);
+        return rocsparse_status_success;
+        // LCOV_EXCL_START
+    }
+    }
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
 void rocsparse::one(const rocsparse_handle handle, float** one)
 {
     *one = (float*)handle->sone;

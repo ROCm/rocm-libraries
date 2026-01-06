@@ -1,23 +1,23 @@
-trigger: none  
-pr:  
+trigger: none
+pr:
   branches:
     include:
       - develop
       - release-staging/rocm-rel-*
-  paths:  
-    include:  
+  paths:
+    include:
       - projects/*
       - shared/*
   drafts: false
-  
+
 variables:
   - group: internal
   - name: REPOSITORY_NAME
-    value: '$(Build.Repository.Name)'  
+    value: '$(Build.Repository.Name)'
   - name: HEAD_SHA
     value: '$(system.pullRequest.sourceCommitId)'
   - name: PR_NUM
-    value: '$(system.pullRequest.pullRequestNumber)' 
+    value: '$(system.pullRequest.pullRequestNumber)'
   - name: PR_URL
     value: '$(system.pullRequest.sourceRepositoryUri)/pull/$(PR_NUM)'
   - name: BASE_REF
@@ -25,9 +25,9 @@ variables:
   - name: EVENT_TYPE
     value: 'pull_request'
   - name: GH_PAT
-    value: '$(svc_acc_org_secret)'  
-jobs:  
-- job: Trigger_Pipeline 
+    value: '$(svc_acc_org_secret)'
+jobs:
+- job: Trigger_Pipeline
   displayName: 'Trigger Pipeline'
   pool: rocm-ci-caller
   steps:
@@ -37,7 +37,7 @@ jobs:
           git clone $(gh_repo)
     displayName: Checkout Code
   - script: |
-          set -e  
+          set -e
           echo "Calling jenkins_api.py for PR #$(PR_NUM)"
           cd $(repo_name)
           docker run \
@@ -58,6 +58,6 @@ jobs:
               -ghpat '$(GH_PAT)' \
               -br   '$(BASE_REF)' \
               -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
-    displayName: Invoke jenkins_api.py in Docker  
-    env:  
+    displayName: Invoke jenkins_api.py in Docker
+    env:
       svc_acc_org_secret: $(svc_acc_org_secret)

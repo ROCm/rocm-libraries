@@ -25,6 +25,7 @@
 #include "../shared/gpubuf.h"
 #include "../shared/precision_type.h"
 #include "rocfft/rocfft.h"
+#include "rocfft_enums_vs_fft_enums.h"
 
 #ifdef ROCFFT_MPI_ENABLE
 #include <mpi.h>
@@ -64,99 +65,6 @@ static std::string rocfft_status_to_string(const rocfft_status ret)
         return "rocfft_status_invalid_work_buffer";
     default:
         throw std::runtime_error("unknown rocfft_status");
-    }
-}
-
-inline fft_status fft_status_from_rocfftparams(const rocfft_status val)
-{
-    switch(val)
-    {
-    case rocfft_status_success:
-        return fft_status_success;
-    case rocfft_status_failure:
-        return fft_status_failure;
-    case rocfft_status_invalid_arg_value:
-        return fft_status_invalid_arg_value;
-    case rocfft_status_invalid_dimensions:
-        return fft_status_invalid_dimensions;
-    case rocfft_status_invalid_array_type:
-        return fft_status_invalid_array_type;
-    case rocfft_status_invalid_strides:
-        return fft_status_invalid_strides;
-    case rocfft_status_invalid_distance:
-        return fft_status_invalid_distance;
-    case rocfft_status_invalid_offset:
-        return fft_status_invalid_offset;
-    case rocfft_status_invalid_work_buffer:
-        return fft_status_invalid_work_buffer;
-    default:
-        throw std::runtime_error("Invalid status");
-    }
-}
-
-inline rocfft_precision rocfft_precision_from_fftparams(const fft_precision val)
-{
-    switch(val)
-    {
-    case fft_precision_single:
-        return rocfft_precision_single;
-    case fft_precision_double:
-        return rocfft_precision_double;
-    case fft_precision_half:
-        return rocfft_precision_half;
-    default:
-        throw std::runtime_error("Invalid precision");
-    }
-}
-
-inline rocfft_array_type rocfft_array_type_from_fftparams(const fft_array_type val)
-{
-    switch(val)
-    {
-    case fft_array_type_complex_interleaved:
-        return rocfft_array_type_complex_interleaved;
-    case fft_array_type_complex_planar:
-        return rocfft_array_type_complex_planar;
-    case fft_array_type_real:
-        return rocfft_array_type_real;
-    case fft_array_type_hermitian_interleaved:
-        return rocfft_array_type_hermitian_interleaved;
-    case fft_array_type_hermitian_planar:
-        return rocfft_array_type_hermitian_planar;
-    case fft_array_type_unset:
-        return rocfft_array_type_unset;
-    }
-    return rocfft_array_type_unset;
-}
-
-inline rocfft_transform_type rocfft_transform_type_from_fftparams(const fft_transform_type val)
-{
-    switch(val)
-    {
-    case fft_transform_type_complex_forward:
-        return rocfft_transform_type_complex_forward;
-    case fft_transform_type_complex_inverse:
-        return rocfft_transform_type_complex_inverse;
-    case fft_transform_type_real_forward:
-        return rocfft_transform_type_real_forward;
-    case fft_transform_type_real_inverse:
-        return rocfft_transform_type_real_inverse;
-    default:
-        throw std::runtime_error("Invalid transform type");
-    }
-}
-
-inline rocfft_result_placement
-    rocfft_result_placement_from_fftparams(const fft_result_placement val)
-{
-    switch(val)
-    {
-    case fft_placement_inplace:
-        return rocfft_placement_inplace;
-    case fft_placement_notinplace:
-        return rocfft_placement_notinplace;
-    default:
-        throw std::runtime_error("Invalid result placement");
     }
 }
 
@@ -445,22 +353,50 @@ public:
         return ret;
     }
 
-    fft_status set_callbacks(void*  load_cb_host,
-                             void*  load_cb_data,
-                             void*  store_cb_host,
-                             void*  store_cb_data,
-                             size_t load_cb_shared_mem_bytes  = 0,
-                             size_t store_cb_shared_mem_bytes = 0) override
+    // Return the number of expected callback entries for supplied
+    // fields.
+    static size_t expected_callback_count(const std::vector<fft_field>& fields)
+    {
+        // If fields are not specified, we consider the input or
+        // output to have a single brick (and thus expect a single
+        // callback entry)
+        if(fields.empty())
+            return 1;
+        return std::accumulate(fields.begin(),
+                               fields.end(),
+                               static_cast<size_t>(0),
+                               [](size_t s, const fft_field& f) { return s + f.bricks.size(); });
+    }
+
+    fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                             std::vector<void*>* load_cb_data,
+                             std::vector<void*>* store_cb_func,
+                             std::vector<void*>* store_cb_data,
+                             size_t              load_cb_shared_mem_bytes  = 0,
+                             size_t              store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
+            auto expected_load_cb_count  = expected_callback_count(ifields);
+            auto expected_store_cb_count = expected_callback_count(ofields);
+            check_callback_vec(load_cb_func, expected_load_cb_count, true);
+            check_callback_vec(load_cb_data, expected_load_cb_count, false);
+            check_callback_vec(store_cb_func, expected_store_cb_count, true);
+            check_callback_vec(store_cb_data, expected_store_cb_count, false);
+
             auto roc_status = rocfft.execution_info_set_load_callback(
-                info, &load_cb_host, &load_cb_data, load_cb_shared_mem_bytes);
+                info,
+                load_cb_func ? load_cb_func->data() : nullptr,
+                load_cb_data ? load_cb_data->data() : nullptr,
+                load_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
 
             roc_status = rocfft.execution_info_set_store_callback(
-                info, &store_cb_host, &store_cb_data, store_cb_shared_mem_bytes);
+                info,
+                store_cb_func ? store_cb_func->data() : nullptr,
+                store_cb_data ? store_cb_data->data() : nullptr,
+                store_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
         }
@@ -474,9 +410,10 @@ public:
     }
 
     // scatter data to multiple GPUs and adjust I/O buffers to match
-    void multi_gpu_prepare(std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    virtual void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                                   std::vector<gpubuf>&  ibuffer,
+                                   std::vector<void*>&   pibuffer,
+                                   std::vector<void*>&   pobuffer) override
     {
         auto alloc_fields = [&](const fft_params::fft_field& field,
                                 fft_array_type               array_type,
@@ -489,17 +426,11 @@ public:
             // we'll be allocating new ones for each brick
             pbuffer.clear();
 
-            auto length_with_batch = copy_input ? length : olength();
-            length_with_batch.insert(length_with_batch.begin(), nbatch);
-            const auto   splitDims       = get_split_dimensions(field, length_with_batch);
-            const auto   splitDimIdx     = splitDims.back();
             const size_t elem_size_bytes = var_size<size_t>(precision, array_type);
 
-            for(auto b : field.bricks)
+            for(const auto& b : field.bricks)
             {
-                const auto   whole_brick_len = b.length();
-                const size_t brick_size_elems
-                    = product(whole_brick_len.begin(), whole_brick_len.end());
+                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
                 const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
                 // set device for the alloc, but we want to return to the
@@ -512,48 +443,44 @@ public:
                     pbuffer.push_back(multi_gpu_data.back().data());
                 }
 
-                const auto   batch_increment  = splitDims.size() == 1 ? b.upper[0] - b.lower[0] : 1;
-                const size_t batch_upper_orig = b.upper[0];
-
-                for(auto batchIdx = b.lower[0]; batchIdx < batch_upper_orig;
-                    batchIdx += batch_increment)
+                if(copy_input)
                 {
-                    b.lower[0] = batchIdx;
-                    b.upper[0] = b.lower[0] + batch_increment;
+                    // get this brick's starting offset in the field
+                    const size_t brick_offset_elems = b.lower_field_offset(istride, idist);
 
-                    // get brick's length now - might be just a single batch's worth
-                    const auto brick_len    = b.length();
-                    const auto brick_stride = b.stride;
+                    // transpose input data to the brick's shape in
+                    // host memory, then memcpy
 
-                    if(copy_input)
+                    // alloc a host-side brick that's the right shape
+                    std::vector<hostbuf> host_brick(1);
+                    host_brick.front().alloc(brick_size_bytes);
+
+                    std::vector<size_t> istride_with_batch{idist};
+                    std::copy(
+                        istride.begin(), istride.end(), std::back_inserter(istride_with_batch));
+
+                    copy_buffers(cpu_input,
+                                 host_brick,
+                                 b.length(),
+                                 1,
+                                 precision,
+                                 array_type,
+                                 istride_with_batch,
+                                 0,
+                                 array_type,
+                                 b.stride,
+                                 0,
+                                 {brick_offset_elems},
+                                 {0});
+
+                    // memcpy the transposed brick to the device
+                    if(hipMemcpy(pbuffer.back(),
+                                 host_brick.front().data(),
+                                 brick_size_bytes,
+                                 hipMemcpyHostToDevice)
+                       != hipSuccess)
                     {
-                        // get contiguous elems before and after the split
-                        const auto brick_length_before_split
-                            = product(brick_len.begin() + splitDimIdx, brick_len.end());
-                        const auto fft_length_with_split = product(
-                            length_with_batch.begin() + splitDimIdx, length_with_batch.end());
-                        const auto length_after_split
-                            = product(brick_len.begin(), brick_len.begin() + splitDimIdx);
-
-                        // get this brick's starting offset in the field
-                        const size_t brick_offset
-                            = b.lower_field_offset(istride, idist) * elem_size_bytes;
-
-                        // copy from original input - note that we're
-                        // assuming interleaved data so ibuffer has only one
-                        // gpubuf
-                        if(hipMemcpy2D(ptr_offset(pbuffer.back(),
-                                                  batchIdx * b.stride[0],
-                                                  rocfft_precision_from_fftparams(precision),
-                                                  rocfft_array_type_from_fftparams(array_type)),
-                                       brick_length_before_split * elem_size_bytes,
-                                       ibuffer.front().data_offset(brick_offset),
-                                       fft_length_with_split * elem_size_bytes,
-                                       brick_length_before_split * elem_size_bytes,
-                                       length_after_split,
-                                       hipMemcpyHostToDevice)
-                           != hipSuccess)
-                            throw std::runtime_error("hipMemcpy failure");
+                        throw std::runtime_error("hipMemcpy failure");
                     }
                 }
             }
@@ -582,68 +509,56 @@ public:
     std::vector<gpubuf> multi_gpu_data;
 
     // gather data after multi-GPU FFT for verification
-    void multi_gpu_finalize(std::vector<gpubuf>& obuffer, std::vector<void*>& pobuffer) override
+    void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
+                            std::vector<gpubuf>&  obuffer,
+                            std::vector<void*>&   pobuffer) override
     {
         if(ofields.empty())
             return;
 
-        auto length_with_batch = olength();
-        length_with_batch.insert(length_with_batch.begin(), nbatch);
-        const auto   splitDims       = get_split_dimensions(ofields.front(), length_with_batch);
-        const auto   splitDimIdx     = splitDims.back();
         const size_t elem_size_bytes = var_size<size_t>(precision, otype);
 
-        for(size_t i = 0; i < ofields.front().bricks.size(); ++i)
+        for(size_t i = 0; i < pobuffer.size(); ++i)
         {
-            auto b = ofields.front().bricks[i];
+            const auto& b = ofields.front().bricks[i];
 
-            const auto   batch_increment  = splitDims.size() == 1 ? b.upper[0] - b.lower[0] : 1;
-            const size_t batch_upper_orig = b.upper[0];
+            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+            const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
-            for(auto batchIdx = b.lower[0]; batchIdx < batch_upper_orig;
-                batchIdx += batch_increment)
+            // get this brick's starting offset in the field
+            const size_t brick_offset_elems = b.lower_field_offset(ostride, odist);
+
+            // switch device to where we're copying from
+            rocfft_scoped_device dev(b.device);
+
+            // copy the brick to host, then copy to output
+            std::vector<hostbuf> host_brick(1);
+            host_brick.front().alloc(brick_size_bytes);
+            if(hipMemcpy(
+                   host_brick.front().data(), pobuffer[i], brick_size_bytes, hipMemcpyDeviceToHost)
+               != hipSuccess)
             {
-                b.lower[0] = batchIdx;
-                b.upper[0] = b.lower[0] + batch_increment;
-
-                const auto& brick_ptr = pobuffer[i];
-                const auto  brick_len = b.length();
-
-                // get contiguous elems before and after the split
-                const auto brick_length_before_split
-                    = product(brick_len.begin() + splitDimIdx, brick_len.end());
-                const auto fft_length_with_split
-                    = product(length_with_batch.begin() + splitDimIdx, length_with_batch.end());
-                const auto length_after_split
-                    = product(brick_len.begin(), brick_len.begin() + splitDimIdx);
-
-                // get this brick's starting offset in the field
-                const size_t brick_offset = b.lower_field_offset(ostride, odist) * elem_size_bytes;
-
-                // switch device to where we're copying from
-                rocfft_scoped_device dev(b.device);
-
-                // copy to original output buffer - note that
-                // we're assuming interleaved data so obuffer
-                // has only one gpubuf
-                if(hipMemcpy2D(obuffer.front().data_offset(brick_offset),
-                               fft_length_with_split * elem_size_bytes,
-                               ptr_offset(brick_ptr,
-                                          batchIdx * b.stride[0],
-                                          rocfft_precision_from_fftparams(precision),
-                                          rocfft_array_type_from_fftparams(otype)),
-                               brick_length_before_split * elem_size_bytes,
-                               brick_length_before_split * elem_size_bytes,
-                               length_after_split,
-                               hipMemcpyDeviceToDevice)
-                   != hipSuccess)
-                    throw std::runtime_error("hipMemcpy failure");
-
-                // device-to-device transfers don't synchronize with the
-                // host, add explicit sync
-                (void)hipDeviceSynchronize();
+                throw std::runtime_error("hipMemcpy failed");
             }
+
+            std::vector<size_t> ostride_with_batch{odist};
+            std::copy(ostride.begin(), ostride.end(), std::back_inserter(ostride_with_batch));
+
+            copy_buffers(host_brick,
+                         gpu_output,
+                         b.length(),
+                         1,
+                         precision,
+                         otype,
+                         b.stride,
+                         0,
+                         otype,
+                         ostride_with_batch,
+                         0,
+                         {0},
+                         {brick_offset_elems});
         }
+        // set pobuffer back to a single-device transform
         pobuffer.clear();
         pobuffer.push_back(obuffer.front().data());
     }

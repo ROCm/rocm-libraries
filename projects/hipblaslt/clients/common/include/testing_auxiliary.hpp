@@ -1783,10 +1783,15 @@ void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU") == HIPBLASLT_EPILOGUE_GELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_BIAS")
                 == HIPBLASLT_EPILOGUE_GELU_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_AUX")
+                == HIPBLASLT_EPILOGUE_RELU_AUX);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_AUX_BIAS")
+                == HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX")
                 == HIPBLASLT_EPILOGUE_GELU_AUX);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX_BIAS")
                 == HIPBLASLT_EPILOGUE_GELU_AUX_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID") == HIPBLASLT_EPILOGUE_SIGMOID);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU") == HIPBLASLT_EPILOGUE_DGELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU_BGRAD")
                 == HIPBLASLT_EPILOGUE_DGELU_BGRAD);
@@ -1796,6 +1801,15 @@ void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_SWISH_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT")
                 == HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT);
+
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DEFAULT")
                 == HIPBLASLT_EPILOGUE_DEFAULT);
     ASSERT_TRUE(string_to_epilogue_type("test") == static_cast<hipblasLtEpilogue_t>(0));
@@ -2409,6 +2423,8 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
                 == "EPILOGUE_GELU_AUX");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_GELU_AUX_BIAS)}
                 == "EPILOGUE_GELU_AUX_BIAS");
+    ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SIGMOID)}
+                == "EPILOGUE_SIGMOID");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_DGELU_BGRAD)}
                 == "EPILOGUE_DGELU_BGRAD");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_BGRADA)}
@@ -2756,7 +2772,7 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT) == true);
-
+    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SIGMOID) == true);
     // Test all epilogue values that should return false (activation disabled)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DEFAULT) == false);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_BIAS) == false);
@@ -3219,7 +3235,7 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         stream, // stream
                                         roc_handle->Synchronizer,
                                         arg.swizzle_a, // swizzleA
-                                        false}; // swizzleB
+                                        arg.swizzle_b}; // swizzleB
 
     const hipblasLtMatmulAlgo_t* hip_algo = &heuristicResult[0].algo;
     const rocblaslt_matmul_algo* roc_algo = (const rocblaslt_matmul_algo*)hip_algo;

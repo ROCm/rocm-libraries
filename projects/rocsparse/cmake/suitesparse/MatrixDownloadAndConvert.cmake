@@ -21,7 +21,11 @@
 #
 # ########################################################################
 
-find_program(ROCSPARSE_MTX2CSR rocsparse_mtx2csr PATHS /opt/rocm/bin ${ROCM_PATH}/bin ./)
+if(WIN32)
+    find_program(ROCSPARSE_MTX2CSR rocsparse_mtx2csr PATHS build/Release)
+else()
+    find_program(ROCSPARSE_MTX2CSR rocsparse_mtx2csr PATHS build)
+endif()
 
 if(NOT CMAKE_MATRICES_DIR)
   set(CMAKE_MATRICES_DIR "./")
@@ -84,7 +88,7 @@ foreach(i RANGE 0 ${len1})
         else()
             message(STATUS "${mat} success.")
         endif()
-        
+
         file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx)
     endif()
 endforeach()

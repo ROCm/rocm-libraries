@@ -30,11 +30,11 @@ e.g.: rocgdb -ex "source trace_memory.py" -ex "gpu_memory_trace -h /work/tensile
 """
 
 import argparse
-import gdb
 import re
 import shlex
-
 from dataclasses import dataclass
+
+import gdb
 
 
 @dataclass

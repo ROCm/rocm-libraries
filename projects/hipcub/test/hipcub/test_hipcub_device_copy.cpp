@@ -187,12 +187,14 @@ TYPED_TEST(DeviceBatchCopyTests, SizeAndTypeVariation)
         if(i < num_tlev_buffers)
         {
             size = test_utils::get_random_value<buffer_size_type>(1, wlev_min_size - 1, rng());
-        } else if(i < num_tlev_buffers + num_wlev_buffers)
+        }
+        else if(i < num_tlev_buffers + num_wlev_buffers)
         {
             size = test_utils::get_random_value<buffer_size_type>(wlev_min_size,
                                                                   blev_min_size - 1,
                                                                   rng());
-        } else
+        }
+        else
         {
             size = test_utils::get_random_value<buffer_size_type>(blev_min_size, max_size, rng());
         }
@@ -256,7 +258,8 @@ TYPED_TEST(DeviceBatchCopyTests, SizeAndTypeVariation)
     {
         src_offsets = shuffled_exclusive_scan<buffer_offset_type>(h_buffer_num_elements, rng);
         dst_offsets = shuffled_exclusive_scan<buffer_offset_type>(h_buffer_num_elements, rng);
-    } else
+    }
+    else
     {
         src_offsets = std::vector<buffer_offset_type>(num_buffers);
         dst_offsets = std::vector<buffer_offset_type>(num_buffers);
@@ -320,4 +323,14 @@ TYPED_TEST(DeviceBatchCopyTests, SizeAndTypeVariation)
             ASSERT_TRUE(test_utils::bit_equal(h_input[input_index], h_output[output_index]));
         }
     }
+
+    // De-allocate memory.
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+
+    HIP_CHECK(hipFree(d_buffer_srcs));
+    HIP_CHECK(hipFree(d_buffer_dsts));
+    HIP_CHECK(hipFree(d_buffer_sizes));
+
+    HIP_CHECK(hipFree(d_temp_storage));
 }

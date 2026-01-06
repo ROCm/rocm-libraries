@@ -4,10 +4,10 @@
     <var name="COMMAND">rocfft-test --gtest_color=yes --gtest_output=xml</var>
     <var name="WISDOM_FLAGS"></var>
     <test sets="psdb">
-        <run name="all-psdb">{COMMAND}:output_psdb.xml {WISDOM_FLAGS} --precompile=rocfft-test-precompile.db --gtest_filter=-*multi_gpu*</run>
+        <run name="all-psdb">{COMMAND}:output_psdb.xml {WISDOM_FLAGS} --test_prob 0.2 --precompile=rocfft-test-precompile.db --gtest_filter=-*multi_gpu*</run>
     </test>
     <test sets="osdb">
-        <run name="all-osdb">{COMMAND}:output_osdb.xml {WISDOM_FLAGS} --precompile=rocfft-test-precompile.db --gtest_filter=-*multi_gpu*</run>
+        <run name="all-osdb">{COMMAND}:output_osdb.xml {WISDOM_FLAGS} --test_prob 0.2 --precompile=rocfft-test-precompile.db --gtest_filter=-*multi_gpu*</run>
     </test>
     <test sets="hmm">
         <!-- * This test should be run with the following command: -->

@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <algorithm>
 #include <cstring>
 #include <unordered_set>
@@ -5,6 +8,7 @@
 #include <set>
 
 #include "ck_tile/host.hpp"
+#include "ck_tile/utility/json_dump.hpp"
 #include "fused_moe.hpp"
 
 // different threshold for different dtype
@@ -130,7 +134,9 @@ auto create_args(int argc, char* argv[])
                 "normalized(slow)")
         .insert("seed", "11939", "seed used to do random")
         .insert("warmup", "5", "cold iter")
-        .insert("repeat", "20", "hot iter");
+        .insert("repeat", "20", "hot iter")
+        .insert("json", "0", "0: No Json, 1: Dump Results in Json format")
+        .insert("jsonfile", "fused_moe.json", "json file name to dump results");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -278,26 +284,25 @@ bool run(const ck_tile::ArgParser& arg_parser)
     }
     else if(init == 1)
     {
-        ck_tile::FillUniformDistribution<ADataType>{-.5f, .5f, seed, true}(a_host);
-        ck_tile::FillUniformDistribution<GDataType>{-.5f, .5f, seed, true}(g_host);
-        ck_tile::FillUniformDistribution<DDataType>{-.5f, .5f, seed, true}(d_host);
-        ck_tile::FillUniformDistribution<AScaleDataType>{-.5f, .5f, seed, true}(sa_host);
-        ck_tile::FillUniformDistribution<GScaleDataType>{-.5f, .5f, seed, true}(sg_host);
-        ck_tile::FillUniformDistribution<DScaleDataType>{-.5f, .5f, seed, true}(sd_host);
-        ck_tile::FillUniformDistribution<YSmoothScaleDataType>{-.5f, .5f, seed, true}(sy_host);
-        ck_tile::FillUniformDistribution<TopkWeightDataType>{-.5f, .5f, seed, true}(
-            topk_weight_host);
+        ck_tile::FillUniformDistribution<ADataType>{-.5f, .5f, seed}(a_host);
+        ck_tile::FillUniformDistribution<GDataType>{-.5f, .5f, seed}(g_host);
+        ck_tile::FillUniformDistribution<DDataType>{-.5f, .5f, seed}(d_host);
+        ck_tile::FillUniformDistribution<AScaleDataType>{-.5f, .5f, seed}(sa_host);
+        ck_tile::FillUniformDistribution<GScaleDataType>{-.5f, .5f, seed}(sg_host);
+        ck_tile::FillUniformDistribution<DScaleDataType>{-.5f, .5f, seed}(sd_host);
+        ck_tile::FillUniformDistribution<YSmoothScaleDataType>{-.5f, .5f, seed}(sy_host);
+        ck_tile::FillUniformDistribution<TopkWeightDataType>{-.5f, .5f, seed}(topk_weight_host);
     }
     else if(init == 2)
     {
-        ck_tile::FillNormalDistribution<ADataType>{0.f, 1.f, seed, true}(a_host);
-        ck_tile::FillNormalDistribution<GDataType>{0.f, 1.f, seed, true}(g_host);
-        ck_tile::FillNormalDistribution<DDataType>{0.f, 1.f, seed, true}(d_host);
-        ck_tile::FillNormalDistribution<AScaleDataType>{0.f, 1.f, seed, true}(sa_host);
-        ck_tile::FillNormalDistribution<GScaleDataType>{0.f, 1.f, seed, true}(sg_host);
-        ck_tile::FillNormalDistribution<DScaleDataType>{0.f, 1.f, seed, true}(sd_host);
-        ck_tile::FillNormalDistribution<YSmoothScaleDataType>{0.f, 1.f, seed, true}(sy_host);
-        ck_tile::FillNormalDistribution<TopkWeightDataType>{0.f, 1.f, seed, true}(topk_weight_host);
+        ck_tile::FillNormalDistribution<ADataType>{0.f, 1.f, seed}(a_host);
+        ck_tile::FillNormalDistribution<GDataType>{0.f, 1.f, seed}(g_host);
+        ck_tile::FillNormalDistribution<DDataType>{0.f, 1.f, seed}(d_host);
+        ck_tile::FillNormalDistribution<AScaleDataType>{0.f, 1.f, seed}(sa_host);
+        ck_tile::FillNormalDistribution<GScaleDataType>{0.f, 1.f, seed}(sg_host);
+        ck_tile::FillNormalDistribution<DScaleDataType>{0.f, 1.f, seed}(sd_host);
+        ck_tile::FillNormalDistribution<YSmoothScaleDataType>{0.f, 1.f, seed}(sy_host);
+        ck_tile::FillNormalDistribution<TopkWeightDataType>{0.f, 1.f, seed}(topk_weight_host);
     }
 
     // permute weight
@@ -513,6 +518,29 @@ bool run(const ck_tile::ArgParser& arg_parser)
             std::cout << ", valid:" << (pass ? "y" : "n") << std::flush;
         }
         std::cout << std::flush << std::endl;
+
+        if(arg_parser.get_int("json") == 1)
+        {
+            dump_fused_moe_json(arg_parser.get_str("jsonfile"),
+                                api_str,
+                                prec_str,
+                                tokens,
+                                is_local_token,
+                                local_tokens,
+                                experts,
+                                topk,
+                                hidden_size,
+                                intermediate_size,
+                                stride,
+                                block_m,
+                                activation,
+                                gate_only,
+                                fused_quant,
+                                pass,
+                                ave_time,
+                                cal_tflops(ave_time),
+                                cal_tbps(ave_time));
+        }
         return pass;
     }
     else if(api == 1)
@@ -618,6 +646,29 @@ bool run(const ck_tile::ArgParser& arg_parser)
             std::cout << ", valid:" << (pass ? "y" : "n") << std::flush;
         }
         std::cout << std::flush << std::endl;
+
+        if(arg_parser.get_int("json") == 1)
+        {
+            dump_fused_moe_json(arg_parser.get_str("jsonfile"),
+                                api_str,
+                                prec_str,
+                                tokens,
+                                is_local_token,
+                                local_tokens,
+                                experts,
+                                topk,
+                                hidden_size,
+                                intermediate_size,
+                                stride,
+                                block_m,
+                                activation,
+                                gate_only,
+                                fused_quant,
+                                pass,
+                                ave_time,
+                                cal_tflops(ave_time),
+                                cal_tbps(ave_time));
+        }
 
         return pass;
     }

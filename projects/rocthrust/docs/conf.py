@@ -7,7 +7,7 @@
 import re
 
 with open("../CMakeLists.txt", encoding="utf-8") as f:
-    match = re.search(r"rocm_setup_version\(VERSION\s+\"?([0-9.]+)[^0-9.]+", f.read())
+    match = re.search(r"set\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -34,4 +34,4 @@ doxygen_project = {
     "path": "doxygen/xml",
 }
 
-cpp_id_attributes = ["__device__", "__host__", "THRUST_HOST_DEVICE", "THRUST_HOST", "THRUST_DEVICE"]
+cpp_id_attributes = ["__device__", "__host__", "THRUST_HOST_DEVICE", "THRUST_HOST", "THRUST_DEVICE", "THRUST_SUPPRESS_DEPRECATED_PUSH", "THRUST_CONSTEXPR_SINCE_CXX23"]

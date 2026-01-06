@@ -46,6 +46,8 @@
 #include "generic/rocsparse_spmv.h"
 #include "generic/rocsparse_spsm.h"
 #include "generic/rocsparse_spsv.h"
+#include "generic/rocsparse_sptrsm.h"
+#include "generic/rocsparse_sptrsv.h"
 #include "generic/rocsparse_spvv.h"
 #include "generic/rocsparse_v2_spmv.h"
 

@@ -76,6 +76,6 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::BitwiseAnd const&);
 
-        static const std::string Name;
+        inline static const std::string Name = "BitwiseAndGenerator";
     };
 }

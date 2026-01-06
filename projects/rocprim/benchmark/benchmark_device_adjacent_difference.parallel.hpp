@@ -73,9 +73,10 @@ struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_i
 
         using namespace std::string_literals;
         return bench_naming::format_name(
-            "{lvl:device,algo:adjacent_difference" + (Left ? ""s : "_right"s)
-            + (Aliasing == common::api_variant::no_alias ? ""s : "_inplace"s) + ",value_type:"
-            + std::string(Traits<T>::name()) + ",cfg:" + config_name<Config>() + "}");
+            "{lvl:device,algo:adjacent_difference"
+            + (Aliasing == common::api_variant::no_alias ? ""s : "_inplace"s) + ",is_left:"
+            + (Left ? "true"s : "false"s) + ",value_type:" + std::string(Traits<T>::name())
+            + ",cfg:" + config_name<Config>() + "}");
     }
 
     void run(benchmark_utils::state&& state) override

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -30,25 +30,38 @@ struct hipsparse_arguments_config : Arguments
 {
 
 public:
-    char precision{};
-    char indextype{};
-    int  device_id{};
+    char        precision{};
+    char        indextype{};
+    int         device_id{};
+    std::string function_name{};
 
 private:
-    char b_transA{};
-    char b_transB{};
-    int  b_baseA{};
-    int  b_baseB{};
-    int  b_baseC{};
-    int  b_baseD{};
-    int  b_action{};
-    int  b_part{};
-    int  b_dir{};
-    int  b_orderA{};
-    int  b_orderB{};
-    int  b_orderC{};
-    int  b_formatA{};
-    int  b_formatB{};
+    std::string b_filename{};
+    char        b_transA{};
+    char        b_transB{};
+    int         b_baseA{};
+    int         b_baseB{};
+    int         b_baseC{};
+    int         b_baseD{};
+    int         b_action{};
+    int         b_part{};
+    int         b_dir{};
+    int         b_orderA{};
+    int         b_orderB{};
+    int         b_orderC{};
+    int         b_formatA{};
+    int         b_formatB{};
+
+    int b_csr2csc_alg{};
+    int b_dense2sparse_alg{};
+    int b_sparse2dense_alg{};
+    int b_sddmm_alg{};
+    int b_spgemm_alg{};
+    int b_spmm_alg{};
+    int b_spmv_alg{};
+    int b_spsm_alg{};
+    int b_spsv_alg{};
+
     char b_diag{};
     char b_uplo{};
     char b_spol{};

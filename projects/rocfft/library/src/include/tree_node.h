@@ -35,6 +35,7 @@
 #include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
+#include "callback_map.h"
 #include "compute_scheme.h"
 #include "enum_printer.h"
 #include "function_map_key.h"
@@ -61,7 +62,7 @@ enum FuseType
     FT_STOCKHAM_WITH_TRANS_XY_Z, // R_T-XY_Z
     FT_R2C_TRANSPOSE, // post-r2c + transpose
     FT_TRANSPOSE_C2R, // transpose + pre-c2r
-    FT_STOCKHAM_R2C_TRANSPOSE, // Stokham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
+    FT_STOCKHAM_R2C_TRANSPOSE, // Stockham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
 };
 
 struct GridParam
@@ -96,6 +97,9 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx1100",
                                                        "gfx1101",
                                                        "gfx1102",
+                                                       "gfx1151",
+                                                       "gfx1152",
+                                                       "gfx1153",
                                                        "gfx1200",
                                                        "gfx1201"};
 
@@ -431,8 +435,8 @@ public:
     size_t                      allowedOutBuf;
     std::set<rocfft_array_type> allowedOutArrayTypes;
 
-    LoadOps  loadOps;
-    StoreOps storeOps;
+    std::optional<LoadOps>  loadOps;
+    std::optional<StoreOps> storeOps;
 
 public:
     // Disallow copy constructor:
@@ -793,7 +797,7 @@ public:
         // Since large twiddle multiply (i.e. middle T of L1D_TRTRT)
         // cannot be fused with an FFT kernel, we should not try too
         // hard to pad its output.  The other T nodes of that plan can
-        // keep their buffer assigments so that padding doesn't upset
+        // keep their buffer assignments so that padding doesn't upset
         // the current choice of which nodes we fuse.
         return large1D == 0;
     }
@@ -1040,11 +1044,12 @@ struct MultiPlanItem
     // object's event is allocated and recorded on the stream when
     // the last piece of work is queued, so callers can wait on that
     // event to know when the work is complete.
-    virtual void ExecuteAsync(const rocfft_plan     plan,
-                              void*                 in_buffer[],
-                              void*                 out_buffer[],
-                              rocfft_execution_info info,
-                              size_t                multiPlanIdx)
+    virtual void ExecuteAsync(const rocfft_plan                       plan,
+                              void*                                   in_buffer[],
+                              void*                                   out_buffer[],
+                              rocfft_execution_info                   info,
+                              size_t                                  multiPlanIdx,
+                              const std::map<int, device_callback_t>& callbacks)
         = 0;
 
     // wait for async operations to finish
@@ -1093,6 +1098,13 @@ struct MultiPlanItem
 
     // This process's rank relative to the plan communicator.
     int local_comm_rank;
+
+    // Sub-communicator for this operation, which is only set if
+    // we know we're only talking to a subset of the ranks
+    std::optional<MPI_Comm_wrapper_t> subcomm;
+    // Helper to get the sub-communicator if it's set, or the plan's
+    // communicator.
+    MPI_Comm ActiveMPIComm(const rocfft_plan plan) const;
 };
 
 // Communication operations
@@ -1132,7 +1144,8 @@ struct CommPointToPoint : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1229,7 +1242,8 @@ struct CommScatter : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1333,7 +1347,8 @@ struct CommGather : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1376,16 +1391,15 @@ private:
 struct CommAllToAll : public MultiPlanItem
 {
 
-    CommAllToAll(rocfft_precision           _precision,
-                 rocfft_array_type          _arrayType,
-                 const std::vector<size_t>& _sendOffsets,
-                 const std::vector<size_t>& _sendCounts,
-                 const std::vector<size_t>& _recvOffsets,
-                 const std::vector<size_t>& _recvCounts,
-                 BufferPtr                  _sendBuf,
-                 BufferPtr                  _recvBuf,
-                 bool                       uniformCounts,
-                 MPI_Comm_wrapper_t         subcomm = {})
+    CommAllToAll(rocfft_precision                    _precision,
+                 rocfft_array_type                   _arrayType,
+                 const std::vector<size_t>&          _sendOffsets,
+                 const std::vector<size_t>&          _sendCounts,
+                 const std::vector<size_t>&          _recvOffsets,
+                 const std::vector<size_t>&          _recvCounts,
+                 BufferPtr                           _sendBuf,
+                 BufferPtr                           _recvBuf,
+                 std::optional<MPI_Comm_wrapper_t>&& _subcomm)
         : precision(_precision)
         , arrayType(_arrayType)
         , sendOffsets(_sendOffsets)
@@ -1394,9 +1408,16 @@ struct CommAllToAll : public MultiPlanItem
         , recvCounts(_recvCounts)
         , sendBuf(_sendBuf)
         , recvBuf(_recvBuf)
-        , uniform_counts(uniformCounts)
-        , subcomm(std::move(subcomm))
+        // check if uniform exchange to use MPI_Alltoall
+        , uniform_counts(std::all_of(sendCounts.begin(),
+                                     sendCounts.end(),
+                                     [&](size_t c) { return c == sendCounts[0]; })
+                         && std::all_of(recvCounts.begin(), recvCounts.end(), [&](size_t c) {
+                                return c == recvCounts[0];
+                            }))
     {
+        subcomm = std::move(_subcomm);
+
         // Currently MPI interface uses 32-bit signed ints, so assert
         // that our counts/offsets don't overflow that type
         auto checkArray = [](const std::vector<size_t>& arr) {
@@ -1426,7 +1447,8 @@ struct CommAllToAll : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
 
     void Wait() override;
 
@@ -1444,16 +1466,6 @@ struct CommAllToAll : public MultiPlanItem
         return true;
     }
 
-    void set_uniform_count_inside_subcomm(size_t val)
-    {
-        uniform_count_inside_subcomm = val;
-    }
-
-    void set_uniform_count(bool val)
-    {
-        uniform_counts = val;
-    }
-
 private:
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
@@ -1465,18 +1477,12 @@ private:
     const std::vector<size_t> recvOffsets;
     const std::vector<size_t> recvCounts;
 
-    // counts for MPIAlltoall inside a subcommunicator
-    size_t uniform_count_inside_subcomm;
-
     // send/receive buffers
     const BufferPtr sendBuf;
     const BufferPtr recvBuf;
 
     // check uniform counts for using AlltoAll instead of AlltoAllv
-    bool uniform_counts = false;
-
-    // subcomm for optimizations whenever possible
-    MPI_Comm_wrapper_t subcomm;
+    const bool uniform_counts = false;
 };
 
 // Tree-structured FFT plan.  This is specific to a single device on
@@ -1515,11 +1521,12 @@ struct ExecPlan : public MultiPlanItem
     BufferPtr inputPtr;
     BufferPtr outputPtr;
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+    void ExecuteAsync(const rocfft_plan                       plan,
+                      void*                                   in_buffer[],
+                      void*                                   out_buffer[],
+                      rocfft_execution_info                   info,
+                      size_t                                  multiPlanIdx,
+                      const std::map<int, device_callback_t>& callbacks) override;
 
     void Wait() override;
 

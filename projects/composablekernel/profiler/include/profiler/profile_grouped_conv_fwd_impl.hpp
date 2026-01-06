@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -22,6 +22,7 @@
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_fwd.hpp"
+#include "ck/library/reference_tensor_operation/gpu/naive_conv_fwd_gpu.hpp"
 
 namespace ck {
 namespace profiler {
@@ -42,7 +43,8 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
                                    bool do_log,
                                    bool time_kernel,
                                    const ck::utils::conv::ConvParam& conv_param,
-                                   const OutElementOp out_element_op = OutElementOp{})
+                                   const OutElementOp out_element_op = OutElementOp{},
+                                   index_t instance_index            = -1)
 {
     using InElementOp  = ck::tensor_operation::element_wise::PassThrough;
     using WeiElementOp = ck::tensor_operation::element_wise::PassThrough;
@@ -112,8 +114,38 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     wei_device_buf.ToDevice(weight.mData.data());
 
     // run reference op
-    if(do_verification)
+    if(do_verification == 2)
     {
+        // Use GPU reference for verification
+        std::cout << "Using GPU reference for verification" << std::endl;
+
+        // Allocate GPU reference output buffer
+        DeviceMem gpu_ref_out_buf(sizeof(OutDataType) * device_output.mDesc.GetElementSpaceSize());
+
+        // Call GPU reference with ConvParam directly
+        ref::naive_conv_fwd<InLayout,
+                            WeiLayout,
+                            OutLayout,
+                            InDataType,
+                            WeiDataType,
+                            OutDataType,
+                            InElementOp,
+                            WeiElementOp,
+                            OutElementOp>(
+            reinterpret_cast<const InDataType*>(in_device_buf.GetDeviceBuffer()),
+            reinterpret_cast<const WeiDataType*>(wei_device_buf.GetDeviceBuffer()),
+            reinterpret_cast<OutDataType*>(gpu_ref_out_buf.GetDeviceBuffer()),
+            conv_param,
+            in_element_op,
+            wei_element_op,
+            out_element_op);
+
+        // Copy GPU reference result to host for comparison
+        gpu_ref_out_buf.FromDevice(host_output.mData.data());
+    }
+    else if(do_verification == 1)
+    {
+        // Use CPU reference for verification (default)
         auto ref_conv = ck::tensor_operation::host::ReferenceConvFwd<NDimSpatial,
                                                                      InDataType,
                                                                      WeiDataType,
@@ -144,6 +176,8 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     float best_avg_time   = 0;
     float best_tflops     = 0;
     float best_gb_per_sec = 0;
+    index_t num_kernel    = 0;
+    int valids            = 0;
 
     // profile device op instances
     bool pass = true;
@@ -156,7 +190,17 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
 
         if(op_ptr->IsSupportedArgument(argument_ptr.get()))
         {
+            num_kernel++;
+            if((instance_index != -1) && (instance_index + 1 != num_kernel))
+            {
+                // skip test if instance_index is specified
+                return;
+            }
+
             std::string op_name = op_ptr->GetTypeString();
+            valids++;
+
+            out_device_buf.SetZero();
 
             auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
@@ -250,10 +294,16 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
         run_impl(op_ptr, argument_ptr);
     }
 
+    printf("\033[36mvalids: %d\033[0m\n", valids);
+
     std::cout << "Best configuration parameters:" << "\nname: " << best_op_name
               << "\navg_time: " << best_avg_time << "\ntflops: " << best_tflops
               << "\nGB/s: " << best_gb_per_sec << std::endl;
-
+    if(instance_index != -1)
+    {
+        std::cout << "grouped_conv_fwd_instance (" << instance_index << "/" << num_kernel
+                  << "): Passed" << std::endl;
+    }
     return pass;
 }
 

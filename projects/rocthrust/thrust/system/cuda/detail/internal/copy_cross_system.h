@@ -26,11 +26,20 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 // XXX
 // this file must not be included on its own, ever,
 // but must be part of include in thrust/system/cuda/detail/copy.h
 
-#include <thrust/detail/config.h>
 #include <thrust/system/cuda/config.h>
 
 #include <thrust/advance.h>
@@ -128,7 +137,7 @@ OutputIt _CCCL_HOST cross_system_copy_n(
   return ret;
 }
 
-#ifdef _CCCL_CUDA_COMPILER
+#if _CCCL_HAS_CUDA_COMPILER
 // non-trivial copy D->H, only supported with NVCC compiler
 // because copy ctor must have  __device__ annotations, which is nvcc-only
 // feature

@@ -101,6 +101,7 @@ namespace rocsparse
         envariables();
         ~envariables()                  = default;
         envariables(const envariables&) = delete;
+
         envariables& operator=(const envariables&) = delete;
         bool         m_bool_var[bool_var_size]{};
     };

@@ -28,53 +28,42 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
+
+#  include <cub/device/device_for.cuh>
 
 #  include <thrust/detail/function.h>
 #  include <thrust/distance.h>
+#  include <thrust/system/cuda/detail/cdp_dispatch.h>
 #  include <thrust/system/cuda/detail/parallel_for.h>
 #  include <thrust/system/cuda/detail/util.h>
-
-#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub
 {
 
-// for_each functor
-template <class Input, class UnaryOp>
-struct for_each_f
-{
-  Input input;
-  UnaryOp op;
-
-  THRUST_FUNCTION
-  for_each_f(Input input, UnaryOp op)
-      : input(input)
-      , op(op)
-  {}
-
-  template <class Size>
-  THRUST_DEVICE_FUNCTION void operator()(Size idx)
-  {
-    op(raw_reference_cast(*(input + idx)));
-  }
-};
-
-//-------------------------
-// Thrust API entry points
-//-------------------------
-
 // for_each_n
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived, class Input, class Size, class UnaryOp>
 Input THRUST_FUNCTION for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
-  using wrapped_t = thrust::detail::wrapped_function<UnaryOp, void>;
-  wrapped_t wrapped_op{op};
-
-  cuda_cub::parallel_for(policy, for_each_f<Input, wrapped_t>(first, wrapped_op), count);
+  THRUST_CDP_DISPATCH(
+    (cudaStream_t stream = cuda_cub::stream(policy);
+     cudaError_t status  = cub::DeviceFor::ForEachN(first, count, op, stream);
+     cuda_cub::throw_on_error(status, "parallel_for failed");
+     status = cuda_cub::synchronize_optional(policy);
+     cuda_cub::throw_on_error(status, "parallel_for: failed to synchronize");),
+    (for (Size idx = 0; idx != count; ++idx) { op(raw_reference_cast(*(first + idx))); }));
 
   return first + count;
 }
@@ -85,7 +74,8 @@ Input THRUST_FUNCTION for_each(execution_policy<Derived>& policy, Input first, I
 {
   using size_type = typename iterator_traits<Input>::difference_type;
   size_type count = static_cast<size_type>(thrust::distance(first, last));
-  return cuda_cub::for_each_n(policy, first, count, op);
+
+  return THRUST_NS_QUALIFIER::cuda_cub::for_each_n(policy, first, count, op);
 }
 } // namespace cuda_cub
 

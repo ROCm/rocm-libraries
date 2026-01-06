@@ -26,10 +26,10 @@
 #include <cstdint>
 
 // Types used in the benchmarks
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__GLIBCXX__) || defined(_LIBCPP_VERSION))
-#  define THRUST_BENCHMARKS_HAVE_INT128_SUPPORT 1
-#else
+#if defined(_MSC_VER)
 #  define THRUST_BENCHMARKS_HAVE_INT128_SUPPORT 0
+#else
+#  define THRUST_BENCHMARKS_HAVE_INT128_SUPPORT 1
 #endif
 
 namespace bench_utils

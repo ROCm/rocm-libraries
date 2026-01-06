@@ -676,7 +676,7 @@ inline void hipsparse_get_matrixname(const char* f, char* name)
                                  "verified",                                    \
                                  (argus.unit_check ? "yes" : "no"),             \
                                  display_key_t::function,                       \
-                                 &argus.function_name[0],                       \
+                                 &argus.function[0],                            \
                                  display_key_t::ctype,                          \
                                  ctypename,                                     \
                                  display_key_t::itype,                          \

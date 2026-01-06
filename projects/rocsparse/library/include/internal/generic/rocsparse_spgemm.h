@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -102,7 +102,7 @@ extern "C" {
 *  In general, when multiplying two sparse matrices together, it is entirely possible that the resulting matrix will require a
 *  larger index representation to store correctly. For example, when multiplying \f$A \times B\f$ using
 *  \ref rocsparse_indextype_i32 index types for the row pointer and column indices arrays, it may be the case that the row pointer
-*  of the resulting \f$C\f$ matrix would require index precision \ref rocsparse_indextype_i64. This is currently not supported. 
+*  of the resulting \f$C\f$ matrix would require index precision \ref rocsparse_indextype_i64. This is currently not supported.
 *  In this scenario, the user would need to store the \f$A\f$ and \f$B\f$ matrices using the higher index precision.
 *
 *  \note
@@ -135,6 +135,9 @@ extern "C" {
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
+*
+*  \note
+*  This routine does not support batched computation.
 *
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.

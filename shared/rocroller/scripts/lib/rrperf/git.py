@@ -57,7 +57,9 @@ def clone(remote: Union[str, Path], repo: Path) -> None:
         ["git", "sparse-checkout", "init", "--cone"], cwd=str(repo), check=True
     )
     subprocess.run(
-        ["git", "sparse-checkout", "set", "shared/rocroller"], cwd=str(repo), check=True
+        ["git", "sparse-checkout", "set", "shared/rocroller", "shared/mxdatagenerator"],
+        cwd=str(repo),
+        check=True,
     )
 
 

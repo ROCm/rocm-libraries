@@ -29,7 +29,7 @@
 std::string hipsparse_get_version()
 {
     int  hipsparse_ver;
-    char hipsparse_rev[64];
+    char hipsparse_rev[256];
 
     hipsparseStatus_t status;
 

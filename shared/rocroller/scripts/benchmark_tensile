@@ -27,15 +27,16 @@
 
 
 import argparse
-from pathlib import Path
-import tempfile
-import subprocess
-import pathlib
-import sys
 import csv
-import yaml
 import glob
+import pathlib
+import subprocess
+import sys
+import tempfile
 from dataclasses import asdict
+from pathlib import Path
+
+import yaml
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))

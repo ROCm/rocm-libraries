@@ -66,6 +66,11 @@ namespace rocRoller
                 call(expr.r2hs);
             }
 
+            void operator()(CNary auto const& expr)
+            {
+                std::ranges::for_each(expr.operands, [this](auto const& op) { call(op); });
+            }
+
             void operator()(ScaledMatrixMultiply const& expr)
             {
                 call(expr.matA);

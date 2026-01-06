@@ -60,6 +60,17 @@ typename Titer::value_type product(Titer begin, Titer end)
     return std::accumulate(
         begin, end, typename Titer::value_type(1), std::multiplies<typename Titer::value_type>());
 }
+template <typename T>
+T product(const T* begin, const T* end)
+{
+    return std::accumulate(begin, end, T(1), std::multiplies<T>());
+}
+
+template <typename Titer>
+typename Titer::value_type sum(Titer begin, Titer end, typename Titer::value_type start_sum = 0)
+{
+    return std::accumulate(begin, end, start_sum, std::plus<typename Titer::value_type>());
+}
 
 // count the number of total iterations for 1-, 2-, and 3-D dimensions
 template <typename T1>

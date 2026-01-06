@@ -41,7 +41,60 @@ from collections import defaultdict
 from typing import Dict, List, Callable, Optional, Tuple
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-TARGET_ARCHITECTURES = ['gfx803', 'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx942', 'gfx1030', 'gfx1100', 'gfx1102']
+TARGET_ARCHITECTURES = [
+    "gfx803",
+    "gfx900",
+    "gfx906",
+    "gfx908",
+    "gfx90a",
+    "gfx942",
+    "gfx950",
+    "gfx1010",
+    "gfx1011",
+    "gfx1012",
+    "gfx1030",
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201",
+]
+
+TARGET_GPUS_DICT = {
+    "MI350X": "mi350x",
+    "MI325X": "mi325x",
+    "MI308X": "mi308x",
+    "MI300A": "mi300a",
+    "MI300X": "mi300x",
+    "MI210": "mi210",
+    "MI100": "mi100",
+    "RX 9060": "rx9060",
+    "RX 9070": "rx9070",
+    "V620": "v620",
+    "RX 7900": "rx7900",
+    "RX 6900": "rx6900"
+}
+@dataclass(frozen=True, eq=True)
+class Target:
+    """
+    Data class describing the target of the benchmark
+    """
+    gen: str = "gen::unknown"
+    arch: str = "target_arch::unknown"
+    gpu: str = "gpu::generic"
+    rep: str = "rep::amdgcn"
+
+    def __iter__(self):
+        yield from (self.gen, self.arch, self.gpu, self.rep)
+
+    def as_str(self) -> str:
+        return ", ".join(str(v) for v in self)
+
 # C++ typename used for optional types
 EMPTY_TYPENAME = "empty_type"
 
@@ -135,24 +188,28 @@ def translate_settings_to_cpp_metaprogramming(
                 setting_list.append(f"(!std::is_same<{typename}, rocprim::{EMPTY_TYPENAME}>::value)")
     for name, value in const_configuration.items():
         setting_list.append(f"({name} == {value})")
-    return "std::enable_if_t<(" + " && ".join(setting_list) + ")>"
+    return "if constexpr(" + " && ".join(setting_list) + ")"
 
-class BenchmarksOfArchitecture:
+class BenchmarksOfTarget:
     """
     Stores the benchmark results for a specific architecture and algorithm.
     """
 
-    def __init__(self, arch_name: str, config_selection_params, fallback_entries: List[FallbackCase], config_get_best, algorithm_name):
-        self.config_selection_params = config_selection_params
-        self.fallback_entries: List[FallbackCase] = fallback_entries
-        self.arch_name: str = arch_name
-        self.config_get_best: Callable[[Dict], Dict[str, str]] = config_get_best
-        self.algorithm_name: str = algorithm_name
-        # Dictionary storing the benchmarks
-        # Key is an instantiation of the configuration selection types
-        # Value is a list of all benchmark runs corresponding to that instantiation,
-        # these benchmarks in this list vary in the actual configuration used to run the benchmark
-        self.benchmarks = defaultdict(list)
+    def __init__(
+            self,
+            target: Target,
+            config_selection_params=None,
+            fallback_entries: Optional[List["FallbackCase"]] = None,
+            config_get_best: Optional[Callable[[Dict], Dict[str, str]]] = None,
+            algorithm_name: Optional[str] = None,
+        ):
+            self.__target: Target = target
+            self.config_selection_params = config_selection_params
+            self.fallback_entries: List["FallbackCase"] = fallback_entries or []
+            self.config_get_best = config_get_best
+            self.algorithm_name = algorithm_name
+            self.algorithm_name_short = algorithm_name.replace("device_", "") if algorithm_name != None else None
+            self.benchmarks = defaultdict(list)
 
     def __get_instance_key(self, instanced_types):
         """
@@ -177,8 +234,11 @@ class BenchmarksOfArchitecture:
         self.benchmarks[instance_key].append(benchmark_data)
 
     @property
-    def name(self) -> str:
-        return self.arch_name
+    def target(self) -> Target:
+        return self.__target
+    
+    def get_enable_if(self, config_params) -> str:
+        return f'std::enable_if_t<std::is_same<Target, comp_target<{self.__target.as_str()}>>::value, {config_params}>'
 
     def __get_best_benchmark(self, instance_key) -> Dict[str, str]:
         """
@@ -348,34 +408,38 @@ class Algorithm:
     """
 
     def __init__(self, fallback_entries: List[FallbackCase], config_get_best = default_config_get_best):
-        self.architectures: Dict[str, BenchmarksOfArchitecture] = {}
+        self.targets: Dict[Target, BenchmarksOfTarget] = {}
         self.fallback_entries: List[FallbackCase] = fallback_entries
         self.config_get_best = config_get_best
 
-    def add_measurement(self, single_benchmark_data: Dict[str, str], architecture: str):
+    def __get_fallback_target(self) -> BenchmarksOfTarget:
+        """
+        Returns M100 or first gpu in the list
+        """
+        for target in self.targets:
+            if target.gpu == "mi100":
+                return self.targets[target]
+        return next(iter(self.targets.values()))
+
+
+    def add_measurement(self, single_benchmark_data: Dict[str, str], target: Target):
         """
         Adds a single benchmark execution for a given architecture
         """
-        if architecture not in self.architectures:
-            self.architectures[architecture] = BenchmarksOfArchitecture(architecture, self.config_selection_params,
+        if target not in self.targets:
+            self.targets[target] = BenchmarksOfTarget(target, self.config_selection_params,
                                                                         self.fallback_entries, self.config_get_best,
                                                                         self.algorithm_name)
-        self.architectures[architecture].add_measurement(single_benchmark_data)
+        self.targets[target].add_measurement(single_benchmark_data)
 
     def create_config_file_content(self) -> str:
         """
         Generate the content of the configuration file, including license
         and header guards, based on general template file.
         """
-        if 'target_arch::gfx908' in self.architectures:
-            self.architectures['target_arch::unknown'] = copy.deepcopy(self.architectures['target_arch::gfx908'])
-            self.architectures['target_arch::unknown'].arch_name = 'target_arch::unknown'
-            if 'target_arch::gfx90a' not in self.architectures:
-                self.architectures['target_arch::gfx90a'] = copy.deepcopy(self.architectures['target_arch::gfx908'])
-                self.architectures['target_arch::gfx90a'].arch_name = 'target_arch::gfx90a'
-
         algorithm_template = env.get_template(self.cpp_configuration_template_name)
-        rendered_template = algorithm_template.render(all_architectures=self.architectures.values())
+        fallback_target = self.__get_fallback_target()
+        rendered_template = algorithm_template.render(all_targets=self.targets.values(), fallback_target=fallback_target, unknown_target= BenchmarksOfTarget(Target()))
 
         return rendered_template
 
@@ -811,11 +875,87 @@ class BenchmarkDataManager:
         Uses the benchmark run context embedded into the benchmark output json to retrieve the targeted architecture
         """
 
-        name_from_context = benchmark_run['context']['hdp_gcn_arch_name'].split(":")[0]
-        if name_from_context in TARGET_ARCHITECTURES:
-            return f'target_arch::{name_from_context}'
+        arch_from_context = benchmark_run['context']['hdp_gcn_arch_name'].split(":")[0]
+        if arch_from_context in TARGET_ARCHITECTURES:
+            return f'target_arch::{arch_from_context}'
         else:
-            raise RuntimeError(f"ERROR: unknown hdp_gcn_arch_name: {name_from_context}")
+            raise RuntimeError(f"ERROR: unknown hdp_gcn_arch_name: {arch_from_context}")
+        
+    def __get_target_gpu_from_context(self, benchmark_run):
+        """
+        Uses the benchmark run context embedded into the benchmark output json to retrieve the targeted gpu
+        """
+
+        gpu_from_context = benchmark_run['context']['hdp_name']
+
+        ret = "gpu::generic"
+
+        for gpu in TARGET_GPUS_DICT.keys():
+            if gpu in gpu_from_context:
+                ret = f'gpu::{TARGET_GPUS_DICT[gpu]}'
+
+        if ret == "gpu::generic":
+            print("WARNING: Could find gpu in defined gpus will use gpu::generic", file=sys.stderr, flush=True)
+        return ret
+    
+    def __get_target_rep_from_context(self, benchmark_run):
+        """
+        Uses the benchmark run context embedded into the benchmark output json to retrieve the targeted rep
+        TODO The data is not yet inbedded in the benchmark output json
+        """
+        return "rep::amdgcn"
+    
+    def __get_gen_from_architecture(self, arch):
+        match arch:
+            case "target_arch::gfx803":
+                return "gen::gcn3"
+            case "target_arch::gfx900" | "target_arch::gfx906":
+                return "gen::gcn5"
+            case "target_arch::gfx908":
+                return "gen::cdna1"
+            case "target_arch::gfx90a":
+                return "gen::cdna2"
+            case "target_arch::gfx942":
+                return "gen::cdna3"
+            case "target_arch::gfx950":
+                return "gen::cdna4"
+            case (
+                "target_arch::gfx1010"
+                | "target_arch::gfx1011"
+                | "target_arch::gfx1012"
+            ):
+                return "gen::rdna1"
+            case "target_arch::gfx1030":
+                return "gen::rdna2"
+            case (
+                "target_arch::gfx1100"
+                | "target_arch::gfx1101"
+                | "target_arch::gfx1102"
+                | "target_arch::gfx1103"
+                | "target_arch::gfx1150"
+                | "target_arch::gfx1151"
+                | "target_arch::gfx1152"
+                | "target_arch::gfx1153"
+            ):
+                return "gen::rdna3"
+            case "target_arch::gfx1200" | "target_arch::gfx1201":
+                return "gen::rdna4"
+            case "target_arch::unknown" | "target_arch::invalid":
+                return "gen::unknown"
+            case _:
+                return "gen::unknown"
+            
+    def __get_target(self, benchmark_run) -> Target:
+        """
+        Uses the benchmark run context embedded into the benchmark output json to retrieve the target
+        """
+        arch = self.__get_target_architecture_from_context(benchmark_run)
+        gpu = self.__get_target_gpu_from_context(benchmark_run)
+        rep = self.__get_target_rep_from_context(benchmark_run)
+        gen = self.__get_gen_from_architecture(arch)
+
+        return Target(gen, arch, gpu, rep)
+        
 
     def __get_single_benchmark(self, single_benchmark):
         """
@@ -831,7 +971,7 @@ class BenchmarkDataManager:
             raise RuntimeError(f"ERROR: cannot parse JSON from: \"{single_benchmark['name']}\"")
         return dict(single_benchmark, **tokenized_name)
 
-    def __add_benchmark_to_algorithm(self, single_benchmark, arch):
+    def __add_benchmark_to_algorithm(self, single_benchmark, target):
         """
         Adds a single_benchmark execution of a given Algorithm on a given architecture, to the Algorithm object
 
@@ -842,7 +982,7 @@ class BenchmarkDataManager:
             algorithm_name += "_" + single_benchmark['subalgo']
         if algorithm_name not in self.algorithms:
             self.algorithms[algorithm_name] = create_algorithm(algorithm_name, self.fallback_entries)
-        self.algorithms[algorithm_name].add_measurement(single_benchmark, arch)
+        self.algorithms[algorithm_name].add_measurement(single_benchmark, target)
 
     def add_run(self, benchmark_run_file_path: str):
         """
@@ -855,10 +995,11 @@ class BenchmarkDataManager:
 
         try:
             print(f'INFO: Processing "{benchmark_run_file_path}"')
-            arch = self.__get_target_architecture_from_context(benchmark_run_data)
+            target = self.__get_target(benchmark_run_data)
+
             for raw_single_benchmark in benchmark_run_data['benchmarks']:
                 single_benchmark = self.__get_single_benchmark(raw_single_benchmark)
-                self.__add_benchmark_to_algorithm(single_benchmark, arch)
+                self.__add_benchmark_to_algorithm(single_benchmark, target)
             print(f'INFO: Successfully processed file "{benchmark_run_file_path}"')
         except NotSupportedError as error:
             print(f'WARNING: Could not process file "{benchmark_run_file_path}": {error}', file=sys.stderr, flush=True)

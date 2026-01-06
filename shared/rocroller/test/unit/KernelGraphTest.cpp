@@ -41,6 +41,7 @@
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Random.hpp>
@@ -1272,8 +1273,11 @@ namespace KernelGraphTest
         auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
         auto removeDuplicatesTransform = std::make_shared<RemoveDuplicates>();
 
-        auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
-        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+        auto cleanLoopsTransform = std::make_shared<CleanLoops>();
+        auto updateWavefrontParametersTransform
+            = std::make_shared<UpdateWavefrontParameters>(params);
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
 
         kgraph0      = kgraph0.transform(updateParametersTransform);
         auto kgraph1 = kgraph0.transform(addLDSTransform);
@@ -1330,11 +1334,11 @@ namespace KernelGraphTest
                           .to<std::vector>();
         EXPECT_EQ(unrolledStoreLDS.size(), kloops.size());
 
-        // Verify number of ComputeIndexes: A loads; A LDS loads; B loads; C load; D
-        // store: 3 + (2+2) + 3 + 3 + 3 = 12
-        kgraph1             = kgraph1.transform(addComputeIndexTransform);
-        auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 16);
+        // Verify number of Assigns: A loads; A LDS loads; B loads; C load; D
+        kgraph1           = kgraph1.transform(updateWavefrontParametersTransform);
+        kgraph1           = kgraph1.transform(assignIndexExprsTransform);
+        auto indexAssigns = kgraph1.control.getNodes<Assign>().to<std::vector>();
+        EXPECT_EQ(indexAssigns.size(), 44);
 
         // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         auto addDeallocate = std::make_shared<AddDeallocateDataFlow>();
@@ -1351,7 +1355,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 16);
+            EXPECT_EQ(deallocatedDims.size(), 61);
         }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
@@ -1360,10 +1364,11 @@ namespace KernelGraphTest
         auto fusedStoreLDS = kgraphFused.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(fusedStoreLDS.size(), 1);
 
-        // Verify number of ComputeIndexes after unroll/fuse/lds
-        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addComputeIndexTransform);
-        computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 112);
+        // Verify number of Assigns after unroll/fuse/lds
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(updateWavefrontParametersTransform);
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(assignIndexExprsTransform);
+        indexAssigns        = unrolled_kgraph_lds.control.getNodes<Assign>().to<std::vector>();
+        EXPECT_EQ(indexAssigns.size(), 248);
 
         // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
@@ -1379,7 +1384,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 86);
+            EXPECT_EQ(deallocatedDims.size(), 303);
         }
     }
 
@@ -1400,9 +1405,12 @@ namespace KernelGraphTest
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
             = std::make_shared<LowerTensorContraction>(params, m_context);
-        auto unrollLoopsTransform        = std::make_shared<UnrollLoops>(params, m_context);
-        auto cleanLoopsTransform         = std::make_shared<CleanLoops>();
-        auto addComputeIndexTransform    = std::make_shared<AddComputeIndex>();
+        auto unrollLoopsTransform = std::make_shared<UnrollLoops>(params, m_context);
+        auto cleanLoopsTransform  = std::make_shared<CleanLoops>();
+        auto updateWavefrontParametersTransform
+            = std::make_shared<UpdateWavefrontParameters>(params);
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
         auto inlineInrecrementsTransform = std::make_shared<InlineIncrements>();
 
         kgraph = kgraph.transform(updateParametersTransform);
@@ -1413,8 +1421,9 @@ namespace KernelGraphTest
 
         // Usual lowering, should be able to inline everything.
         auto kgraph1 = kgraph.transform(unrollLoopsTransform);
+        kgraph1      = kgraph1.transform(updateWavefrontParametersTransform);
         kgraph1      = kgraph1.transform(cleanLoopsTransform);
-        kgraph1      = kgraph1.transform(addComputeIndexTransform);
+        kgraph1      = kgraph1.transform(assignIndexExprsTransform);
 
         auto pre1  = kgraph1.control.getEdges<ForLoopIncrement>().to<std::vector>();
         kgraph1    = kgraph1.transform(inlineInrecrementsTransform);
@@ -1608,13 +1617,14 @@ namespace KernelGraphTest
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
-        auto addLDSTransform          = std::make_shared<AddLDS>(params, m_context);
-        auto lowerTileTransform       = std::make_shared<LowerTile>(params, m_context);
-        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+        auto addLDSTransform    = std::make_shared<AddLDS>(params, m_context);
+        auto lowerTileTransform = std::make_shared<LowerTile>(params, m_context);
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
 
         auto kgraph1 = kgraph0.transform(addLDSTransform);
         kgraph1      = kgraph1.transform(lowerTileTransform);
-        kgraph1      = kgraph1.transform(addComputeIndexTransform);
+        kgraph1      = kgraph1.transform(assignIndexExprsTransform);
 
         namespace CG = rocRoller::KernelGraph::ControlGraph;
         ASSERT_EQ(kgraph1.control.getNodes<CG::LoadTiled>().to<std::vector>().size(), 2);
@@ -3106,8 +3116,9 @@ namespace KernelGraphTest
         auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
         auto removeDuplicatesTransform = std::make_shared<RemoveDuplicates>();
 
-        auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
-        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+        auto cleanLoopsTransform = std::make_shared<CleanLoops>();
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
 
         kgraph0      = kgraph0.transform(updateParametersTransform);
         auto kgraph1 = kgraph0.transform(addLDSTransform);
@@ -3256,5 +3267,127 @@ namespace KernelGraphTest
                }).";
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(kg2.control.toDOT()));
+    }
+
+    TEST_F(KernelGraphTest, StreamKTwoTileDPFirst)
+    {
+        auto kgraph = rocRoller::KernelGraph::KernelGraph();
+
+        uint numTileM = 57;
+        uint numTileN = 57;
+        uint numTileK = 57;
+        uint numWGs   = 128;
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        auto [forKCoord, forKOp]
+            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
+
+        auto user = kgraph.coordinates.addElement(User({}, "result"));
+
+        auto tileM = kgraph.coordinates.addElement(
+            MacroTileNumber(0, Expression::literal(numTileM), nullptr));
+        auto tileN = kgraph.coordinates.addElement(
+            MacroTileNumber(1, Expression::literal(numTileN), nullptr));
+        auto tileK = kgraph.coordinates.addElement(
+            MacroTileNumber(-1, Expression::literal(numTileK), nullptr));
+
+        kgraph.coordinates.addElement(PassThrough(), {forKCoord}, {tileK});
+        kgraph.coordinates.addElement(Flatten(), {tileM, tileN, tileK}, {user});
+
+        auto dstVGPR = kgraph.coordinates.addElement(VGPR());
+        auto wgDim   = kgraph.coordinates.addElement(Workgroup(0));
+        auto wgExpr  = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{wgDim, Register::Type::Vector, DataType::UInt32});
+        auto assignWGNumber = kgraph.control.addElement(Assign{Register::Type::Vector, wgExpr});
+        kgraph.mapper.connect(assignWGNumber, dstVGPR, NaryArgument::DEST);
+
+        kgraph.coordinates.addElement(PassThrough(), {user}, {dstVGPR});
+
+        auto storeOp = kgraph.control.addElement(StoreVGPR());
+        kgraph.mapper.connect<User>(storeOp, user);
+        kgraph.mapper.connect<VGPR>(storeOp, dstVGPR);
+
+        auto preWaitOp  = kgraph.control.addElement(WaitZero());
+        auto loopWaitOp = kgraph.control.addElement(WaitZero());
+
+        kgraph.control.addElement(Body(), {kernel}, {preWaitOp});
+        kgraph.control.addElement(Sequence(), {preWaitOp}, {forKOp});
+        kgraph.control.addElement(Body(), {forKOp}, {assignWGNumber});
+        kgraph.control.addElement(Sequence(), {assignWGNumber}, {storeOp});
+        kgraph.control.addElement(Sequence(), {storeOp}, {loopWaitOp});
+
+        CommandParametersPtr params           = std::make_shared<CommandParameters>();
+        params->loopOverOutputTilesDimensions = {0, 1};
+
+        // Helper to check loop order in a given kernel graph
+        auto checkStreamKLoopOrder = [&](rocRoller::KernelGraph::KernelGraph& kg,
+                                         const std::string&                   firstLoop,
+                                         const std::string&                   secondLoop) {
+            int body = -1, sequence = -1;
+            for(auto const scope :
+                filter(kg.control.isElemType<Scope>(),
+                       kg.control.depthFirstVisit(kg.control.roots().only().value())))
+            {
+                auto bodies = kg.control.getOutputNodeIndices<Body>(scope).to<std::unordered_set>();
+                auto sequences
+                    = kg.control.getOutputNodeIndices<Sequence>(scope).to<std::unordered_set>();
+
+                if(bodies.size() + sequences.size() == 1)
+                    continue;
+
+                AssertFatal(
+                    bodies.size() == 1 && sequences.size() == 1,
+                    "Expected one body and one sequence in scope, found {} bodies and {} sequences",
+                    bodies.size(),
+                    sequences.size());
+
+                body     = *bodies.begin();
+                sequence = *sequences.begin();
+                break;
+            }
+
+            // Check for first loop through the Body edge
+            for(auto const loop :
+                filter(kg.control.isElemType<ForLoopOp>(), kg.control.depthFirstVisit(body)))
+            {
+                auto forloop = kg.control.get<ForLoopOp>(loop).value();
+                EXPECT_EQ(forloop.loopName, firstLoop);
+                break;
+            }
+
+            // Check for second loop through the Sequence edge
+            for(auto const loop :
+                filter(kg.control.isElemType<ForLoopOp>(), kg.control.depthFirstVisit(sequence)))
+            {
+                auto forloop = kg.control.get<ForLoopOp>(loop).value();
+                EXPECT_EQ(forloop.loopName, secondLoop);
+                break;
+            }
+        };
+
+        // For streamKTwoTile, the SK loop is first
+        params->streamK = StreamKMode::TwoTile;
+
+        auto kgraphTwoTile = kgraph.transform(std::make_shared<AddStreamK>(
+            m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs)));
+
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraphTwoTile = kgraphTwoTile.transform(std::make_shared<RemoveSetCoordinate>());
+
+        checkStreamKLoopOrder(kgraphTwoTile, "SKStreamTileLoop", "DPStreamTileLoop");
+
+        m_context->kernel()->resetArguments();
+
+        // For streamKTwoTileDPFirst, the DP loop is first
+        params->streamK = StreamKMode::TwoTileDPFirst;
+
+        auto kgraphTwoTileDPFirst = kgraph.transform(std::make_shared<AddStreamK>(
+            m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs)));
+
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraphTwoTileDPFirst
+                = kgraphTwoTileDPFirst.transform(std::make_shared<RemoveSetCoordinate>());
+
+        checkStreamKLoopOrder(kgraphTwoTileDPFirst, "DPStreamTileLoop", "SKStreamTileLoop");
     }
 }

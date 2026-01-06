@@ -37,6 +37,7 @@
 #include <rocRoller/DataTypes/DataTypes_BF6.hpp>
 #include <rocRoller/DataTypes/DataTypes_BF8.hpp>
 #include <rocRoller/DataTypes/DataTypes_BFloat16.hpp>
+#include <rocRoller/DataTypes/DataTypes_Buffer.hpp>
 #include <rocRoller/DataTypes/DataTypes_E8M0.hpp>
 #include <rocRoller/DataTypes/DataTypes_E8M0x4.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP4.hpp>
@@ -45,6 +46,7 @@
 #include <rocRoller/DataTypes/DataTypes_Half.hpp>
 #include <rocRoller/DataTypes/DataTypes_Int8.hpp>
 #include <rocRoller/DataTypes/DataTypes_Int8x4.hpp>
+#include <rocRoller/DataTypes/DataTypes_Raw32.hpp>
 #include <rocRoller/DataTypes/DataTypes_Scale_Utils.hpp>
 #include <rocRoller/DataTypes/DataTypes_UInt8x4.hpp>
 
@@ -159,6 +161,8 @@ namespace rocRoller
         WAVE_SPLIT,
         WAVE_Direct2LDS,
         WAVE_SWIZZLE,
+        WAVE_FROM_GLOBAL,
+        WAVE_LDS_FROM_GLOBAL,
         Literal,
         None,
         Count
@@ -445,10 +449,6 @@ namespace rocRoller
     {
     };
 
-    struct Raw32 : public DistinctType<uint32_t, Raw32>
-    {
-    };
-
     struct Bool32 : public DistinctType<uint32_t, Bool32>
     {
     };
@@ -464,15 +464,6 @@ namespace rocRoller
     struct PointerGlobal : public DistinctType<uint64_t, PointerGlobal>
     {
     };
-
-    struct Buffer
-    {
-        uint32_t desc0;
-        uint32_t desc1;
-        uint32_t desc2;
-        uint32_t desc3;
-    };
-
 }
 
 #include "DataTypes_impl.hpp"

@@ -41,7 +41,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrmm_bad_arg(void)
+void testing_csrmm_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                  N         = 100;
@@ -51,8 +51,8 @@ void testing_csrmm_bad_arg(void)
     int                  ldc       = 100;
     int                  nnz       = 100;
     int                  safe_size = 100;
-    T                    alpha     = 0.6;
-    T                    beta      = 0.2;
+    T                    alpha     = make_DataType<T>(0.6);
+    T                    beta      = make_DataType<T>(0.2);
     hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseOperation_t transB    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -292,7 +292,7 @@ void testing_csrmm_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrmm(Arguments argus)
+void testing_csrmm(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  M        = argus.M;
@@ -323,11 +323,8 @@ hipsparseStatus_t testing_csrmm(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, M, K, nnz, hcsr_row_ptrA, hcsr_col_indA, hcsr_valA, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, M, K, nnz, hcsr_row_ptrA, hcsr_col_indA, hcsr_valA, idx_base));
 
     // Some matrix properties
     int A_m = M;
@@ -558,8 +555,6 @@ hipsparseStatus_t testing_csrmm(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRMM_HPP

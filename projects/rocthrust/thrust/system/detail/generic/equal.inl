@@ -17,14 +17,19 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/detail/generic/equal.h>
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/detail/internal_functional.h>
-#include <thrust/mismatch.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#include <cuda/std/functional>
-#endif
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/mismatch.h>
+#include <thrust/system/detail/generic/equal.h>
+
+#include _THRUST_STD_INCLUDE(functional)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -34,32 +39,28 @@ namespace detail
 namespace generic
 {
 
-
-template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
-THRUST_HOST_DEVICE
-bool equal(thrust::execution_policy<DerivedPolicy> &exec, InputIterator1 first1, InputIterator1 last1, InputIterator2 first2)
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
+THRUST_HOST_DEVICE bool
+equal(thrust::execution_policy<DerivedPolicy>& exec, InputIterator1 first1, InputIterator1 last1, InputIterator2 first2)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using namespace ::cuda::std;
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-  using namespace std;
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return thrust::equal(exec, first1, last1, first2, equal_to<>());
+  return thrust::equal(exec, first1, last1, first2, _THRUST_STD::equal_to<>());
 }
 
 // the == below could be a __host__ function in the case of std::vector::iterator::operator==
 // we make this exception for equal and use nv_exec_check_disable because it is used in vector's implementation
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-bool equal(thrust::execution_policy<DerivedPolicy> &exec, InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, BinaryPredicate binary_pred)
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
+THRUST_HOST_DEVICE bool
+equal(thrust::execution_policy<DerivedPolicy>& exec,
+      InputIterator1 first1,
+      InputIterator1 last1,
+      InputIterator2 first2,
+      BinaryPredicate binary_pred)
 {
   return thrust::mismatch(exec, first1, last1, first2, binary_pred).first == last1;
 }
 
-
-} // end generic
-} // end detail
-} // end system
+} // namespace generic
+} // namespace detail
+} // namespace system
 THRUST_NAMESPACE_END
-

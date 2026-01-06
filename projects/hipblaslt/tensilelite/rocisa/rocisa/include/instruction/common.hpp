@@ -471,6 +471,34 @@ namespace rocisa
         }
     };
 
+    struct SCSelectB64 : public CommonInstruction
+    {
+        SCSelectB64(const std::shared_ptr<Container>& dst,
+                    const InstructionInput&           src0,
+                    const InstructionInput&           src1,
+                    const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B64,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_cselect_b64");
+        }
+
+        SCSelectB64(const SCSelectB64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SCSelectB64>(*this);
+        }
+    };
+
     struct SAndB32 : public CommonInstruction
     {
         SAndB32(const std::shared_ptr<Container>& dst,
@@ -1076,6 +1104,33 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SBfmB32>(*this);
+        }
+    };
+
+    struct SFlbitI32B32 : public CommonInstruction
+    {
+        SFlbitI32B32(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B32,
+                                dst,
+                                {src},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_flbit_i32_b32");
+        }
+
+        SFlbitI32B32(const SFlbitI32B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SFlbitI32B32>(*this);
         }
     };
 
@@ -1706,7 +1761,7 @@ namespace rocisa
         dscnt: Number of LDS instructions issued but not yet completed.
         kmcnt: Number of constant-fetch (scalar memory read), and message instructions issued but not yet completed.
 
-        In some ISA, VMEM load/store share the same counter(vmcnt). LDS, scalar memory read and message share 
+        In some ISA, VMEM load/store share the same counter(vmcnt). LDS, scalar memory read and message share
         the same counter(lgkmcnt). These counters are combined from the 4 counters above as:
             vmcnt   = vlcnt + vscnt
             lgkmcnt = dscnt + kmcnt
@@ -1715,7 +1770,7 @@ namespace rocisa
 
             If the target ISA has separate counters for load and store, use SWaitCnt(vlcnt=1),
             which means vl_2 is not completed yet.
-            
+
             If the target ISA has a single counter for load and store, use SWaitCnt(vlcnt=1, vscnt=1),
             which means vs_0, vl_2 are not completed yet.
         */
@@ -1782,7 +1837,7 @@ namespace rocisa
             std::vector<std::shared_ptr<Instruction>> instructions;
 
             if(getAsmCaps()["SeparateVscnt"])
-            {  
+            {
                 int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
                 int vmcnt   = vlcnt; // With SeparateVscnt, vmcnt only counts load instructions
                 if(vlcnt != -1 || lgkmcnt != -1)
@@ -3511,6 +3566,28 @@ namespace rocisa
         }
     };
 
+    struct VRcpF64 : public CommonInstruction
+    {
+        VRcpF64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src,
+                const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_rcp_f64");
+        }
+
+        VRcpF64(const VRcpF64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VRcpF64>(*this);
+        }
+    };
+
     struct VRsqF16 : public CommonInstruction
     {
         VRsqF16(const std::shared_ptr<Container>& dst,
@@ -4801,6 +4878,52 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VReadfirstlaneB32>(*this);
+        }
+    };
+
+    struct VReadlaneB32 : public CommonInstruction
+    {
+        VReadlaneB32(const std::shared_ptr<Container>& dst,
+                          const InstructionInput&           src0,
+                          const InstructionInput&           src1,
+                          const std::string&                comment = "")
+            : CommonInstruction(
+                                InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_readlane_b32");
+        }
+
+        VReadlaneB32(const VReadlaneB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VReadlaneB32>(*this);
+        }
+    };
+
+    struct VWritelaneB32 : public CommonInstruction
+    {
+        VWritelaneB32(const std::shared_ptr<Container>& dst,
+                          const InstructionInput&           src0,
+                          const InstructionInput&           src1,
+                          const std::string&                comment = "")
+            : CommonInstruction(
+                                InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_writelane_b32");
+        }
+
+        VWritelaneB32(const VWritelaneB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VWritelaneB32>(*this);
         }
     };
 

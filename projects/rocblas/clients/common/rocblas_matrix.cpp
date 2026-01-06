@@ -421,7 +421,7 @@ void rocblas_init_matrix(rocblas_handle                  handle,
                                                   bool                      seedReset,   \
                                                   bool                      alternate_sign)
 
-INST(signed char, true);
+INST(int8_t, true);
 INST(int, true);
 INST(float, true);
 INST(double, true);
@@ -430,7 +430,7 @@ INST(rocblas_double_complex, true);
 INST(rocblas_half, true);
 INST(rocblas_bfloat16, true);
 
-INST(signed char, false);
+INST(int8_t, false);
 INST(int, false);
 INST(float, false);
 INST(double, false);

@@ -605,10 +605,13 @@ namespace
 #endif // ifndef HIPSPARSELT_STATIC_LIB
 
                 // Find the location of the libraries
-                if(TestPath(path + "/../Tensile/library"))
+                // The first path below is for new build system where `hipblaslt` is added as a subdirectory
+                if(TestPath(path + "/../hipblaslt/Tensile/library"))
+                    path += "/../hipblaslt/Tensile/library";
+                else if(TestPath(path + "/../Tensile/library"))
                     path += "/../Tensile/library";
                 else if(TestPath(path + "../hipsparselt/library"))
-                    path += "../hipsparselt/library";
+                    path += "/../hipsparselt/library";
                 else
                     path += "/hipsparselt/library";
 
@@ -1052,7 +1055,7 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
         configs[i].max_workspace_bytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
         configs[i].use_bias            = tensile_prob.useBias();
         configs[i].use_scale_alpha_vec = tensile_prob.useScaleAlphaVec();
-        configs[i].synchronizer_bytes  = std::ceil(solution->requiredSynchronizerSize(tensile_prob, *hardware) / 16) * 16; // align 16 
+        configs[i].synchronizer_bytes  = std::ceil(solution->requiredSynchronizerSize(tensile_prob, *hardware) / 16) * 16; // align 16
     }
     return rocsparselt_status_success;
 }

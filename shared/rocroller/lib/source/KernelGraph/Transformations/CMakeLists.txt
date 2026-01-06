@@ -3,7 +3,7 @@
 
 target_sources(rocroller
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/AddComputeIndex.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AssignIndexExpressions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddConvert.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDeallocate.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDirect2LDS.cpp"
@@ -34,10 +34,12 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/OrderMemory.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/OrderMultiplyNodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PrefetchScale.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RemapOutputTiles.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RemoveDuplicates.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RemoveSetCoordinate.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Simplify.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SwizzleScale.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UnrollLoops.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UpdateParameters.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCC.cpp"
 )

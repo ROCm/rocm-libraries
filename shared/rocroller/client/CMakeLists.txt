@@ -26,6 +26,7 @@ add_executable(rocroller-gemm
 target_sources(rocroller-gemm
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/BenchmarkSolution.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/CLI_Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/DataParallelGEMMSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMParameters.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMParameters_serialization.hpp"

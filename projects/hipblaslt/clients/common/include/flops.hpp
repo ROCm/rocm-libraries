@@ -58,6 +58,30 @@ constexpr double gemm_gflop_count(int64_t m, int64_t n, int64_t k, hipDataType t
 }
 
 template <typename T>
+constexpr double sigmoid_gflop_count(int64_t m, int64_t n)
+{
+    return (4 * m * n) / 1e9;
+}
+
+constexpr double sigmoid_gflop_count(int64_t m, int64_t n, hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        return sigmoid_gflop_count<float>(m, n);
+    case HIP_R_64F:
+        return sigmoid_gflop_count<double>(m, n);
+    case HIP_R_16F:
+        return sigmoid_gflop_count<hipblasLtHalf>(m, n);
+    case HIP_R_32I:
+        return sigmoid_gflop_count<int32_t>(m, n);
+    default:
+        hipblaslt_cerr << "Error type in sigmoid_gflop_count()" << std::endl;
+        return sigmoid_gflop_count<float>(m, n);
+    }
+}
+
+template <typename T>
 constexpr double relu_gflop_count(int64_t m, int64_t n)
 {
     return (m * n) / 1e9;

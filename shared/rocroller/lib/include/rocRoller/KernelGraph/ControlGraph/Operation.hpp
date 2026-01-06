@@ -36,6 +36,7 @@
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -218,6 +219,10 @@ namespace rocRoller
             // (valueCount / variableType.packing) registers will be allocated.
             std::optional<VariableType> variableType = std::nullopt;
 
+            // If the destination coordinate is Stride then
+            // set the register expression attributes
+            std::optional<RegisterExpressionAttributes> strideExpressionAttributes = std::nullopt;
+
             std::string name() const;
             std::string toString() const;
         };
@@ -227,33 +232,6 @@ namespace rocRoller
          *
          */
         RR_EMPTY_STRUCT_WITH_NAME(Barrier);
-
-        /**
-         * @brief Computes offsets and strides between coordinates.
-         *
-         * Offsets and strides into the `target` dimension, based on
-         * incrementing the `increment` dimension.
-         *
-         * Introduced to prevent recomputation (e.g. of an address)
-         *
-         * @param target Target dimension.
-         * @param increment Increment dimension
-         * @param base
-         */
-        struct ComputeIndex
-        {
-            // TODO: might be nicer to have UInt32 for strides; need
-            // to allow user to specify stride types instead of
-            // forcing size_t.
-
-            bool     forward      = false;
-            bool     isDirect2LDS = false;
-            DataType valueType    = DataType::Count;
-            DataType offsetType   = DataType::Count;
-            DataType strideType   = DataType::Count;
-
-            std::string name() const;
-        };
 
         /**
          * @brief Deallocates a register tag.
@@ -293,13 +271,9 @@ namespace rocRoller
         struct LoadTiled
         {
             LoadTiled();
-            explicit LoadTiled(VariableType const varType,
-                               bool const         isTransposedTile = false,
-                               bool const         isDirect2LDS     = false);
+            explicit LoadTiled(VariableType const varType);
 
             VariableType varType;
-            bool         isTransposedTile;
-            bool         isDirect2LDS;
 
             std::string name() const;
         };

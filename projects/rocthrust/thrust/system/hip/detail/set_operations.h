@@ -29,8 +29,17 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
+#  include <thrust/detail/alignment.h>
 #  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
@@ -55,17 +64,18 @@ namespace hip_rocprim
 
 namespace __set_operations
 {
+
 template <bool UpperBound, class IntT, class Size, class It, class T, class Comp>
 THRUST_HIP_DEVICE_FUNCTION void binary_search_iteration(It data, Size& begin, Size& end, T key, int shift, Comp comp)
 {
   IntT scale = (1 << shift) - 1;
-  Size mid   = ((begin + scale * end) >> shift);
+  Size mid   = (begin + scale * end) >> shift;
 
   T key2    = data[mid];
   bool pred = UpperBound ? !comp(key, key2) : comp(key2, key);
   if (pred)
   {
-    begin = mid + static_cast<Size>(1);
+    begin = mid + 1;
   }
   else
   {
@@ -74,7 +84,7 @@ THRUST_HIP_DEVICE_FUNCTION void binary_search_iteration(It data, Size& begin, Si
 }
 
 template <bool UpperBound, class Size, class T, class It, class Comp>
-THRUST_HIP_DEVICE_FUNCTION int binary_search(It data, Size count, T key, Comp comp)
+THRUST_HIP_DEVICE_FUNCTION Size binary_search(It data, Size count, T key, Comp comp)
 {
   Size begin = 0;
   Size end   = count;
@@ -85,7 +95,7 @@ THRUST_HIP_DEVICE_FUNCTION int binary_search(It data, Size count, T key, Comp co
   return begin;
 }
 
-template <bool UpperBound, class Size, class IntT, class T, class It, class Comp>
+template <bool UpperBound, class IntT, class Size, class T, class It, class Comp>
 THRUST_HIP_DEVICE_FUNCTION Size biased_binary_search(It data, Size count, T key, IntT levels, Comp comp)
 {
   Size begin = 0;
@@ -120,8 +130,8 @@ THRUST_HIP_DEVICE_FUNCTION Size merge_path(It1 a, Size aCount, It2 b, Size bCoun
 {
   using T = typename thrust::iterator_traits<It1>::value_type;
 
-  Size begin = thrust::max((Size) 0, diag - bCount);
-  Size end   = thrust::min(diag, aCount);
+  Size begin = thrust::max<Size>(0, diag - bCount);
+  Size end   = thrust::min<Size>(diag, aCount);
 
   while (begin < end)
   {
@@ -142,7 +152,7 @@ THRUST_HIP_DEVICE_FUNCTION Size merge_path(It1 a, Size aCount, It2 b, Size bCoun
 }
 
 template <class It1, class It2, class Size, class Size2, class CompareOp>
-pair<Size, Size> THRUST_HIP_DEVICE_FUNCTION
+THRUST_HIP_DEVICE_FUNCTION pair<Size, Size>
 balanced_path(It1 keys1, It2 keys2, Size num_keys1, Size num_keys2, Size diag, Size2 levels, CompareOp compare_op)
 {
   using T = typename iterator_traits<It1>::value_type;
@@ -187,10 +197,6 @@ balanced_path(It1 keys1, It2 keys2, Size num_keys1, Size num_keys2, Size diag, S
   return thrust::make_pair(index1, (diag - index1) + star);
 } // func balanced_path
 
-//---------------------------------------------------------------------
-// Utility functions
-//---------------------------------------------------------------------
-
 template <unsigned int BlockSize, unsigned int ItemsPerThread>
 using set_operations_config = rocprim::kernel_config<BlockSize, ItemsPerThread>;
 
@@ -214,15 +220,18 @@ template <class Config,
           class CompareOp,
           class SetOp,
           bool HAS_VALUES>
-class SetOpAgent
+struct SetOpAgent
 {
-  using key_type   = typename std::iterator_traits<KeysIt1>::value_type;
-  using value_type = typename std::iterator_traits<ValuesIt1>::value_type;
+  using key_type   = typename iterator_traits<KeysIt1>::value_type;
+  using value_type = typename iterator_traits<ValuesIt1>::value_type;
 
   static constexpr int BLOCK_THREADS    = Config::block_size;
   static constexpr int ITEMS_PER_THREAD = Config::items_per_thread;
 
-public:
+  //---------------------------------------------------------------------
+  // Utility functions
+  //---------------------------------------------------------------------
+
   template <bool IS_FULL_TILE, class T, class It1, class It2>
   THRUST_HIP_DEVICE_FUNCTION void
   gmem_to_reg(T (&output)[ITEMS_PER_THREAD], It1 input1, It2 input2, int count1, int count2)
@@ -274,7 +283,7 @@ public:
   }
 
   template <class OutputIt, class T, class SharedIt>
-  THRUST_HIP_DEVICE_FUNCTION void scatter(
+  void THRUST_HIP_DEVICE_FUNCTION scatter(
     OutputIt output,
     T (&input)[ITEMS_PER_THREAD],
     SharedIt shared,
@@ -301,8 +310,7 @@ public:
     }
   }
 
-  THRUST_HIP_DEVICE_FUNCTION
-  int serial_set_op(
+  int THRUST_HIP_DEVICE_FUNCTION serial_set_op(
     key_type* keys,
     int keys1_beg,
     int keys2_beg,
@@ -318,8 +326,12 @@ public:
     return active_mask;
   }
 
+  //---------------------------------------------------------------------
+  // Tile operations
+  //---------------------------------------------------------------------
+
   template <bool IS_LAST_TILE, class LookBackScanState>
-  THRUST_HIP_DEVICE_FUNCTION void consume_tile(
+  void THRUST_HIP_DEVICE_FUNCTION consume_tile(
     Size tile_idx,
     LookBackScanState& lookback_scan_state,
     KeysIt1 keys1_in,
@@ -351,7 +363,7 @@ public:
 
         union
         {
-          // Allocate extra shmem than truely neccessary
+          // Allocate extra shmem than truly necessary
           // This will permit to avoid range checks in
           // serial set operations, e.g. serial_set_difference
           ::rocprim::uninitialized_array<key_type, BLOCK_THREADS + ITEMS_PER_THREAD * BLOCK_THREADS> keys_shared;
@@ -429,6 +441,10 @@ public:
       compare_op,
       set_op);
     ::rocprim::syncthreads();
+#  if 0
+      if (ITEMS_PER_THREAD*threadIdx.x >= num_keys1 + num_keys2)
+        active_mask = 0;
+#  endif
 
     // look-back scan over thread_output_count
     // to compute global thread_output_base and tile_otput_count;
@@ -485,8 +501,8 @@ public:
 
       ::rocprim::syncthreads();
 
-// gather items from shared mem
-//
+      // gather items from shared mem
+      //
 #  pragma unroll
       for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
       {
@@ -551,7 +567,7 @@ struct serial_set_intersection
       bool pA = compare_op(aKey, bKey);
       bool pB = compare_op(bKey, aKey);
 
-      // The outputs must come from A by definition of set interection.
+      // The outputs must come from A by definition of set intersection.
       output[i]  = aKey;
       indices[i] = aBegin;
 
@@ -856,8 +872,8 @@ template <bool HAS_VALUES,
           class CompareOp,
           class SetOp>
 hipError_t THRUST_HIP_RUNTIME_FUNCTION doit_step(
-  void* temporary_storage,
-  size_t& storage_size,
+  void* d_temp_storage,
+  size_t& temp_storage_size,
   KeysIt1 keys1,
   KeysIt2 keys2,
   ValuesIt1 values1,
@@ -904,10 +920,10 @@ hipError_t THRUST_HIP_RUNTIME_FUNCTION doit_step(
   scan_state_bytes               = ::rocprim::detail::align_size(scan_state_bytes);
   size_t ordered_block_id_bytes  = ::rocprim::detail::align_size(ordered_block_id_type::get_storage_size());
   size_t partition_storage_bytes = (number_of_blocks + 1) * sizeof(pair<Size, Size>);
-  if (temporary_storage == nullptr)
+  if (d_temp_storage == nullptr)
   {
-    // storage_size is never zero
-    storage_size = scan_state_bytes + ordered_block_id_bytes + partition_storage_bytes;
+    // temp_storage_size is never zero
+    temp_storage_size = scan_state_bytes + ordered_block_id_bytes + partition_storage_bytes;
     return hipSuccess;
   }
 
@@ -922,7 +938,7 @@ hipError_t THRUST_HIP_RUNTIME_FUNCTION doit_step(
     std::cout << "items_per_block " << items_per_block << '\n';
   }
 
-  auto ptr = reinterpret_cast<char*>(temporary_storage);
+  auto ptr = reinterpret_cast<char*>(d_temp_storage);
   // Create and initialize lookback_scan_state obj
   block_state_type blocks_state;
   status = block_state_type::create(blocks_state, ptr, number_of_blocks, stream);
@@ -1052,7 +1068,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> set_operations(
 
   temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
 
-  size_t storage_size;
+  size_t storage_size = 0;
   void* ptr       = nullptr;
   void* temp_stor = nullptr;
   size_type* d_output_count;
@@ -1089,7 +1105,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> set_operations(
       debug_sync),
     "set_operations failed on 2nd step");
 
-  size_type output_count = hip_rocprim::get_value(policy, d_output_count);
+  std::size_t output_count = hip_rocprim::get_value(policy, d_output_count);
 
   return thrust::make_pair(keys_output + output_count, values_output + output_count);
 }
@@ -1099,8 +1115,9 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> set_operations(
 // Thrust API entry points
 //-------------------------
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION set_difference(
+OutputIt THRUST_HOST_DEVICE set_difference(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1109,8 +1126,7 @@ OutputIt THRUST_HIP_FUNCTION set_difference(
   OutputIt result,
   CompareOp compare)
 {
-  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-  using set_op_type = typename __set_operations::serial_set_difference;
+  using items1_t = thrust::iterator_value_t<ItemsIt1>;
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
@@ -1118,35 +1134,36 @@ OutputIt THRUST_HIP_FUNCTION set_difference(
       Derived,
       ItemsIt1,
       ItemsIt2,
-      dummy_type*,
-      dummy_type*,
+      items1_t*,
+      items1_t*,
       OutputIt,
-      dummy_type*,
+      items1_t*,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_difference>) );
 #  if __THRUST_HAS_HIPRT__
-  dummy_type* null_ = nullptr;
-  return __set_operations::set_operations<false>(
-           policy,
-           items1_first,
-           items1_last,
-           items2_first,
-           items2_last,
-           null_,
-           null_,
-           result,
-           null_,
-           compare,
-           set_op_type())
-    .first;
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_difference());
+  result = tmp.first;
 #  else
-  return thrust::set_difference(
+  result = thrust::set_difference(
     cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
 #  endif
+  return result;
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION set_difference(
+OutputIt THRUST_HOST_DEVICE set_difference(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1161,8 +1178,9 @@ OutputIt THRUST_HIP_FUNCTION set_difference(
 
 /*****************************/
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION set_intersection(
+OutputIt THRUST_HOST_DEVICE set_intersection(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1171,8 +1189,7 @@ OutputIt THRUST_HIP_FUNCTION set_intersection(
   OutputIt result,
   CompareOp compare)
 {
-  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-  using set_op_type = typename __set_operations::serial_set_intersection;
+  using items1_t = thrust::iterator_value_t<ItemsIt1>;
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
@@ -1180,35 +1197,36 @@ OutputIt THRUST_HIP_FUNCTION set_intersection(
       Derived,
       ItemsIt1,
       ItemsIt2,
-      dummy_type*,
-      dummy_type*,
+      items1_t*,
+      items1_t*,
       OutputIt,
-      dummy_type*,
+      items1_t*,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_intersection>) );
 #  if __THRUST_HAS_HIPRT__
-  dummy_type* null_ = nullptr;
-  return __set_operations::set_operations<false>(
-           policy,
-           items1_first,
-           items1_last,
-           items2_first,
-           items2_last,
-           null_,
-           null_,
-           result,
-           null_,
-           compare,
-           set_op_type())
-    .first;
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_intersection());
+  result = tmp.first;
 #  else
-  return thrust::set_intersection(
+  result = thrust::set_intersection(
     cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
 #  endif
+  return result;
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION set_intersection(
+OutputIt THRUST_HOST_DEVICE set_intersection(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1223,8 +1241,9 @@ OutputIt THRUST_HIP_FUNCTION set_intersection(
 
 /*****************************/
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION set_symmetric_difference(
+OutputIt THRUST_HOST_DEVICE set_symmetric_difference(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1233,8 +1252,7 @@ OutputIt THRUST_HIP_FUNCTION set_symmetric_difference(
   OutputIt result,
   CompareOp compare)
 {
-  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-  using set_op_type = typename __set_operations::serial_set_symmetric_difference;
+  using items1_t = thrust::iterator_value_t<ItemsIt1>;
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
@@ -1242,35 +1260,36 @@ OutputIt THRUST_HIP_FUNCTION set_symmetric_difference(
       Derived,
       ItemsIt1,
       ItemsIt2,
-      dummy_type*,
-      dummy_type*,
+      items1_t*,
+      items1_t*,
       OutputIt,
-      dummy_type*,
+      items1_t*,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_symmetric_difference>) );
 #  if __THRUST_HAS_HIPRT__
-  dummy_type* null_ = nullptr;
-  return __set_operations::set_operations<false>(
-           policy,
-           items1_first,
-           items1_last,
-           items2_first,
-           items2_last,
-           null_,
-           null_,
-           result,
-           null_,
-           compare,
-           set_op_type())
-    .first;
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_symmetric_difference());
+  result = tmp.first;
 #  else
-  return thrust::set_symmetric_difference(
+  result = thrust::set_symmetric_difference(
     cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
 #  endif
+  return result;
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION set_symmetric_difference(
+OutputIt THRUST_HOST_DEVICE set_symmetric_difference(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1285,8 +1304,9 @@ OutputIt THRUST_HIP_FUNCTION set_symmetric_difference(
 
 /*****************************/
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION set_union(
+OutputIt THRUST_HOST_DEVICE set_union(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1295,8 +1315,7 @@ OutputIt THRUST_HIP_FUNCTION set_union(
   OutputIt result,
   CompareOp compare)
 {
-  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-  using set_op_type = typename __set_operations::serial_set_union;
+  using items1_t = thrust::iterator_value_t<ItemsIt1>;
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
@@ -1304,35 +1323,36 @@ OutputIt THRUST_HIP_FUNCTION set_union(
       Derived,
       ItemsIt1,
       ItemsIt2,
-      dummy_type*,
-      dummy_type*,
+      items1_t*,
+      items1_t*,
       OutputIt,
-      dummy_type*,
+      items1_t*,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_union>) );
 #  if __THRUST_HAS_HIPRT__
-  dummy_type* null_ = nullptr;
-  return __set_operations::set_operations<false>(
-           policy,
-           items1_first,
-           items1_last,
-           items2_first,
-           items2_last,
-           null_,
-           null_,
-           result,
-           null_,
-           compare,
-           set_op_type())
-    .first;
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_union());
+  result = tmp.first;
 #  else
-  return thrust::set_union(
+  result = thrust::set_union(
     cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
 #  endif
+  return result;
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION set_union(
+OutputIt THRUST_HOST_DEVICE set_union(
   execution_policy<Derived>& policy,
   ItemsIt1 items1_first,
   ItemsIt1 items1_last,
@@ -1353,6 +1373,7 @@ OutputIt THRUST_HIP_FUNCTION set_union(
 
 /*****************************/
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1361,7 +1382,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_difference_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,
@@ -1373,8 +1394,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
   ItemsOutputIt items_result,
   CompareOp compare_op)
 {
-  using set_op_type = typename __set_operations::serial_set_difference;
-
+  auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
       true,
@@ -1386,9 +1406,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
       KeysOutputIt,
       ItemsOutputIt,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_difference>) );
 #  if __THRUST_HAS_HIPRT__
-  return __set_operations::set_operations<true>(
+  ret = __set_operations::set_operations<true>(
     policy,
     keys1_first,
     keys1_last,
@@ -1399,9 +1419,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
     keys_result,
     items_result,
     compare_op,
-    set_op_type());
+    __set_operations::serial_set_difference());
 #  else
-  return thrust::set_difference_by_key(
+  ret = thrust::set_difference_by_key(
     cvt_to_seq(derived_cast(policy)),
     keys1_first,
     keys1_last,
@@ -1413,10 +1433,11 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
     items_result,
     compare_op);
 #  endif
+  return ret;
 }
 
 template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_difference_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,
@@ -1443,6 +1464,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
 
 /*****************************/
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1451,7 +1473,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_intersection_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,
@@ -1462,8 +1484,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
   ItemsOutputIt items_result,
   CompareOp compare_op)
 {
-  using set_op_type = typename __set_operations::serial_set_intersection;
-
+  auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
       true,
@@ -1475,9 +1496,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
       KeysOutputIt,
       ItemsOutputIt,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_intersection>) );
 #  if __THRUST_HAS_HIPRT__
-  return __set_operations::set_operations<true>(
+  ret = __set_operations::set_operations<true>(
     policy,
     keys1_first,
     keys1_last,
@@ -1488,9 +1509,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
     keys_result,
     items_result,
     compare_op,
-    set_op_type());
+    __set_operations::serial_set_intersection());
 #  else
-  return thrust::set_intersection_by_key(
+  ret = thrust::set_intersection_by_key(
     cvt_to_seq(derived_cast(policy)),
     keys1_first,
     keys1_last,
@@ -1501,10 +1522,11 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
     items_result,
     compare_op);
 #  endif
+  return ret;
 }
 
 template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_intersection_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,
@@ -1529,6 +1551,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
 
 /*****************************/
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1537,7 +1560,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_symmetric_difference_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,
@@ -1549,8 +1572,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_b
   ItemsOutputIt items_result,
   CompareOp compare_op)
 {
-  using set_op_type = typename __set_operations::serial_set_symmetric_difference;
-
+  auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
       true,
@@ -1562,9 +1584,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_b
       KeysOutputIt,
       ItemsOutputIt,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_symmetric_difference>) );
 #  if __THRUST_HAS_HIPRT__
-  return __set_operations::set_operations<true>(
+  ret = __set_operations::set_operations<true>(
     policy,
     keys1_first,
     keys1_last,
@@ -1575,9 +1597,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_b
     keys_result,
     items_result,
     compare_op,
-    set_op_type());
+    __set_operations::serial_set_symmetric_difference());
 #  else
-  return thrust::set_symmetric_difference_by_key(
+  ret = thrust::set_symmetric_difference_by_key(
     cvt_to_seq(derived_cast(policy)),
     keys1_first,
     keys1_last,
@@ -1589,10 +1611,11 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_b
     items_result,
     compare_op);
 #  endif
+  return ret;
 }
 
 template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_symmetric_difference_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,
@@ -1619,6 +1642,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_b
 
 /*****************************/
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1627,7 +1651,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_union_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,
@@ -1639,8 +1663,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
   ItemsOutputIt items_result,
   CompareOp compare_op)
 {
-  using set_op_type = typename __set_operations::serial_set_union;
-
+  auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
       true,
@@ -1652,9 +1675,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
       KeysOutputIt,
       ItemsOutputIt,
       CompareOp,
-      set_op_type>) );
+      __set_operations::serial_set_union>) );
 #  if __THRUST_HAS_HIPRT__
-  return __set_operations::set_operations<true>(
+  ret = __set_operations::set_operations<true>(
     policy,
     keys1_first,
     keys1_last,
@@ -1665,9 +1688,9 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
     keys_result,
     items_result,
     compare_op,
-    set_op_type());
+    __set_operations::serial_set_union());
 #  else
-  return thrust::set_union_by_key(
+  ret = thrust::set_union_by_key(
     cvt_to_seq(derived_cast(policy)),
     keys1_first,
     keys1_last,
@@ -1679,10 +1702,11 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
     items_result,
     compare_op);
 #  endif
+  return ret;
 }
 
 template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_union_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_first,
   KeysIt1 keys1_last,

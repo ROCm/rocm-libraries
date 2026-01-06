@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_gebsr2gebsc_bad_arg(void)
+void testing_gebsr2gebsc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
@@ -431,7 +431,7 @@ void testing_gebsr2gebsc_bad_arg(void)
     TYPE* NAME           = (TYPE*)NAME##_managed.get()
 
 template <typename T>
-hipsparseStatus_t testing_gebsr2gebsc(Arguments argus)
+void testing_gebsr2gebsc(Arguments argus)
 {
     int                  m             = argus.M;
     int                  n             = argus.N;
@@ -443,14 +443,6 @@ hipsparseStatus_t testing_gebsr2gebsc(Arguments argus)
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
-
-    if(m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse does not support m == 0 for csr2bsr
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     int mb = m * row_block_dim;
     int nb = n * col_block_dim;
@@ -464,11 +456,8 @@ hipsparseStatus_t testing_gebsr2gebsc(Arguments argus)
 
     // Read or construct CSR matrix
     int nnzb = 0;
-    if(!generate_csr_matrix(filename, mb, nb, nnzb, hbsr_row_ptr, hbsr_col_ind, hbsr_val, base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, mb, nb, nnzb, hbsr_row_ptr, hbsr_col_ind, hbsr_val, base));
 
     m          = mb * row_block_dim;
     n          = nb * col_block_dim;
@@ -650,8 +639,6 @@ hipsparseStatus_t testing_gebsr2gebsc(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GEBSR2GEBSC_HPP

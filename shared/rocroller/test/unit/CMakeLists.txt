@@ -37,23 +37,17 @@ target_link_libraries(rocroller-tests
         ${msgpack_libs}
 )
 
-if(ROCROLLER_ENABLE_LLD)
-    target_link_libraries(rocroller-tests PRIVATE lldELF)
-endif()
 
 target_sources(rocroller-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUContextFixture.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AllocatingObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentLoaderTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentValueTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AssemblerTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/AssertTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/BufferDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElimTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp"
@@ -73,15 +67,23 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastMultiplicationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FileWritingObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMDirectLDSTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF16Test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF8F6F4Test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMFusion.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMJammedTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMLargeMacroTileTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMStreamKTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMSwizzleScaledTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMUnrollKTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMWMMATest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUArchitectureTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUInstructionInfoTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GeneratorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HalfPrecisionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/ConstantPropagation.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/KernelGraphUtils.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/Simplify.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/UpdateParameters.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelIndexTest.cpp"
@@ -94,7 +96,8 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerExponentialTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MFMAHazardObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MFMAUnitObserverTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTestGFX9.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTestGFX120X.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MemoryInstructionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MixedArithmeticTest.cpp"
@@ -116,4 +119,14 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/VectorAddBenchmark.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountTest.cpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF8F6F4.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMTestBase.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GPUContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTestBase.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SimpleFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SourceMatcher.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Utilities.hpp"
 )

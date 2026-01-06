@@ -21,17 +21,17 @@
 #ifndef ROCPRIM_DETAIL_VARIOUS_HPP_
 #define ROCPRIM_DETAIL_VARIOUS_HPP_
 
-#include <chrono>
-#include <iostream>
-#include <type_traits>
-
 #include "../common.hpp"
 #include "../config.hpp"
-#include "../functional.hpp"
 #include "../type_traits.hpp"
 #include "../types.hpp"
 
 #include <hip/hip_runtime.h>
+
+#include <chrono>
+#include <iostream>
+#include <type_traits>
+#include <variant>
 
 // Check for c++ standard library features, in a backwards compatible manner
 #ifndef __has_include
@@ -497,6 +497,91 @@ inline float update_time_point(std::chrono::high_resolution_clock::time_point& t
 
     return delta_time;
 }
+
+template<typename T, T... Vs>
+struct constexpr_value_variant
+{
+    using variant = std::variant<std::integral_constant<T, Vs>...>;
+
+    static variant create(T value)
+    {
+        variant var{};
+        // Unfold over variadic enum values. For each value
+        // create and run a small lambda that sets our variant.
+        (
+            [&]
+            {
+                if(value == Vs)
+                {
+                    var = std::integral_constant<T, Vs>{};
+                }
+            }(),
+            ...);
+        return var;
+    }
+};
+
+template<typename... T>
+struct constexpr_type_variant
+{
+    using variant = std::variant<T...>;
+
+    static variant create(int index, T... values)
+    {
+        variant var{};
+        update_variant(index, var, std::make_tuple(values...), std::index_sequence_for<T...>{});
+        return var;
+    }
+
+    static variant create(int index)
+    {
+        return create(index, (T{}, ...));
+    }
+
+    template<typename F>
+    static variant create_with(int index, F f)
+    {
+        auto var = create(index, (T{}, ...));
+        std::visit(f, var);
+    };
+
+    static variant create(bool select, T... values)
+    {
+        return create(select ? 1 /* true */ : 0 /* false */, values...);
+    }
+
+private:
+    template<std::size_t... I>
+    static void update_variant(std::size_t      index,
+                               variant&         var,
+                               std::tuple<T...> t,
+                               std::index_sequence<I...> /* */)
+    {
+        ((index == I ? var = std::get<I>(t), 0 : 0), ...);
+    }
+};
+
+template<class T>
+struct type_wrapper
+{
+private:
+    T data;
+
+public:
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    static auto create(T& item)
+    {
+        type_wrapper ret;
+        ret.data = item;
+        return ret;
+    }
+
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    T unpack()
+    {
+        return data;
+    }
+};
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE

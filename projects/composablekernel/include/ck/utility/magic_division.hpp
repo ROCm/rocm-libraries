@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -9,10 +9,6 @@
 #include "number.hpp"
 #include "type.hpp"
 #include "tuple.hpp"
-
-#ifdef CK_CODE_GEN_RTC
-#define INT32_MAX 2147483647
-#endif
 
 namespace ck {
 

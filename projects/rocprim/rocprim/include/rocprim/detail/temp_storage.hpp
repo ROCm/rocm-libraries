@@ -24,7 +24,6 @@
 #include <cstddef>
 
 #include "../config.hpp"
-#include "../types.hpp"
 #include "various.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE

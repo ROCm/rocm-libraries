@@ -415,6 +415,81 @@ auto rocblas_gemv_batched_and_strided_batched_dispatch(const Arguments& arg)
     return TEST<void, void, void>{}(arg);
 }
 
+// syrk_ex
+template <template <typename...> class TEST>
+auto rocblas_syrk_ex_dispatch(const Arguments& arg)
+{
+    const auto Ti = arg.a_type, To = arg.c_type, Tex = arg.compute_type;
+
+    if(Ti != Tex && (Ti == rocblas_datatype_f16_r || Ti == rocblas_datatype_bf16_r)
+       && (To == Ti || To == rocblas_datatype_f32_r))
+    {
+        if(Ti == rocblas_datatype_f16_r && To == Ti && Tex == rocblas_datatype_f32_r)
+        {
+            return TEST<rocblas_half, rocblas_half, float>{}(arg);
+        }
+        else if(Ti == rocblas_datatype_f16_r && To == Tex && Tex == rocblas_datatype_f32_r)
+        {
+            return TEST<rocblas_half, float, float>{}(arg);
+        }
+        else if(Ti == rocblas_datatype_bf16_r && To == Ti && Tex == rocblas_datatype_f32_r)
+        {
+            return TEST<rocblas_bfloat16, rocblas_bfloat16, float>{}(arg);
+        }
+        else if(Ti == rocblas_datatype_bf16_r && To == Tex && Tex == rocblas_datatype_f32_r)
+        {
+            return TEST<rocblas_bfloat16, float, float>{}(arg);
+        }
+    }
+    else if(Ti != Tex && (Ti == rocblas_datatype_f32_r && Tex == rocblas_datatype_f64_r))
+    {
+        if(To == rocblas_datatype_f32_r && To == Ti && Tex == rocblas_datatype_f64_r)
+        {
+            return TEST<float, float, double>{}(arg);
+        }
+        else if(To == Tex && Tex == rocblas_datatype_f64_r)
+        {
+            return TEST<float, double, double>{}(arg);
+        }
+    }
+    // covers s, d, c, z precisions
+    // else
+    // {
+    //     return rocblas_simple_dispatch<TEST>(arg); // Ti = Tex = To
+    // }
+    return TEST<void, void, void>{}(arg);
+}
+
+// herk_ex
+template <template <typename...> class TEST>
+auto rocblas_herk_ex_dispatch(const Arguments& arg)
+{
+    const auto Ti = arg.a_type, To = arg.c_type, Tex = arg.compute_type;
+
+    if(Ti == rocblas_datatype_f32_c && To == Ti)
+    {
+        if(Tex == rocblas_datatype_f64_c)
+        {
+            return TEST<rocblas_float_complex, rocblas_float_complex, rocblas_double_complex>{}(
+                arg);
+        }
+    }
+    else if(Ti != Tex && Tex == rocblas_datatype_f64_c)
+    {
+        if(Ti == rocblas_datatype_f32_c && To == rocblas_datatype_f64_c)
+        {
+            return TEST<rocblas_float_complex, rocblas_double_complex, rocblas_double_complex>{}(
+                arg);
+        }
+    }
+    // covers s, d, c, z precisions
+    // else
+    // {
+    //     return rocblas_simple_dispatch<TEST>(arg); // Ti = Tex = To
+    // }
+    return TEST<void, void, void>{}(arg);
+}
+
 // gemm functions
 template <template <typename...> class TEST>
 auto rocblas_gemm_dispatch(const Arguments& arg)

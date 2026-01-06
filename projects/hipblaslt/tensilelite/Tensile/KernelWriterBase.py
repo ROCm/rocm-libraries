@@ -106,4 +106,3 @@ class KernelWriterBase(ABC):
     if result is NotImplemented:
       return result
     return not result
-

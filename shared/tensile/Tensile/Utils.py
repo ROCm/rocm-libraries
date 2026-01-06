@@ -79,7 +79,7 @@ class ProgressBar:
         """Prints the current status of the progress bar to the console."""
         progress_bar = self.char * self.numTicks + ' ' * (self.maxTicks - self.numTicks)
         status_msg = f"{self.message} {progress_bar} {self.fraction * 100:.1f}%"
-        
+
         if self.numTicks == 0:
             sys.stdout.write(status_msg)
         else:

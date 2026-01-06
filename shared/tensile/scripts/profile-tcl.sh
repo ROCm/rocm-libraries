@@ -112,8 +112,8 @@ run_suite() {
                            --jobs=$n \
                            --arch=$arch \
                            --compiler=$compiler"
-        done 
-    done 
+        done
+    done
 }
 
 # Parse command line arguments
@@ -129,7 +129,7 @@ for arg in "$@"; do
     esac
 done
 
-assert_envvar_exists $base_image_envvar 
+assert_envvar_exists $base_image_envvar
 base_image=${!base_image_envvar}
 
 declare -a tags=($(convert_comma_separated_to_array "$tags"))
@@ -141,7 +141,7 @@ if [ -z "$tags" ] || \
    [ -z "$arch" ]     || \
    [ -z "$branch" ]   || \
    [ -z "$compiler" ]; then
-    usage 
+    usage
     exit 1
 fi
 

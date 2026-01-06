@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup conv_module
 *  \details
 *  \p rocsparse_csr2csc_buffer_size returns the size of the temporary storage buffer
-*  required by \ref rocsparse_scsr2csc "rocsparse_Xcsr2csc()". 
+*  required by \ref rocsparse_scsr2csc "rocsparse_Xcsr2csc()".
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -61,7 +61,7 @@ extern "C" {
 *  @param[in]
 *  copy_values \ref rocsparse_action_symbolic or \ref rocsparse_action_numeric.
 *  @param[out]
-*  buffer_size number of bytes of the temporary storage buffer required by 
+*  buffer_size number of bytes of the temporary storage buffer required by
 *              \ref rocsparse_scsr2csc "rocsparse_Xcsr2csc()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
@@ -85,20 +85,20 @@ rocsparse_status rocsparse_csr2csc_buffer_size(rocsparse_handle     handle,
 *  \brief Convert a sparse CSR matrix into a sparse CSC matrix
 *
 *  \details
-*  \p rocsparse_csr2csc converts a CSR matrix into a CSC matrix. The resulting matrix can also 
-*  be seen as the transpose of the input matrix. \p rocsparse_csr2csc can also be used to convert 
-*  a CSC matrix into a CSR matrix. 
+*  \p rocsparse_csr2csc converts a CSR matrix into a CSC matrix. The resulting matrix can also
+*  be seen as the transpose of the input matrix. \p rocsparse_csr2csc can also be used to convert
+*  a CSC matrix into a CSR matrix.
 *
-*  The conversion of a sparse matrix from CSR to CSC format involves two steps. First, the 
-*  user calls \ref rocsparse_csr2csc_buffer_size in order to determine the size of the required 
-*  tempory storage buffer. The user then allocates this buffer. Secondly, the user calls 
-*  \p rocsparse_csr2csc to complete the conversion. Once the conversion is complete, the 
+*  The conversion of a sparse matrix from CSR to CSC format involves two steps. First, the
+*  user calls \ref rocsparse_csr2csc_buffer_size in order to determine the size of the required
+*  tempory storage buffer. The user then allocates this buffer. Secondly, the user calls
+*  \p rocsparse_csr2csc to complete the conversion. Once the conversion is complete, the
 *  user must free the temporary buffer.
 *
-*  Both \ref rocsparse_csr2csc_buffer_size and \p rocsparse_csr2csc take a \ref rocsparse_action 
-*  parameter as input. This \p copy_values parameter decides whether \p csc_row_ind and \p csc_val 
-*  are filled during conversion (\ref rocsparse_action_numeric) or whether only \p csc_row_ind is filled 
-*  (\ref rocsparse_action_symbolic). Using \ref rocsparse_action_symbolic is useful for example if only 
+*  Both \ref rocsparse_csr2csc_buffer_size and \p rocsparse_csr2csc take a \ref rocsparse_action
+*  parameter as input. This \p copy_values parameter decides whether \p csc_row_ind and \p csc_val
+*  are filled during conversion (\ref rocsparse_action_numeric) or whether only \p csc_row_ind is filled
+*  (\ref rocsparse_action_symbolic). Using \ref rocsparse_action_symbolic is useful for example if only
 *  the sparsity pattern is required.
 *
 *  \note

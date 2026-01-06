@@ -183,6 +183,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -278,6 +279,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -363,6 +365,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -379,6 +382,7 @@ namespace rocsparse
             case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_bsr:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -424,6 +428,7 @@ namespace rocsparse
             case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_bsr:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -689,6 +694,11 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(5, B, (B->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(7, D, (D->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(8, C, (C->init == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(4, A, (A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(5, B, (B->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(7, D, (D->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(8, C, (C->batch_count != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(5, B, (B->format != A->format), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(7, D, (D->format != A->format), rocsparse_status_not_implemented);

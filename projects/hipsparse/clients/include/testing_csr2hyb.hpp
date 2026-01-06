@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ using namespace hipsparse_test;
 #define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
 
 template <typename T>
-void testing_csr2hyb_bad_arg(void)
+void testing_csr2hyb_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int m         = 100;
@@ -119,7 +119,7 @@ void testing_csr2hyb_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2hyb(Arguments argus)
+void testing_csr2hyb(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                     m              = argus.M;
@@ -150,15 +150,12 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     if(m == 0 || n == 0)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     // Allocate memory on the device
@@ -206,7 +203,7 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
             verify_hipsparse_status_invalid_value(
                 status, "Error: user_ell_width < 0 || user_ell_width > max_ell_width");
 
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
     }
 
@@ -235,7 +232,7 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
                                        part);
 
             verify_hipsparse_status_invalid_value(status, "ell_max_width > width_limit");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
     }
 
@@ -428,8 +425,6 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2HYB_HPP

@@ -721,4 +721,3 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
-

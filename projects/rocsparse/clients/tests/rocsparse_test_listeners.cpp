@@ -189,5 +189,5 @@ std::ostringstream& rocsparse_clients::stream_redirector::get_stream()
 
 void rocsparse_clients::stream_redirector::clear()
 {
-    this->m_stream.clear();
+    this->m_stream.str("");
 }

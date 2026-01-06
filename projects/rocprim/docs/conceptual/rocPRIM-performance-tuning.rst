@@ -22,6 +22,7 @@ What we call *autotuning* is a method of generating the above-mentioned architec
   * The option ``--out_basedir`` can be used to place the output config(s) in a specific path, otherwise the config(s) will be placed in the current directory.
 
 6. If ``--out_basedir rocprim/include/device/detail/config`` was not used in the previous step, place the generated config(s) from the output path to ``rocprim/include/device/detail/config``.
+7. Generate configs that combine the best specializations of old and new configs using ``scripts/apply_config_improvements/apply_config_improvements.py``. You'll need to collect the JSON data by running the benchmarks once with the old configs, and once with the new configs. You can update rocPRIM's configs by passing ``--improved_configs_dir rocprim/include/rocprim/device/detail/config``.
 
 Device-level algorithm dependencies
 ===================================

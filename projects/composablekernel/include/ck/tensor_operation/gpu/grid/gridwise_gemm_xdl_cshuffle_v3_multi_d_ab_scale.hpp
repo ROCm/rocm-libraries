@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -38,21 +38,26 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__)
-    __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+    if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
+    {
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
-    GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-        karg.p_a_grid,
-        karg.p_b_grid,
-        karg.p_ds_grid,
-        karg.p_c_grid,
-        karg.p_a_scale_grid,
-        karg.p_b_scale_grid,
-        p_shared,
-        karg,
-        karg.a_element_op,
-        karg.b_element_op,
-        karg.c_element_op);
+        auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg);
+
+        GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+            karg.p_a_grid + splitk_batch_offset.a_k_split_offset,
+            karg.p_b_grid + splitk_batch_offset.b_k_split_offset,
+            karg.p_ds_grid,
+            karg.p_c_grid,
+            karg.p_a_scale_grid + splitk_batch_offset.scale_a_k_split_offset,
+            karg.p_b_scale_grid + splitk_batch_offset.scale_b_k_split_offset,
+            p_shared,
+            karg,
+            karg.a_element_op,
+            karg.b_element_op,
+            karg.c_element_op);
+    }
 #else
     ignore = karg;
 #endif // end of if (defined(__gfx908__) || defined(__gfx90a__))
@@ -402,31 +407,33 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
         }
     }
 
-    __host__ __device__ static constexpr auto MakeAScaleGridDesciptor_M_K(index_t M, index_t K)
+    __host__ __device__ static constexpr auto
+    MakeAScaleGridDesciptor_M_K(index_t M, index_t K, index_t StrideScaleA)
     {
         const auto BM = math::integer_divide_ceil(M, ScaleBlockM);
         const auto BK = math::integer_divide_ceil(K, ScaleBlockK);
         if constexpr(is_same<tensor_layout::gemm::RowMajor, ALayout>::value)
         {
-            return make_naive_tensor_descriptor(make_tuple(BM, BK), make_tuple(BK, I1));
+            return make_naive_tensor_descriptor(make_tuple(BM, BK), make_tuple(StrideScaleA, I1));
         }
         else if constexpr(is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value)
         {
-            return make_naive_tensor_descriptor(make_tuple(BM, BK), make_tuple(I1, BM));
+            return make_naive_tensor_descriptor(make_tuple(BM, BK), make_tuple(I1, StrideScaleA));
         }
     }
 
-    __host__ __device__ static constexpr auto MakeBScaleGridDesciptor_N_K(index_t N, index_t K)
+    __host__ __device__ static constexpr auto
+    MakeBScaleGridDesciptor_N_K(index_t N, index_t K, index_t StrideScaleB)
     {
         const auto BN = math::integer_divide_ceil(N, ScaleBlockN);
         const auto BK = math::integer_divide_ceil(K, ScaleBlockK);
         if constexpr(is_same<tensor_layout::gemm::ColumnMajor, BLayout>::value)
         {
-            return make_naive_tensor_descriptor(make_tuple(BN, BK), make_tuple(BK, I1));
+            return make_naive_tensor_descriptor(make_tuple(BN, BK), make_tuple(StrideScaleB, I1));
         }
         else if constexpr(is_same<tensor_layout::gemm::RowMajor, BLayout>::value)
         {
-            return make_naive_tensor_descriptor(make_tuple(BN, BK), make_tuple(I1, BN));
+            return make_naive_tensor_descriptor(make_tuple(BN, BK), make_tuple(I1, StrideScaleB));
         }
     }
 
@@ -443,7 +450,8 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
     __host__ __device__ static constexpr auto
     MakeBMmaTileDescriptor_N0_N1_N2_K(const BBlockDesc_BK0_N_BK1&)
     {
-        constexpr index_t NWaves = NPerBlock / (NXdlPerWave * NPerXdl);
+        constexpr index_t NWaves =
+            NXdlPerWave * NPerXdl == 0 ? 1 : NPerBlock / (NXdlPerWave * NPerXdl);
 
         return MakeGemmMmaTileDescriptor<NXdlPerWave, NWaves, NPerXdl>(BBlockDesc_BK0_N_BK1{});
     }
@@ -544,6 +552,8 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
                          index_t StrideB_,
                          std::array<index_t, NumDTensor> StrideDs_,
                          index_t StrideC_,
+                         index_t StrideScaleA_,
+                         index_t StrideScaleB_,
                          index_t KBatch_)
             : M{M_},
               N{N_},
@@ -552,6 +562,8 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
               StrideB{StrideB_},
               StrideDs{StrideDs_},
               StrideC{StrideC_},
+              StrideScaleA{StrideScaleA_},
+              StrideScaleB{StrideScaleB_},
               KBatch{KBatch_},
               MPadded{CalculateMPadded(M_)},
               NPadded{CalculateNPadded(N_)},
@@ -581,7 +593,8 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
         index_t StrideB;
         std::array<index_t, NumDTensor> StrideDs;
         index_t StrideC;
-
+        index_t StrideScaleA;
+        index_t StrideScaleB;
         index_t KBatch;
         index_t MPadded;
         index_t NPadded;
@@ -607,13 +620,24 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
                           index_t StrideB_,
                           std::array<index_t, NumDTensor> StrideDs_,
                           index_t StrideC_,
+                          index_t StrideScaleA_,
+                          index_t StrideScaleB_,
                           const AScaleType* p_a_scale_grid_,
                           const BScaleType* p_b_scale_grid_,
                           index_t k_batch_,
                           AElementwiseOperation a_element_op_,
                           BElementwiseOperation b_element_op_,
                           CElementwiseOperation c_element_op_)
-            : Problem{M_, N_, K_, StrideA_, StrideB_, StrideDs_, StrideC_, k_batch_},
+            : Problem{M_,
+                      N_,
+                      K_,
+                      StrideA_,
+                      StrideB_,
+                      StrideDs_,
+                      StrideC_,
+                      StrideScaleA_,
+                      StrideScaleB_,
+                      k_batch_},
               p_a_grid{p_a_grid_},
               p_b_grid{p_b_grid_},
               p_ds_grid{},
@@ -669,6 +693,28 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
                 b_k_split_offset = blockIdx.z * karg.KRead;
             }
 
+            // Calculate A scale offset
+            if constexpr(is_same_v<tensor_layout::gemm::RowMajor, ALayout>)
+            {
+                scale_a_k_split_offset = blockIdx.z * (karg.KRead / ScaleBlockK);
+            }
+            else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, ALayout>)
+            {
+                scale_a_k_split_offset =
+                    blockIdx.z * (karg.KRead / ScaleBlockK) * karg.StrideScaleA;
+            }
+
+            // Calculate B scale offset
+            if constexpr(is_same_v<tensor_layout::gemm::RowMajor, BLayout>)
+            {
+                scale_b_k_split_offset =
+                    blockIdx.z * (karg.KRead / ScaleBlockK) * karg.StrideScaleB;
+            }
+            else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, BLayout>)
+            {
+                scale_b_k_split_offset = blockIdx.z * (karg.KRead / ScaleBlockK);
+            }
+
             if(blockIdx.z < static_cast<uint32_t>(karg.KBatch - 1))
             {
                 karg.K = karg.KRead;
@@ -681,10 +727,15 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
 
         index_t a_k_split_offset;
         index_t b_k_split_offset;
+        index_t scale_a_k_split_offset; // A scale matrix offset
+        index_t scale_b_k_split_offset; // B scale matrix offset
     };
 
     __device__ static constexpr auto GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1()
     {
+        constexpr index_t MWave    = MPerBlock / (MXdlPerWave * MPerXdl);
+        constexpr index_t NWave    = NPerBlock / (NXdlPerWave * NPerXdl);
+        constexpr index_t WaveSize = BlockSize / (MWave * NWave);
         // A matrix in LDS memory, dst of blockwise copy
         if constexpr(ABlockLdsExtraM)
         {
@@ -720,7 +771,7 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
 
             constexpr auto KThreadWrite     = ABlockTransferThreadClusterLengths_AK0_M_AK1{}.At(I0);
             constexpr auto K0PerThreadWrite = AK0Number / KThreadWrite;
-            constexpr auto KThreadRead      = 64 / MPerXdl;
+            constexpr auto KThreadRead      = WaveSize / MPerXdl;
             constexpr auto K0PerThreadRead  = AK0Number / KThreadRead;
 
             constexpr auto kfold = (AK1Number * M0 * sizeof(LDSTypeA) > 128)
@@ -801,6 +852,9 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
 
     __device__ static constexpr auto GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1()
     {
+        constexpr index_t MWave    = MPerBlock / (MXdlPerWave * MPerXdl);
+        constexpr index_t NWave    = NPerBlock / (NXdlPerWave * NPerXdl);
+        constexpr index_t WaveSize = BlockSize / (MWave * NWave);
         // B matrix in LDS memory, dst of blockwise copy
         if constexpr(BBlockLdsExtraN)
         {
@@ -831,7 +885,7 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
 
             constexpr auto KThreadWrite     = BBlockTransferThreadClusterLengths_BK0_N_BK1{}.At(I0);
             constexpr auto K0PerThreadWrite = BK0Number / KThreadWrite;
-            constexpr auto KThreadRead      = 64 / NPerXdl;
+            constexpr auto KThreadRead      = WaveSize / NPerXdl;
             constexpr auto K0PerThreadRead  = BK0Number / KThreadRead;
 
             constexpr auto kfold = (BK1Number * N0 * sizeof(LDSTypeB) > 128)
@@ -977,6 +1031,8 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
                           b_block_space_size_aligned * sizeof(LDSTypeB)),
                          c_block_size * sizeof(CShuffleDataType));
     }
+
+    IS_VALID_COMPILATION_PARAMETER_IMPL(CDataType)
 
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     __host__ static constexpr bool CheckValidity(const Argument& karg)
@@ -1209,8 +1265,10 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
         const auto c_grid_desc_m_n = MakeCGridDescriptor_M_N<CLayout>(
             problem.M, problem.MPadded, problem.N, problem.NPadded, problem.StrideC);
 
-        const auto a_scale_grid_desc_am_ak = MakeAScaleGridDesciptor_M_K(problem.M, problem.K);
-        const auto b_scale_grid_desc_bn_ak = MakeBScaleGridDesciptor_N_K(problem.N, problem.K);
+        const auto a_scale_grid_desc_am_ak =
+            MakeAScaleGridDesciptor_M_K(problem.M, problem.K, problem.StrideScaleA);
+        const auto b_scale_grid_desc_bn_ak =
+            MakeBScaleGridDesciptor_N_K(problem.N, problem.K, problem.StrideScaleB);
 
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
@@ -1358,10 +1416,11 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
         constexpr auto a_scale_thread_desc = make_naive_tensor_descriptor_packed(
             make_tuple(Number<ScaleSliceSizeM>{}, Number<ScaleSliceSizeK>{}));
 
-        constexpr index_t MWaves = MPerBlock / (MXdlPerWave * MPerXdl);
-        constexpr index_t NWaves = NPerBlock / (NXdlPerWave * NPerXdl);
-        auto a_thread_offset =
-            get_thread_local_1d_id() % MPerXdl + (get_thread_local_1d_id() / 64) / NWaves * MPerXdl;
+        constexpr index_t MWaves   = MPerBlock / (MXdlPerWave * MPerXdl);
+        constexpr index_t NWaves   = NPerBlock / (NXdlPerWave * NPerXdl);
+        constexpr index_t WaveSize = BlockSize / (MWaves * NWaves);
+        auto a_thread_offset       = get_thread_local_1d_id() % MPerXdl +
+                               (get_thread_local_1d_id() / WaveSize) / NWaves * MPerXdl;
 
         constexpr auto b_scale_thread_desc = make_naive_tensor_descriptor_packed(
             make_tuple(Number<ScaleSliceSizeN>{}, Number<ScaleSliceSizeK>{}));

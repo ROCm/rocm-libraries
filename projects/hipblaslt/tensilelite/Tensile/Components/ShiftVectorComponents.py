@@ -185,7 +185,7 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
                     SOrSaveExecBX = SOrSaveExecB64 if kernel["WavefrontSize"] == 64 else SOrSaveExecB32
                     module.add(SMovB32(sgpr(tmpSgpr, writer.states.laneSGPRCount), all1mask, "to restore all threads active"))
                     module.add(SOrSaveExecBX(dst=VCC(), src=sgpr(tmpSgpr, writer.states.laneSGPRCount), comment="all threads active"))
-                    module.add(SBranch(labelName=svrLabels[glvw-1].getLabelName(), comment="done shifting" ))            
+                    module.add(SBranch(labelName=svrLabels[glvw-1].getLabelName(), comment="done shifting" ))
             module.add(svrLabels[glvw-1])
 
         # checkin scratch vgprs
@@ -400,6 +400,9 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             module.add(VAndB32(dst=vgpr(vwReg), src0=allContOutCoal-1, src1=vgpr(wgMT), comment="permute register between threads"))
             module.add(VLShiftRightB32(dst=vgpr(vwReg), shiftHex=log2(glvw), src=vgpr(vwReg), comment="permute register between threads"))
 
+            shiftVectorComponentsPlaceHolders   = []
+            shiftVectorComponentsPlaceTargets    = []
+            shiftVectorComponentsPlaceOperations = []
             # rReg : reminder of M_size % vectorwidth
             # decide to jump to block which handle this case, M_size % vector width
             module.addComment1("rReg : reminder of M_size % GlobalReadVectorWidth")
@@ -408,7 +411,15 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             for r in range(1, glvw):
                 module.add(VCmpEQU32(dst=VCC(), src0=vgpr(rReg), src1=hex(r), comment="wgMT%%VW == %u"%r ))
                 module.add(SCBranchVCCNZ(labelName=glvwLabels[(r-1)].getLabelName(), comment="branch to shift d%u r=%u"%(tP["idx"], r)))
-            module.add(SBranch(labelName=glvwLabels[glvw-1].getLabelName(), comment="no shifting" ))
+
+            label_name = glvwLabels[glvw-1].getLabelName().replace("label_", "")
+            place_holder = "%d_%s_placeholder"%(len(shiftVectorComponentsPlaceHolders), label_name)
+            shiftVectorComponentsPlaceHolders.append(place_holder)
+            shiftVectorComponentsPlaceTargets.append(label_name)
+            shiftVectorComponentsPlaceOperations.append("SBranch")
+            shiftVectorComponentsModel = Module(place_holder)
+            shiftVectorComponentsModel.addComment1("no shifting")
+            module.add(shiftVectorComponentsModel)
             writer.vgprPool.checkIn(rReg)
 
             _, arch2acc = accToArchMapper(kernel)
@@ -428,7 +439,14 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                             else:
                                 src1 = hex(target)
                             module.add(VCmpEQU32(dst=VCC(), src0=vgpr(mbReg), src1=src1))
-                            module.add(SCBranchVCCNZ(labelName=MBblockLabels[r-1][label].getLabelName(), comment="branch to shift d%u r%u mb%u" % (tP["idx"], r, label)))
+                            label_name = MBblockLabels[r-1][label].getLabelName().replace("label_", "")
+                            place_holder = "%d_%s_placeholder"%(len(shiftVectorComponentsPlaceHolders), label_name)
+                            shiftVectorComponentsPlaceHolders.append(place_holder)
+                            shiftVectorComponentsPlaceTargets.append(label_name)
+                            shiftVectorComponentsPlaceOperations.append("SCBranchVCCNZ")
+                            shiftVectorComponentsModel = Module(place_holder)
+                            shiftVectorComponentsModel.addComment1("branch to shift d%u r%u mb%u" % (tP["idx"], r, label))
+                            module.add(shiftVectorComponentsModel)
 
             for r in range(1, glvw):
                 for mb in range(0, miOuterTTCoal * matrixInstBCoal * OutBlocksInMI):
@@ -437,7 +455,14 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                     module.add(MBblockLabels[r-1][mb])
                     for vw in range(0, max(1, allContOutCoal//glvw)):
                         module.add(VCmpEQU32(dst=VCC(), src0=vgpr(vwReg), src1=hex(vw)))
-                        module.add(SCBranchVCCNZ(labelName=VWBlockLabels[r-1][mb][vw].getLabelName(), comment="branch to shift d%u r%u mb%u vw%u" % (tP["idx"], r, mb, vw)))
+                        label_name = VWBlockLabels[r-1][mb][vw].getLabelName().replace("label_", "")
+                        place_holder = "%d_%s_placeholder"%(len(shiftVectorComponentsPlaceHolders), label_name)
+                        shiftVectorComponentsPlaceHolders.append(place_holder)
+                        shiftVectorComponentsPlaceTargets.append(label_name)
+                        shiftVectorComponentsPlaceOperations.append("SCBranchVCCNZ")
+                        shiftVectorComponentsModel = Module(place_holder)
+                        shiftVectorComponentsModel.addComment1("branch to shift d%u r%u mb%u vw%u" % (tP["idx"], r, mb, vw))
+                        module.add(shiftVectorComponentsModel)
 
             # blocks for handle M_size % vector width
             tReg  = writer.vgprPool.checkOut(min(glvw, allContOutCoal))
@@ -496,7 +521,14 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                                 SOrSaveExecBX = SOrSaveExecB64 if kernel["WavefrontSize"] == 64 else SOrSaveExecB32
                                 module.add(SMovBX(dst=sgpr(tmpSgpr, writer.states.laneSGPRCount), src=all1mask, comment="to restore all threads active"))
                                 module.add(SOrSaveExecBX(dst=VCC(), src=sgpr(tmpSgpr,writer.states.laneSGPRCount), comment="all threads active"))
-                                module.add(SBranch(labelName=glvwLabels[glvw-1].getLabelName(), comment="done shifting" ))
+                                label_name = glvwLabels[glvw-1].getLabelName().replace("label_", "")
+                                place_holder = "%d_%s_placeholder"%(len(shiftVectorComponentsPlaceHolders), label_name)
+                                shiftVectorComponentsPlaceHolders.append(place_holder)
+                                shiftVectorComponentsPlaceTargets.append(label_name)
+                                shiftVectorComponentsPlaceOperations.append("SBranch")
+                                shiftVectorComponentsModel = Module(place_holder)
+                                shiftVectorComponentsModel.addComment1("no shifting")
+                                module.add(shiftVectorComponentsModel)
                                 module.addSpaceLine()
 
             module.add(glvwLabels[glvw-1])
@@ -509,7 +541,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             writer.vgprPool.checkIn(gbReg)
             writer.vgprPool.checkIn(vwReg)
             writer.vgprPool.checkIn(mbReg)
-
+            writer.updateBranchPlaceHolder(module, shiftVectorComponentsPlaceHolders, shiftVectorComponentsPlaceTargets, shiftVectorComponentsPlaceOperations)
         return module
 
     def ShiftVectorComponentsMFMAAllThread(self, writer, kernel, tP):
@@ -749,4 +781,3 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             writer.vgprPool.checkIn(wgMT)
 
         return module
-

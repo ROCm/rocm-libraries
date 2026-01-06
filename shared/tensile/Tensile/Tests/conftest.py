@@ -181,7 +181,7 @@ def useGlobalParameters(tensile_args):
 @pytest.fixture
 def initGlobalParametersForTCL():
     from Tensile import Common
-    from Tensile.TensileCreateLib.ParseArguments import parseArguments    
+    from Tensile.TensileCreateLib.ParseArguments import parseArguments
 
     class gpUpdater:
         def __init__(self, tcl_args):

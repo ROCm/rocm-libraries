@@ -12,4 +12,4 @@ This code sample from ``clients/bench/src/client_extop_softmax.cpp`` demonstrate
 input is contiguous on the second dimension.
 
 .. literalinclude:: ../../clients/bench/src/client_extop_softmax.cpp
-   :language: c++    
+   :language: c++

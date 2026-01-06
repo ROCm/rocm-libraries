@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gpsv_interleaved_batch_buffer_size calculates the required buffer size
-*  for \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()". It is the user's 
+*  for \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()". It is the user's
 *  responsibility to allocate this buffer.
 *
 *  \note
@@ -147,22 +147,22 @@ rocsparse_status rocsparse_zgpsv_interleaved_batch_buffer_size(rocsparse_handle 
 *  \f[
 *    P^{i}*x^{i} = x^{i}
 *  \f]
-*  where for each batch \f$i=0\ldots\f$ \p batch_count, \f$P^{i}\f$ is a sparse pentadiagonal matrix and 
-*  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are 
-*  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower 
-*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals. 
+*  where for each batch \f$i=0\ldots\f$ \p batch_count, \f$P^{i}\f$ is a sparse pentadiagonal matrix and
+*  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are
+*  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower
+*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals.
 *  See below for a description of what this interleaved memory pattern looks like.
 *
-*  Solving the batched pentadiagonal system involves two steps. First, the user calls 
-*  \ref rocsparse_sgpsv_interleaved_batch_buffer_size "rocsparse_Xgpsv_interleaved_batch_buffer_size()" 
-*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates 
-*  this buffer and passes it to \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()" 
-*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are 
-*  overwritten with the solution after the call to 
+*  Solving the batched pentadiagonal system involves two steps. First, the user calls
+*  \ref rocsparse_sgpsv_interleaved_batch_buffer_size "rocsparse_Xgpsv_interleaved_batch_buffer_size()"
+*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  this buffer and passes it to \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()"
+*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
+*  overwritten with the solution after the call to
 *  \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()".
 *
-*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved 
-*  routines write the batch matrices such that each element from each matrix is written consecutively one after 
+*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved
+*  routines write the batch matrices such that each element from each matrix is written consecutively one after
 *  the other. For example, consider the following batch matrices:
 *
 *  \f[
@@ -181,7 +181,7 @@ rocsparse_status rocsparse_zgpsv_interleaved_batch_buffer_size(rocsparse_handle 
 *    t^{2}_{10} & t^{2}_{11} & t^{2}_{12} \\
 *    t^{2}_{20} & t^{2}_{21} & t^{2}_{22}
 *    \end{bmatrix}
-*  \f] 
+*  \f]
 *
 *  In interleaved format, the highest, higher, lowest, lower, and diagonal arrays would look like:
 *  \f[
@@ -193,7 +193,7 @@ rocsparse_status rocsparse_zgpsv_interleaved_batch_buffer_size(rocsparse_handle 
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
 *    \end{align}
 *  \f]
-*  For the lowest array, the first \p 2*batch_count entries are zero, for the lower array, the first \p batch_count entries are zero, 
+*  For the lowest array, the first \p 2*batch_count entries are zero, for the lower array, the first \p batch_count entries are zero,
 *  for the upper array the last \p batch_count entries are zero, and for the highest array, the last \p 2*batch_count entries are zero.
 *
 *  \note

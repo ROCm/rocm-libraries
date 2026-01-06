@@ -49,9 +49,18 @@ namespace std
 // Parse YAML data
 static std::string hipsparselt_parse_yaml(const std::string& yaml)
 {
+#ifdef WIN32
+    // Explicitly run via `python.exe`, without relying on the .py file being
+    // treated as an executable that should be run via the python interpreter.
+    std::string python_command_launcher = "python ";
+#else
+    // Rely on the shebang in the file, e.g. `#!/usr/bin/env python3`.
+    std::string python_command_launcher = "";
+#endif
+
     std::string tmp     = hipsparselt_tempname();
     auto        exepath = hipsparselt_exepath();
-    auto        cmd     = exepath + "hipsparselt_gentest.py --template " + exepath
+    auto cmd = python_command_launcher + exepath + "hipsparselt_gentest.py --template " + exepath
                + "hipsparselt_template.yaml -o " + tmp + " " + yaml;
     hipsparselt_cerr << cmd << std::endl;
 

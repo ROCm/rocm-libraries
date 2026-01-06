@@ -39,7 +39,7 @@ namespace rocRoller
     public:
         using Base = Assembler;
 
-        static const std::string Name;
+        inline static const std::string Name = "SubprocessAssembler";
 
         static bool Match(Argument arg);
 

@@ -59,31 +59,19 @@ template <class Vector>
 void InitializeSimpleKeyValueSortTest(
   Vector& unsorted_keys, Vector& unsorted_values, Vector& sorted_keys, Vector& sorted_values)
 {
-  // clang-format off
   unsorted_keys.resize(7);
+  unsorted_keys = {1, 3, 6, 5, 2, 0, 4};
   unsorted_values.resize(7);
-  unsorted_keys[0] = 1;  unsorted_values[0] = 0;
-  unsorted_keys[1] = 3;  unsorted_values[1] = 1;
-  unsorted_keys[2] = 6;  unsorted_values[2] = 2;
-  unsorted_keys[3] = 5;  unsorted_values[3] = 3;
-  unsorted_keys[4] = 2;  unsorted_values[4] = 4;
-  unsorted_keys[5] = 0;  unsorted_values[5] = 5;
-  unsorted_keys[6] = 4;  unsorted_values[6] = 6;
+  unsorted_values = {0, 1, 2, 3, 4, 5, 6};
 
   sorted_keys.resize(7);
+  sorted_keys = {0, 1, 2, 3, 4, 5, 6};
   sorted_values.resize(7);
-  sorted_keys[0] = 0;  sorted_values[1] = 0;
-  sorted_keys[1] = 1;  sorted_values[3] = 1;
-  sorted_keys[2] = 2;  sorted_values[6] = 2;
-  sorted_keys[3] = 3;  sorted_values[5] = 3;
-  sorted_keys[4] = 4;  sorted_values[2] = 4;
-  sorted_keys[5] = 5;  sorted_values[0] = 5;
-  sorted_keys[6] = 6;  sorted_values[4] = 6;
-  // clang-format on
+  sorted_values = {5, 0, 4, 1, 6, 3, 2};
 }
 
 template <class Vector>
-void TestSortByKeySimple(void)
+void TestSortByKeySimple()
 {
   Vector unsorted_keys, unsorted_values;
   Vector sorted_keys, sorted_values;
@@ -131,7 +119,7 @@ void TestSortDescendingKeyValue(const size_t n)
 }
 DECLARE_VARIABLE_UNITTEST(TestSortDescendingKeyValue);
 
-void TestSortByKeyBool(void)
+void TestSortByKeyBool()
 {
   const size_t n = 10027;
 
@@ -149,7 +137,7 @@ void TestSortByKeyBool(void)
 }
 DECLARE_UNITTEST(TestSortByKeyBool);
 
-void TestSortByKeyBoolDescending(void)
+void TestSortByKeyBoolDescending()
 {
   const size_t n = 10027;
 

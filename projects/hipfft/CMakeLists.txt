@@ -23,8 +23,8 @@
 # CMake version according to latest ROCm platform requirements
 cmake_minimum_required( VERSION 3.17 )
 
-# We use C++17 features, this will add compile option: -std=c++17
-set( CMAKE_CXX_STANDARD 17 )
+# We use C++20 features, this will add compile option: -std=c++20
+set( CMAKE_CXX_STANDARD 20 )
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Consider removing this in the future
@@ -36,7 +36,6 @@ else()
   set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH
     "Install path prefix, prepended onto install directories" )
 endif()
-
 
 # Workarounds..
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
@@ -90,6 +89,8 @@ set(DEFAULT_GPUS
   gfx1101
   gfx1102
   gfx1151
+  gfx1152
+  gfx1153
   gfx1200
   gfx1201)
 
@@ -124,7 +125,7 @@ string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
-  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wno-unknown-pragmas)
+  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-unknown-pragmas)
   if( WERROR )
     set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
   endif()
@@ -176,8 +177,9 @@ endif()
 message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 
 # Version
-set( VERSION_STRING "1.0.21" )
+set( VERSION_STRING "1.0.23" )
 set( hipfft_SOVERSION 0.1 )
+set( hipfftw_SOVERSION 0.1 )
 
 if( ROCmCMakeBuildTools_FOUND )
   rocm_setup_version( VERSION ${VERSION_STRING} )

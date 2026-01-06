@@ -160,9 +160,21 @@ To use special data ordering for ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_O
 +-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 |  FP8  | FP8   |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R16 |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
 +-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  FP16 | FP16  |  FP32 | FP32  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 |  FP16 | FP16  |  FP16 | FP16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
 +-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 |  BF16 | BF16  |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  FP8  | FP8   |  FP16 | FP16  |  T   |   N   |  HIPBLASLT_ORDER_COL        |  HIPBLASLT_ORDER_COL16_4R16 | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  FP8  | FP8   |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL        |  HIPBLASLT_ORDER_COL16_4R16 | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  FP16 | FP16  |  FP32 | FP32  |  T   |   N   |  HIPBLASLT_ORDER_COL        |  HIPBLASLT_ORDER_COL16_4R8  | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  FP16 | FP16  |  FP16 | FP16  |  T   |   N   |  HIPBLASLT_ORDER_COL        |  HIPBLASLT_ORDER_COL16_4R8  | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  BF16 | BF16  |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL        |  HIPBLASLT_ORDER_COL16_4R8  | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
 +-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 
 There are restrictions on the supported problem sizes for the ``HIP_R_4F_E2M1``, ``HIP_R_6F_E2M3``, ``HIP_R_6F_E3M2``,

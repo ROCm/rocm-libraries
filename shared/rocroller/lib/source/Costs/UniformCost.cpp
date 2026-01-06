@@ -30,20 +30,19 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(UniformCost);
         static_assert(Component::Component<UniformCost>);
 
-        inline UniformCost::UniformCost(ContextPtr ctx)
+        UniformCost::UniformCost(ContextPtr ctx)
             : Cost{ctx}
         {
         }
 
-        inline bool UniformCost::Match(Argument arg)
+        bool UniformCost::Match(Argument arg)
         {
             return std::get<0>(arg) == CostFunction::Uniform;
         }
 
-        inline std::shared_ptr<Cost> UniformCost::Build(Argument arg)
+        std::shared_ptr<Cost> UniformCost::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -51,13 +50,12 @@ namespace rocRoller
             return std::make_shared<UniformCost>(std::get<1>(arg));
         }
 
-        inline std::string UniformCost::name() const
+        std::string UniformCost::name() const
         {
             return Name;
         }
 
-        inline float UniformCost::cost(Instruction const&       inst,
-                                       InstructionStatus const& status) const
+        float UniformCost::cost(Instruction const& inst, InstructionStatus const& status) const
         {
             return 0.0;
         }

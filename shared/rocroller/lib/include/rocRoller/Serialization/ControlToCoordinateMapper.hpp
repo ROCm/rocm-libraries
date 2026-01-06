@@ -86,6 +86,46 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::Connections::UnrollStride, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, KernelGraph::Connections::UnrollStride& x, Context& ctx)
+            {
+                iot::mapRequired(io, "unrollStride", x.unrollStride);
+                iot::mapRequired(io, "unrollDimension", x.unrollDimension);
+            }
+
+            static void mapping(IO& io, KernelGraph::Connections::UnrollStride& x)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, x, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::Connections::BaseOffset, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, KernelGraph::Connections::BaseOffset& x, Context& ctx)
+            {
+                iot::mapRequired(io, "base", x.base);
+                iot::mapRequired(io, "subdimension", x.subdimension);
+            }
+
+            static void mapping(IO& io, KernelGraph::Connections::BaseOffset& x)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, x, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::Connections::TypeAndNaryArgument, IO, Context>
         {
             using iot = IOTraits<IO>;
@@ -98,26 +138,6 @@ namespace rocRoller
             }
 
             static void mapping(IO& io, KernelGraph::Connections::TypeAndNaryArgument& x)
-            {
-                AssertFatal((std::same_as<EmptyContext, Context>));
-
-                Context ctx;
-                mapping(io, x, ctx);
-            }
-        };
-
-        template <typename IO, typename Context>
-        struct MappingTraits<KernelGraph::Connections::ComputeIndex, IO, Context>
-        {
-            using iot = IOTraits<IO>;
-
-            static void mapping(IO& io, KernelGraph::Connections::ComputeIndex& x, Context& ctx)
-            {
-                iot::mapRequired(io, "argument", x.argument);
-                iot::mapRequired(io, "index", x.index);
-            }
-
-            static void mapping(IO& io, KernelGraph::Connections::ComputeIndex& x)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 

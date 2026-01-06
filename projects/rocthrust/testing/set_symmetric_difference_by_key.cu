@@ -95,25 +95,14 @@ void TestSetSymmetricDifferenceByKeyDispatchImplicit()
 DECLARE_UNITTEST(TestSetSymmetricDifferenceByKeyDispatchImplicit);
 
 template <typename Vector>
-void TestSetSymmetricDifferenceByKeySimple(void)
+void TestSetSymmetricDifferenceByKeySimple()
 {
   using Iterator = typename Vector::iterator;
 
-  Vector a_key(4), b_key(5);
-  Vector a_val(4), b_val(5);
+  Vector a_key{0, 2, 4, 6}, b_key{0, 3, 3, 4, 7};
+  Vector a_val(4, 0), b_val(5, 1);
 
-  // clang-format off
-  a_key[0] = 0; a_key[1] = 2; a_key[2] = 4; a_key[3] = 6;
-  a_val[0] = 0; a_val[1] = 0; a_val[2] = 0; a_val[3] = 0;
-
-  b_key[0] = 0; b_key[1] = 3; b_key[2] = 3; b_key[3] = 4; b_key[4] = 7;
-  b_val[0] = 1; b_val[1] = 1; b_val[2] = 1; b_val[3] = 1; b_val[4] = 1;
-
-  Vector ref_key(5), ref_val(5);
-  ref_key[0] = 2; ref_key[1] = 3; ref_key[2] = 3; ref_key[3] = 6; ref_key[4] = 7;
-  ref_val[0] = 0; ref_val[1] = 1; ref_val[2] = 1; ref_val[3] = 0; ref_val[4] = 1;
-  // clang-format on
-
+  Vector ref_key{2, 3, 3, 6, 7}, ref_val{0, 1, 1, 0, 1};
   Vector result_key(5), result_val(5);
 
   thrust::pair<Iterator, Iterator> end = thrust::set_symmetric_difference_by_key(
@@ -262,7 +251,7 @@ DECLARE_VARIABLE_UNITTEST(TestSetSymmetricDifferenceByKeyEquivalentRanges);
 template <typename T>
 void TestSetSymmetricDifferenceByKeyMultiset(const size_t n)
 {
-  thrust::host_vector<T> vec = unittest::random_integers<T>(2 * n);
+  thrust::host_vector<T> vec = unittest::random_integers<int>(2 * n);
 
   // restrict elements to [min,13)
   for (typename thrust::host_vector<T>::iterator i = vec.begin(); i != vec.end(); ++i)

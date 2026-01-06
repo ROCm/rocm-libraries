@@ -26,7 +26,8 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <typename T>
 class mark_present_for_each
@@ -40,37 +41,26 @@ public:
 };
 
 template <class Vector>
-void TestForEachSimple(void)
+void TestForEachSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector input(5);
+  Vector input{3, 2, 3, 4, 6};
   Vector output(7, (T) 0);
-
-  input[0] = 3;
-  input[1] = 2;
-  input[2] = 3;
-  input[3] = 4;
-  input[4] = 6;
 
   mark_present_for_each<T> f;
   f.ptr = thrust::raw_pointer_cast(output.data());
 
   typename Vector::iterator result = thrust::for_each(input.begin(), input.end(), f);
 
-  ASSERT_EQUAL(output[0], 0);
-  ASSERT_EQUAL(output[1], 0);
-  ASSERT_EQUAL(output[2], 1);
-  ASSERT_EQUAL(output[3], 1);
-  ASSERT_EQUAL(output[4], 1);
-  ASSERT_EQUAL(output[5], 0);
-  ASSERT_EQUAL(output[6], 1);
+  Vector ref{0, 0, 1, 1, 1, 0, 1};
+  ASSERT_EQUAL(output, ref);
   ASSERT_EQUAL_QUIET(result, input.end());
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestForEachSimple);
 
 template <typename InputIterator, typename Function>
-THRUST_HOST_DEVICE InputIterator for_each(my_system& system, InputIterator first, InputIterator, Function)
+InputIterator for_each(my_system& system, InputIterator first, InputIterator, Function)
 {
   system.validate_dispatch();
   return first;
@@ -88,7 +78,7 @@ void TestForEachDispatchExplicit()
 DECLARE_UNITTEST(TestForEachDispatchExplicit);
 
 template <typename InputIterator, typename Function>
-THRUST_HOST_DEVICE InputIterator for_each(my_tag, InputIterator first, InputIterator, Function)
+InputIterator for_each(my_tag, InputIterator first, InputIterator, Function)
 {
   *first = 13;
   return first;
@@ -105,37 +95,26 @@ void TestForEachDispatchImplicit()
 DECLARE_UNITTEST(TestForEachDispatchImplicit);
 
 template <class Vector>
-void TestForEachNSimple(void)
+void TestForEachNSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector input(5);
+  Vector input{3, 2, 3, 4, 6};
   Vector output(7, (T) 0);
-
-  input[0] = 3;
-  input[1] = 2;
-  input[2] = 3;
-  input[3] = 4;
-  input[4] = 6;
 
   mark_present_for_each<T> f;
   f.ptr = thrust::raw_pointer_cast(output.data());
 
   typename Vector::iterator result = thrust::for_each_n(input.begin(), input.size(), f);
 
-  ASSERT_EQUAL(output[0], 0);
-  ASSERT_EQUAL(output[1], 0);
-  ASSERT_EQUAL(output[2], 1);
-  ASSERT_EQUAL(output[3], 1);
-  ASSERT_EQUAL(output[4], 1);
-  ASSERT_EQUAL(output[5], 0);
-  ASSERT_EQUAL(output[6], 1);
+  Vector ref{0, 0, 1, 1, 1, 0, 1};
+  ASSERT_EQUAL(output, ref);
   ASSERT_EQUAL_QUIET(result, input.end());
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestForEachNSimple);
 
 template <typename InputIterator, typename Size, typename Function>
-THRUST_HOST_DEVICE InputIterator for_each_n(my_system& system, InputIterator first, Size, Function)
+InputIterator for_each_n(my_system& system, InputIterator first, Size, Function)
 {
   system.validate_dispatch();
   return first;
@@ -153,7 +132,7 @@ void TestForEachNDispatchExplicit()
 DECLARE_UNITTEST(TestForEachNDispatchExplicit);
 
 template <typename InputIterator, typename Size, typename Function>
-THRUST_HOST_DEVICE InputIterator for_each_n(my_tag, InputIterator first, Size, Function)
+InputIterator for_each_n(my_tag, InputIterator first, Size, Function)
 {
   *first = 13;
   return first;
@@ -169,7 +148,7 @@ void TestForEachNDispatchImplicit()
 }
 DECLARE_UNITTEST(TestForEachNDispatchImplicit);
 
-void TestForEachSimpleAnySystem(void)
+void TestForEachSimpleAnySystem()
 {
   thrust::device_vector<int> output(7, 0);
 
@@ -179,18 +158,13 @@ void TestForEachSimpleAnySystem(void)
   thrust::counting_iterator<int> result =
     thrust::for_each(thrust::make_counting_iterator(0), thrust::make_counting_iterator(5), f);
 
-  ASSERT_EQUAL(output[0], 1);
-  ASSERT_EQUAL(output[1], 1);
-  ASSERT_EQUAL(output[2], 1);
-  ASSERT_EQUAL(output[3], 1);
-  ASSERT_EQUAL(output[4], 1);
-  ASSERT_EQUAL(output[5], 0);
-  ASSERT_EQUAL(output[6], 0);
+  thrust::device_vector<int> ref{1, 1, 1, 1, 1, 0, 0};
+  ASSERT_EQUAL(output, ref);
   ASSERT_EQUAL_QUIET(result, thrust::make_counting_iterator(5));
 }
 DECLARE_UNITTEST(TestForEachSimpleAnySystem);
 
-void TestForEachNSimpleAnySystem(void)
+void TestForEachNSimpleAnySystem()
 {
   thrust::device_vector<int> output(7, 0);
 
@@ -199,13 +173,8 @@ void TestForEachNSimpleAnySystem(void)
 
   thrust::counting_iterator<int> result = thrust::for_each_n(thrust::make_counting_iterator(0), 5, f);
 
-  ASSERT_EQUAL(output[0], 1);
-  ASSERT_EQUAL(output[1], 1);
-  ASSERT_EQUAL(output[2], 1);
-  ASSERT_EQUAL(output[3], 1);
-  ASSERT_EQUAL(output[4], 1);
-  ASSERT_EQUAL(output[5], 0);
-  ASSERT_EQUAL(output[6], 0);
+  thrust::device_vector<int> ref{1, 1, 1, 1, 1, 0, 0};
+  ASSERT_EQUAL(output, ref);
   ASSERT_EQUAL_QUIET(result, thrust::make_counting_iterator(5));
 }
 DECLARE_UNITTEST(TestForEachNSimpleAnySystem);
@@ -215,7 +184,7 @@ void TestForEach(const size_t n)
 {
   const size_t output_size = std::min((size_t) 10, 2 * n);
 
-  thrust::host_vector<T> h_input = unittest::random_integers<T>(n);
+  thrust::host_vector<T> h_input = unittest::random_integers<size_t>(n);
 
   for (size_t i = 0; i < n; i++)
   {
@@ -247,7 +216,7 @@ void TestForEachN(const size_t n)
 {
   const size_t output_size = std::min((size_t) 10, 2 * n);
 
-  thrust::host_vector<T> h_input = unittest::random_integers<T>(n);
+  thrust::host_vector<T> h_input = unittest::random_integers<size_t>(n);
 
   for (size_t i = 0; i < n; i++)
   {
@@ -290,7 +259,7 @@ struct SetFixedVectorToConstant
 };
 
 template <typename T, unsigned int N>
-void _TestForEachWithLargeTypes(void)
+void _TestForEachWithLargeTypes()
 {
   size_t n = (64 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -311,7 +280,7 @@ void _TestForEachWithLargeTypes(void)
   ASSERT_EQUAL_QUIET(h_data, d_data);
 }
 
-void TestForEachWithLargeTypes(void)
+void TestForEachWithLargeTypes()
 {
   _TestForEachWithLargeTypes<int, 1>();
   _TestForEachWithLargeTypes<int, 2>();
@@ -325,13 +294,13 @@ void TestForEachWithLargeTypes(void)
   _TestForEachWithLargeTypes<int, 256>();
   _TestForEachWithLargeTypes<int, 512>();
 
-  // XXX parallel_for doens't support large types
+  // XXX parallel_for doesn't support large types
   //    _TestForEachWithLargeTypes<int, 1024>();  // fails on Vista 64 w/ VS2008
 }
 DECLARE_UNITTEST(TestForEachWithLargeTypes);
 
 template <typename T, unsigned int N>
-void _TestForEachNWithLargeTypes(void)
+void _TestForEachNWithLargeTypes()
 {
   size_t n = (64 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -352,7 +321,7 @@ void _TestForEachNWithLargeTypes(void)
   ASSERT_EQUAL_QUIET(h_data, d_data);
 }
 
-void TestForEachNWithLargeTypes(void)
+void TestForEachNWithLargeTypes()
 {
   _TestForEachNWithLargeTypes<int, 1>();
   _TestForEachNWithLargeTypes<int, 2>();
@@ -366,12 +335,12 @@ void TestForEachNWithLargeTypes(void)
   _TestForEachNWithLargeTypes<int, 256>();
   _TestForEachNWithLargeTypes<int, 512>();
 
-  // XXX parallel_for doens't support large types
+  // XXX parallel_for doesn't support large types
   //    _TestForEachNWithLargeTypes<int, 1024>();  // fails on Vista 64 w/ VS2008
 }
 DECLARE_UNITTEST(TestForEachNWithLargeTypes);
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP
 
 struct only_set_when_expected
 {

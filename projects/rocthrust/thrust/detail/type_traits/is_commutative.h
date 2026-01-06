@@ -18,43 +18,51 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/functional.h>
 
 THRUST_NAMESPACE_BEGIN
-
 namespace detail
 {
+
 template <typename BinaryFunction>
 struct is_commutative : public thrust::detail::false_type
 {};
 
 template <typename T>
-struct is_commutative<typename thrust::plus<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::plus<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::multiplies<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::multiplies<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::minimum<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::minimum<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::maximum<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::maximum<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::logical_or<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::logical_or<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::logical_and<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::logical_and<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::bit_or<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::bit_or<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::bit_and<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::bit_and<T>> : public ::internal::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename thrust::bit_xor<T>> : public thrust::detail::is_arithmetic<T>
+struct is_commutative<typename thrust::bit_xor<T>> : public ::internal::is_arithmetic<T>
 {};
 
 } // end namespace detail

@@ -33,7 +33,7 @@
 //!
 //! Define a extremely thin runtime layer that allows source code to be compiled
 //! unmodified through either AMD HCC or NVCC. Key features tend to be in the spirit
-//! and terminology of CUDA, but with a portable path to other accelerators as well.
+//! and terminology of CUDA, but with a portable path to other GPUs as well.
 //!
 //! This is the master include file for hipSPARSELt, wrapping around hipSPARSELt and
 //! cuSPARSELt "version 0.3".

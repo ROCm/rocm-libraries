@@ -15,8 +15,11 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -26,87 +29,20 @@
 #include <thrust/tuple.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
-// This header pulls in an unsuppressable warning on GCC 6
-#    include <cuda/std/complex>
-#  endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
-#  include <cuda/std/tuple>
-#  include <cuda/std/type_traits>
-#  include <cuda/std/utility>
-#elif defined(__has_include)
-#  if __has_include(<cuda/std/complex>)
-#    include <cuda/std/complex>
-#  endif // __has_include(<cuda/std/complex>)
-#  if __has_include(<cuda/std/tuple>)
-#    include <cuda/std/tuple>
-#  endif // __has_include(<cuda/std/tuple>)
-#  if __has_include(<cuda/std/type_traits>)
-#    include <cuda/std/type_traits>
-#  endif // __has_include(<cuda/std/type_traits>)
-#  if __has_include(<cuda/std/utility>)
-#    include <cuda/std/utility>
-#  endif // __has_include(<cuda/std/utility>)
-#endif // THRUST_DEVICE_SYSTEM
-
 #include <unittest/unittest.h>
 
-struct non_pod
-{
-  // non-pods can have constructors
-  non_pod(void) {}
+#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+// This header pulls in an unsuppressable warning on GCC 6
+#  include _THRUST_STD_INCLUDE(complex)
+#endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#include _THRUST_STD_INCLUDE(tuple)
+#include _THRUST_STD_INCLUDE(utility)
 
-  int x;
-  int y;
-};
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
-void TestIsPlainOldData(void)
-{
-  // primitive types
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<bool>::value, true);
-
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<char>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<signed char>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<unsigned char>::value, true);
-
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<short>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<signed short>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<unsigned short>::value, true);
-
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<int>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<signed int>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<unsigned int>::value, true);
-
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<long>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<signed long>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<unsigned long>::value, true);
-
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<long long>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<signed long long>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<unsigned long long>::value, true);
-
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<float>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<double>::value, true);
-
-  // void
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<void>::value, true);
-
-  // structs
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<non_pod>::value, false);
-
-  // pointers
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<char*>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<int*>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<int**>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<non_pod*>::value, true);
-
-  // const types
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<const int>::value, true);
-  ASSERT_EQUAL((bool) thrust::detail::is_pod<const int*>::value, true);
-}
-DECLARE_UNITTEST(TestIsPlainOldData);
-
-void TestIsContiguousIterator(void)
+void TestIsContiguousIterator()
 {
   using HostVector   = thrust::host_vector<int>;
   using DeviceVector = thrust::device_vector<int>;
@@ -124,19 +60,28 @@ void TestIsContiguousIterator(void)
 
   using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
-  using ConstantIterator  = thrust::constant_iterator<int>;
-  using CountingIterator  = thrust::counting_iterator<int>;
-  using TransformIterator = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
-  using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
+  using ConstantIterator = thrust::constant_iterator<int>;
+  using CountingIterator = thrust::counting_iterator<int>;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using TransformIterator1 = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
+  THRUST_SUPPRESS_DEPRECATED_POP
+  using TransformIterator2 = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
+  using ZipIterator        = thrust::zip_iterator<HostIteratorTuple>;
 
   ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
   ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVHPC
+  // thrust::identity creates a deprecated warning that could not be worked around
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TransformIterator1>::value, false);
+  THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVHPC
+  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TransformIterator2>::value, false);
   ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
 }
 DECLARE_UNITTEST(TestIsContiguousIterator);
 
-void TestIsCommutative(void)
+void TestIsCommutative()
 {
   {
     using T  = int;
@@ -244,55 +189,61 @@ void TestIsCommutative(void)
 }
 DECLARE_UNITTEST(TestIsCommutative);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 struct NonTriviallyCopyable
 {
   NonTriviallyCopyable(const NonTriviallyCopyable&) {}
 };
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(NonTriviallyCopyable);
 
-static_assert(!::cuda::std::is_trivially_copyable<NonTriviallyCopyable>::value, "");
+static_assert(!_THRUST_STD::is_trivially_copyable<NonTriviallyCopyable>::value, "");
 static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "");
 
 void TestTriviallyRelocatable()
 {
   static_assert(thrust::is_trivially_relocatable<int>::value, "");
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
   static_assert(thrust::is_trivially_relocatable<__half>::value, "");
   static_assert(thrust::is_trivially_relocatable<int1>::value, "");
   static_assert(thrust::is_trivially_relocatable<int2>::value, "");
   static_assert(thrust::is_trivially_relocatable<int3>::value, "");
   static_assert(thrust::is_trivially_relocatable<int4>::value, "");
-#    ifndef _LIBCUDACXX_HAS_NO_INT128
+#if !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC                                          \
+      || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC && !defined(__CUDACC_RTC_INT128__)) \
+      || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ < 1105)         \
+      || !defined(__SIZEOF_INT128__))
   static_assert(thrust::is_trivially_relocatable<__int128>::value, "");
-#    endif // _LIBCUDACXX_HAS_NO_INT128
-#  endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC &&
+       // !defined(__CUDACC_RTC_INT128__)) || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ <
+       // 1105) || !defined(__SIZEOF_INT128__))
+#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
   static_assert(thrust::is_trivially_relocatable<thrust::complex<float>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<::cuda::std::complex<float>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::pair<int, thrust::complex<float>>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<::cuda::std::pair<int, ::cuda::std::complex<float>>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<int, _THRUST_STD::complex<float>>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<int, thrust::complex<float>, char>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<::cuda::std::tuple<int, ::cuda::std::complex<float>, char>>::value,
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value,
                 "");
-#  endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
   static_assert(thrust::is_trivially_relocatable<
-                  ::cuda::std::tuple<thrust::pair<int, thrust::tuple<int, ::cuda::std::tuple<>>>,
-                                     thrust::tuple<::cuda::std::pair<int, thrust::tuple<>>, int>>>::value,
+                  _THRUST_STD::tuple<thrust::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,
+                                     thrust::tuple<_THRUST_STD::pair<int, thrust::tuple<>>, int>>>::value,
                 "");
+#endif
 
   static_assert(!thrust::is_trivially_relocatable<thrust::pair<int, std::string>>::value, "");
-  static_assert(!thrust::is_trivially_relocatable<::cuda::std::pair<int, std::string>>::value, "");
+  static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::pair<int, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<thrust::tuple<int, float, std::string>>::value, "");
-  static_assert(!thrust::is_trivially_relocatable<::cuda::std::tuple<int, float, std::string>>::value, "");
+  static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, float, std::string>>::value, "");
 
   // test propagation of relocatability through pair and tuple
   static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "");
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
   static_assert(thrust::is_trivially_relocatable<thrust::pair<NonTriviallyCopyable, int>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<::cuda::std::pair<NonTriviallyCopyable, int>>::value, "");
+#endif
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<NonTriviallyCopyable, int>>::value, "");
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<NonTriviallyCopyable>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<::cuda::std::tuple<NonTriviallyCopyable>>::value, "");
+#endif
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
 };
 DECLARE_UNITTEST(TestTriviallyRelocatable);
-
-#endif

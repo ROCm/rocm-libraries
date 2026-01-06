@@ -56,15 +56,45 @@ rocsparse_v2_spmv()
 
 .. doxygenfunction:: rocsparse_v2_spmv
 
+rocsparse_spmv_set_extra()
+--------------------------
+
+.. doxygenfunction:: rocsparse_spmv_set_extra
+
+rocsparse_spmv_clear_extra()
+----------------------------
+
+.. doxygenfunction:: rocsparse_spmv_clear_extra
+
 rocsparse_spsv()
 ----------------
 
 .. doxygenfunction:: rocsparse_spsv
 
+rocsparse_sptrsv_buffer_size()
+------------------------------
+
+.. doxygenfunction:: rocsparse_sptrsv_buffer_size
+
+rocsparse_sptrsv()
+------------------
+
+.. doxygenfunction:: rocsparse_sptrsv
+
 rocsparse_spsm()
 ----------------
 
 .. doxygenfunction:: rocsparse_spsm
+
+rocsparse_sptrsm_buffer_size()
+------------------------------
+
+.. doxygenfunction:: rocsparse_sptrsm_buffer_size
+
+rocsparse_sptrsm()
+------------------
+
+.. doxygenfunction:: rocsparse_sptrsm
 
 rocsparse_spmm()
 ----------------

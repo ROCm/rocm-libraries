@@ -18,7 +18,7 @@
 - Introduced 4-tuple targets for bundler invocations
 - Introduced PATHEXT extensions on Windows when searching for toolchain components
 - Enabled passing fully qualified paths to toolchain components
-- Enabled environment variable overrides when searching for a ROCm stack 
+- Enabled environment variable overrides when searching for a ROCm stack
 - Improved default toolchain configuration
 - Ignored f824 flake errors
 

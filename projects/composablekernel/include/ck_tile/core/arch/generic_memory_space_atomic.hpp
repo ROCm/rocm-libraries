@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 #include "ck_tile/core/numeric/vector_type.hpp"
@@ -102,6 +102,9 @@ CK_TILE_DEVICE void atomic_add(X* p_dst, const X& x);
 template <>
 CK_TILE_DEVICE void atomic_add<bf16x2_t>(bf16x2_t* p_dst, const bf16x2_t& x)
 {
+#if HAS_GLOBAL_ATOMIC_PK_ADD_BUILTIN
+    __builtin_amdgcn_global_atomic_fadd_v2bf16(c_style_pointer_cast<bf16x2_t*>(p_dst), x);
+#else
     union U32BF162_ADDR
     {
         uint32_t* u32_a;
@@ -128,6 +131,7 @@ CK_TILE_DEVICE void atomic_add<bf16x2_t>(bf16x2_t* p_dst, const bf16x2_t& x)
         new_v      = new_.u32;
         cur_v.u32  = atomicCAS(dword_addr.u32_a, old_v, new_v);
     } while(cur_v.u32 != old_v);
+#endif
 }
 
 template <>
@@ -359,7 +363,7 @@ CK_TILE_DEVICE void atomic_add_g(T* p_dst, const thread_buffer<T, N>& x)
 {
     static_assert((std::is_same<T, int32_t>::value && (N == 1)) ||
                       (std::is_same<T, uint32_t>::value && (N == 1)) ||
-                      (std::is_same<T, float>::value && (N == 1 || N == 2)) ||
+                      (std::is_same<T, float>::value && (N == 1 || N == 2 || N == 4)) ||
                       (std::is_same<T, double>::value && (N == 1 || N == 2)) ||
                       (std::is_same<T, fp16_t>::value && (N == 2 || N == 4 || N == 8)) ||
                       (std::is_same<T, bf16_t>::value && (N == 2 || N == 4 || N == 8)) ||
@@ -369,6 +373,8 @@ CK_TILE_DEVICE void atomic_add_g(T* p_dst, const thread_buffer<T, N>& x)
 
     constexpr auto I0 = number<0>{};
     constexpr auto I1 = number<1>{};
+    constexpr auto I2 = number<2>{};
+    constexpr auto I3 = number<3>{};
 
     if constexpr(std::is_same<T, float>::value)
     {
@@ -380,6 +386,13 @@ CK_TILE_DEVICE void atomic_add_g(T* p_dst, const thread_buffer<T, N>& x)
         {
             atomicAdd(c_style_pointer_cast<float*>(p_dst), x.template get_as<float>()[I0]);
             atomicAdd(c_style_pointer_cast<float*>(p_dst) + 1, x.template get_as<float>()[I1]);
+        }
+        else if constexpr(N == 4)
+        {
+            atomicAdd(c_style_pointer_cast<float*>(p_dst), x.template get_as<float>()[I0]);
+            atomicAdd(c_style_pointer_cast<float*>(p_dst) + 1, x.template get_as<float>()[I1]);
+            atomicAdd(c_style_pointer_cast<float*>(p_dst) + 2, x.template get_as<float>()[I2]);
+            atomicAdd(c_style_pointer_cast<float*>(p_dst) + 3, x.template get_as<float>()[I3]);
         }
     }
     else if constexpr(std::is_same<T, double>::value)

@@ -33,8 +33,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename Config,
-         typename TransformedInputIterator,
+template<typename TransformedInputIterator,
          typename ReduceIndexIterator,
          typename BinaryPred,
          typename OrderedTileIdType>
@@ -52,25 +51,28 @@ struct adjacent_find_impl_kernels
         ordered_tile_id.reset();
     }
 
-    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
-                                                    .kernel_config.block_size) void
-        block_reduce_kernel(TransformedInputIterator transformed_input,
-                            ReduceIndexIterator      reduce_output,
-                            const std::size_t        size,
-                            BinaryPred               op,
-                            OrderedTileIdType        ordered_tile_id)
+    template<typename ArchConfig>
+    static ROCPRIM_DEVICE
+    void block_reduce_kernel(TransformedInputIterator transformed_input,
+                             ReduceIndexIterator      reduce_output,
+                             const std::size_t        size,
+                             BinaryPred               op,
+                             OrderedTileIdType        ordered_tile_id)
     {
-        static constexpr adjacent_find_config_params params     = device_params<Config>();
+        static constexpr adjacent_find_config_params params     = ArchConfig::params;
         static constexpr unsigned int                block_size = params.kernel_config.block_size;
         static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
         static constexpr unsigned int items_per_tile   = block_size * items_per_thread;
 
         using transformed_input_type =
             typename std::iterator_traits<TransformedInputIterator>::value_type;
-        using block_reduce_type = ::rocprim::block_reduce<
-            transformed_input_type,
-            block_size,
-            block_reduce_algorithm::raking_reduce>; // TODO?: params.block_reduce_method>;
+        using block_reduce_type
+            = ::rocprim::block_reduce<transformed_input_type,
+                                      block_size,
+                                      block_reduce_algorithm::raking_reduce,
+                                      1,
+                                      1,
+                                      ArchConfig::wavefront>; // TODO?: params.block_reduce_method>;
 
         ROCPRIM_SHARED_MEMORY union
         {

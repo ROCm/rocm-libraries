@@ -34,6 +34,7 @@
 
 #include "../../config.hpp"
 #include "../../type_traits.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 
 #include <iterator>
 #include <type_traits>
@@ -515,8 +516,8 @@ public:
     }
 };
 
-template<lookback_scan_determinism Determinism,
-         typename Config,
+template<typename ArchConfig,
+         lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
          typename ValueIterator,
@@ -525,7 +526,8 @@ template<lookback_scan_determinism Determinism,
          typename UniqueCountIterator,
          typename CompareFunction,
          typename BinaryOp,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
                                                      ValueIterator,
                                                      const UniqueIterator,
@@ -538,14 +540,15 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
                                                      const std::size_t,
                                                      const std::size_t,
                                                      const std::size_t* const,
-                                                     const AccumulatorType* const)
+                                                     const AccumulatorType* const,
+                                                     BlockIdWrapper)
     -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<lookback_scan_determinism Determinism,
-         typename Config,
+template<typename ArchConfig,
+         lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
          typename ValueIterator,
@@ -554,7 +557,8 @@ template<lookback_scan_determinism Determinism,
          typename UniqueCountIterator,
          typename CompareFunction,
          typename BinaryOp,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     kernel_impl(KeyIterator                    keys_input,
                 ValueIterator                  values_input,
@@ -568,10 +572,11 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                 const std::size_t              total_number_of_blocks,
                 const std::size_t              size,
                 const std::size_t* const       global_head_count,
-                const AccumulatorType* const   previous_accumulated)
+                const AccumulatorType* const   previous_accumulated,
+                BlockIdWrapper                 ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr reduce_by_key_config_params params = device_params<Config>();
+    static constexpr reduce_by_key_config_params params = ArchConfig::params;
 
     static constexpr unsigned int         block_size       = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread = params.kernel_config.items_per_thread;
@@ -593,10 +598,13 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
 
     ROCPRIM_SHARED_MEMORY union
     {
+        typename BlockIdWrapper::storage_type ordered_bid;
         typename tile_processor::storage_type tile;
     } storage;
 
-    const unsigned int  block_id     = rocprim::flat_block_id<block_size, 1, 1>();
+    const unsigned int block_id
+        = ordered_bid.get(threadIdx.x,
+                          storage.ordered_bid); // rocprim::flat_block_id<block_size, 1, 1>();
     const unsigned int  block_offset = block_id * items_per_block;
     const KeyIterator   block_keys   = keys_input + block_offset;
     const ValueIterator block_values = values_input + block_offset;

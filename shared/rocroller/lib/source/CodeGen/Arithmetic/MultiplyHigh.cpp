@@ -31,8 +31,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(MultiplyHighGenerator);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::MultiplyHigh>>
         GetGenerator<Expression::MultiplyHigh>(Register::ValuePtr dst,

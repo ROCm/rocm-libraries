@@ -52,6 +52,31 @@ struct TestCase
     miopenSoftmaxMode_t mode;
 };
 
+std::string PrintToString(const TestCase& test_case)
+{
+    std::stringstream ss;
+    ss << "{in_dim = {";
+    for(auto i = 0; i + 1 < test_case.in_dim.size(); ++i)
+    {
+        ss << test_case.in_dim[i] << ", ";
+    }
+    if(test_case.in_dim.size() > 0)
+    {
+        ss << test_case.in_dim[test_case.in_dim.size() - 1];
+    }
+    ss << "}, scale = {";
+    for(auto i = 0; i + 1 < test_case.scale.size(); ++i)
+    {
+        ss << test_case.scale[i] << ", ";
+    }
+    if(test_case.scale.size() > 0)
+    {
+        ss << test_case.scale[test_case.scale.size() - 1];
+    }
+    ss << "}, algo = " << test_case.algo << ", mode = " << test_case.mode << "}";
+    return ss.str();
+}
+
 template <typename T>
 void AddTestCasesForDifferentScales(std::vector<TestCase>& test_cases,
                                     const std::vector<size_t>& in_dim,
@@ -59,14 +84,11 @@ void AddTestCasesForDifferentScales(std::vector<TestCase>& test_cases,
                                     int mode,
                                     const std::vector<std::vector<float>>& scales)
 {
-    /// \todo Apply mix-precision in softmax to improve the stability of fp16
-    if(miopen_type<T>{} == miopenHalf)
+    // Result does not fit in data type
+    if(miopen_type<T>{} == miopenHalf && in_dim[1] * in_dim[2] * in_dim[3] >= 2048 &&
+       mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
     {
-        if((in_dim[1] * in_dim[2] * in_dim[3] >= 2048) && mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
-            return;
-
-        if(in_dim[1] >= 96 && in_dim[2] >= 14 && in_dim[3] >= 14 && algo == MIOPEN_SOFTMAX_FAST)
-            return;
+        return;
     }
 
     for(const auto& scale : scales)
@@ -86,20 +108,6 @@ std::vector<TestCase> GenCases()
     int batch_factor = 0;
 
     std::set<std::vector<size_t>> in_dim_set = get_inputs<size_t>(batch_factor);
-
-    /// \todo Resolve this workaround. Random failure on Jenkins (ROCm3.0):
-    /// --float --input-dim 1 480 128 256 --algorithm 2 --mode 1 --scales 1 0 --tolerance 8000
-    /// FAILED: inf
-    in_dim_set.erase({1, 480, 128, 256});
-
-    /// \todo Resolve this workaround. Regular failures on Radeon VII, ROCm 3.3:
-    /// --float --input-dim 1 1 8 8 --algorithm 0 --mode 1 --scales 1 0 --tolerance 8000
-    /// FAILED: -nan
-    in_dim_set.erase({1, 1, 8, 8});
-    in_dim_set.erase({1, 1, 14, 14});
-    in_dim_set.erase({1, 1, 27, 27});
-    in_dim_set.erase({1, 32, 7, 7});
-    in_dim_set.erase({1, 32, 8, 8});
 
     std::vector<int> algos                 = {0, 1, 2};
     std::vector<int> modes                 = {0, 1};
@@ -156,7 +164,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         std::vector<T> tensorGpuDataForward = GetForwardGpu();
 
         // check forward results
-        CompareResults(tensorGpuDataForward, tensorCpuDataForward);
+        CompareResults(tensorGpuDataForward, tensorCpuDataForward, true);
 
         dout   = tensor<T>{test_case.in_dim}.generate([&](int n, int c, int h, int w) {
             T x      = input(n, c, h, w);
@@ -169,7 +177,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         std::vector<T> tensorGpuDataBackward = GetBackwardGpu();
 
         // check backward results
-        CompareResults(tensorGpuDataBackward, tensorCpuDataBackward);
+        CompareResults(tensorGpuDataBackward, tensorCpuDataBackward, false);
     }
 
     std::vector<T> GetForwardCpu() const
@@ -193,14 +201,14 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
 
         if(test_case.mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
         {
-            par_ford(in_n)([&](int o) {
+            miopen::par_ford(in_n)([&](int o) {
                 if(test_case.algo == MIOPEN_SOFTMAX_FAST)
                 {
                     double sum = 0;
-                    ford(in_c, in_h, in_w)([&](int w, int i, int j) {
+                    miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                         sum += std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j]);
                     });
-                    ford(in_c, in_h, in_w)([&](int w, int i, int j) {
+                    miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                         out[o * out_nstr + w * out_cstr + i * out_hstr + j] =
                             alpha * (std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j]) /
                                      sum) +
@@ -210,7 +218,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                 else
                 {
                     T max_c = std::numeric_limits<T>::lowest();
-                    ford(in_c, in_h, in_w)([&](int w, int i, int j) {
+                    miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                         max_c = std::max(max_c, input[o * in_nstr + w * in_cstr + i * in_hstr + j]);
                     });
 
@@ -220,14 +228,14 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                                              ? NEGATIVE_CUTOFF_VAL_FP16
                                              : NEGATIVE_CUTOFF_VAL_FP32;
                         double sum     = neg_inf;
-                        ford(in_c, in_h, in_w)([&](int w, int i, int j) {
+                        miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                             sum = logaddexp(
                                 double(input[o * in_nstr + w * in_cstr + i * in_hstr + j] - max_c),
                                 sum,
                                 neg_inf);
                         });
 
-                        ford(in_c, in_h, in_w)([&](int w, int i, int j) {
+                        miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                             out[o * out_nstr + w * out_cstr + i * out_hstr + j] =
                                 alpha * (input[o * in_nstr + w * in_cstr + i * in_hstr + j] -
                                          max_c - sum) +
@@ -237,12 +245,12 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                     else
                     {
                         double sum = 0;
-                        ford(in_c, in_h, in_w)([&](int w, int i, int j) {
+                        miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                             sum += std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j] -
                                             max_c);
                         });
 
-                        ford(in_c, in_h, in_w)([&](int w, int i, int j) {
+                        miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                             out[o * out_nstr + w * out_cstr + i * out_hstr + j] =
                                 alpha *
                                     (std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j] -
@@ -256,14 +264,14 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         }
         else
         {
-            par_ford(in_n, in_h, in_w)([&](int o, int i, int j) {
+            miopen::par_ford(in_n, in_h, in_w)([&](int o, int i, int j) {
                 if(test_case.algo == MIOPEN_SOFTMAX_FAST)
                 {
                     double sum = 0;
-                    ford(in_c)([&](int w) {
+                    miopen::ford(in_c)([&](int w) {
                         sum += std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j]);
                     });
-                    ford(in_c)([&](int w) {
+                    miopen::ford(in_c)([&](int w) {
                         out[o * out_nstr + w * out_cstr + i * out_hstr + j] =
                             alpha * (std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j]) /
                                      sum) +
@@ -273,7 +281,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                 else
                 {
                     T max_c = std::numeric_limits<T>::lowest();
-                    ford(in_c)([&](int w) {
+                    miopen::ford(in_c)([&](int w) {
                         max_c = std::max(max_c, input[o * in_nstr + w * in_cstr + i * in_hstr + j]);
                     });
 
@@ -283,14 +291,14 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                                              ? NEGATIVE_CUTOFF_VAL_FP16
                                              : NEGATIVE_CUTOFF_VAL_FP32;
                         double sum     = neg_inf;
-                        ford(in_c)([&](int w) {
+                        miopen::ford(in_c)([&](int w) {
                             sum = logaddexp(
                                 double(input[o * in_nstr + w * in_cstr + i * in_hstr + j] - max_c),
                                 sum,
                                 neg_inf);
                         });
 
-                        ford(in_c)([&](int w) {
+                        miopen::ford(in_c)([&](int w) {
                             out[o * out_nstr + w * out_cstr + i * out_hstr + j] =
                                 alpha * (input[o * in_nstr + w * in_cstr + i * in_hstr + j] -
                                          max_c - sum) +
@@ -300,12 +308,12 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                     else
                     {
                         double sum = 0;
-                        ford(in_c)([&](int w) {
+                        miopen::ford(in_c)([&](int w) {
                             sum += std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j] -
                                             max_c);
                         });
 
-                        ford(in_c)([&](int w) {
+                        miopen::ford(in_c)([&](int w) {
                             out[o * out_nstr + w * out_cstr + i * out_hstr + j] =
                                 alpha *
                                     (std::exp(input[o * in_nstr + w * in_cstr + i * in_hstr + j] -
@@ -324,7 +332,6 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
     {
         const TestCase& test_case = GetParam();
         auto&& handle             = get_handle();
-        // auto out      = output;
 
         auto in_dev  = handle.Write(input.data);
         auto out_dev = handle.Write(output.data);
@@ -363,9 +370,9 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
 
         if(test_case.mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
         {
-            par_ford(in_n)([&](int o) {
+            miopen::par_ford(in_n)([&](int o) {
                 double sum = 0;
-                ford(in_c, in_h, in_w)([&](int c, int i, int j) {
+                miopen::ford(in_c, in_h, in_w)([&](int c, int i, int j) {
                     if(test_case.algo == MIOPEN_SOFTMAX_LOG)
                     {
                         sum += dout[o * out_nstr + c * out_cstr + i * out_hstr + j];
@@ -377,7 +384,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                     }
                 });
 
-                ford(in_c, in_h, in_w)([&](int c, int i, int j) {
+                miopen::ford(in_c, in_h, in_w)([&](int c, int i, int j) {
                     if(test_case.algo == MIOPEN_SOFTMAX_LOG)
                     {
                         din[o * in_nstr + c * in_cstr + i * in_hstr + j] =
@@ -398,9 +405,9 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         }
         else
         {
-            par_ford(in_n, in_h, in_w)([&](int o, int i, int j) {
+            miopen::par_ford(in_n, in_h, in_w)([&](int o, int i, int j) {
                 double sum = 0;
-                ford(in_c)([&](int c) {
+                miopen::ford(in_c)([&](int c) {
                     if(test_case.algo == MIOPEN_SOFTMAX_LOG)
                     {
                         sum += dout[o * out_nstr + c * out_cstr + i * out_hstr + j];
@@ -412,7 +419,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
                     }
                 });
 
-                ford(in_c)([&](int c) {
+                miopen::ford(in_c)([&](int c) {
                     if(test_case.algo == MIOPEN_SOFTMAX_LOG)
                     {
                         din[o * in_nstr + c * in_cstr + i * in_hstr + j] =
@@ -462,7 +469,9 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         return handle.Read<T>(din_dev, dinput.data.size());
     }
 
-    void CompareResults(const std::vector<T>& tensorGPUData, const std::vector<T>& tensorCPUData)
+    void CompareResults(const std::vector<T>& tensorGPUData,
+                        const std::vector<T>& tensorCPUData,
+                        bool isForward)
     {
         const TestCase& test_case = GetParam();
 
@@ -481,7 +490,8 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
             << "Tensor Dims: " << test_case.in_dim[0] << ", " << test_case.in_dim[1] << ", "
             << test_case.in_dim[2] << ", " << test_case.in_dim[3] << ", "
             << "Alpha / Beta: " << test_case.scale[0] << ", " << test_case.scale[1]
-            << ". Algo: " << test_case.algo << ". Mode: " << test_case.mode << std::endl;
+            << ". Algo: " << test_case.algo << ". Mode: " << test_case.mode
+            << ". Direction: " << (isForward ? "Forward" : "Backward") << std::endl;
     }
 
 private:

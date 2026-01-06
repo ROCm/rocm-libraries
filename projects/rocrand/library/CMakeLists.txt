@@ -51,7 +51,6 @@ configure_file(
 )
 
 add_library(rocrand ${rocRAND_HIP_SRCS})
-add_library(roc::rocrand ALIAS rocrand)
 
 set(SOBOL_PRECOMPUTED_SOURCES
     "src/rocrand_scrambled_sobol32_precomputed"

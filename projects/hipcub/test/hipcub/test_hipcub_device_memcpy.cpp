@@ -327,4 +327,14 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
             ASSERT_TRUE(test_utils::bit_equal(h_input[input_index], h_output[output_index]));
         }
     }
+
+    // De-allocate memory.
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+
+    HIP_CHECK(hipFree(d_buffer_srcs));
+    HIP_CHECK(hipFree(d_buffer_dsts));
+    HIP_CHECK(hipFree(d_buffer_sizes));
+
+    HIP_CHECK(hipFree(d_temp_storage));
 }

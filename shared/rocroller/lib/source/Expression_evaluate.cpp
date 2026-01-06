@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Expression_evaluate_detail.hpp>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
@@ -67,9 +68,18 @@ namespace rocRoller
                 return EvaluateDetail::evaluateOp(expr, arg);
             }
 
-            CommandArgumentValue operator()(BitFieldExtract const& expr)
+            CommandArgumentValue operator()(Concatenate const& expr)
             {
-                throw std::runtime_error("BitFieldExtract present in runtime expression.");
+                throw std::runtime_error("N-ary operation present in runtime expression");
+            }
+
+            CommandArgumentValue operator()(BitfieldCombine const& expr)
+            {
+                BitfieldCombine cpy = expr;
+                cpy.lhs             = std::make_shared<Expression>(call(expr.lhs));
+                cpy.rhs             = std::make_shared<Expression>(call(expr.rhs));
+
+                return evaluate(lowerBitfieldCombine(std::make_shared<Expression>(cpy)));
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)
@@ -185,6 +195,18 @@ namespace rocRoller
                 return evaluate(expr) == val;
             }
             return false;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(ExpressionPtr const& expr)
+        {
+            return expr ? tryEvaluate(*expr) : std::nullopt;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(Expression const& expr)
+        {
+            if(evaluationTimes(expr)[EvaluationTime::Translate])
+                return evaluate(expr);
+            return std::nullopt;
         }
     }
 }

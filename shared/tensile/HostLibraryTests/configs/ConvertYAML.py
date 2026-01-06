@@ -92,4 +92,3 @@ if __name__ == "__main__":
     for i in Utils.tqdm(itertools.chain([1,2,3], [4,5,6]), desc="Converting YAML"): time.sleep(1)
 
     merge_libraries(sys.argv[1:])
-

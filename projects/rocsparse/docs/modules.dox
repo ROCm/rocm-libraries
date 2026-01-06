@@ -100,6 +100,6 @@
  *  \brief This module holds all sparse reordering routines.
  *
  *  \details
- *  The sparse reordering routines are a set of functions that can be used for creating colorings of 
+ *  The sparse reordering routines are a set of functions that can be used for creating colorings of
  *  sparse matrices
  */

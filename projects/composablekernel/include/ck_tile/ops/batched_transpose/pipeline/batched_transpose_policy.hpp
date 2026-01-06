@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -18,12 +18,12 @@ struct BatchedTransposePolicy : public BatchedTransposeCommonPolicy
         constexpr index_t NPerBlock   = Problem::kNPerBlock;
         constexpr index_t VecLoadSize = Problem::VectorSizeOutput;
 
-        using TileEncodingPattern = TileDistributionEncodingPattern2D<BlockSize,
-                                                                      MPerBlock,
-                                                                      NPerBlock,
-                                                                      VecLoadSize,
-                                                                      TileAccessPattern>;
-        return TileEncodingPattern::MakeShuffled2DStaticTileDistribution();
+        using TileEncodingPattern = tile_distribution_encoding_pattern_2d<BlockSize,
+                                                                          MPerBlock,
+                                                                          NPerBlock,
+                                                                          VecLoadSize,
+                                                                          TileAccessPattern>;
+        return TileEncodingPattern::make_shuffled_2d_static_tile_distribution();
     }
 };
 } // namespace ck_tile

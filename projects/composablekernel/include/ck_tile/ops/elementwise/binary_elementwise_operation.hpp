@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -80,6 +80,14 @@ struct Add
         const float x2_tmp = type_convert<float>(x1);
         const float y_tmp  = x0 + x2_tmp;
         y                  = type_convert<bf16_t>(y_tmp);
+    }
+
+    template <>
+    __host__ __device__ constexpr void
+    operator()<bf16_t>(bf16_t& y, const float& x0, const float& x1) const
+    {
+        const float y_tmp = x0 + x1;
+        y                 = type_convert<bf16_t>(y_tmp);
     }
 
     template <>

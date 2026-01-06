@@ -1,9 +1,10 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
-
 #pragma once
 
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_dropout.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/block/block_position_encoding.hpp"
@@ -60,5 +61,7 @@
 #include "ck_tile/ops/fmha/pipeline/tile_fmha_shape.hpp"
 #include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 #include "ck_tile/ops/common/generic_2d_block_shape.hpp"
+#include "ck_tile/ops/common/load_interleaved_pk_type.hpp"
+#include "ck_tile/ops/common/streamk_common.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/common/utils.hpp"

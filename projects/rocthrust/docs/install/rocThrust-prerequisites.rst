@@ -6,15 +6,21 @@
 rocThrust prerequisites
 ********************************************************************
 
-rocThrust has the following prerequisites on all platforms:
+On Linux, `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/index.html>`_ must be installed before rocThrust is installed.
 
-* ROCm 6.1 or later.
-* CMake 3.10.2 or later.
-* hipcc or amdclag++. See the `ROCm LLVM compiler infrastructure <https://rocm.docs.amd.com/projects/llvm-project/en/latest/index.html>`_ for more information. 
-* `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_. rocPRIM is automatically downloaded and installed when rocThrust is built and installed.
+rocThrust has the following prerequisites on Linux and Microsoft Windows:
 
-rocThrust has the following HIP on Windows prerequisites:
+* `CMake <https://cmake.org/>`_ version 3.10.2 or higher
+* `hipcc <https://rocm.docs.amd.com/projects/HIPCC/en/latest/index.html>`_
+* `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_ 
+* `rocRAND <https://rocm.docs.amd.com/projects/rocRAND/en/latest/index.html>`_ 
 
-* Python 3.6 or later
-* Visual Studio 2019 with Clang support
-* Strawberry Perl
+rocPRIM can be automatically downloaded and installed when rocThrust is built.
+
+rocThrust has these additional prerequisites on Windows:
+
+* `HIP SDK for Windows <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/>`_
+* `Python version 3.6 or later <https://www.python.org/>`_
+* `Visual Studio 2019 with Clang support <https://visualstudio.microsoft.com/>`_
+* `Strawberry Perl <https://strawberryperl.com/>`_
+

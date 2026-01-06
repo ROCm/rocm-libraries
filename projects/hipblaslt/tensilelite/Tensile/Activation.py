@@ -166,7 +166,7 @@ class ActivationType:
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('sigmoid', { \
                             'instance': ActivationTypeRegister('sigmoid', False, 0,     True,  True, False,   False, False, False, False), \
-                            'supported_by': SupportedBy.TENSILE}), \
+                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('tanh', {  \
                             'instance': ActivationTypeRegister('tanh', False, 2,        True,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE}), \
@@ -511,7 +511,7 @@ class ActivationModule:
                 module.add(VMinF16(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(activationBeta), src1=0.0, \
                            sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
                                               src0_sel=select_bit, src1_sel=select_bit), \
-                           comment="min(0, beta)"))                
+                           comment="min(0, beta)"))
                 module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=vgpr(Holder(idx=vgprTemp)), src1=self.vgprPrefix(vgprOut), \
                            sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
                                               src0_sel=select_bit, src1_sel=select_bit), \

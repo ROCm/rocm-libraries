@@ -98,4 +98,3 @@ def logTxtOutput(fileName, mode, txt):
 def log(filename, txt):
     with open(filename, 'a') as f:
         f.write(datetime.now().ctime()+'# '+txt+'\n')
-

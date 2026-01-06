@@ -201,4 +201,3 @@ Tests:
              bibd_22_8,
              rma10]
   formatA: [rocsparse_format_ell]
-

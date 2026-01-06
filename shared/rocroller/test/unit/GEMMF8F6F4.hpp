@@ -23,112 +23,106 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#pragma once
 
 #include "common/GEMMProblem.hpp"
 
-GEMMProblem setup_GEMMF8_NT()
+struct GEMMProblemF8NT : GEMMProblem
 {
-    GEMMProblem gemm;
+    GEMMProblemF8NT()
+        : GEMMProblem()
+    {
+        // 4x2 jamming
+        const int wavesPerWGX = 16;
+        const int wavesPerWGY = 2;
 
-    // 4x2 jamming
-    uint wavesPerWGX = 16;
-    uint wavesPerWGY = 2;
+        this->waveM = 16;
+        this->waveN = 16;
+        this->waveK = 32;
 
-    gemm.waveM = 16;
-    gemm.waveN = 16;
-    gemm.waveK = 32;
+        this->macM = wavesPerWGX * this->waveM;
+        this->macN = wavesPerWGY * this->waveN;
+        this->macK = 2 * this->waveK;
 
-    gemm.macM = wavesPerWGX * gemm.waveM;
-    gemm.macN = wavesPerWGY * gemm.waveN;
-    gemm.macK = 2 * gemm.waveK;
+        this->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
-    gemm.loadLDSA = true;
-    gemm.loadLDSB = true;
+        this->workgroupSizeX = 256;
+        this->workgroupSizeY = 1;
 
-    gemm.workgroupSizeX = 256;
-    gemm.workgroupSizeY = 1;
+        this->m = 33 * this->macM;
+        this->n = 17 * this->macN;
+        this->k = 4 * this->macK;
 
-    gemm.m = 33 * gemm.macM;
-    gemm.n = 17 * gemm.macN;
-    gemm.k = 4 * gemm.macK;
+        this->alpha = 2.1;
+        this->beta  = 0.75;
 
-    gemm.alpha = 2.1;
-    gemm.beta  = 0.75;
+        this->transA = "N";
+        this->transB = "T";
+    }
+};
 
-    gemm.transA = "N";
-    gemm.transB = "T";
-
-    return gemm;
-}
-
-GEMMProblem setup_GEMMF8F6F4(int waveM, int waveN, int waveK)
+struct GEMMProblemF8F6F4 : GEMMProblem
 {
-    GEMMProblem gemm;
+    GEMMProblemF8F6F4(int waveM, int waveN, int waveK)
+        : GEMMProblem()
+    {
+        // 2x2 jamming
+        const int wavesPerWGX = 4;
+        const int wavesPerWGY = 4;
+        this->waveM           = waveM;
+        this->waveN           = waveN;
+        this->waveK           = waveK;
+        this->macM            = wavesPerWGX * this->waveM;
+        this->macN            = wavesPerWGY * this->waveN;
+        this->macK            = 2 * this->waveK;
+        this->loadPathA       = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->loadPathB       = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->storeLDSD       = false;
+        this->workgroupSizeX  = 256;
+        this->workgroupSizeY  = 1;
+        this->m               = 2 * this->macM;
+        this->n               = 3 * this->macN;
+        this->k               = 4 * this->macK;
+        this->alpha           = 2.1;
+        this->beta            = 0.75;
+        this->transA          = "T";
+        this->transB          = "N";
+    }
+};
 
-    // 2x2 jamming
-    uint wavesPerWGX = 4;
-    uint wavesPerWGY = 4;
-
-    gemm.waveM = waveM;
-    gemm.waveN = waveN;
-    gemm.waveK = waveK;
-
-    gemm.macM = wavesPerWGX * gemm.waveM;
-    gemm.macN = wavesPerWGY * gemm.waveN;
-    gemm.macK = 2 * gemm.waveK;
-
-    gemm.loadLDSA  = true;
-    gemm.loadLDSB  = true;
-    gemm.storeLDSD = false;
-
-    gemm.workgroupSizeX = 256;
-    gemm.workgroupSizeY = 1;
-
-    gemm.m = 2 * gemm.macM;
-    gemm.n = 3 * gemm.macN;
-    gemm.k = 4 * gemm.macK;
-
-    gemm.alpha = 2.1;
-    gemm.beta  = 0.75;
-
-    gemm.transA = "T";
-    gemm.transB = "N";
-
-    return gemm;
-}
-
-GEMMProblem setup_GEMMF8_TN()
+struct GEMMProblemF8TN : GEMMProblem
 {
-    GEMMProblem gemm;
+    GEMMProblemF8TN()
+        : GEMMProblem()
+    {
+        // 1x1 jamming
+        const int wavesPerWGX = 4;
+        const int wavesPerWGY = 1;
 
-    // 1x1 jamming
-    uint wavesPerWGX = 4;
-    uint wavesPerWGY = 1;
+        this->waveM = 16;
+        this->waveN = 16;
+        this->waveK = 32;
 
-    gemm.waveM = 16;
-    gemm.waveN = 16;
-    gemm.waveK = 32;
+        this->macM = wavesPerWGX * this->waveM;
+        this->macN = wavesPerWGY * this->waveN;
+        this->macK = 2 * this->waveK;
 
-    gemm.macM = wavesPerWGX * gemm.waveM;
-    gemm.macN = wavesPerWGY * gemm.waveN;
-    gemm.macK = 2 * gemm.waveK;
+        this->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->storeLDSD = false;
 
-    gemm.loadLDSA  = true;
-    gemm.loadLDSB  = true;
-    gemm.storeLDSD = false;
+        this->workgroupSizeX = 256;
+        this->workgroupSizeY = 1;
 
-    gemm.workgroupSizeX = 256;
-    gemm.workgroupSizeY = 1;
+        this->m = 33 * this->macM;
+        this->n = 17 * this->macN;
+        this->k = 4 * this->macK;
 
-    gemm.m = 33 * gemm.macM;
-    gemm.n = 17 * gemm.macN;
-    gemm.k = 4 * gemm.macK;
+        this->alpha = 2.1;
+        this->beta  = 0.75;
 
-    gemm.alpha = 2.1;
-    gemm.beta  = 0.75;
-
-    gemm.transA = "T";
-    gemm.transB = "N";
-
-    return gemm;
-}
+        this->transA = "T";
+        this->transB = "N";
+    }
+};

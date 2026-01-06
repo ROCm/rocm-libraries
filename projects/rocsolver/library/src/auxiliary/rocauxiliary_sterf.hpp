@@ -411,9 +411,9 @@ rocblas_status rocsolver_sterf_template(rocblas_handle handle,
         rocsolver_hybrid_storage<T, rocblas_int, U> hE;
         rocsolver_hybrid_storage<rocblas_int, rocblas_int, rocblas_int*> hInfo;
 
-        ROCBLAS_CHECK(hD.init_async(n, D + shiftD, strideD, batch_count, stream));
-        ROCBLAS_CHECK(hE.init_async(n - 1, E + shiftE, strideE, batch_count, stream));
-        ROCBLAS_CHECK(hInfo.init_async(1, info, 1, batch_count, stream));
+        ROCBLAS_CHECK(hD.init_async(n, D, shiftD, strideD, batch_count, stream));
+        ROCBLAS_CHECK(hE.init_async(n - 1, E, shiftE, strideE, batch_count, stream));
+        ROCBLAS_CHECK(hInfo.init_async(1, info, 0, 1, batch_count, stream));
         HIP_CHECK(hipStreamSynchronize(stream));
 
         for(rocblas_int b = 0; b < batch_count; b++)

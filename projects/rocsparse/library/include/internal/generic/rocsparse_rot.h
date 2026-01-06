@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -52,7 +52,7 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_rot supports the following uniform precision data types for the sparse and dense vectors x and 
+*  \p rocsparse_rot supports the following uniform precision data types for the sparse and dense vectors x and
 *  y and compute types for the scalars \f$c\f$ and \f$s\f$.
 *
 *  \par Uniform Precisions:
@@ -71,6 +71,9 @@ extern "C" {
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
+*
+*  \note
+*  This routine does not support batched computation.
 *
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.

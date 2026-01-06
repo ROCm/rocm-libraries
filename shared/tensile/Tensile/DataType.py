@@ -178,7 +178,7 @@ class DataType:
         {
             'char': 'F8',
             'name': 'float8',
-            'nameAbbrev': 'fp8_fp8',               # to match v_mfma inst 
+            'nameAbbrev': 'fp8_fp8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
             'enum': 'Float8',                      # mapping to new client c++ enum
             'reg': 0.25,
@@ -193,7 +193,7 @@ class DataType:
         {
             'char': 'B8',
             'name': 'bfloat8',
-            'nameAbbrev': 'bf8_bf8',               # to match v_mfma inst  
+            'nameAbbrev': 'bf8_bf8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
             'enum': 'BFloat8',                     # mapping to new client c++ enum
             'reg': 0.25,
@@ -208,7 +208,7 @@ class DataType:
         {
             'char': 'F8B8',
             'name': 'float8Bfloat8',
-            'nameAbbrev': 'fp8_bf8',               # to match v_mfma 
+            'nameAbbrev': 'fp8_bf8',               # to match v_mfma
             'miOutTypeNameAbbrev': 'f32',
             'enum': 'Float8BFloat8',               # mapping to new client c++ enum
             'reg': 0.25,
@@ -223,7 +223,7 @@ class DataType:
         {
             'char': 'B8F8',
             'name': 'bfloat8Float8',
-            'nameAbbrev': 'bf8_fp8',               # to match v_mfma 
+            'nameAbbrev': 'bf8_fp8',               # to match v_mfma
             'miOutTypeNameAbbrev': 'f32',
             'enum': 'BFloat8Float8',               # mapping to new client c++ enum
             'reg': 0.25,
@@ -328,7 +328,7 @@ class DataType:
         return self.value == DataType.float8Bfloat8
     def isBFloat8Float8(self):
         return self.value == DataType.bfloat8Float8
-    def is8bitFloat(self): 
+    def is8bitFloat(self):
         return (self.value == DataType.float8 \
                 or self.value == DataType.bfloat8 \
                 or self.value == DataType.float8Bfloat8 \
@@ -386,4 +386,3 @@ def populateLookupTable(properties,lookup):
             lookup[lookupKey] = i
 
 populateLookupTable(DataType.properties,DataType.lookup)
-

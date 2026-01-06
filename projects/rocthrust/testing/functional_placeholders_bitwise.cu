@@ -88,6 +88,9 @@ struct rebind_vector<thrust::universal_vector<T, Allocator>, U>
   VectorUnitTest<TestFunctionalPlaceholders##name, type_list, thrust::host_vector, std::allocator>                \
     TestFunctionalPlaceholders##name##HostInstance;
 
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
+
 BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitAnd, &, thrust::bit_and, SmallIntegralTypes);
 BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitOr, |, thrust::bit_or, SmallIntegralTypes);
 BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitXor, ^, thrust::bit_xor, SmallIntegralTypes);
@@ -102,7 +105,7 @@ struct bit_negate_reference
 };
 
 template <typename Vector>
-void TestFunctionalPlaceholdersBitNegate(void)
+void TestFunctionalPlaceholdersBitNegate()
 {
   using T           = typename Vector::value_type;
   using bool_vector = typename rebind_vector<Vector, bool>::type;
@@ -118,3 +121,5 @@ void TestFunctionalPlaceholdersBitNegate(void)
   ASSERT_EQUAL(reference, result);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestFunctionalPlaceholdersBitNegate);
+
+THRUST_DIAG_POP

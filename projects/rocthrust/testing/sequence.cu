@@ -22,7 +22,7 @@
 #include <unittest/unittest.h>
 
 template <typename ForwardIterator>
-THRUST_HOST_DEVICE void sequence(my_system& system, ForwardIterator, ForwardIterator)
+void sequence(my_system& system, ForwardIterator, ForwardIterator)
 {
   system.validate_dispatch();
 }
@@ -39,7 +39,7 @@ void TestSequenceDispatchExplicit()
 DECLARE_UNITTEST(TestSequenceDispatchExplicit);
 
 template <typename ForwardIterator>
-THRUST_HOST_DEVICE void sequence(my_tag, ForwardIterator first, ForwardIterator)
+void sequence(my_tag, ForwardIterator first, ForwardIterator)
 {
   *first = 13;
 }
@@ -62,27 +62,18 @@ void TestSequenceSimple()
 
   thrust::sequence(v.begin(), v.end());
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 2);
-  ASSERT_EQUAL(v[3], 3);
-  ASSERT_EQUAL(v[4], 4);
+  Vector ref{0, 1, 2, 3, 4};
+  ASSERT_EQUAL(v, ref);
 
   thrust::sequence(v.begin(), v.end(), value_type{10});
 
-  ASSERT_EQUAL(v[0], 10);
-  ASSERT_EQUAL(v[1], 11);
-  ASSERT_EQUAL(v[2], 12);
-  ASSERT_EQUAL(v[3], 13);
-  ASSERT_EQUAL(v[4], 14);
+  ref = {10, 11, 12, 13, 14};
+  ASSERT_EQUAL(v, ref);
 
   thrust::sequence(v.begin(), v.end(), value_type{10}, value_type{2});
 
-  ASSERT_EQUAL(v[0], 10);
-  ASSERT_EQUAL(v[1], 12);
-  ASSERT_EQUAL(v[2], 14);
-  ASSERT_EQUAL(v[3], 16);
-  ASSERT_EQUAL(v[4], 18);
+  ref = {10, 12, 14, 16, 18};
+  ASSERT_EQUAL(v, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestSequenceSimple);
 
@@ -136,7 +127,7 @@ void TestSequenceComplex()
 }
 DECLARE_UNITTEST(TestSequenceComplex);
 
-// A class that doesnt accept conversion from size_t but can be multiplied by a scalar
+// A class that does not accept conversion from size_t but can be multiplied by a scalar
 struct Vector
 {
   Vector() = default;

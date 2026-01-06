@@ -32,20 +32,25 @@ from typing import List, Optional
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Given a list of changed subtrees, determine which Azure pipelines to run.")
-    parser.add_argument("--subtree-file", required=True,
-                        help="Path to the file containing changed subtrees")
+        description="Given a list of changed subtrees, determine which Azure pipelines to run."
+    )
+    parser.add_argument(
+        "--subtree-file",
+        required=True,
+        help="Path to the file containing changed subtrees",
+    )
     return parser.parse_args(argv)
 
 
 def read_file_into_set(file_path):
     """Reads the project names from the file into a set."""
-    with open(file_path, 'r') as file:
+    with open(file_path, "r") as file:
         return {line.strip() for line in file}
 
 
 def resolve_dependencies(projects, dependencies):
     """Resolves projects to be run by checking all levels of dependencies."""
+
     def has_dependency(project, projects_set):
         """Recursively checks if a project has any dependencies in the projects_set."""
         if project not in dependencies:
@@ -69,6 +74,7 @@ def main(argv=None) -> None:
     # Mathlib build+test dependency tree as defined in Azure CI and TheRock
     math_dependencies = {
         "shared/tensile": {},
+        "shared/origami": {},
         "projects/rocrand": {},
         "projects/hiprand": {"projects/rocrand"},
         "projects/rocfft": {"projects/hiprand"},
@@ -85,7 +91,7 @@ def main(argv=None) -> None:
         "projects/hipsolver": {"projects/rocsolver", "projects/rocsparse"},
         "projects/hipsparse": {"projects/rocsparse"},
         "projects/hipsparselt": {"projects/hipsparse"},
-        "projects/miopen": {"projects/rocrand", "projects/hipblas"}
+        "projects/hiptensor": {},
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
     definition_ids = {
@@ -106,7 +112,9 @@ def main(argv=None) -> None:
         "projects/hipsolver": 322,
         "projects/hipsparse": 315,
         "projects/hipsparselt": 309,
-        "projects/miopen": 320
+        "shared/origami": 364,
+        "projects/rocwmma": 370,
+        "projects/hiptensor": 374,
     }
 
     args = parse_arguments(argv)

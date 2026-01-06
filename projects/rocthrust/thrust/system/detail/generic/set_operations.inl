@@ -473,4 +473,3 @@ OutputIterator set_union(thrust::execution_policy<DerivedPolicy> &,
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

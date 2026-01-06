@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_gtsv2_strided_batch_bad_arg(void)
+void testing_gtsv2_strided_batch_bad_arg(const Arguments& argus)
 {
     // Dont do bad argument checking for cuda
 #if(!defined(CUDART_VERSION))
@@ -120,7 +120,7 @@ void testing_gtsv2_strided_batch_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gtsv2_strided_batch(Arguments argus)
+void testing_gtsv2_strided_batch(Arguments argus)
 {
     int m           = argus.M;
     int batch_count = argus.batch_count;
@@ -248,8 +248,6 @@ hipsparseStatus_t testing_gtsv2_strided_batch(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GTSV2_NOPIVOT_STRIDED_BATCH_HPP

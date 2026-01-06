@@ -48,4 +48,3 @@ if len(sys.argv) > 2:
 out_args = ['docker', 'run'] + user_args + volume_args + interactive_args + [image] + command
 print(' '.join(out_args))
 subprocess.check_call(out_args)
-

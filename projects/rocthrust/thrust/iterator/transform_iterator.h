@@ -33,11 +33,23 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 // #include the details first
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/transform_iterator.inl>
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -68,7 +80,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor inherits from unary_function
  *  struct square_root : public thrust::unary_function<float,float>
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x) const
  *    {
  *      return sqrtf(x);
@@ -111,7 +123,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor inherits from unary_function
  *  struct square : public thrust::unary_function<float,float>
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x) const
  *    {
  *      return x * x;
@@ -152,7 +164,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor *does not* inherit from unary_function
  *  struct square_root
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x) const
  *    {
  *      return sqrtf(x);
@@ -195,7 +207,7 @@ public:
   using super_t =
     typename detail::make_transform_iterator_base<AdaptableUnaryFunction, Iterator, Reference, Value>::type;
 
-  friend class thrust::iterator_core_access;
+  friend class iterator_core_access;
   /*! \endcond
    */
 
@@ -236,8 +248,8 @@ public:
   template <typename OtherAdaptableUnaryFunction, typename OtherIterator, typename OtherReference, typename OtherValue>
   THRUST_HOST_DEVICE transform_iterator(
     const transform_iterator<OtherAdaptableUnaryFunction, OtherIterator, OtherReference, OtherValue>& other,
-    typename thrust::detail::enable_if_convertible<OtherIterator, Iterator>::type*                             = 0,
-    typename thrust::detail::enable_if_convertible<OtherAdaptableUnaryFunction, AdaptableUnaryFunction>::type* = 0)
+    thrust::detail::enable_if_convertible_t<OtherIterator, Iterator>*                             = 0,
+    thrust::detail::enable_if_convertible_t<OtherAdaptableUnaryFunction, AdaptableUnaryFunction>* = 0)
       : super_t(other.base())
       , m_f(other.functor())
   {}
@@ -254,14 +266,7 @@ public:
    */
   THRUST_HOST_DEVICE transform_iterator& operator=(const transform_iterator& other)
   {
-    return do_assign(other,
-    // XXX gcc 4.2.1 crashes on is_copy_assignable; just assume the functor is assignable as a WAR
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION <= 40201)
-                     thrust::detail::true_type()
-#else
-                     typename thrust::detail::is_copy_assignable<AdaptableUnaryFunction>::type()
-#endif // THRUST_HOST_COMPILER
-    );
+    return do_assign(other, _THRUST_STD::is_copy_assignable<AdaptableUnaryFunction>());
   }
 
   /*! This method returns a copy of this \p transform_iterator's \c AdaptableUnaryFunction.
@@ -295,22 +300,43 @@ private:
     return *this;
   }
 
-  // MSVC 2013 and 2015 incorrectly warning about returning a reference to
-  // a local/temporary here.
-  // See goo.gl/LELTNp
-  THRUST_DISABLE_MSVC_WARNING_BEGIN(4172)
+// MSVC 2013 and 2015 incorrectly warning about returning a reference to
+// a local/temporary here.
+// See goo.gl/LELTNp
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
+  THRUST_DIAG_PUSH
+  THRUST_DIAG_SUPPRESS_MSVC(4172)
+#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE typename super_t::reference dereference() const
   {
-    // Create a temporary to allow iterators with wrapped references to
-    // convert to their value type before calling m_f. Note that this
-    // disallows non-constant operations through m_f.
-    typename thrust::iterator_value<Iterator>::type const& x = *this->base();
+    // TODO(bgruber): we should ideally do as `std::ranges::transform_view::iterator` does:
+    // `return std::invoke(m_f, *this->base());` and return `decltype(auto)`. However, `*this->base()` may return a
+    // wrapped reference (`device_reference<T>`), which is a temporary value. If `m_f` forwards this value, e.g. as a
+    // `device_reference<T>&&` if `m_f` is `identity<void>`, (and `super_t::reference` is thus deduced as
+    // `device_reference<T>&&` as well), we return a dangling reference. So we cannot do as
+    // `std::ranges::transform_view::iterator` does.
+
+    // Interestingly, C++20 ranges have the same bug. The following program crashes because the transform iterator also
+    // returns a reference to an expired temporary (given by the iota iterator upon dereferencing)
+    //   for (auto e : std::views::iota(10) | std::views::transform(std::identity{}))
+    //     std::cout << e << '\n';
+    // See: https://godbolt.org/z/jrKcnMqhK
+
+    // The workaround is to create a temporary to allow iterators with wrapped/proxy references to convert to their
+    // value type before calling m_f. This also loads values from a different memory space (cf. `device_reference`).
+    // Note that this disallows mutable operations through m_f.
+    iterator_value_t<Iterator> const& x = *this->base();
+    // FIXME(bgruber): x may be a reference to a temporary (e.g. if the base iterator is a counting_iterator). If `m_f`
+    // does not produce an independent copy and super_t::reference is a reference, we return a dangling reference (e.g.
+    // for any `[thrust|::cuda::std]::identity` functor).
     return m_f(x);
   }
 
-  THRUST_DISABLE_MSVC_WARNING_END(4172)
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
+  THRUST_DIAG_POP
+#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
 
   // tag this as mutable per Dave Abrahams in this thread:
   // http://lists.boost.org/Archives/boost/2004/05/65332.php

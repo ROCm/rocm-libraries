@@ -120,6 +120,14 @@ inline void tuning_check(const std::string& err)
     default_check(err);
 }
 
+inline void compiler_check(const std::string& err)
+{
+    // the test should fail if kernel build failed.
+    EXPECT_FALSE(err.find("Error") != std::string::npos ||
+                 err.find("Code object build failed") != std::string::npos);
+    default_check(err);
+}
+
 inline void db_check(const std::string& err)
 {
     EXPECT_FALSE(err.find("Perf Db: record not found") != std::string::npos);
@@ -138,7 +146,8 @@ enum class Gpu : int
     gfx950  = 1 << 5,
     gfx103X = 1 << 6,
     gfx110X = 1 << 7,
-    gfx120X = 1 << 8,
+    gfx115X = 1 << 8,
+    gfx120X = 1 << 9,
     gfxLast = Gpu::gfx120X, // \note Change the value when adding a new device
     All     = -1
 };
@@ -194,7 +203,7 @@ public:
 
     // Add additional methods here if needed
     const std::string& Name() const override;
-    boost::optional<bool> Xnack() const override;
+    bool isXnackEnabled() const override;
 
 private:
     std::string name;

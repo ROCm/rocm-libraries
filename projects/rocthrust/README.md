@@ -6,14 +6,15 @@
 Thrust is a parallel algorithm library. It has been ported to
 [HIP](https://github.com/ROCm/HIP) and [ROCm](https://www.github.com/ROCm/ROCm), which use
 the [rocPRIM](https://github.com/ROCm/rocPRIM) library. The HIP-ported library
-works on HIP and ROCm software. Currently there is no CUDA backend in place.
+works on HIP and ROCm software.
 
 ## Requirements
 
 Software requirements include:
 
 * CMake (3.10.2 or later)
-* AMD [ROCm](https://rocm.docs.amd.com) Software (1.8.0 or later)
+* AMD [ROCm](https://rocm.docs.amd.com)
+  * The version of ROCm needs to correspond to the rocThrust branch you're using.
   * Including the [HipCC](https://github.com/ROCm/HIP) compiler, which must be set
     as your C++ compiler for ROCm
 * [rocPRIM](https://github.com/ROCm/rocPRIM) library
@@ -37,22 +38,47 @@ For ROCm hardware requirements, refer to:
 
 ## Build and install
 
+### Obtaining the source code
+
+rocThrust can be cloned in two ways:
+1.  Clone rocThrust along with other ROCm libraries that are frequently used together (note that this may take some time to complete):
 ```sh
-git clone https://github.com/ROCm/rocThrust
+git clone https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries
+```
 
-# Go to rocThrust directory, create and go to the build directory.
-cd rocThrust; mkdir build; cd build
+2. To clone rocThrust individually (faster, but requires git version 2.25+):
+```sh
+git clone --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries
+git sparse-checkout init --cone
+git sparse-checkout set projects/rocthrust
+git checkout develop
+```
 
-# Configure rocThrust, setup options for your system.
+### Building the library
+
+```sh
+# Go to the rocthrust directory
+cd projects/rocthrust
+
+# Create a directory for the build and go to it.
+mkdir build; cd build
+
 # Build options:
-#   DISABLE_WERROR        - ON  by default, This flag disable the -Werror compiler flag
-#   BUILD_TEST            - OFF by default,
-#   BUILD_HIPSTDPAR_TEST  - OFF by default,
-#   BUILD_EXAMPLE         - OFF by default,
-#   BUILD_BENCHMARK       - OFF by default,
-#   DOWNLOAD_ROCPRIM      - OFF by default, when ON rocPRIM will be downloaded to the build folder,
-#   RNG_SEED_COUNT        - 0 by default, controls non-repeatable random dataset count
-#   PRNG_SEEDS            - 1 by default, reproducible seeds to generate random data
+#   DISABLE_WERROR               - ON  by default, this flag disables the -Werror compiler flag
+#   BUILD_TEST                   - OFF by default,
+#   BUILD_HIPSTDPAR_TEST         - OFF by default,
+#   BUILD_EXAMPLE                - OFF by default,
+#   BUILD_BENCHMARK              - OFF by default,
+#   ROCPRIM_FETCH_METHOD         - PACKAGE is the default, see below for a description of available options
+#   ROCRAND_FETCH_METHOD         - PACKAGE is the default, see below for a description of available options
+#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (eg. Google Test / Benchmark)
+#   BUILD_ADDRESS_SANITIZER      - OFF by default, builds with clang address sanitizer enabled.
+#   RNG_SEED_COUNT               - 0 by default, controls non-repeatable random dataset count
+#   PRNG_SEEDS                   - 1 by default, reproducible seeds to generate random data
+#   USE_HIPCXX                   - OFF by default, builds with CMake HIP language support. This eliminates the need to set CXX.
+#   USE_SYSTEM_LIB               - OFF by default, builds tests using the installed ROCm libs provided by the system. This only takes effect when BUILD_TEST is ON.
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HipCC. You can do it by adding 'CXX=<path-to-hipcc>'
@@ -73,19 +99,42 @@ make package
 [sudo] make install
 ```
 
+### Build Options for Fetching Dependencies
+
+rocThrust can (optionally) automatically fetch a number of dependencies for you at cmake configuration time.
+Alternatively, it can seach for an existing installation on your system.
+The following cmake build options control how dependencies are located.
+
+- `EXTERNAL_DEPS_FORCE_DOWNLOAD` (default: `OFF`) - when set to `ON`, non-ROCm dependencies (Google Test, Google Benchmark) will always be downloaded, even if they are already installed ony your system. When set to `OFF`, rocThrust first searches for existing installations of the dependencies on your system, and only downloads them if they cannot be found.
+
+- `ROCPRIM_FETCH_METHOD` (default: `PACKAGE`) - controls the way that the rocPRIM dependency is fetched. This option must be set to one of:
+  - `PACKAGE` - searches for an existing installation of the dependency. If it is not found, rocThrust will fall back to using the `DOWNLOAD` setting (below).
+  - `DOWNLOAD` - downloads the dependency from the rocm-libraries repository. If git version 2.25+ is present, uses a [sparse checkout](https://git-scm.com/docs/git-sparse-checkout) to pull only rocThrust files. If not, the whole [rocm-libraries](https://github.com/ROCm/rocm-libraries/) repository will be downloaded (this may take some time).
+  - `MONOREPO` - this option is useful if you are building rocThrust from within a checkout of the rocm-libraries repository (which already includes rocPRIM and rocRAND). When enabled, rocThrust will try to find the dependency in the local repository tree. If it cannot be found, rocThrust will fall back to usign the `DOWNLOAD` option (above).
+- `ROCRAND_FETCH_METHOD` (default: `PACKAGE`) - this option is only considered when the `BUILD_BENCHMARKS` option is set to `ON`. It controls the way that the rocRAND dependency is fetched. See `ROCPRIM_FETCH_METHOD` (above) for available options.
+
+To specify an option, add it to your camke command, prefixed with the `-D` switch, (eg. `[CXX=hipcc] cmake -DFORCE_DEPENDENCIES_DOWNLOAD=ON -DROCPRIM_FETCH_METHOD="MONOREPO" ../.`).
+
 ### HIP on Windows
 
-We've added initial support for HIP on Windows. To install, use the provided `rmake.py` Python script:
+We've added initial support for HIP on Windows.
+To install, first clone rocThrust using the steps described in [obtaining the source code](#obtaining-the-source-code).
+Then, use the provided `rmake.py` Python script:
 
 ```shell
-git clone https://github.com/ROCm/rocThrust.git
-cd rocThrust
+cd projects/rocThrust
 
 # the -i option will install rocPRIM to C:\hipSDK by default
 python rmake.py -i
 
 # the -c option will build all clients including unit tests
 python rmake.py -c
+
+# to build for a specific architecture only, use the -a option
+python rmake.py -ci -a gfx1100
+
+# for a full list of available options, please refer to the help documentation
+python rmake.py -h
 ```
 
 ### Macro options
@@ -117,7 +166,7 @@ target_link_libraries(<your_target> roc::rocthrust)
 
 ```sh
 # Go to rocThrust build directory
-cd rocThrust; cd build
+cd projects/rocthrust; cd build
 
 # Configure with test flag on
 CXX=hipcc cmake -DBUILD_TEST=ON ..
@@ -156,7 +205,7 @@ There is a utility script in the repo that may be called independently:
 
 ```shell
 # Go to rocThrust build directory
-cd rocThrust; cd build
+cd projects/rocthrust; cd build
 
 # Invoke directly or use CMake script mode via cmake -P
 ../cmake/GenerateResourceSpec.cmake
@@ -214,7 +263,7 @@ There are two CMake configuration-time options that control random data fed to u
 
 ```sh
 # Go to rocThrust build directory
-cd rocThrust; cd build
+cd projects/rocthrust; cd build
 
 # Configure with example flag on
 CXX=hipcc cmake -DBUILD_EXAMPLE=ON ..
@@ -235,7 +284,7 @@ make -j4
 
 ```sh
 # Go to rocThrust build directory
-cd rocThrust; cd build
+cd projects/rocthrust; cd build
 
 # Configure with benchmark flag on
 CXX=hipcc cmake -DBUILD_BENCHMARK=ON ..
@@ -262,11 +311,11 @@ HIPSTDPAR is currently packaged along rocThrust. The `hipstdpar` package is set 
 ### Tests
 rocThrust also includes tests to check the correct building of HIPSTDPAR implementations. They are located in the [tests/hipstdpar](/test/hipstdpar/) folder. When configuring the project with the `BUILD_TEST` option, these tests will not be enabled by default. To enable them, set `BUILD_HIPSTDPAR_TEST=ON`. Additionally, you can configure only HIPSTDPAR's tests by disabling `BUILD_TEST` and enabling `BUILD_HIPSTDPAR_TEST`. In general, the following steps can be followed for building and running the tests:
 
+First, clone rocThrust using the steps described in [obtaining the source code](#obtaining-the-source-code).
+Then, build the tests as follows:
 ```sh
-git clone https://github.com/ROCm/rocThrust
-
 # Go to rocThrust directory, create and go to the build directory.
-cd rocThrust; mkdir build; cd build
+cd projects/rocthrust; mkdir build; cd build
 
 # Configure rocThrust.
 [CXX=hipcc] cmake ../. -D BUILD_TEST=ON # Configure rocThrust's tests.
@@ -327,9 +376,11 @@ pyenv activate venv_rocthrust
 
 ### Building
 
-After cloning this repository, and `cd`ing into it:
+After cloning this repository (see [obtaining the source code](#obtaining-the-source-code)):
 
 ```shell
+cd rocm-libraries/projects/rocthrust
+
 # Install Python dependencies
 python3 -m pip install -r docs/sphinx/requirements.txt
 
@@ -342,7 +393,10 @@ You can then open `docs/_build/html/index.html` in your browser to view the docu
 ## Support
 
 You can report bugs and feature requests through the GitHub
-[issue tracker](https://github.com/ROCm/rocThrust/issues).
+[issue tracker](https://github.com/ROCm/rocm-libraries/issues).
+To help ensure that your issue is seen by the right team more quicly, when creating your issue, please apply the label `project: rocthrust`.
+Similarly, to filter the exising issue list down to only those affecting rocThrust, you can add the filter `label:"project: rocthrust"`,
+or follow [this link](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22project%3A%20rocthrust%22).
 
 ## License
 

@@ -948,6 +948,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
     for(int sol = 0; sol < validIdx.size(); sol++)
     {
         // step3: Initialize
+        groupedGemm.setMaxWorkspaceBytes(max_workspace_size);
         CHECK_HIPBLASLT_ERROR(
             groupedGemm.initialize(heuristicResult[validIdx[sol]].algo, d_workspace));
 

@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -24,14 +24,13 @@
 #include <vector>
 
 #include <hipfft/hipfft.h>
+#include <hipfft/hipfftXt.h>
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
-
-#include "../hipfft_params.h"
 
 int main()
 {
@@ -73,12 +72,12 @@ int main()
     }
 
     // Define list of GPUs to use
-    std::array<int, 2> gpus = {0, 1};
+    std::vector<int> gpus = {0, 1};
 
     // Create the multi-gpu plan
     hipLibXtDesc* desc; // input descriptor
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
@@ -95,13 +94,13 @@ int main()
         throw std::runtime_error("hipfftXtSetGPUs failed.");
 
     // Make the 2D plan
-    size_t workSize[gpus.size()];
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize);
+    std::vector<size_t> workSize(gpus.size());
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
     // Copy input data to GPUs
-    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
     hipfft_rt                  = hipfftXtMalloc(plan, &desc, format);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtMalloc failed.");

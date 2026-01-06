@@ -28,12 +28,6 @@ For Ubuntu and Debian:
 
    sudo apt-get install hiprand
 
-For CentOS-based systems:
-
-.. code-block:: shell
-
-   sudo yum install hiprand
-
 For SLES:
 
 .. code-block:: shell
@@ -147,7 +141,8 @@ Here are the CMake options:
 * ``BUILD_ADDRESS_SANITIZER``: Builds with address sanitization enabled when set to ``ON``. Defaults to ``OFF``.
 * ``ROCRAND_PATH``: Specifies a rocRAND install other than the default system installed version.
 * ``DOWNLOAD_ROCRAND``: Downloads and installs rocRAND in the build directory when set to ``ON``. Defaults to ``OFF``.
-* ``DEPENDENCIES_FORCE_DOWNLOAD``: Downloads and builds the dependencies instead of using the system-installed dependencies when set to ``ON``. Defaults to ``OFF``.
+* ``EXTERNAL_DEPS_FORCE_DOWNLOAD``: Downloads and builds the external dependencies (everything except rocRAND) instead of using the system-installed dependencies when set to ``ON``. Defaults to ``OFF``.
+* ``ROCRAND_FETCH_METHOD``. Set this to the method to use to download rocRAND. Can be set to ``PACKAGE``, ``DOWNLOAD``, or ``MONOREPO``. Set to ``MONOREPO`` if rocRAND isn't already installed and you're building hipRAND from within a clone of the `rocm-libraries <https://github.com/ROCm/rocm-libraries/>`_ repository that also includes rocRAND. Set to ``DOWNLOAD`` if rocRAND isn't installed and you aren't in a clone of the ``rocm-libraries`` repository that includes rocRAND. ``DOWNLOAD`` will clone the repository using sparse checkout so that only the necessary files are downloaded. Set to ``PACKAGE`` if rocRAND is already installed. If you specify ``PACKAGE`` but rocRAND isn't installed, the files will be downloaded using the same method as the ``DOWNLOAD`` option. The default method is ``PACKAGE``.
 
 If you are using ``ROCRAND_PATH`` or ``DOWNLOAD_ROCRAND`` when rocRAND is already installed in the default location,
 you must use the ``CMAKE_NO_SYSTEM_FROM_IMPORTED=ON`` option to configure the project.

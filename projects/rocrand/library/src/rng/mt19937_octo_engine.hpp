@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -188,7 +188,7 @@ struct mt19937_octo_engine
     {
         const unsigned int y
             = (mt_i & mt19937_constants::upper_mask) | (mt_i_1 & mt19937_constants::lower_mask);
-        const unsigned int mag = (y & 0x1U) * mt19937_constants::matrix_a;
+        unsigned int mag = ((y & 1) ? -1 : 0) & mt19937_constants::matrix_a;
         return mt_i_m ^ (y >> 1) ^ mag;
     }
 

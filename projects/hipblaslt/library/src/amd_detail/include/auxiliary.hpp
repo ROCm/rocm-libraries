@@ -151,15 +151,14 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
 HIPBLASLT_EXPORT
 constexpr const char* hipblas_computetype_to_string(hipblasComputeType_t type)
 {
-    return 
-        type == HIPBLAS_COMPUTE_16F ? "f16_r" :
-        type == HIPBLAS_COMPUTE_32F ? "f32_r" :
-        type == HIPBLAS_COMPUTE_32F_FAST_TF32 ? "xf32_r" :
-        type == HIPBLAS_COMPUTE_64F ? "f64_r" :
-        type == HIPBLAS_COMPUTE_32I ? "i32_r" :
-        type == HIPBLAS_COMPUTE_32F_FAST_16F ? "f32_f16_r" :
-        type == HIPBLAS_COMPUTE_32F_FAST_16BF ? "f32_bf16_r" :
-        "non-supported compute type";
+    return type == HIPBLAS_COMPUTE_16F             ? "f16_r"
+           : type == HIPBLAS_COMPUTE_32F           ? "f32_r"
+           : type == HIPBLAS_COMPUTE_32F_FAST_TF32 ? "xf32_r"
+           : type == HIPBLAS_COMPUTE_64F           ? "f64_r"
+           : type == HIPBLAS_COMPUTE_32I           ? "i32_r"
+           : type == HIPBLAS_COMPUTE_32F_FAST_16F  ? "f32_f16_r"
+           : type == HIPBLAS_COMPUTE_32F_FAST_16BF ? "f32_bf16_r"
+                                                   : "non-supported compute type";
 }
 
 // clang-format off
@@ -243,6 +242,8 @@ constexpr hipblasLtEpilogue_t string_to_epilogue_type(const std::string& value)
         value == "HIPBLASLT_EPILOGUE_RELU_BIAS" ? HIPBLASLT_EPILOGUE_RELU_BIAS :
         value == "HIPBLASLT_EPILOGUE_GELU" ? HIPBLASLT_EPILOGUE_GELU :
         value == "HIPBLASLT_EPILOGUE_GELU_BIAS" ? HIPBLASLT_EPILOGUE_GELU_BIAS :
+        value == "HIPBLASLT_EPILOGUE_RELU_AUX" ? HIPBLASLT_EPILOGUE_RELU_AUX :
+        value == "HIPBLASLT_EPILOGUE_RELU_AUX_BIAS" ? HIPBLASLT_EPILOGUE_RELU_AUX_BIAS:
         value == "HIPBLASLT_EPILOGUE_GELU_AUX" ? HIPBLASLT_EPILOGUE_GELU_AUX :
         value == "HIPBLASLT_EPILOGUE_GELU_AUX_BIAS" ? HIPBLASLT_EPILOGUE_GELU_AUX_BIAS :
         value == "HIPBLASLT_EPILOGUE_DGELU" ? HIPBLASLT_EPILOGUE_DGELU :
@@ -253,6 +254,8 @@ constexpr hipblasLtEpilogue_t string_to_epilogue_type(const std::string& value)
         value == "HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT" ? HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT :
         value == "HIPBLASLT_EPILOGUE_CLAMP_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_EXT :
         value == "HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT :
+        value == "HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT :
+        value == "HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT :
         value == "HIPBLASLT_EPILOGUE_DEFAULT" || value == "" ? HIPBLASLT_EPILOGUE_DEFAULT :
         static_cast<hipblasLtEpilogue_t>(0);
 }
@@ -320,7 +323,6 @@ __host__ __device__ inline bool hipblaslt_isnan(hipblaslt_bf8_fnuz arg)
 {
     return arg.is_nan();
 }
-
 
 __host__ __device__ inline bool hipblaslt_isnan(hipblaslt_f8 arg)
 {

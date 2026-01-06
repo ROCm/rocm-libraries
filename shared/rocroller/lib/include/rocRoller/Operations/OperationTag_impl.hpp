@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <rocRoller/Operations/OperationTag.hpp>
+
 namespace rocRoller
 {
     namespace Operations

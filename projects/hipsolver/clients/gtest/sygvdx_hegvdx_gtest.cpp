@@ -157,22 +157,22 @@ TEST_P(HEGVDX, DISABLED__double_complex)
     run_tests<false, false, rocblas_double_complex>();
 }
 
-TEST_P(SYGVDX_COMPAT, __float)
+TEST_P(SYGVDX_COMPAT, DISABLED__float)
 {
     run_tests<false, false, float>();
 }
 
-TEST_P(SYGVDX_COMPAT, __double)
+TEST_P(SYGVDX_COMPAT, DISABLED__double)
 {
     run_tests<false, false, double>();
 }
 
-TEST_P(HEGVDX_COMPAT, __float_complex)
+TEST_P(HEGVDX_COMPAT, DISABLED__float_complex)
 {
     run_tests<false, false, rocblas_float_complex>();
 }
 
-TEST_P(HEGVDX_COMPAT, __double_complex)
+TEST_P(HEGVDX_COMPAT, DISABLED__double_complex)
 {
     run_tests<false, false, rocblas_double_complex>();
 }

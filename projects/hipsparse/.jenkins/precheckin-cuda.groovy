@@ -9,7 +9,7 @@ import com.amd.project.*
 import com.amd.docker.*
 import java.nio.file.Path;
 
-def runCI = 
+def runCI =
 {
     nodeDetails, jobName->
 
@@ -38,7 +38,7 @@ def runCI =
     def packageCommand =
     {
         platform, project->
-        
+
         commonGroovy.runPackageCommand(platform, project)
     }
 
@@ -54,7 +54,7 @@ def runCI =
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
 }
 
-ci: { 
+ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
     def propertyList = [:]
@@ -76,17 +76,13 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(jobName) {
-                runCI(nodeDetails, jobName)
-            }
+            runCI(nodeDetails, jobName)
     }
 
     // For url job names that are not listed by the jobNameList i.e. compute-rocm-dkms-no-npi-1901
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * 6')])]))
-        stage(urlJobName) {
-            runCI(['ubuntu22-cuda12':['anycuda']], urlJobName)
-        }
+        runCI(['ubuntu22-cuda12':['anycuda']], urlJobName)
     }
 }

@@ -2,6 +2,33 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.2.0 for ROCm 7.2.0
+
+### Added
+
+* Support for 'BF16' input with 'FP32' output data type for gfx90a.
+* Support for hipBLASLtExt operation APIs on gfx11XX and gfx12XX.
+
+## hipBLASLt 1.1.0 for ROCm 7.1.0
+
+### Added
+
+* Fused Clamp GEMM for ``HIPBLASLT_EPILOGUE_CLAMP_EXT`` and ``HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT``. This feature requires the minimum (``HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT``) and maximum (``HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT``) to be set.
+* Support for ReLU/Clamp activation functions with auxiliary output for the `f16` and `bf16` data types for gfx942 to capture intermediate results. This feature is enabled for ``HIPBLASLT_EPILOGUE_RELU_AUX``, ``HIPBLASLT_EPILOGUE_RELU_AUX_BIAS``, ``HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT``, and ``HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT``.
+* Support for `HIPBLAS_COMPUTE_32F_FAST_16BF` for FP32 data type for gfx950 only.
+* Added the CPP extension APIs ``setMaxWorkspaceBytes`` and ``getMaxWorkspaceBytes``.
+* Added the ability to print logs (using ``HIPBLASLT_LOG_MASK=32``) for Grouped GEMM.
+* Support for swizzleA by using the hipblaslt-ext cpp API.
+* Support for hipBLASLt extop for gfx11xx and gfx12xx.
+
+### Changed
+
+* ``hipblasLtMatmul()`` now returns an error when the workspace size is insufficient, rather than causing a segmentation fault.
+
+### Resolved issues
+
+* Fix incorrect results when using ldd and ldc with some solutions
+
 ## hipBLASLt 1.0.0 for ROCm 7.0.0
 
 ### Added

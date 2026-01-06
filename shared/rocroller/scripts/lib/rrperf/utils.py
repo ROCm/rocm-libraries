@@ -25,9 +25,11 @@
 
 import datetime
 import functools
+import json
 import os
 import subprocess
-
+from dataclasses import asdict, fields
+from hashlib import sha1
 from pathlib import Path
 
 import rrperf
@@ -92,11 +94,20 @@ def get_build_dir() -> Path:
     varname = "ROCROLLER_BUILD_DIR"
     if varname in os.environ:
         return Path(os.environ[varname])
-    default = rrperf.git.top() / "build"
+    default = rrperf.git.top() / "shared" / "rocroller" / "build"
     if default.is_dir():
         return default
 
     raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
+
+
+def get_dataclass_id(obj):
+    obj_dict = asdict(obj)
+    for f in fields(obj):
+        if not f.compare:
+            del obj_dict[f.name]
+    data_str = json.dumps(obj_dict, sort_keys=True)
+    return sha1(data_str.encode()).hexdigest()
 
 
 @functools.cache

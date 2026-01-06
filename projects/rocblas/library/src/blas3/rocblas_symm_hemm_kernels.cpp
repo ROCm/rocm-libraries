@@ -1530,4 +1530,3 @@ INSTANTIATE_HEMM_SYMM_NUMERICS( true, rocblas_double_complex const* const*, rocb
 #undef DSYMM_BATCHED_MIN_NB
 #undef CSYMM_BATCHED_MIN_NB
 #undef ZSYMM_BATCHED_MIN_NB
-

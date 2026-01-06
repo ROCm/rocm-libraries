@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -39,10 +39,10 @@ extern "C" {
 *  \p rocsparse_check_spmat checks if the input matrix is valid.
 *
 *  \p rocsparse_check_spmat requires two steps to complete. First the user calls \p rocsparse_check_spmat
-*  with the stage parameter set to \ref rocsparse_check_spmat_stage_buffer_size which determines the 
+*  with the stage parameter set to \ref rocsparse_check_spmat_stage_buffer_size which determines the
 *  size of the temporary buffer needed in the second step. The user allocates this buffer and calls
 *  \p rocsparse_check_spmat with the stage parameter set to \ref rocsparse_check_spmat_stage_compute
-*  which checks the input matrix for errors. Any detected errors in the input matrix are reported in the 
+*  which checks the input matrix for errors. Any detected errors in the input matrix are reported in the
 *  \p data_status (passed to the function as a host pointer).
 *
 *  \par Uniform Precisions:
@@ -72,6 +72,9 @@ extern "C" {
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.
 *  @param[in]
@@ -95,8 +98,8 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_value the value of stage is incorrect.
 *
 *  \par Example
-*  In this example we want to check whether a matrix is upper triangular. The matrix passed to 
-*  \ref rocsparse_check_spmat is invalid because it contains an entry in the lower triangular 
+*  In this example we want to check whether a matrix is upper triangular. The matrix passed to
+*  \ref rocsparse_check_spmat is invalid because it contains an entry in the lower triangular
 *  part of the matrix.
 *  \snippet example_rocsparse_check_spmat.cpp doc example
 */

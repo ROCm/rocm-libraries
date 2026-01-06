@@ -20,7 +20,7 @@
 # ########################################################################
 
 # This is incremented when the ABI to the library changes
-set( hipblas_SOVERSION 3.1 )
+set( hipblas_SOVERSION 3.3 )
 
 list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 

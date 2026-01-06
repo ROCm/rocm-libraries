@@ -35,6 +35,12 @@
 #include "lib_macros.hpp"
 #include "libcommon.hpp"
 
+#if defined(__GFX9__)
+__device__ static constexpr int WarpSize = 64;
+#else
+__device__ static constexpr int WarpSize = 32;
+#endif
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*
@@ -1025,6 +1031,64 @@ ROCSOLVER_KERNEL void set_zero(const rocblas_int m,
             T* Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
             Ap[i + j * lda] = 0.0;
         }
+    }
+}
+
+/** Eigensolver scalar case (n=1) **/
+template <typename T, typename U, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+ROCSOLVER_KERNEL void syev_scalar_case(const rocblas_evect evect,
+                                       U AA,
+                                       const rocblas_stride strideA,
+                                       T* DD,
+                                       const rocblas_stride strideD,
+                                       rocblas_int bc)
+{
+    int b = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    if(b < bc)
+    {
+        T* A = load_ptr_batch<T>(AA, b, 0, strideA);
+        T* D = DD + b * strideD;
+        D[0] = std::real(A[0]);
+
+        if(evect == rocblas_evect_original)
+            A[0] = T(1);
+    }
+}
+
+/** Eigensolver scalar case (n=1) **/
+template <typename T, typename S, typename U, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+ROCSOLVER_KERNEL void syev_scalar_case(const rocblas_evect evect,
+                                       U AA,
+                                       const rocblas_stride strideA,
+                                       S* DD,
+                                       const rocblas_stride strideD,
+                                       rocblas_int bc)
+{
+    int b = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    if(b < bc)
+    {
+        T* A = load_ptr_batch<T>(AA, b, 0, strideA);
+        S* D = DD + b * strideD;
+        D[0] = A[0].real();
+
+        if(evect == rocblas_evect_original)
+            A[0] = T(1);
+    }
+}
+
+template <typename T>
+ROCSOLVER_KERNEL void sygv_update_info(T* info, T* iinfo, const rocblas_int n, const rocblas_int bc)
+{
+    int b = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    if(b < bc)
+    {
+        if(info[b] != 0)
+            info[b] += n;
+        else
+            info[b] = iinfo[b];
     }
 }
 

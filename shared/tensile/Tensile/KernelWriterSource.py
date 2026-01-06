@@ -2391,7 +2391,7 @@ class KernelWriterSource(KernelWriter):
   ##############################################################################
   def doneGlobalABReads(self, kernel):
     return ""
-  
+
   ##############################################################################
   # Local Write: Swap Offsets A/B
   ##############################################################################
@@ -3379,4 +3379,3 @@ class KernelWriterSource(KernelWriter):
   ##############################################################################
   def isSwapGlobalReadOrderForDtvOrDtl(self, kernel):
     return False
-

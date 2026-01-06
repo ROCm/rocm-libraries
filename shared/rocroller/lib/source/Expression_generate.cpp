@@ -54,6 +54,13 @@ namespace rocRoller
     {
         struct ExpressionHasDFTagVisitor
         {
+            template <CNary Expr>
+            bool operator()(Expr const& expr) const
+            {
+                return std::ranges::any_of(expr.operands,
+                                           [this](auto const& operand) { return call(operand); });
+            }
+
             template <CTernary Expr>
             bool operator()(Expr const& expr) const
             {
@@ -934,6 +941,14 @@ namespace rocRoller
                 co_yield generateOp<BitFieldExtract>(dest, arg, expr);
             }
 
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Reinterpret const& expr)
+            {
+                co_yield call(dest, expr.arg);
+                AssertFatal(dest != nullptr,
+                            "Reinterpret expression must have a destination register.");
+                dest->setVariableType(expr.destinationType);
+            }
+
             Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
             {
 
@@ -1026,6 +1041,48 @@ namespace rocRoller
                 }
 
                 co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, mi, maybeScaleBlockSize);
+            }
+
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Concatenate const& expr)
+            {
+                // TODO: this transform is required the copier generates incorrect code for 64 bit literals
+                auto cpy = splitConcatenate(expr);
+
+                auto                    destResultType = resultType(cpy);
+                std::vector<ResultType> operandResultTypes;
+                std::ranges::transform(cpy.operands,
+                                       std::back_inserter(operandResultTypes),
+                                       [](auto const& operand) { return resultType(operand); });
+
+                if(dest == nullptr)
+                {
+                    dest = Register::Value::Placeholder(
+                        m_context, destResultType.regType, destResultType.varType, 1);
+                }
+                else
+                {
+                    auto const expectDestRegisterCount
+                        = DataTypeInfo::Get(destResultType.varType).registerCount;
+                    auto const actualDestRegisterCount = dest->registerCount();
+                    AssertFatal(expectDestRegisterCount == actualDestRegisterCount,
+                                "Destination size mismatch.",
+                                ShowValue(expectDestRegisterCount),
+                                ShowValue(actualDestRegisterCount));
+                }
+
+                unsigned offset = 0;
+                for(size_t i = 0; i < cpy.operands.size(); ++i)
+                {
+                    auto const& operand           = cpy.operands[i];
+                    auto const& operandResultType = operandResultTypes[i];
+                    auto        length = DataTypeInfo::Get(operandResultType.varType).registerCount;
+
+                    auto operandDest
+                        = dest->subset(iota<int>(offset, offset + length).to<std::vector>());
+                    offset = offset + length;
+
+                    co_yield call(operandDest, operand);
+                }
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)
@@ -1251,7 +1308,6 @@ namespace rocRoller
                    && getConsolidationCount(tree) == 0))
             {
                 // Don't use CSE in this case
-
                 tree.resize(0);
                 co_yield v.call(dest, expr);
             }

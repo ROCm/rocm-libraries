@@ -329,6 +329,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -367,6 +368,9 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(3, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
@@ -436,6 +440,9 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(3, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
@@ -931,6 +938,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1013,6 +1021,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1065,6 +1074,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1140,6 +1150,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }

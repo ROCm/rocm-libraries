@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ target_include_directories( rocfft_rtc_helper
 # To find rocm libraries need the relative RPATH
 set(APPEND_ROCMLIB_RPATH "\$ORIGIN/../../../lib")
 target_link_libraries( rocfft_rtc_helper PRIVATE rocfft-rtc-compile )
-set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON
+set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON
                                          INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}" )
 target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
@@ -151,7 +151,7 @@ set( kgen_logic_files
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
      ${CMAKE_SOURCE_DIR}/library/src/device/generator.py
-     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_lds.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_arch.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrr.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcc.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcr.py
@@ -247,6 +247,7 @@ set( rocfft_source
   tree_node_real.cpp
   fuse_shim.cpp
   assignment_policy.cpp
+  callback_map.cpp
   node_factory.cpp
   enum_printer.cpp
   rtc_exports.cpp
@@ -341,7 +342,7 @@ foreach( target
   set_target_properties( ${target} PROPERTIES
     CXX_VISIBILITY_PRESET "hidden"
     VISIBILITY_INLINES_HIDDEN ON
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
   )
@@ -402,9 +403,12 @@ add_library( rocfft
 rocfft_add_coverage_flags( rocfft )
 
 # rocFFT contains default implementations of callback functions that
-# need to be built as relocatable device code
-target_compile_options( rocfft PRIVATE -fgpu-rdc )
-target_link_options( rocfft PRIVATE -fgpu-rdc )
+# need to be built as relocatable device code (causes failure at link
+# stage on Windows)
+if (NOT WIN32)
+  target_compile_options( rocfft PRIVATE -fgpu-rdc )
+  target_link_options( rocfft PRIVATE -fgpu-rdc )
+endif()
 
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)
@@ -445,7 +449,7 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
   set_target_properties( ${target} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
   )
   rocfft_link_internal_lib( ${target} rocfft-rtc-cache )
@@ -551,6 +555,8 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1101 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1102 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1151 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
   add_custom_command(
     OUTPUT rocfft_kernel_cache.db

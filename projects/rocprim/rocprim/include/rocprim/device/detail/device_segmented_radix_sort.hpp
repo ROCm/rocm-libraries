@@ -730,7 +730,7 @@ public:
 };
 
 template<
-    class Config,
+    class ArchConfig,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -752,7 +752,7 @@ void segmented_sort(KeysInputIterator keys_input,
                     unsigned int begin_bit,
                     unsigned int end_bit)
 {
-    static constexpr segmented_radix_sort_config_params params = device_params<Config>();
+    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
 
     static constexpr unsigned int radix_bits        = params.radix_bits;
     static constexpr unsigned int block_size        = params.kernel_config.block_size;
@@ -863,7 +863,7 @@ void segmented_sort(KeysInputIterator keys_input,
 }
 
 template<
-    class Config,
+    class ArchConfig,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -887,7 +887,7 @@ void segmented_sort_large(KeysInputIterator keys_input,
                           unsigned int begin_bit,
                           unsigned int end_bit)
 {
-    static constexpr segmented_radix_sort_config_params params = device_params<Config>();
+    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
 
     static constexpr unsigned int radix_bits       = params.radix_bits;
     static constexpr unsigned int block_size       = params.kernel_config.block_size;
@@ -966,7 +966,7 @@ void segmented_sort_large(KeysInputIterator keys_input,
 }
 
 template<
-    class Config,
+    class ArchConfig,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -990,7 +990,7 @@ void segmented_sort_small(KeysInputIterator keys_input,
                           unsigned int begin_bit,
                           unsigned int end_bit)
 {
-    static constexpr segmented_radix_sort_config_params params = device_params<Config>();
+    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
 
     static constexpr unsigned int block_size = params.warp_sort_config.block_size_small;
     static constexpr unsigned int logical_warp_size
@@ -1045,7 +1045,7 @@ void segmented_sort_small(KeysInputIterator keys_input,
                                  storage);
 }
 
-template<class Config,
+template<class ArchConfig,
          bool Descending,
          class KeysInputIterator,
          class KeysOutputIterator,
@@ -1068,7 +1068,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void segmented_sort_medium(
     unsigned int                                                    begin_bit,
     unsigned int                                                    end_bit)
 {
-    static constexpr segmented_radix_sort_config_params params = device_params<Config>();
+    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
 
     static constexpr unsigned int block_size = params.warp_sort_config.block_size_medium;
     static constexpr unsigned int logical_warp_size

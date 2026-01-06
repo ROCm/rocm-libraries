@@ -114,8 +114,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csr_bufferSize(hipsparseHandle_t         ha
  *
  *  \details
  *  \p hipsparseXpruneCsr2csr_bufferSizeExt returns the size of the temporary buffer that
- *  is required by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" and 
- *  \ref hipsparseSpruneCsr2csr "hipsparseXpruneCsr2csr()". The temporary storage buffer 
+ *  is required by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" and
+ *  \ref hipsparseSpruneCsr2csr "hipsparseXpruneCsr2csr()". The temporary storage buffer
  *  must be allocated by the user.
  *
  *  @param[in]
@@ -233,11 +233,11 @@ hipsparseStatus_t hipsparseDpruneCsr2csr_bufferSizeExt(hipsparseHandle_t        
  *  @param[out]
  *  nnzTotalDevHostPtr total number of nonzero elements in device or host memory.
  *  @param[out]
- *  buffer             buffer allocated by the user whose size is determined by calling \ref hipsparseSpruneCsr2csr_bufferSize 
+ *  buffer             buffer allocated by the user whose size is determined by calling \ref hipsparseSpruneCsr2csr_bufferSize
  *                     "hipsparseXpruneCsr2csr_bufferSize()".
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p threshold, \p descrA, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p threshold, \p descrA,
  *              \p descrC, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr
  *              or \p buffer pointer is invalid.
 */
@@ -283,12 +283,12 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnz(hipsparseHandle_t         handle,
  *  \details
  *  This function converts the sparse CSR matrix A into a sparse CSR matrix C by pruning values in A
  *  that are less than the threshold. All the parameters are assumed to have been pre-allocated by the user.
- *  The user first calls \ref hipsparseSpruneCsr2csr_bufferSize "hipsparseXpruneCsr2csr_bufferSize()" to 
- *  determine the size of the buffer used by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" 
- *  and \p hipsparseXpruneCsr2csr() which the user then allocates. The user then allocates \p csrRowPtrC to 
- *  have \p m+1 elements and then calls hipsparseXpruneCsr2csrNnz() which fills in the \p csrRowPtrC array 
- *  stores then number of elements that are larger than the pruning \p threshold in \p nnzTotalDevHostPtr. 
- *  The user then calls \p hipsparseXpruneCsr2csr() to complete the conversion. It is executed asynchronously 
+ *  The user first calls \ref hipsparseSpruneCsr2csr_bufferSize "hipsparseXpruneCsr2csr_bufferSize()" to
+ *  determine the size of the buffer used by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()"
+ *  and \p hipsparseXpruneCsr2csr() which the user then allocates. The user then allocates \p csrRowPtrC to
+ *  have \p m+1 elements and then calls hipsparseXpruneCsr2csrNnz() which fills in the \p csrRowPtrC array
+ *  stores then number of elements that are larger than the pruning \p threshold in \p nnzTotalDevHostPtr.
+ *  The user then calls \p hipsparseXpruneCsr2csr() to complete the conversion. It is executed asynchronously
  *  with respect to the host and may return control to the application on the host before the entire result is ready.
  *
  *  @param[in]
@@ -322,7 +322,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnz(hipsparseHandle_t         handle,
  *  @param[out]
  *  csrColIndC    array of \p nnzC elements containing the column indices of the sparse CSR matrix C.
  *  @param[in]
- *  buffer        buffer allocated by the user whose size is determined by calling \ref hipsparseSpruneCsr2csr_bufferSize 
+ *  buffer        buffer allocated by the user whose size is determined by calling \ref hipsparseSpruneCsr2csr_bufferSize
  *                "hipsparseXpruneCsr2csr_bufferSize()".
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.

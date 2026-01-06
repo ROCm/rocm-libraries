@@ -120,6 +120,29 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    int ControlToCoordinateMapper::getConnectionSubdimension(int control, int coordinate) const
+    {
+        auto iter = m_map.find(control);
+        AssertFatal(iter != m_map.end());
+
+        for(auto const& [conn, coord] : iter->second)
+        {
+            if(coord == coordinate)
+            {
+                if(std::holds_alternative<Connections::TypeAndSubDimension>(conn))
+                {
+                    auto curConnection = std::get<Connections::TypeAndSubDimension>(conn);
+                    return curConnection.subdimension;
+                }
+                else
+                {
+                    return -1;
+                }
+            }
+        }
+        return -1;
+    }
+
     void ControlToCoordinateMapper::purge(int control)
     {
         auto iter = m_map.find(control);
@@ -216,37 +239,12 @@ namespace rocRoller::KernelGraph
             return std::visit(rocRoller::overloaded{
                                   [](std::monostate const&) { return "none"; },
                                   [](JustNaryArgument const&) { return "NaryArgument"; },
-                                  [](ComputeIndex const&) { return "ComputeIndex"; },
                                   [](TypeAndSubDimension const&) { return "TypeAndSubDimension"; },
                                   [](TypeAndNaryArgument const&) { return "TypeAndNaryArgument"; },
+                                  [](UnrollStride const&) { return "UnrollStride"; },
+                                  [](BaseOffset const&) { return "BaseOffset"; },
                               },
                               cs);
-        }
-
-        std::string toString(ComputeIndexArgument cia)
-        {
-            switch(cia)
-            {
-            case ComputeIndexArgument::TARGET:
-                return "TARGET";
-            case ComputeIndexArgument::INCREMENT:
-                return "INCREMENT";
-            case ComputeIndexArgument::BASE:
-                return "BASE";
-            case ComputeIndexArgument::OFFSET:
-                return "OFFSET";
-            case ComputeIndexArgument::STRIDE:
-                return "STRIDE";
-            case ComputeIndexArgument::BUFFER:
-                return "BUFFER";
-            default:
-                return "Invalid";
-            }
-        }
-
-        std::ostream& operator<<(std::ostream& stream, ComputeIndexArgument const& cia)
-        {
-            return stream << toString(cia);
         }
 
         struct CSToStringVisitor
@@ -261,14 +259,19 @@ namespace rocRoller::KernelGraph
                 return toString(n.argument);
             }
 
-            std::string operator()(ComputeIndex const& ci) const
-            {
-                return concatenate(ci.argument, ": (", ci.index, ")");
-            }
-
             std::string operator()(TypeAndSubDimension const& ci) const
             {
                 return concatenate(ci.id, ": (", ci.subdimension, ")");
+            }
+
+            std::string operator()(UnrollStride const& ci) const
+            {
+                return concatenate(ci.unrollStride, ": (", ci.unrollDimension, ")");
+            }
+
+            std::string operator()(BaseOffset const& ci) const
+            {
+                return concatenate(ci.base, ": (", ci.subdimension, ")");
             }
 
             std::string operator()(TypeAndNaryArgument const& ci) const

@@ -150,135 +150,28 @@ rocsparse_status rocsparse::bsrsm_analysis_core(rocsparse_handle          handle
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Switch between lower and upper triangular analysis
-    if(descr->fill_mode == rocsparse_fill_mode_upper)
+    // Differentiate the analysis policies
+    if(analysis == rocsparse_analysis_policy_reuse)
     {
-        // Differentiate the analysis policies
-        if(analysis == rocsparse_analysis_policy_reuse)
+        auto trm = info->get_bsrsm_info(trans_A, descr->fill_mode);
+
+        trm = (trm != nullptr) ? trm : info->get_bsrsv_info(trans_A, descr->fill_mode);
+        if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans_A == rocsparse_operation_none))
         {
-            // We try to re-use already analyzed upper part, if available.
-            // It is the user's responsibility that this data is still valid,
-            // since he passed the 'reuse' flag.
-
-            // If bsrsm meta data is already available, do nothing
-            if(trans_A == rocsparse_operation_none && info->bsrsm_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_transpose && info->bsrsmt_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-
-            // Check for other upper analysis meta data
-
-            if(trans_A == rocsparse_operation_none && info->bsrsv_upper_info != nullptr)
-            {
-                // bsrsv meta data
-                info->bsrsm_upper_info = info->bsrsv_upper_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans_A == rocsparse_operation_transpose && info->bsrsvt_upper_info != nullptr)
-            {
-                // bsrsv meta data
-                info->bsrsmt_upper_info = info->bsrsvt_upper_info;
-                return rocsparse_status_success;
-            }
+            trm = (trm != nullptr) ? trm : info->get_bsric0_info(trans_A, descr->fill_mode);
+            trm = (trm != nullptr) ? trm : info->get_bsrilu0_info(trans_A, descr->fill_mode);
         }
 
-        // User is explicitly asking to force a re-analysis, or no valid data has been
-        // found to be re-used
-
-        rocsparse::trm_info_t** p_trm_info = (trans_A == rocsparse_operation_none)
-                                                 ? &info->bsrsm_upper_info
-                                                 : &info->bsrsmt_upper_info;
-
-        rocsparse::trm_info_t::recreate(p_trm_info);
-
-        // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
-                                                          trans_A,
-                                                          mb,
-                                                          nnzb,
-                                                          descr,
-                                                          bsr_val,
-                                                          bsr_row_ptr,
-                                                          bsr_col_ind,
-                                                          p_trm_info[0],
-                                                          (rocsparse_int**)&info->zero_pivot,
-                                                          temp_buffer));
-    }
-    else
-    {
-        // Differentiate the analysis policies
-        if(analysis == rocsparse_analysis_policy_reuse)
+        if(trm != nullptr)
         {
-            // We try to re-use already analyzed lower part, if available.
-            // It is the user's responsibility that this data is still valid,
-            // since he passed the 'reuse' flag.
-
-            // If bsrsm meta data is already available, do nothing
-            if(trans_A == rocsparse_operation_none && info->bsrsm_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_transpose && info->bsrsmt_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-
-            // Check for other lower analysis meta data
-
-            if(trans_A == rocsparse_operation_none && info->bsrilu0_info != nullptr)
-            {
-                // bsrilu0 meta data
-                info->bsrsm_lower_info = info->bsrilu0_info;
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_none && info->bsric0_info != nullptr)
-            {
-                // bsric0 meta data
-                info->bsrsm_lower_info = info->bsric0_info;
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_none && info->bsrsv_lower_info != nullptr)
-            {
-                // bsrsv meta data
-                info->bsrsm_lower_info = info->bsrsv_lower_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans_A == rocsparse_operation_transpose && info->bsrsvt_lower_info != nullptr)
-            {
-                // bsrsv meta data
-                info->bsrsm_upper_info = info->bsrsvt_lower_info;
-                return rocsparse_status_success;
-            }
+            info->set_bsrsm_info(trans_A, descr->fill_mode, trm);
+            return rocsparse_status_success;
         }
-
-        // User is explicitly asking to force a re-analysis, or no valid data has been
-        // found to be re-used
-
-        rocsparse::trm_info_t** p_trm_info = (trans_A == rocsparse_operation_none)
-                                                 ? &info->bsrsm_lower_info
-                                                 : &info->bsrsmt_lower_info;
-
-        rocsparse::trm_info_t::recreate(p_trm_info);
-
-        // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
-                                                          trans_A,
-                                                          mb,
-                                                          nnzb,
-                                                          descr,
-                                                          bsr_val,
-                                                          bsr_row_ptr,
-                                                          bsr_col_ind,
-                                                          p_trm_info[0],
-                                                          (rocsparse_int**)&info->zero_pivot,
-                                                          temp_buffer));
     }
+
+    auto bsrsm_info = info->get_bsrsm_info();
+    RETURN_IF_ROCSPARSE_ERROR(bsrsm_info->recreate(
+        handle, trans_A, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));
 
     return rocsparse_status_success;
 }

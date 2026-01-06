@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/kernel_build_params.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U_PERF_VALS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U_SEARCH_OPTIMIZED)
@@ -523,7 +524,8 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U))
         return false;
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx90")))
         return false;
     if(!ctx.use_asm_kernels)
         return false;
@@ -546,12 +548,9 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
-    const std::string name = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(name, "gfx90")))
-        return false;
     if(!problem.IsLayoutDefault())
         return false;
 
@@ -642,6 +641,63 @@ static int divide_round_plus_inf(const int x, const int y)
     return x / y;
 }
 
+KernelInfo GetSampleKernelInfo(const ProblemDescription& problem)
+{
+    KernelInfo ss_us_kernel;
+
+    // subsampled input, in_height equals to image size after downsampling
+    auto in_batch_stride =
+        AsmImgWidth(problem) * AsmImgHeight(problem) *
+        (UseSubsample(problem) ? problem.GetInChannels() : problem.GetOutChannels());
+    unsigned write_unit    = (AsmImgWidth(problem) % 4 == 0)   ? 4
+                             : (AsmImgWidth(problem) % 3 == 0) ? 3
+                             : (AsmImgWidth(problem) % 2 == 0) ? 2
+                                                               : 1;
+    const int local_size_x = 256;
+
+    auto sampling_kernel_build_params = KernelBuildParameters{
+        {"LOCAL_SIZE_X", local_size_x},
+        {"LOCAL_SIZE_Y", int(1)},
+        {"FILTER0_STRIDE0", problem.GetKernelStrideW()},
+        {"FILTER0_STRIDE1", problem.GetKernelStrideH()},
+        {"WRITE_UNIT", write_unit},
+        {"OUT_CHANNEL_STRIDE", problem.GetOutChannelStride()},
+        {"OUT_STRIDE", problem.GetOutStrideH()},
+        {"IN_BATCH_STRIDE", in_batch_stride},
+        {"IN0_BATCH_STRIDE",
+         problem.IsDirectionForward() ? problem.GetInBatchStride() : problem.GetOutBatchStride()},
+        {"IN0_CHANNEL_STRIDE", problem.GetInChannelStride()},
+        {"IN0_STRIDE", problem.GetInStrideH()},
+        {"MIOPEN_USE_FP16", static_cast<int>(problem.GetInDataType() == miopenHalf)},
+        {"MIOPEN_USE_FP32", static_cast<int>(problem.GetInDataType() == miopenFloat)}};
+
+    ss_us_kernel.l_wk.push_back(local_size_x);
+    ss_us_kernel.l_wk.push_back(1);
+    ss_us_kernel.l_wk.push_back(1);
+    // output is number of subsampled input maps
+    size_t gbl_wk0 = (in_batch_stride / write_unit);
+    size_t gbl_wk1 = problem.GetBatchSize();
+    size_t gbl_wk2 = 1;
+    ss_us_kernel.g_wk.push_back(gbl_wk0);
+    ss_us_kernel.g_wk.push_back(gbl_wk1);
+    ss_us_kernel.g_wk.push_back(gbl_wk2);
+
+    if(UseSubsample(problem))
+    {
+        ss_us_kernel.kernel_name = "SubSample";
+        ss_us_kernel.kernel_file = "MIOpenSubSample.cpp";
+    }
+    else
+    {
+        ss_us_kernel.kernel_name = "UpSample";
+        ss_us_kernel.kernel_file = "MIOpenUpSample.cpp";
+    }
+
+    ss_us_kernel.comp_options = sampling_kernel_build_params.GenerateFor(kbp::HIP{});
+
+    return ss_us_kernel;
+}
+
 ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
                                       const ProblemDescription& problem,
                                       const PerformanceConfigConvAsm1x1U& config) const
@@ -650,62 +706,8 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
 
     std::ostringstream options;
 
-    KernelInfo ss_us_kernel;
     int data_len = GetTypeSize(problem.GetOutDataType());
-    if(UseSubsample(problem) || UseUpsample(problem))
-    {
-        // subsampled input, in_height equals to image size after downsampling
-        auto in_batch_stride =
-            AsmImgWidth(problem) * AsmImgHeight(problem) *
-            (UseSubsample(problem) ? problem.GetInChannels() : problem.GetOutChannels());
-        unsigned write_unit = (AsmImgWidth(problem) % 4 == 0)   ? 4
-                              : (AsmImgWidth(problem) % 3 == 0) ? 3
-                              : (AsmImgWidth(problem) % 2 == 0) ? 2
-                                                                : 1;
 
-        int n_grp0_size0 = 256;
-
-        // clang-format off
-        const auto subsample_kernel_compilation_options =
-            std::string(" -DDATA_TYPE=") +
-            (problem.GetInDataType() == miopenHalf ? "ushort" : "float") +
-            std::string(" -DMLO_GRP0_SZ0=") + std::to_string(n_grp0_size0) +
-            std::string(" -DMLO_GRP0_SZ1=1 ") + std::string(" -DMLO_GRP0_SZ2=1 ") +
-            std::string(" -DMLO_FILTER0_STRIDE0=") + std::to_string(problem.GetKernelStrideW()) +
-            std::string(" -DMLO_FILTER0_STRIDE1=") + std::to_string(problem.GetKernelStrideH()) +
-            std::string(" -DMLO_WRITE_UNIT=") + std::to_string(write_unit) +
-            std::string(" -DMLO_OUT_CHANNEL_STRIDE=") + std::to_string(problem.GetOutChannelStride()) +
-            std::string(" -DMLO_OUT_STRIDE=") + std::to_string(problem.GetOutStrideH()) +
-            std::string(" -DMLO_IN_BATCH_STRIDE=") + std::to_string(in_batch_stride) +
-            std::string(" -DMLO_IN0_BATCH_STRIDE=") +
-            std::to_string(problem.IsDirectionForward() ? problem.GetInBatchStride()
-                                                         : problem.GetOutBatchStride()) +
-            std::string(" -DMLO_IN0_CHANNEL_STRIDE=") + std::to_string(problem.GetInChannelStride()) +
-            std::string(" -DMLO_IN0_STRIDE=") + std::to_string(problem.GetInStrideH()) +
-            ctx.general_compile_options;
-        // clang-format on
-
-        ss_us_kernel.l_wk.push_back(n_grp0_size0);
-        ss_us_kernel.l_wk.push_back(1);
-        ss_us_kernel.l_wk.push_back(1);
-        // output is number of subsampled input maps
-        size_t gbl_wk0 = (in_batch_stride / write_unit);
-        size_t gbl_wk1 = problem.GetBatchSize();
-        size_t gbl_wk2 = 1;
-
-        ss_us_kernel.g_wk.push_back(gbl_wk0);
-        ss_us_kernel.g_wk.push_back(gbl_wk1);
-        ss_us_kernel.g_wk.push_back(gbl_wk2);
-
-        ss_us_kernel.kernel_file = "MIOpenUtilKernels3.cl";
-
-        if(UseSubsample(problem))
-            ss_us_kernel.kernel_name = "SubSample";
-        else
-            ss_us_kernel.kernel_name = "UpSample";
-
-        ss_us_kernel.comp_options = subsample_kernel_compilation_options;
-    }
     result.workspace_sz = GetWorkspaceSize(ctx, problem);
 
     GenerateClangDefsym(options, "stride_h", 1);
@@ -878,27 +880,25 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
     main_kernel.kernel_file = "conv1x1u.s";
     main_kernel.kernel_name = "miopenGcnAsmConv1x1U";
 
-    if(UseSubsample(problem))
-        result.construction_params.push_back(ss_us_kernel);
-
     result.construction_params.push_back(main_kernel);
-
-    if(UseUpsample(problem))
-        result.construction_params.push_back(ss_us_kernel);
 
     if(UseSubsample(problem))
     {
+        const KernelInfo ss_kernel_info = GetSampleKernelInfo(problem);
+
         int N, C, H, W, K, n_groups, out_H, out_W;
         GetCompiledInParameters(ctx, problem, &N, &C, &H, &W, &K, &n_groups, &out_H, &out_W);
         result.invoker_factory = miopen::conv::MakeGcnAsm1x1USSInvokerFactory(
-            N, C, K, n_groups, out_H, out_W, result.workspace_sz);
+            ss_kernel_info, N, C, K, n_groups, out_H, out_W, result.workspace_sz);
     }
     else if(UseUpsample(problem))
     {
+        const KernelInfo us_kernel_info = GetSampleKernelInfo(problem);
+
         int N, C, H, W, K, n_groups;
         GetCompiledInParameters(ctx, problem, &N, &C, &H, &W, &K, &n_groups);
         result.invoker_factory = miopen::conv::MakeGcnAsm1x1UUSInvokerFactory(
-            N, C, K, n_groups, H, W, result.workspace_sz);
+            us_kernel_info, N, C, K, n_groups, H, W, result.workspace_sz);
     }
     else
     {

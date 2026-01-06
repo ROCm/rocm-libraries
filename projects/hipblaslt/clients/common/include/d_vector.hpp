@@ -97,7 +97,9 @@ public:
         char* d = nullptr;
         if((use_HMM ? hipMallocManaged(&d, capacity) : hipMalloc(&d, capacity)) != hipSuccess)
         {
-            hipblaslt_cerr << "Error allocating (" << (m_size >> 30) << " GB) device memory"
+            size_t free_device_mem, total_device_mem;
+            (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
+            hipblaslt_cerr << "Insufficient device memory to allocate (" << (m_size >> 30) << " GB) as the available device memory is (" << (free_device_mem >> 30) << " GB) "
                            << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;
@@ -185,7 +187,7 @@ private:
         auto& pool = use_HMM ? m_pool_managed : m_pool;
         auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
         if(it != pool.end() && // found a buffer that is large enough ..
-           it->capacity() < 4 * bytes) // but not way too large
+           it->capacity() < 2 * bytes) // but not way too large
         {
             auto p = std::move(*it);
             p.resize(bytes);
@@ -194,16 +196,32 @@ private:
         }
         else
         {
+            size_t free_device_mem, total_device_mem;
+            (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
+
+            // Threshold for "huge" allocations — skip 20% extra allocation
+            const size_t big_thresh = total_device_mem / 4;
+            bool huge_request = (bytes >= big_thresh);
+
             // remove the (largest) buffer that was too small
             if(it != pool.begin())
                 pool.erase(it - 1);
-            // Allocate 20% extra for later reuse
-            auto e = M(bytes, bytes * 1.2, use_HMM);
+
+            // Allocate 20% extra if it is not huge_request for later reuse
+            size_t alloc_capacity = huge_request ? bytes : static_cast<size_t>(bytes * 1.2); 
+
+            auto e = M(bytes, alloc_capacity, use_HMM);
             if(e.get())
                 return e;
-            hipblaslt_cerr << "Clearing memory pool" << std::endl;
+            hipblaslt_cerr << "Clearing memory pool and retrying" << std::endl;
             // allocation failed, so clear the pool and try again (without the 20%)
             pool.clear();
+
+            // reset the error code from previous hipMalloc failure and try again to allocate memory
+            hipError_t err = hipPeekAtLastError();
+            if(err == hipErrorOutOfMemory || err == hipErrorMemoryAllocation )
+                (void)hipGetLastError();
+
             return M(bytes, bytes, use_HMM);
         }
     }

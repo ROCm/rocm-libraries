@@ -529,3 +529,9 @@ typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type saturate_cast(
 std::vector<void*> benchmark_allocation();
 int32_t            hipblaslt_get_arch_major();
 void hipblaslt_print_version();
+
+/* ==================================================================== */
+/*! \brief write a matrix to file. */
+void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType TiA,
+                                   int row, int col, int lda, void *hA,
+                                   std::string ADataFile);

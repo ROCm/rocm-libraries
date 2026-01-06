@@ -62,7 +62,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   target_link_libraries(clients-common INTERFACE
     ${LAPACK_LIBRARIES}
     $<$<PLATFORM_ID:Linux>:stdc++fs>
-    fmt::fmt
+    fmt::fmt-header-only
   )
   target_link_options(clients-common INTERFACE
     ${LAPACK_LINKER_FLAGS}

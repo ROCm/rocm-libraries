@@ -27,6 +27,7 @@
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 
@@ -66,10 +67,7 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.arg)
-                {
-                    cpy.arg = call(expr.arg);
-                }
+                cpy.arg  = call(expr.arg);
                 return std::make_shared<Expression::Expression>(cpy);
             }
 
@@ -77,40 +75,19 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.rhs)
-                {
-                    cpy.rhs = call(expr.rhs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
                 return std::make_shared<Expression::Expression>(cpy);
             }
 
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
             {
                 ScaledMatrixMultiply cpy = expr;
-                if(expr.matA)
-                {
-                    cpy.matA = call(expr.matA);
-                }
-                if(expr.matB)
-                {
-                    cpy.matB = call(expr.matB);
-                }
-                if(expr.matC)
-                {
-                    cpy.matC = call(expr.matC);
-                }
-                if(expr.scaleA)
-                {
-                    cpy.scaleA = call(expr.scaleA);
-                }
-                if(expr.scaleB)
-                {
-                    cpy.scaleB = call(expr.scaleB);
-                }
+                cpy.matA                 = call(expr.matA);
+                cpy.matB                 = call(expr.matB);
+                cpy.matC                 = call(expr.matC);
+                cpy.scaleA               = call(expr.scaleA);
+                cpy.scaleB               = call(expr.scaleB);
                 return std::make_shared<Expression::Expression>(cpy);
             }
 
@@ -118,19 +95,18 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.r1hs)
-                {
-                    cpy.r1hs = call(expr.r1hs);
-                }
-                if(expr.r2hs)
-                {
-                    cpy.r2hs = call(expr.r2hs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression::Expression>(cpy);
+            }
+
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression::Expression>(std::move(cpy));
             }
 
             // Finds the AssemblyKernelArgument with the same name as the provided
@@ -252,15 +228,10 @@ namespace rocRoller
                 {
                     if(!m_kernel->hasArgument(dim.argumentName))
                     {
-                        auto args  = m_command->getArguments();
-                        auto myArg = std::find_if(
-                            args.begin(), args.end(), [&dim](CommandArgumentPtr arg) {
-                                return dim.argumentName == arg->name();
-                            });
+                        auto arg = findArgumentByName(m_command, dim.argumentName);
+                        AssertFatal(arg, ShowValue(dim.argumentName));
 
-                        AssertFatal(myArg != args.end(), ShowValue(dim.argumentName));
-
-                        m_kernel->addCommandArgument(*myArg);
+                        m_kernel->addCommandArgument(arg);
                     }
                 }
 

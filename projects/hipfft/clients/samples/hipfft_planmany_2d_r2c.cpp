@@ -44,10 +44,10 @@ int main()
 
     int istride    = 1;
     int ostride    = istride;
-    int inembed[2] = {istride * n[0], istride * n1_padding_real_elements};
-    int onembed[2] = {ostride * n[0], ostride * n1_complex_elements};
-    int idist      = inembed[0] * inembed[1];
-    int odist      = onembed[0] * onembed[1];
+    int inembed[2] = {n[0], n1_padding_real_elements};
+    int onembed[2] = {n[0], n1_complex_elements};
+    int idist      = istride * inembed[0] * inembed[1];
+    int odist      = ostride * onembed[0] * onembed[1];
 
     std::cout << "n: " << n[0] << " " << n[1] << "\n"
               << "howmany: " << howmany << "\n"
@@ -76,11 +76,11 @@ int main()
     for(int ibatch = 0; ibatch < howmany; ++ibatch)
     {
         std::cout << "batch: " << ibatch << "\n";
-        for(int i = 0; i < inembed[0]; i++)
+        for(int i = 0; i < n[0]; i++)
         {
-            for(int j = 0; j < inembed[1]; j++)
+            for(int j = 0; j < n[1]; j++)
             {
-                const auto pos = ibatch * idist + i * inembed[1] + j;
+                const auto pos = ibatch * idist + istride * (i * inembed[1] + j);
                 std::cout << data[pos] << " ";
             }
             std::cout << "\n";
@@ -129,11 +129,11 @@ int main()
     for(int ibatch = 0; ibatch < howmany; ++ibatch)
     {
         std::cout << "batch: " << ibatch << "\n";
-        for(int i = 0; i < onembed[0]; i++)
+        for(int i = 0; i < n[0]; i++)
         {
-            for(int j = 0; j < onembed[1]; j++)
+            for(int j = 0; j < n1_complex_elements; j++)
             {
-                const auto pos = ibatch * odist + i * onembed[1] + j;
+                const auto pos = ibatch * odist + ostride * (i * onembed[1] + j);
                 std::cout << output[pos] << " ";
             }
             std::cout << "\n";

@@ -31,6 +31,9 @@ function(add_rocsparse_example EXAMPLE_SOURCE)
 
   # Include common client headers
   target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+  if (BUILD_CLIENTS_ONLY)
+    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+  endif()
 
   # Linker dependencies
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host hip::device)
@@ -73,6 +76,7 @@ add_rocsparse_example(example_spmv_ell.cpp)
 add_rocsparse_example(example_gebsrmv.cpp)
 add_rocsparse_example(example_gemvi.cpp)
 add_rocsparse_example(example_v2_spmv_csr.cpp)
+add_rocsparse_example(example_sptrsv.cpp)
 
 set_source_files_properties(
   example_spmv_coo.cpp
@@ -136,6 +140,9 @@ if(TARGET rocsparse)
 
       # Include common client headers
       target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+      if (BUILD_CLIENTS_ONLY)
+        target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+      endif()
 
       # Linker dependencies
       target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host)
@@ -170,6 +177,5 @@ endif()
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 
 foreach(file ${DOCUMENTATION_EXAMPLES})
-    message(STATUS "Found .cpp file: ${file}")
     add_rocsparse_example(${file})
 endforeach()

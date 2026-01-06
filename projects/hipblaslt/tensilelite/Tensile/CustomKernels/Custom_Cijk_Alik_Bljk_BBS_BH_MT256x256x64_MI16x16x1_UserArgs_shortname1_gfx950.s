@@ -58,7 +58,31 @@ custom.config:
       TransposeB: 0
       UseBeta: True
       Batched: True
-      Activation: False
+  MIBlock: [16, 16, 32, 1, 1, 1]
+  MatrixInstruction: [16, 16, 32, 1]
+  WavefrontSize: 64
+  WorkGroupMapping: 16
+  WorkGroupMappingXCC: 2
+  WorkGroupMappingXCCGroup: -1
+  StaggerU: 0
+  EnableMatrixInstruction: True
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MIInputPerThread: 8
+  MIInputPerThreadA: 8
+  MIInputPerThreadB: 8
+  DepthU: 64
+  DirectToLds: 1
+  LocalReadVectorWidth: 8
+  GlobalReadVectorWidthA: 8
+  GlobalReadVectorWidthB: 8
+  GlobalSplitU: 1
+  GlobalSplitUAlgorithm: MultipleBuffer
+  GlobalSplitUCoalesced: false
+  GlobalSplitUWorkGroupMappingRoundRobin: false
+  PrefetchGlobalRead: 2
+  PrefetchLocalRead: 1
+  TransposeLDS: 1
 amdhsa.version:
   - 1
   - 1

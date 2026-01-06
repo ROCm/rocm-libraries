@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ set( lapack_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_LAPACK} -DBUILD_SHARED_LI
 append_cmake_cli_arguments( lapack_cmake_args lapack_cmake_args )
 
 set( lapack_git_repository "https://github.com/Reference-LAPACK/lapack-release" CACHE STRING "URL to download lapack from" )
-set( lapack_git_tag "lapack-3.7.1" CACHE STRING "git branch" )
+set( lapack_git_tag "lapack-3.9.1" CACHE STRING "git branch" )
 
 # message( STATUS "lapack_make ( " ${lapack_make} " ) " )
 # message( STATUS "lapack_cmake_args ( " ${lapack_cmake_args} " ) " )
@@ -49,7 +49,7 @@ ExternalProject_Add(
   PREFIX ${CMAKE_BINARY_DIR}/lapack
   GIT_REPOSITORY ${lapack_git_repository}
   GIT_TAG ${lapack_git_tag}
-  CMAKE_ARGS ${lapack_cmake_args} -DCBLAS=ON -DLAPACKE=OFF -DBUILD_TESTING=OFF
+  CMAKE_ARGS ${lapack_cmake_args} -DCBLAS=ON -DLAPACKE=OFF -DBUILD_TESTING=OFF -DBUILD_INDEX64=ON
   LOG_BUILD 1
   INSTALL_COMMAND ""
   LOG_INSTALL 1

@@ -50,4 +50,3 @@ Build information functions
 
 .. doxygenfunction:: rocblas_get_version_string_size
 .. doxygenfunction:: rocblas_get_version_string
-

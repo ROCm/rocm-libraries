@@ -25,22 +25,25 @@
 #pragma once
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_csrsm_info.hpp"
 
 namespace rocsparse
 {
+    rocsparse_status csrsm_zero_pivot(rocsparse_handle         handle,
+                                      rocsparse::pivot_info_t* info,
+                                      rocsparse_indextype      indextype,
+                                      void*                    position);
+
     rocsparse_status csrsm_buffer_size_quickreturn(rocsparse_handle          handle,
                                                    rocsparse_operation       trans_A,
                                                    rocsparse_operation       trans_B,
                                                    int64_t                   m,
                                                    int64_t                   nrhs,
                                                    int64_t                   nnz,
-                                                   const void*               alpha,
                                                    const rocsparse_mat_descr descr,
                                                    const void*               csr_val,
                                                    const void*               csr_row_ptr,
                                                    const void*               csr_col_ind,
-                                                   const void*               B,
-                                                   int64_t                   ldb,
                                                    rocsparse_order           order_B,
                                                    rocsparse_mat_info        info,
                                                    rocsparse_solve_policy    policy,
@@ -50,26 +53,49 @@ namespace rocsparse
     rocsparse_status csrsm_buffer_size_core(rocsparse_handle          handle,
                                             rocsparse_operation       trans_A,
                                             rocsparse_operation       trans_B,
-                                            J                         m,
-                                            J                         nrhs,
-                                            I                         nnz,
-                                            const T*                  alpha,
+                                            int64_t                   m,
+                                            int64_t                   nrhs,
+                                            int64_t                   nnz,
                                             const rocsparse_mat_descr descr,
-                                            const T*                  csr_val,
-                                            const I*                  csr_row_ptr,
-                                            const J*                  csr_col_ind,
-                                            const T*                  B,
-                                            int64_t                   ldb,
+                                            const void*               csr_val,
+                                            const void*               csr_row_ptr,
+                                            const void*               csr_col_ind,
                                             rocsparse_order           order_B,
                                             rocsparse_mat_info        info,
                                             rocsparse_solve_policy    policy,
                                             size_t*                   buffer_size);
 
-    template <typename... P>
-    rocsparse_status csrsm_buffer_size_template(P&&... p)
+    template <typename I, typename J, typename T>
+    rocsparse_status csrsm_buffer_size_template(rocsparse_handle          handle,
+                                                rocsparse_operation       trans_A,
+                                                rocsparse_operation       trans_B,
+                                                int64_t                   m,
+                                                int64_t                   nrhs,
+                                                int64_t                   nnz,
+                                                const rocsparse_mat_descr descr,
+                                                const void*               csr_val,
+                                                const void*               csr_row_ptr,
+                                                const void*               csr_col_ind,
+                                                rocsparse_order           order_B,
+                                                rocsparse_mat_info        info,
+                                                rocsparse_solve_policy    policy,
+                                                size_t*                   buffer_size)
     {
 
-        const rocsparse_status status = rocsparse::csrsm_buffer_size_quickreturn(p...);
+        const rocsparse_status status = rocsparse::csrsm_buffer_size_quickreturn(handle,
+                                                                                 trans_A,
+                                                                                 trans_B,
+                                                                                 m,
+                                                                                 nrhs,
+                                                                                 nnz,
+                                                                                 descr,
+                                                                                 csr_val,
+                                                                                 csr_row_ptr,
+                                                                                 csr_col_ind,
+                                                                                 order_B,
+                                                                                 info,
+                                                                                 policy,
+                                                                                 buffer_size);
 
         if(status != rocsparse_status_continue)
         {
@@ -77,7 +103,21 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_buffer_size_core(p...));
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsm_buffer_size_core<I, J, T>(handle,
+                                                                              trans_A,
+                                                                              trans_B,
+                                                                              m,
+                                                                              nrhs,
+                                                                              nnz,
+                                                                              descr,
+                                                                              csr_val,
+                                                                              csr_row_ptr,
+                                                                              csr_col_ind,
+                                                                              order_B,
+                                                                              info,
+                                                                              policy,
+
+                                                                              buffer_size)));
         return rocsparse_status_success;
     }
 
@@ -103,26 +143,60 @@ namespace rocsparse
     rocsparse_status csrsm_analysis_core(rocsparse_handle          handle,
                                          rocsparse_operation       trans_A,
                                          rocsparse_operation       trans_B,
-                                         J                         m,
-                                         J                         nrhs,
-                                         I                         nnz,
-                                         const T*                  alpha,
+                                         int64_t                   m,
+                                         int64_t                   nrhs,
+                                         int64_t                   nnz,
+                                         const void*               alpha,
                                          const rocsparse_mat_descr descr,
-                                         const T*                  csr_val,
-                                         const I*                  csr_row_ptr,
-                                         const J*                  csr_col_ind,
-                                         const T*                  B,
+                                         const void*               csr_val,
+                                         const void*               csr_row_ptr,
+                                         const void*               csr_col_ind,
+                                         const void*               B,
                                          int64_t                   ldb,
                                          rocsparse_mat_info        info,
                                          rocsparse_analysis_policy analysis,
                                          rocsparse_solve_policy    solve,
+                                         rocsparse_csrsm_info*     p_csrsm_info,
                                          void*                     temp_buffer);
 
-    template <typename... P>
-    rocsparse_status csrsm_analysis_template(P&&... p)
+    template <typename I, typename J, typename T>
+    rocsparse_status csrsm_analysis_template(rocsparse_handle          handle,
+                                             rocsparse_operation       trans_A,
+                                             rocsparse_operation       trans_B,
+                                             int64_t                   m,
+                                             int64_t                   nrhs,
+                                             int64_t                   nnz,
+                                             const void*               alpha,
+                                             const rocsparse_mat_descr descr,
+                                             const void*               csr_val,
+                                             const void*               csr_row_ptr,
+                                             const void*               csr_col_ind,
+                                             const void*               B,
+                                             int64_t                   ldb,
+                                             rocsparse_mat_info        info,
+                                             rocsparse_analysis_policy analysis,
+                                             rocsparse_solve_policy    solve,
+                                             rocsparse_csrsm_info*     p_csrsm_info,
+                                             void*                     temp_buffer)
     {
 
-        const rocsparse_status status = rocsparse::csrsm_analysis_quickreturn(p...);
+        const rocsparse_status status = rocsparse::csrsm_analysis_quickreturn(handle,
+                                                                              trans_A,
+                                                                              trans_B,
+                                                                              m,
+                                                                              nrhs,
+                                                                              nnz,
+                                                                              alpha,
+                                                                              descr,
+                                                                              csr_val,
+                                                                              csr_row_ptr,
+                                                                              csr_col_ind,
+                                                                              B,
+                                                                              ldb,
+                                                                              info,
+                                                                              analysis,
+                                                                              solve,
+                                                                              temp_buffer);
 
         if(status != rocsparse_status_continue)
         {
@@ -130,7 +204,24 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_core(p...));
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsm_analysis_core<I, J, T>(handle,
+                                                                           trans_A,
+                                                                           trans_B,
+                                                                           m,
+                                                                           nrhs,
+                                                                           nnz,
+                                                                           alpha,
+                                                                           descr,
+                                                                           csr_val,
+                                                                           csr_row_ptr,
+                                                                           csr_col_ind,
+                                                                           B,
+                                                                           ldb,
+                                                                           info,
+                                                                           analysis,
+                                                                           solve,
+                                                                           p_csrsm_info,
+                                                                           temp_buffer)));
         return rocsparse_status_success;
     }
 
@@ -156,26 +247,60 @@ namespace rocsparse
     rocsparse_status csrsm_solve_core(rocsparse_handle          handle,
                                       rocsparse_operation       trans_A,
                                       rocsparse_operation       trans_B,
-                                      J                         m,
-                                      J                         nrhs,
-                                      I                         nnz,
-                                      const T*                  alpha_device_host,
+                                      int64_t                   m,
+                                      int64_t                   nrhs,
+                                      int64_t                   nnz,
+                                      const void*               alpha_device_host,
                                       const rocsparse_mat_descr descr,
-                                      const T*                  csr_val,
-                                      const I*                  csr_row_ptr,
-                                      const J*                  csr_col_ind,
-                                      T*                        B,
+                                      const void*               csr_val,
+                                      const void*               csr_row_ptr,
+                                      const void*               csr_col_ind,
+                                      void*                     B,
                                       int64_t                   ldb,
                                       rocsparse_order           order_B,
                                       rocsparse_mat_info        info,
                                       rocsparse_solve_policy    policy,
+                                      rocsparse_csrsm_info      csrsm_info,
                                       void*                     temp_buffer);
 
-    template <typename... P>
-    rocsparse_status csrsm_solve_template(P&&... p)
+    template <typename I, typename J, typename T>
+    rocsparse_status csrsm_solve_template(rocsparse_handle          handle,
+                                          rocsparse_operation       trans_A,
+                                          rocsparse_operation       trans_B,
+                                          int64_t                   m,
+                                          int64_t                   nrhs,
+                                          int64_t                   nnz,
+                                          const void*               alpha_device_host,
+                                          const rocsparse_mat_descr descr,
+                                          const void*               csr_val,
+                                          const void*               csr_row_ptr,
+                                          const void*               csr_col_ind,
+                                          void*                     B,
+                                          int64_t                   ldb,
+                                          rocsparse_order           order_B,
+                                          rocsparse_mat_info        info,
+                                          rocsparse_solve_policy    policy,
+                                          rocsparse_csrsm_info      csrsm_info,
+                                          void*                     temp_buffer)
     {
 
-        const rocsparse_status status = rocsparse::csrsm_solve_quickreturn(p...);
+        const rocsparse_status status = rocsparse::csrsm_solve_quickreturn(handle,
+                                                                           trans_A,
+                                                                           trans_B,
+                                                                           m,
+                                                                           nrhs,
+                                                                           nnz,
+                                                                           alpha_device_host,
+                                                                           descr,
+                                                                           csr_val,
+                                                                           csr_row_ptr,
+                                                                           csr_col_ind,
+                                                                           B,
+                                                                           ldb,
+                                                                           order_B,
+                                                                           info,
+                                                                           policy,
+                                                                           temp_buffer);
 
         if(status != rocsparse_status_continue)
         {
@@ -183,7 +308,93 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_core(p...));
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsm_solve_core<I, J, T>(handle,
+                                                                        trans_A,
+                                                                        trans_B,
+                                                                        m,
+                                                                        nrhs,
+                                                                        nnz,
+                                                                        alpha_device_host,
+                                                                        descr,
+                                                                        csr_val,
+                                                                        csr_row_ptr,
+                                                                        csr_col_ind,
+                                                                        B,
+                                                                        ldb,
+                                                                        order_B,
+                                                                        info,
+                                                                        policy,
+                                                                        csrsm_info,
+                                                                        temp_buffer)));
         return rocsparse_status_success;
     }
+
+    rocsparse_status csrsm_buffer_size(rocsparse_handle          handle,
+                                       rocsparse_operation       operation,
+                                       rocsparse_operation       operation_X,
+                                       int64_t                   m,
+                                       int64_t                   nrhs,
+                                       int64_t                   nnz,
+                                       rocsparse_datatype        alpha_datatype,
+                                       const rocsparse_mat_descr descr,
+                                       rocsparse_datatype        csr_val_datatype,
+                                       const void*               csr_val,
+                                       rocsparse_indextype       csr_row_ptr_indextype,
+                                       const void*               csr_row_ptr,
+                                       rocsparse_indextype       csr_col_ind_indextype,
+                                       const void*               csr_col_ind,
+                                       rocsparse_datatype        datatype_X,
+                                       rocsparse_order           order_X,
+                                       rocsparse_mat_info        info,
+                                       rocsparse_solve_policy    policy,
+                                       size_t*                   buffer_size);
+
+    rocsparse_status csrsm_analysis(rocsparse_handle          handle,
+                                    rocsparse_operation       trans_A,
+                                    rocsparse_operation       trans_B,
+                                    int64_t                   m,
+                                    int64_t                   nrhs,
+                                    int64_t                   nnz,
+                                    rocsparse_datatype        alpha_datatype,
+                                    const void*               alpha,
+                                    const rocsparse_mat_descr descr,
+                                    rocsparse_datatype        csr_val_datatype,
+                                    const void*               csr_val,
+                                    rocsparse_indextype       csr_row_ptr_indextype,
+                                    const void*               csr_row_ptr,
+                                    rocsparse_indextype       csr_col_ind_indextype,
+                                    const void*               csr_col_ind,
+                                    rocsparse_datatype        B_datatype,
+                                    const void*               B,
+                                    int64_t                   ldb,
+                                    rocsparse_mat_info        info,
+                                    rocsparse_analysis_policy analysis,
+                                    rocsparse_solve_policy    solve,
+                                    rocsparse_csrsm_info*     p_csrsm_info,
+                                    void*                     temp_buffer);
+
+    rocsparse_status csrsm_solve(rocsparse_handle          handle,
+                                 rocsparse_operation       trans_A,
+                                 rocsparse_operation       trans_B,
+                                 int64_t                   m,
+                                 int64_t                   nrhs,
+                                 int64_t                   nnz,
+                                 rocsparse_datatype        alpha_datatype,
+                                 const void*               alpha_device_host,
+                                 const rocsparse_mat_descr descr,
+                                 rocsparse_datatype        csr_val_datatype,
+                                 const void*               csr_val,
+                                 rocsparse_indextype       csr_row_ptr_indextype,
+                                 const void*               csr_row_ptr,
+                                 rocsparse_indextype       csr_col_ind_indextype,
+                                 const void*               csr_col_ind,
+                                 rocsparse_datatype        B_datatype,
+                                 void*                     B,
+                                 int64_t                   ldb,
+                                 rocsparse_order           order_B,
+                                 rocsparse_mat_info        info,
+                                 rocsparse_solve_policy    policy,
+                                 rocsparse_csrsm_info      csrsm_info,
+                                 void*                     temp_buffer);
+
 }

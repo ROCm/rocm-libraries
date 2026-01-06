@@ -6,18 +6,19 @@
 This document is to detail the various continuous integration (CI) systems that are run on the rocm-libraries monorepo.
 
 ## Table of Contents
-1. [Azure Pipelines](#azure-pipelines)
-    1. [Overview](#az-overview)
-    2. [PR Workflow](#az-workflow)
-    3. [Interpreting Results](#az-results)
-    4. [Build and Test Coverage](#az-coverage)
-    5. [Downstream Job Triggers](#az-downstream)
-2. [Math CI](#math-ci)
-    1. [Overview](#math-overview)
-3. [Windows CI](#windows-ci)
-    1. [Overview](#win-overview)
-4. [TheRock CI](#therock-ci)
-    1. [Overview](#rock-overview)
+- [Continuous Integration](#continuous-integration)
+  - [Table of Contents](#table-of-contents)
+  - [Azure Pipelines](#azure-pipelines)
+    - [Overview ](#overview-)
+    - [PR Workflow ](#pr-workflow-)
+    - [Build and Test Coverage ](#build-and-test-coverage-)
+    - [Downstream Job Triggers ](#downstream-job-triggers-)
+  - [Math CI](#math-ci)
+    - [Overview ](#overview--1)
+  - [Windows CI](#windows-ci)
+    - [Overview ](#overview--2)
+  - [TheRock CI](#therock-ci)
+    - [Overview ](#overview--3)
 
 ## Azure Pipelines
 
@@ -132,3 +133,15 @@ graph TD;
 ## TheRock CI
 
 ### Overview <a id="rock-overview"></a>
+
+TheRock CI runs Linux and Windows builds and tests for nightly jobs, pushes to develop, pull requests and workflow dispatches.
+
+TheRock CI builds using `rocm-libraries` at HEAD with TheRock build system. For testing, we test using TheRock's [`fetch_test_configurations.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/fetch_test_configurations.py) along with [ROCm test machines](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/amdgpu_family_matrix.py).
+
+For pull requests and pushes to `develop`:
+- If a change is made to `.github/workflows/therock-*` or `.github/scripts/therock-*`, all projects are built and smoke tests are run.
+- If a change is made to `projects/*` or `shared/*`, TheRock CI will determine which subtree has changed and run the corresponding builds and full tests, using [`therock_matrix.py`](../.github/scripts/therock_matrix.py)
+
+For nightly jobs, TheRock CI runs all builds and full tests for all projects from [`therock_matrix.py`](../.github/scripts/therock_matrix.py).
+
+For workflow dispatch triggers, TheRock CI will run builds and full tests for whichever projects are specified.

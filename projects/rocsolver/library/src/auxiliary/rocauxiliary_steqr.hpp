@@ -80,11 +80,11 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
     rocsolver_hybrid_storage<S, rocblas_int, S*> hWork;
     rocsolver_hybrid_storage<T, rocblas_int, U> hC;
 
-    ROCBLAS_CHECK(hD.init_async(n, dD, strideD, batch_count, stream));
-    ROCBLAS_CHECK(hE.init_async(n - 1, dE, strideE, batch_count, stream));
-    ROCBLAS_CHECK(hInfo.init_async(1, dInfo, 1, batch_count, stream));
-    ROCBLAS_CHECK(hWork.init_async(2 * n, dWork, strideW, 1, stream));
-    ROCBLAS_CHECK(hC.init_pointers_only(dC, strideC, batch_count, stream));
+    ROCBLAS_CHECK(hD.init_async(n, dD, 0, strideD, batch_count, stream));
+    ROCBLAS_CHECK(hE.init_async(n - 1, dE, 0, strideE, batch_count, stream));
+    ROCBLAS_CHECK(hInfo.init_async(1, dInfo, 0, 1, batch_count, stream));
+    ROCBLAS_CHECK(hWork.init_async(2 * n, dWork, 0, strideW, 1, stream));
+    ROCBLAS_CHECK(hC.init_pointers_only(dC, shiftC, strideC, batch_count, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
     rocblas_int blocks = (n - 1) / BS1 + 1;

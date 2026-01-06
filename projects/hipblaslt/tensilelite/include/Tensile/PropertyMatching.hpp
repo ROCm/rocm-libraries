@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,11 +95,6 @@ namespace TensileLite
 
             virtual std::vector<ReturnValue>
                 findTopMatch(Object const& object, Transform transform, int numSolutions) const = 0;
-
-            virtual ReturnValue findBestEvaluationSolution(Object const&   object,
-                                                           Hardware const& hardware,
-                                                           Transform       transform) const
-                = 0;
 
             virtual std::vector<Value> matchesInOrder(Object const& object) const = 0;
 
@@ -363,85 +358,6 @@ namespace TensileLite
                     ProblemKey::keyForProblem<Key, Object>(object, this->properties),
                     transform,
                     numSolutions);
-            }
-
-            virtual ReturnValue findBestEvaluationSolution(Object const&   object,
-                                                           Hardware const& hardware,
-                                                           Transform       transform) const override
-            {
-                double bestDistance = std::numeric_limits<double>::max();
-
-                auto iter = this->table.begin();
-                if(iter == this->table.end())
-                    return this->nullValue;
-
-                ReturnValue theMatch = transform(iter->value);
-
-                ReturnValue bestMatch = theMatch;
-                if(theMatch != nullptr)
-                {
-                    size_t model_M          = iter->key[0];
-                    size_t model_N          = iter->key[1];
-                    size_t model_K          = 1;
-                    size_t model_NumBatches = 1;
-
-                    if(iter->key.size() > 3)
-                    {
-                        model_K          = iter->key[3];
-                        model_NumBatches = iter->key[2];
-                    }
-                    else
-                    {
-                        model_K = iter->key[2];
-                    }
-                    bestDistance = theMatch->computeTAMScore(object,
-                                                             hardware,
-                                                             (double)model_M,
-                                                             (double)model_N,
-                                                             (double)model_K,
-                                                             (double)model_NumBatches);
-                }
-
-                iter++;
-
-                while(iter != this->table.end())
-                {
-                    auto nextMatch = transform(iter->value);
-
-                    if(nextMatch != nullptr)
-                    {
-                        size_t model_M          = iter->key[0];
-                        size_t model_N          = iter->key[1];
-                        size_t model_K          = 1;
-                        size_t model_NumBatches = 1;
-
-                        if(iter->key.size() > 3)
-                        {
-                            model_K          = iter->key[3];
-                            model_NumBatches = iter->key[2];
-                        }
-                        else
-                        {
-                            model_K = iter->key[2];
-                        }
-                        double nextDistance = theMatch->computeTAMScore(object,
-                                                                        hardware,
-                                                                        (double)model_M,
-                                                                        (double)model_N,
-                                                                        (double)model_K,
-                                                                        (double)model_NumBatches);
-
-                        if(nextDistance < bestDistance)
-                        {
-                            bestMatch    = nextMatch;
-                            bestDistance = nextDistance;
-                        }
-                    }
-
-                    ++iter;
-                }
-
-                return bestMatch;
             }
 
             virtual std::vector<Value> matchesInOrder(Object const& object) const override
@@ -873,6 +789,81 @@ namespace TensileLite
                 return (iter->key == key)
                            ? std::make_tuple(transform(iter->value), 0.0)
                            : std::make_tuple(this->nullValue, std::numeric_limits<double>::max());
+            }
+
+            std::vector<ReturnValue>
+                findTopKeyMatch(Key const& key, Transform transform, int numSolutions) const
+            {
+                ReturnValue              solution;
+                std::vector<ReturnValue> solutions;
+                double                   fitness;
+            std:
+                tie(solution, fitness) = findBestKeyMatch(key, transform);
+                if(solution)
+                    solutions.push_back(solution);
+                return solutions;
+            }
+        };
+
+        /**
+         * Specialization of DistanceMatchingTable for Range Distance. This special case will
+         * only select key in the table if it is within the range described by the provided key
+         */
+        template <typename Key, typename Object, typename Value, typename ReturnValue>
+        struct DistanceMatchingTable<Key, Object, Value, ReturnValue, Matching::Range<Key>>
+            : public DistanceMatchingCommon<Key,
+                                            Object,
+                                            Value,
+                                            ReturnValue,
+                                            Matching::Range<Key>>
+        {
+            using Base       = MatchingTable<Object, Value, ReturnValue>;
+            using Entry      = MatchingTableEntry<Key, Value>;
+            using Transform  = typename Base::Transform;
+            using Properties = typename Base::Properties;
+            using Range      = Matching::Range<Key>;
+            using Common
+                = DistanceMatchingCommon<Key, Object, Value, ReturnValue, Matching::Range<Key>>;
+            using Common::distance;
+            using Common::nullValue;
+            using Common::table;
+
+            DistanceMatchingTable(ReturnValue nullValue = ReturnValue())
+                : Common(nullValue)
+            {
+            }
+
+            DistanceMatchingTable(Properties const& properties,
+                               ReturnValue       nullValue = ReturnValue())
+                : Common(properties, nullValue)
+            {
+            }
+
+            DistanceMatchingTable(Range const&   distance,
+                               Properties const& properties,
+                               ReturnValue       nullValue = ReturnValue())
+                : Common(distance, properties, nullValue)
+            {
+            }
+
+            std::tuple<ReturnValue, double> findBestKeyMatch(Key const& key,
+                                                             Transform  transform) const
+            {
+                for(const auto& row : table)
+                {
+                    if((row.key[0] == -1 || key[0] >= row.key[0]) &&  // M >= M_min
+                       (row.key[1] == -1 || key[1] <= row.key[1]) &&  // M <= M_max
+                       (row.key[2] == -1 || key[2] >= row.key[2]) &&  // N >= N_min
+                       (row.key[3] == -1 || key[3] <= row.key[3]) &&  // N <= N_max
+                       (row.key[4] == -1 || key[4] >= row.key[4]) &&  // batch >= batch_min
+                       (row.key[5] == -1 || key[5] <= row.key[5]) &&  // batch <= batch_max
+                       (row.key[6] == -1 || key[6] >= row.key[6]) &&  // K >= K_min
+                       (row.key[7] == -1 || key[7] <= row.key[7]))    // K <= K_max
+                    {
+                        return std::make_tuple(transform(row.value), 0.0);
+                    }
+                }
+                return std::make_tuple(this->nullValue, std::numeric_limits<double>::max());
             }
 
             std::vector<ReturnValue>

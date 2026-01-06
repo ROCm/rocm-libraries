@@ -100,6 +100,6 @@ $(TYPE)_deepbench_gemm_tn.yaml: $(HEADER) types/$(TYPE)_tn.yml \
 clean:
 	rm -f *.yaml
 
-# Common rule used for all 
+# Common rule used for all
 %.yaml:
 	cat $^ > $@

@@ -31,7 +31,7 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponentBase(Scheduler);
+        const std::string Scheduler::Basename = "Scheduler";
 
         std::ostream& operator<<(std::ostream& stream, StreamId val)
         {
@@ -223,7 +223,8 @@ namespace rocRoller
             AssertFatal(dep == Dependency::None || topDep <= dep,
                         "Out of order dependency lock can't be acquired.",
                         ShowValue(topDep),
-                        ShowValue(dep));
+                        ShowValue(dep),
+                        ShowValue(streamId));
 
             if(m_streamToStack.empty())
                 return true;
@@ -247,6 +248,20 @@ namespace rocRoller
             // scheduled by the same stream again, it's schedulable.
             if(m_locks.contains(dep))
                 return m_depToStream.at(dep) == streamId;
+
+            // If another stream holds a higher-ranked lock, the scheduler
+            // cannot schedule this lower-ranked lock from streamId until the
+            // higher-ranked lock is released by another stream.
+            auto depVal  = static_cast<int>(dep);
+            auto tempDep = static_cast<Dependency>(++depVal);
+            while(tempDep != Dependency::Count)
+            {
+                if(m_locks.contains(tempDep))
+                    return false;
+
+                depVal  = static_cast<int>(tempDep);
+                tempDep = static_cast<Dependency>(++depVal);
+            }
 
             // If the given stream tries to acquire a non-preemptible lock
             // and another stream currently holds a higher-ranked preemptible lock,

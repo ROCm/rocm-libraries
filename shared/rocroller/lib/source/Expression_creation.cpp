@@ -48,21 +48,45 @@ namespace rocRoller
 
         ExpressionPtr multiplyHigh(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used in multiplyHigh operation: ",
+                        ShowValue(a),
+                        ", ",
+                        ShowValue(b));
             return std::make_shared<Expression>(MultiplyHigh{a, b});
         }
 
         ExpressionPtr multiplyAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b) and !isRaw32Literal(c),
+                        "Raw32 is a bit type and cannot be used in multiplyAdd operation: ",
+                        ShowValue(a),
+                        ", ",
+                        ShowValue(b),
+                        ", ",
+                        ShowValue(c));
             return std::make_shared<Expression>(MultiplyAdd{a, b, c});
         }
 
         ExpressionPtr addShiftL(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b) and !isRaw32Literal(c),
+                        "Raw32 is a bit type and cannot be used in addShiftL operation: ",
+                        ShowValue(a),
+                        ", ",
+                        ShowValue(b),
+                        ", ",
+                        ShowValue(c));
             return std::make_shared<Expression>(AddShiftL{a, b, c});
         }
 
         ExpressionPtr shiftLAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
         {
+            AssertFatal(!isRaw32Literal(b) and !isRaw32Literal(c),
+                        "Raw32 is a bit type and cannot be used in shiftLAdd operation: ",
+                        ShowValue(b),
+                        ", ",
+                        ShowValue(c));
             return std::make_shared<Expression>(ShiftLAdd{a, b, c});
         }
 
@@ -73,16 +97,25 @@ namespace rocRoller
 
         ExpressionPtr magicMultiple(ExpressionPtr a)
         {
+            AssertFatal(!isRaw32Literal(a),
+                        "Raw32 is a bit type and cannot be used in magicMultiple operation: ",
+                        ShowValue(a));
             return std::make_shared<Expression>(MagicMultiple{a});
         }
 
         ExpressionPtr magicShifts(ExpressionPtr a)
         {
+            AssertFatal(!isRaw32Literal(a),
+                        "Raw32 is a bit type and cannot be used in magicShifts operation: ",
+                        ShowValue(a));
             return std::make_shared<Expression>(MagicShifts{a});
         }
 
         ExpressionPtr magicShiftAndSign(ExpressionPtr a)
         {
+            AssertFatal(!isRaw32Literal(a),
+                        "Raw32 is a bit type and cannot be used in magicShiftAndSign operation: ",
+                        ShowValue(a));
             return std::make_shared<Expression>(MagicShiftAndSign{a});
         }
 
@@ -95,6 +128,23 @@ namespace rocRoller
         ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width)
         {
             return std::make_shared<Expression>(BitFieldExtract{{.arg{a}}, dt, offset, width});
+        }
+
+        ExpressionPtr bfc(ExpressionPtr       src,
+                          ExpressionPtr       dst,
+                          uint32_t            srcOffset,
+                          uint32_t            dstOffset,
+                          uint32_t            width,
+                          std::optional<bool> srcIsZero,
+                          std::optional<bool> dstIsZero)
+        {
+            return std::make_shared<Expression>(
+                BitfieldCombine{{src, dst}, srcOffset, dstOffset, width, srcIsZero, dstIsZero});
+        }
+
+        ExpressionPtr concat(const std::vector<ExpressionPtr>& ops, VariableType v)
+        {
+            return std::make_shared<Expression>(Concatenate{{ops}, v});
         }
 
         ExpressionPtr dataFlowTag(int tag, Register::Type t, VariableType v)

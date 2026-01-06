@@ -316,9 +316,8 @@ void testing_bsrxmv(const Arguments& arg)
     {
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-        double gpu_time_used;
-        ROCSPARSE_CLIENTS_RUN_BENCHMARK(
-            handle, arg, gpu_time_used, rocsparse_bsrxmv<T>(PARAMS(h_alpha, dA, dx, h_beta, dy)));
+        const double gpu_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_bsrxmv<T>, PARAMS(h_alpha, dA, dx, h_beta, dy));
 
         //
         // Re-use bsrmv gflop and gbyte counts but with different parameters

@@ -32,7 +32,7 @@
 // computed by squaring all numbers in the vector, summing the
 // squares, and taking the square root of the sum of squares.  In
 // Thrust this operation is efficiently implemented with the
-// transform_reduce() algorith.  Specifically, we first transform
+// transform_reduce() algorithm.  Specifically, we first transform
 // x -> x^2 and the compute a standard plus reduction.  Since there
 // is no built-in functor for squaring numbers, we define our own
 // square functor.
@@ -49,7 +49,7 @@ struct square
   }
 };
 
-int main(void)
+int main()
 {
   // initialize host array
   float x[4] = {1.0, 2.0, 3.0, 4.0};

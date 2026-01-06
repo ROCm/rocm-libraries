@@ -32,11 +32,11 @@
 
 #pragma once
 
+#include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
 #include "roclapack_potrf.hpp"
 #include "roclapack_syevd_heevd.hpp"
 #include "roclapack_sygst_hegst.hpp"
-#include "roclapack_sygv_hegv.hpp"
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -122,6 +122,46 @@ void rocsolver_sygvd_hegvd_getMemorySize(rocblas_handle handle,
     }
 
     *optim_mem = opt1 && opt2 && opt3;
+}
+
+template <typename T, typename S>
+rocblas_status rocsolver_sygvd_hegvd_argCheck(rocblas_handle handle,
+                                              const rocblas_eform itype,
+                                              const rocblas_evect evect,
+                                              const rocblas_fill uplo,
+                                              const rocblas_int n,
+                                              const rocblas_int lda,
+                                              const rocblas_int ldb,
+                                              T A,
+                                              T B,
+                                              S D,
+                                              S E,
+                                              rocblas_int* info,
+                                              const rocblas_int batch_count = 1)
+{
+    // order is important for unit tests:
+
+    // 1. invalid/non-supported values
+    if(itype != rocblas_eform_ax && itype != rocblas_eform_abx && itype != rocblas_eform_bax)
+        return rocblas_status_invalid_value;
+    if(evect != rocblas_evect_none && evect != rocblas_evect_original)
+        return rocblas_status_invalid_value;
+    if(uplo != rocblas_fill_upper && uplo != rocblas_fill_lower)
+        return rocblas_status_invalid_value;
+
+    // 2. invalid size
+    if(n < 0 || lda < n || ldb < n || batch_count < 0)
+        return rocblas_status_invalid_size;
+
+    // skip pointer check if querying memory size
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_status_continue;
+
+    // 3. invalid pointers
+    if((n && !A) || (n && !B) || (n && !D) || (n && !E) || (batch_count && !info))
+        return rocblas_status_invalid_pointer;
+
+    return rocblas_status_continue;
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename S, typename U>

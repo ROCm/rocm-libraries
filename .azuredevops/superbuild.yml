@@ -25,6 +25,13 @@ trigger:
     include:
     - CMakeLists.txt
     - cmake
+    - shared/mxdatagenerator
+    - shared/rocroller
+    - shared/origami
+    - projects/hipblas-common
+    - projects/hipblaslt
+    - projects/rocprim
+    - projects/rocrand
     exclude:
     - .githooks
     - .github
@@ -34,6 +41,7 @@ trigger:
     - ./**/*.md
 
 pr:
+  autoCancel: false
   branches:
     include:
     - develop
@@ -42,6 +50,13 @@ pr:
     include:
     - CMakeLists.txt
     - cmake
+    - shared/mxdatagenerator
+    - shared/rocroller
+    - shared/origami
+    - projects/hipblas-common
+    - projects/hipblaslt
+    - projects/rocprim
+    - projects/rocrand
     exclude:
     - .githooks
     - .github

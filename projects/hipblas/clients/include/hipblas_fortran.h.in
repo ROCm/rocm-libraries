@@ -6882,5 +6882,37 @@ hipblasStatus_t HIPBLAS_FAPI(hipblasGemmStridedBatchedExWithFlags)(hipblasHandle
                                                                    hipblasGemmAlgo_t    algo,
                                                                    hipblasGemmFlags_t   flags);
 
+// syrkex
+hipblasStatus_t HIPBLAS_FAPI(hipblasSyrkEx)(hipblasHandle_t    handle,
+                                            hipblasFillMode_t  uplo,
+                                            hipblasOperation_t trans_a,
+                                            hipblas_int        n,
+                                            hipblas_int        k,
+                                            const void*        alpha,
+                                            const void*        a,
+                                            hipDataType        a_type,
+                                            hipblas_int        lda,
+                                            const void*        beta,
+                                            void*              c,
+                                            hipDataType        c_type,
+                                            hipblas_int        ldc,
+                                            hipDataType        compute_type);
+
+// herkex
+hipblasStatus_t HIPBLAS_FAPI(hipblasHerkEx)(hipblasHandle_t    handle,
+                                            hipblasFillMode_t  uplo,
+                                            hipblasOperation_t trans_a,
+                                            hipblas_int        n,
+                                            hipblas_int        k,
+                                            const void*        alpha,
+                                            const void*        a,
+                                            hipDataType        a_type,
+                                            hipblas_int        lda,
+                                            const void*        beta,
+                                            void*              c,
+                                            hipDataType        c_type,
+                                            hipblas_int        ldc,
+                                            hipDataType        compute_type);
+
 #undef HIPBLAS_FAPI
 #undef hipblas_int
