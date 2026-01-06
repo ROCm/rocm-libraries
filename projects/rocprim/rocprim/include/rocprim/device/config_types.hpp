@@ -573,8 +573,16 @@ struct comp_targets
     }
 };
 
-constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
+constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknown)
 {
+    // If they are the same we already know the wavefront size at compile time.
+    if constexpr(arch::wavefront::max_size() == arch::wavefront::min_size())
+    {
+        return arch::wavefront::max_size() == 32u ? arch::wavefront::target::size32
+                                                  : arch::wavefront::target::size64;
+    }
+
+    // Otherwise we determine it based on what generation of gpu it was compiled for.
     switch(gen)
     {
         case gen::unknown: return arch::wavefront::target::dynamic;
@@ -700,7 +708,7 @@ constexpr typename Selector::param_type get_config(Config config, target t)
 template<class Config,
          class Selector,
          class Target,
-         arch::wavefront::target TargetWaveSize = gen_wavefront_size(Target::g)>
+         arch::wavefront::target TargetWaveSize = get_wavefront_size(Target::g)>
 struct target_config
 {
     constexpr static target config_target = target{Target{}};
@@ -724,7 +732,7 @@ template<class Config,
          class Target,
          template<class, class, class>
          class LaunchSelector,
-         arch::wavefront::target TargetWaveSize = gen_wavefront_size(Target::g)>
+         arch::wavefront::target TargetWaveSize = get_wavefront_size(Target::g)>
 ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
 void trampoline_kernel(Kernel kernel)
 {
@@ -771,7 +779,7 @@ auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kerne
             if(target{t} == target_config)
             {
                 using Target = decltype(t);
-                if constexpr(gen_wavefront_size(Target::g) != arch::wavefront::target::dynamic)
+                if constexpr(get_wavefront_size(Target::g) != arch::wavefront::target::dynamic)
                 {
 
                     tuned_kernel
