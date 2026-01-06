@@ -602,23 +602,135 @@ This fix should:
 
 ---
 
+## Test Results With Fix #1 + Fix #2 (January 6, 2026)
+
+### Initial Results: Promising but Puzzling
+
+**Test run on rhel9+gfx950 with both device synchronization fixes:**
+
+| Metric | Value |
+|--------|-------|
+| Graph captures started | 2,961 |
+| Graph captures completed | 2,949 |
+| Success rate | **99.6%** |
+| Tests passed | 592,462 |
+| Tests failed | **12** |
+
+### The 12 Failures: A Specific Pattern
+
+All 12 failures share **identical characteristics:**
+- ❌ All segfault (not heap corruption)
+- ❌ All have **N=192**, batch_count=3
+- ❌ All in trsv graph tests
+- ✅ Various data types (f32/f64, real/complex)
+- ✅ Various matrix parameters (uplo, diag, transA)
+
+**List of failures:**
+```
+trsv_graph_test_f32_r_UCN_128_192_1
+trsv_graph_test_f64_r_LTN_128_192_1
+trsv_graph_test_f64_r_UCN_128_192_1
+trsv_graph_test_f64_r_LNU_128_192_1
+trsv_graph_test_f64_r_UNU_128_192_1
+trsv_graph_test_f32_c_LNN_128_192_1
+trsv_graph_test_f32_c_UNN_128_192_1
+trsv_graph_test_f64_c_LNN_128_192_1
+trsv_graph_test_f64_c_LCN_128_192_1
+trsv_graph_test_f64_c_UCN_128_192_1
+trsv_graph_test_f64_c_LNU_128_192_1
+trsv_graph_test_f64_c_UCU_128_192_1
+```
+
+**Common pattern:** All have N=192 (not 128, not 256, only 192)
+
+### Critical Observation: This is NEW Behavior
+
+**Key insight from testing:** These N=192 segfaults have **never been observed before**, even when tests passed without the fixes.
+
+This suggests **one of two scenarios:**
+
+#### Scenario A: We Exposed a Hidden Bug (Less Likely)
+- The synchronization changed timing enough to expose a pre-existing bug
+- This bug only affects N=192 specifically
+- Previously it was masked or didn't trigger
+
+#### Scenario B: We Moved the Bug, Not Fixed It (More Likely)
+**The synchronization didn't eliminate the underlying bug - it changed WHERE/WHEN it manifests:**
+
+Before fixes:
+```
+[Random timing] → Bug triggers randomly → Random corruption/segfaults across many tests
+```
+
+After fixes:
+```
+[Consistent timing from sync] → Bug triggers at specific point → Always segfaults at N=192
+```
+
+### What This Means
+
+**The underlying bug is still present.** We haven't fixed it; we've just made it:
+- ✅ Reproducible (always N=192)
+- ✅ Consistent (always segfaults)
+- ❌ Still present (12 failures)
+
+**This is actually useful for debugging** because:
+1. Specific, reproducible bugs are much easier to debug than intermittent ones
+2. We can now focus investigation on N=192 specifically
+3. The pattern might reveal the actual root cause
+
+### Why N=192 Specifically?
+
+This is the critical question. What's special about 192?
+
+**Possibilities:**
+1. **Grid/Block dimensions**: 192 might hit a specific thread block configuration
+2. **Memory alignment**: 192 * sizeof(element) might hit problematic alignment
+3. **Workspace size**: The 64-byte workspace allocation for batch_count=3 at N=192
+4. **Graph node limits**: Number of nodes in graph for N=192 might exceed some limit
+5. **Sequential dependency tracking**: The `w_completed_sec` workspace behavior at N=192
+
+From trsv code: `dev_bytes = sizeof(rocblas_int) * batch_count = 4 * 3 = 12 bytes`
+But logs show 64-byte allocations, suggesting roundup_device_memory_size().
+
+---
+
 ## Current Status
 
 ### Completed ✅
 1. Added comprehensive debug logging
 2. Confirmed bug is intermittent across all platforms
 3. Disproved simple use-after-free hypothesis
-4. Identified Heisenbug effect of logging
-5. Implemented device synchronization fix
+4. Implemented Fix #1: hipDeviceSynchronize() after graph execution
+5. Implemented Fix #2: hipDeviceSynchronize() before graph capture
+6. Reduced failure rate from 75% to 0.4% (12 out of ~3000 operations)
+7. Identified specific failure pattern: N=192 only
 
-### In Progress 🔄
-1. Testing fix on CI across all platforms
-2. Verifying fix resolves intermittent failures
+### Current Understanding 🔍
+**The bug is still present but now manifests consistently at N=192 instead of randomly.**
+
+This suggests the synchronization changes timing, not the underlying bug. The root cause remains unknown but is now easier to investigate due to reproducibility.
 
 ### Next Steps 📋
-1. **CI Testing:** Run full precheckin suite on all platforms with the fix
-2. **Multiple runs:** Test each platform multiple times to confirm stability
-3. **Compare results:** Verify ubuntu22 stays passing and rhel9 stops corrupting
-4. **Performance impact:** Measure if `hipDeviceSynchronize()` adds significant overhead
-5. **Code review:** Get team review of the synchronization fix
-6. **Documentation:** Update PR #3573 with proper fix if successful
+1. **Investigate N=192 specifically:**
+   - Why does this size trigger the bug?
+   - What's different about memory layout, grid config, or graph structure at N=192?
+   - Run N=192 test repeatedly to confirm 100% reproducibility
+
+2. **Compare with other sizes:**
+   - Does N=128 work? N=256? What about N=191 or N=193?
+   - Find the boundary where it starts/stops failing
+
+3. **Deep dive into the segfault:**
+   - Get stack trace from the segfault
+   - Is it during graph instantiation, execution, or cleanup?
+   - What memory is being accessed when it crashes?
+
+4. **Consider alternative fixes:**
+   - The device synchronization reduced failures but didn't eliminate them
+   - Might need to look at the actual memory allocation/graph capture logic
+   - Possibly a bug in how workspace is sized or used for certain dimensions
+
+5. **Test on other platforms:**
+   - Do ubuntu22 nodes also fail at N=192 now?
+   - Is this specific to gfx950 or universal?
