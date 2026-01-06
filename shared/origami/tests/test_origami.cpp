@@ -157,26 +157,30 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
 
       auto config_large = make_config(256, 256, 32, 32, 32, 8, 1);
       auto skGrid_large = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
-      auto [best_wgmxcc_large_tile, best_wgm_large_tile] =
+      auto mapping_large =
           origami::select_workgroup_mapping(problem, hardware, config_large, skGrid_large);
 
       auto config_small = make_config(128, 128, 64, 32, 32, 8, 1);
       auto skGrid_small = (4096 + 128 - 1) / 128 * (4096 + 128 - 1) / 128;
-      auto [best_wgmxcc_small_tile, best_wgm_small_tile] =
+      auto mapping_small =
           origami::select_workgroup_mapping(problem, hardware, config_small, skGrid_small);
 
       // Different problem size for nonsquare test
       origami::problem_t problem_nonsquare = problem;
-      problem_nonsquare.size.m             = 2048;
-      problem_nonsquare.size.n             = 5120;
-      auto skGrid_nonsquare                = (2048 + 128 - 1) / 128 * (5120 + 128 - 1) / 128;
+      problem_nonsquare.size.m             = 5120;
+      problem_nonsquare.size.n             = 512;
+      auto skGrid_nonsquare                = (5120 + 128 - 1) / 128 * (512 + 128 - 1) / 128;
 
-      auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare] = origami::select_workgroup_mapping(
+      auto mapping_nonsquare = origami::select_workgroup_mapping(
           problem_nonsquare, hardware, config_large, skGrid_nonsquare);
 
-      REQUIRE(best_wgmxcc_large_tile == best_wgmxcc_small_tile);
-      REQUIRE(best_wgm_large_tile > best_wgm_small_tile);
-      REQUIRE(best_wgm_large_tile != best_wgm_nonsquare);
+      REQUIRE(mapping_large.wgmxccchunk >= mapping_small.wgmxccchunk);
+      REQUIRE(mapping_large.wgmxcc == mapping_small.wgmxcc);
+      REQUIRE(mapping_large.wgm >= mapping_small.wgm);
+
+      REQUIRE(mapping_large.wgmxccchunk == mapping_nonsquare.wgmxccchunk);
+      REQUIRE(mapping_large.wgmxcc == mapping_nonsquare.wgmxcc);
+      REQUIRE(mapping_large.wgm >= mapping_nonsquare.wgm);
     }
   }
 }
