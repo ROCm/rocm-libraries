@@ -365,7 +365,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  * All arrays may be re-used or freed immediately after the function returns.
  *
  * @param[out] brick: brick structure
- * @param[in] field_lower: array of length `dim_with_batch specifying the lower index
+ * @param[in] field_lower: array of length `dim_with_batch` specifying the lower index
  * (inclusive) for the brick in the field's index space.
  * @param[in] field_upper: array of length `dim_with_batch` specifying the upper index
  * (exclusive) for the brick in the field's index space.
