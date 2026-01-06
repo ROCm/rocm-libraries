@@ -97,6 +97,11 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
                     A[i + j * lda + b * stride] = (i ^ j) & 1 ? T(value) : T(negate(value));
                 }
     }
+    else
+    {
+        throw std::invalid_argument(
+            "Invalid matrix_type for rocblas_init_matrix_alternating_sign function!");
+    }
 }
 
 template <typename U, typename T>
@@ -136,6 +141,11 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
                         = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(negate(value));
                 }
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "Invalid matrix_type for rocblas_init_matrix_alternating_sign function!");
         }
     }
 }
@@ -324,6 +334,10 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
             }
         }
     }
+    else
+    {
+        throw std::invalid_argument("Invalid matrix_type for rocblas_init_matrix function!");
+    }
 }
 
 template <typename U, typename T>
@@ -485,6 +499,10 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
                 }
             }
         }
+        else
+        {
+            throw std::invalid_argument("Invalid matrix_type for rocblas_init_matrix function!");
+        }
     }
 }
 
@@ -609,6 +627,10 @@ void rocblas_init_matrix_trig(rocblas_check_matrix_type matrix_type,
                     A[i + j * lda + b * stride] = value;
                 }
     }
+    else
+    {
+        throw std::invalid_argument("Invalid matrix_type for rocblas_init_matrix_trig function!");
+    }
 }
 
 template <typename T, typename U>
@@ -704,6 +726,11 @@ void rocblas_init_matrix_trig(rocblas_check_matrix_type matrix_type,
                               : (j <= i ? T(seedReset ? cos(i + j * M) : sin(i + j * M)) : T(0));
                     A[i + j * lda] = value;
                 }
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "Invalid matrix_type for rocblas_init_matrix_trig function!");
         }
     }
 }

@@ -139,7 +139,7 @@ target_compile_options(rocblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_C
 
 target_compile_definitions( rocblas-test PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERNAL_API ROCBLAS_NO_DEPRECATED_WARNINGS )
 
-if (WIN32)
+if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
   # for now adding in all .dll as dependency chain is not cmake based on win32
   file( GLOB third_party_dlls
     LIST_DIRECTORIES OFF

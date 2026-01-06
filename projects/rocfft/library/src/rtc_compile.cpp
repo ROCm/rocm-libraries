@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,7 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
 
     std::vector<const char*> options;
     options.push_back("-O3");
-    options.push_back("-std=c++14");
+    options.push_back("-std=c++20");
     options.push_back(gpu_arch_arg.c_str());
     options.push_back("-mcumode");
 #ifdef ADDRESS_SANITIZER

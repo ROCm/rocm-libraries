@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
+#include "PlatformUtils.hpp"
 
 #include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
 #include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
@@ -14,6 +15,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <hip/hip_runtime.h>
 #include <mutex>
 
 namespace hipdnn_backend
@@ -31,6 +33,54 @@ const std::string S_BACKEND_LOGGER_NAME = "hipdnn_backend";
 const std::string S_CALLBACK_RECEIVER_LOGGER_NAME = "hipdnn_callback_receiver";
 
 } // namespace
+
+void logSystemInfo()
+{
+    auto logger = getBackendLogger();
+    if(!logger)
+    {
+        return;
+    }
+
+    logger->info(platform_utilities::getSystemInfo());
+}
+
+void logHipDeviceInfo(hipStream_t stream)
+{
+    auto logger = getBackendLogger();
+    if(!logger)
+    {
+        return;
+    }
+
+    int deviceId = 0;
+    hipError_t err = hipStreamGetDevice(stream, &deviceId);
+    if(err != hipSuccess)
+    {
+        logger->warn("Failed to get device from stream: {}", hipGetErrorString(err));
+        return;
+    }
+
+    hipDeviceProp_t props;
+    err = hipGetDeviceProperties(&props, deviceId);
+    if(err != hipSuccess)
+    {
+        logger->warn(
+            "Failed to get properties for device {}: {}", deviceId, hipGetErrorString(err));
+        return;
+    }
+
+    logger->info(
+        "HIP Device Information: {{Device: {}, Name: {}, Global Mem: {} bytes, Compute: {}.{}, "
+        "MPs: {}, Clock: {} kHz}}",
+        deviceId,
+        props.name,
+        props.totalGlobalMem,
+        props.major,
+        props.minor,
+        props.multiProcessorCount,
+        props.clockRate);
+}
 
 void initialize()
 {
@@ -84,6 +134,9 @@ void initialize()
         setLogLevel(logLevel);
 
         s_loggingInitialized = true;
+
+        logSystemInfo();
+        logHipDeviceInfo(nullptr);
 
         return;
     }
