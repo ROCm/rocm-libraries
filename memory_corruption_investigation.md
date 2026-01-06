@@ -1129,3 +1129,191 @@ This is like stabilizing a shaky table so you can see which leg is actually brok
 - `projects/rocblas/clients/common/client_utility.cpp` - Graph node inspection
 - `projects/rocblas/clients/include/client_utility.hpp` - Parameter logging + workaround
 - `projects/rocblas/clients/gtest/trsv_gtest.yaml` - Expanded to 14 N values
+
+---
+
+## 🛑 Investigation Paused (January 6, 2026 - Late Afternoon)
+
+### Status: Too Many Changes, CI Pipeline Getting Messy
+
+**Decision:** Pause investigation and regroup. CI is showing many failures and the pipeline has become difficult to interpret with all the debugging changes.
+
+**Current Branch State:**
+- Commit: `6e44086cfa` (all debugging changes committed)
+- Branch: `users/todavis/memory_error_diagnostics`
+- Changes active:
+  - Debug logging in client_utility.cpp (graph node counts)
+  - N=192 skip workaround in client_utility.hpp
+  - Expanded test matrix (14 N values instead of 1)
+  - Device synchronization fixes (#1 and #2)
+
+**The Problem:**
+- Too many variables changed at once
+- Hard to tell what's causing failures vs what's revealing bugs
+- Debug logging may be affecting timing
+- Expanded test matrix makes CI runs longer and harder to interpret
+
+### Clean Path Forward Options
+
+#### Option A: Revert to Simple Baseline (RECOMMENDED)
+
+Start fresh with minimal changes:
+
+```bash
+# Create new clean branch from before all debugging
+git checkout -b memory_error_minimal_test aa64aabbe4  # Before device sync fixes
+
+# Apply ONLY the graph node count logging (no workarounds, no expanded tests)
+# Then test with just original N=192 tests
+```
+
+**Why:** Get ONE data point (graph node count) without other variables.
+
+#### Option B: Keep Current but Simplify
+
+Remove the noise while keeping some debugging:
+
+```bash
+# Remove N=192 workaround (let it fail naturally)
+# Revert test expansion (back to just N=192)
+# Keep only graph node logging
+```
+
+**Why:** Reduces test time, focuses on the actual failure.
+
+#### Option C: Pause Everything, Come Back Later
+
+```bash
+# Just document current state and move on
+# Come back with fresh perspective later
+```
+
+**Why:** Sometimes stepping away is the best debugging move.
+
+### What We Actually Know (Facts Only)
+
+1. ✅ **Heap corruption happens in trsv graph tests** - Confirmed across multiple CI runs
+2. ✅ **Bug is intermittent** - Passes on some platforms/runs, fails on others
+3. ✅ **All CI nodes have HIP 7.1.x** - Not a version issue
+4. ✅ **Graph capture support is enabled** - Confirmed via diagnostics
+5. ✅ **Device synchronization changed behavior** - Made N=192 fail consistently (one run)
+6. ⚠️ **N=192 pattern might be real or might be artifact** - Need cleaner testing to confirm
+7. ❌ **Simple use-after-free hypothesis disproven** - Destructors run before stream cleanup
+
+### What We DON'T Know Yet
+
+- Is N=192 specifically the problem, or was that just one lucky run?
+- How many graph nodes does N=192 create vs other sizes?
+- Does the bug happen WITH or WITHOUT our synchronization fixes?
+- Is this actually multiple different bugs?
+
+### Recommendation
+
+**Take Option A** - Start with a clean minimal branch:
+
+1. Revert to before synchronization fixes
+2. Add ONLY graph node count logging
+3. Test with original small test set
+4. Get ONE clean data point
+5. Build from there incrementally
+
+OR
+
+**Take a break** - This is a hard bug. Sometimes stepping away and coming back with fresh eyes helps more than pushing through.
+
+### If You Want to Continue Later
+
+When ready to resume:
+
+1. Read this document from the top (Executive Summary section)
+2. Review "What We Actually Know" above
+3. Start with Option A (clean minimal test)
+4. Add ONE change at a time
+5. Update this document after EACH CI run
+
+### Memory Requirements Check (From Discussion)
+
+**Question:** Could CI be running out of GPU memory?
+
+**Answer:** No, definitely not:
+- N=192 test uses ~0.4-1.7 MB depending on precision
+- CI GPUs have 16-48 GB of memory
+- Could run 14,000+ tests concurrently
+- This is NOT a capacity issue
+
+---
+
+## CI Run Results - ubuntu22+gfx942 (January 6, 2026 - Evening)
+
+### Status: Compilation fixed, still getting heap corruption
+
+**Fixed:** Compiler error - moved `hipGraphGetNodes()` call to before graph destruction (needs `hipGraph_t` not `hipGraphExec_t`)
+
+**Result:** Still crashing with heap corruption, BUT at a **DIFFERENT N value!**
+
+### Critical Finding: It's NOT N=192!
+
+```
+[TEST_DEBUG] N=190 batch_count=3 lda=190 stride_a=36100
+[DEBUG]   FIX #2: Device sync before graph capture BEGIN
+[DEBUG] Graph capture BEGIN: old_stream=0
+[DEBUG]   Enabling stream_order_memory_allocation
+[DEBUG]   Created graph_stream=0xe53109d0
+[DEBUG]   Graph capture started on stream=0xe53109d0
+[DEBUG] _device_malloc allocating: stream=0xe53109d0 size=64
+[DEBUG] hipMallocAsync result: SUCCESS dev_mem=0x7f41b03fe000 (stream=0xe53109d0)
+[DEBUG] _device_malloc destructor: stream=0xe53109d0 dev_mem=0x7f41b03fe000 size=64
+[DEBUG] hipFreeAsync result: SUCCESS (stream=0xe53109d0)
+[DEBUG] Graph capture END: graph_stream=0xe53109d0
+[DEBUG]   Graph captured, instantiating...
+[DEBUG]   Graph contains 4 nodes
+[DEBUG]   Launching graph on stream=0xe53109d0
+[DEBUG]   Synchronizing graph_stream=0xe53109d0
+malloc(): unsorted double linked list corrupted
+```
+
+**Crashed at N=190, NOT N=192!**
+
+### Graph Node Count Data
+
+From this run, graph tests consistently create **1 or 4 nodes**:
+- BLAS1 operations (asum, axpy, etc.): 1 or 4 nodes
+- TRSV operations: 4 nodes (typical)
+- **No evidence of node count being the issue** - all graphs are small
+
+### Analysis
+
+**This confirms the bug is truly intermittent:**
+- Previous run: Failed at N=192 (rhel9+gfx950)
+- This run: Failed at N=190 (ubuntu22+gfx942)
+- The specific N value is NOT the issue
+- It's timing/memory layout dependent
+
+**The expanded test matrix is actually helpful** - by running more N values, we're increasing the probability of hitting the timing window where the bug manifests.
+
+**The bug is NOT:**
+- ❌ Specific to N=192
+- ❌ Related to graph node count (all graphs small, 1-4 nodes)
+- ❌ GPU memory capacity (tests use < 2MB each)
+
+**The bug IS:**
+- ✅ Intermittent (different N values fail on different runs/platforms)
+- ✅ Related to graph capture with async allocation
+- ✅ Happening during `hipStreamSynchronize()` after graph launch
+- ✅ A race condition or timing-dependent memory corruption
+
+### Conclusion
+
+**The boundary testing revealed the true nature:** It's not a specific N value that's broken - it's a timing-dependent race condition that can trigger at various sizes depending on environmental factors (timing, memory layout, system load, etc.).
+
+The device synchronization fixes (#1 and #2) did NOT solve the problem, they just changed when/where it manifests.
+
+### Recommendation: Stop Chasing Specific N Values
+
+The right approach is NOT to find the "magic N value" - there isn't one. The right approach is to:
+
+1. **Understand the race condition** in the async allocation during graph capture
+2. **Fix the underlying synchronization issue** - not just add more syncs
+3. **Test broadly** - the intermittent nature means we need many test runs to confirm fixes
+
+**Suggestion:** Revert all recent changes and go back to the drawing board. The problem is likely in the original PR #3573 implementation of `set_stream_order_memory_allocation()` during graph capture.
