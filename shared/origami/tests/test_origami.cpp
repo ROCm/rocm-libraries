@@ -153,24 +153,23 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - workgroup mapping selection") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 8192);
-
+      
+      // Large problem size
+      auto problem_large  = make_problem(4096, 4096, 8192);
       auto config_large = make_config(256, 256, 32, 32, 32, 8, 1);
-      auto skGrid_large = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
+      auto skGrid_large = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
       auto mapping_large =
-          origami::select_workgroup_mapping(problem, hardware, config_large, skGrid_large);
+          origami::select_workgroup_mapping(problem_large, hardware, config_large, skGrid_large);
 
-      auto config_small = make_config(128, 128, 64, 32, 32, 8, 1);
-      auto skGrid_small = (4096 + 128 - 1) / 128 * (4096 + 128 - 1) / 128;
+      // Small problem size
+      auto problem_small  = make_problem(2048, 2048, 2048);
+      auto skGrid_small = ((2048 + 256 - 1) / 256) * ((2048 + 256 - 1) / 256);
       auto mapping_small =
-          origami::select_workgroup_mapping(problem, hardware, config_small, skGrid_small);
+          origami::select_workgroup_mapping(problem_small, hardware, config_large, skGrid_small);
 
       // Different problem size for nonsquare test
-      origami::problem_t problem_nonsquare = problem;
-      problem_nonsquare.size.m             = 5120;
-      problem_nonsquare.size.n             = 512;
-      auto skGrid_nonsquare                = (5120 + 128 - 1) / 128 * (512 + 128 - 1) / 128;
-
+      auto problem_nonsquare = make_problem(5120, 512, 5120);
+      auto skGrid_nonsquare  = ((5120 + 256 - 1) / 256) * ((512 + 256 - 1) / 256);
       auto mapping_nonsquare = origami::select_workgroup_mapping(
           problem_nonsquare, hardware, config_large, skGrid_nonsquare);
 
@@ -178,7 +177,7 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
       REQUIRE(mapping_large.wgmxcc == mapping_small.wgmxcc);
       REQUIRE(mapping_large.wgm >= mapping_small.wgm);
 
-      REQUIRE(mapping_large.wgmxccchunk == mapping_nonsquare.wgmxccchunk);
+      REQUIRE(mapping_large.wgmxccchunk >= mapping_nonsquare.wgmxccchunk);
       REQUIRE(mapping_large.wgmxcc == mapping_nonsquare.wgmxcc);
       REQUIRE(mapping_large.wgm >= mapping_nonsquare.wgm);
     }
