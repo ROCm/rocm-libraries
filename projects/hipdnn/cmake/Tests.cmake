@@ -13,13 +13,6 @@ find_package(Python3 COMPONENTS Interpreter)
 
 findandcheckllvmsymbolizer()
 
-# Set executable prefix based on platform
-if(WIN32)
-    set(EXEC_PREFIX "")
-else()
-    set(EXEC_PREFIX "./")
-endif()
-
 set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
 set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
 
