@@ -409,17 +409,9 @@ private:
         return builder.Release();
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    Error deserializeImpl(const nlohmann::json& j)
+    Error deserializeFromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
-        // 1. Convert JSON to FlatBuffer
-        flatbuffers::FlatBufferBuilder builder;
-        auto graphOffset
-            = hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(builder, j);
-        builder.Finish(graphOffset);
-        auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(builder.GetBufferPointer());
-
-        // 2. Set graph attributes from FlatBuffer
+        // Set graph attributes from FlatBuffer
         if(fbGraph->name() != nullptr)
         {
             set_name(fbGraph->name()->c_str());
@@ -433,7 +425,7 @@ private:
             _preferredEngineId = fbGraph->preferred_engine_id().value();
         }
 
-        // 3. Build tensorMap from FlatBuffer tensors
+        // Build tensorMap from FlatBuffer tensors
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
         if(fbGraph->tensors() != nullptr)
         {
@@ -447,7 +439,7 @@ private:
             }
         }
 
-        // 4. Create nodes from FlatBuffer
+        // Create nodes from FlatBuffer
         if(fbGraph->nodes() != nullptr)
         {
             for(const auto* fbNode : *fbGraph->nodes())
@@ -528,6 +520,19 @@ private:
         }
 
         return {ErrorCode::OK, ""};
+    }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    Error deserializeImpl(const nlohmann::json& j)
+    {
+        // Convert JSON to FlatBuffer, then deserialize
+        flatbuffers::FlatBufferBuilder builder;
+        auto graphOffset
+            = hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(builder, j);
+        builder.Finish(graphOffset);
+        auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+
+        return deserializeFromFlatBuffer(fbGraph);
     }
 #endif
 
@@ -723,20 +728,47 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    // User must call build_operation_graph() before serialize() to populate UIDs
+    // To FlatBuffer Graph object
+    flatbuffers::DetachedBuffer toFlatBuffer() const
+    {
+        return buildFlatbufferOperationGraphConst();
+    }
+
+    // From FlatBuffer Graph object
+    Error fromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
+    {
+        try
+        {
+            return deserializeFromFlatBuffer(fbGraph);
+        }
+        catch(const std::out_of_range& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Deserialization failed - missing tensor or invalid reference: ")
+                        + e.what()};
+        }
+        catch(const std::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE, std::string("Deserialization failed: ") + e.what()};
+        }
+    }
+
+    // Binary serialization using packed FlatBuffer
     Error serialize(std::vector<uint8_t>& data) const
     {
-        nlohmann::json j;
-        auto status = serialize(j);
-        if(status.is_bad())
-        {
-            return status;
-        }
-        data = nlohmann::json::to_ubjson(j);
+        auto buffer = toFlatBuffer();
+        data.assign(buffer.data(), buffer.data() + buffer.size());
         return {ErrorCode::OK, ""};
     }
 
+    // Binary deserialization from packed FlatBuffer
+    Error deserialize([[maybe_unused]] hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(data.data());
+        return fromFlatBuffer(fbGraph);
+    }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
     Error serialize(nlohmann::json& j) const
     {
         auto buffer = buildFlatbufferOperationGraphConst();
@@ -745,20 +777,6 @@ public:
         j = *sdkGraph;
 
         return {ErrorCode::OK, ""};
-    }
-
-    Error deserialize([[maybe_unused]] hipdnnHandle_t handle, const std::vector<uint8_t>& data)
-    {
-        try
-        {
-            nlohmann::json j = nlohmann::json::from_ubjson(data);
-            return deserialize(j);
-        }
-        catch(const nlohmann::json::exception& e)
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    std::string("Failed to parse binary data: ") + e.what()};
-        }
     }
 
     Error deserialize(const nlohmann::json& j)
