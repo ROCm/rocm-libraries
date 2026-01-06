@@ -425,8 +425,8 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
 
       auto problem_m_equals_n = make_problem(1024, 1024, 1024);
       auto results_m_equals_n =
-          origami::rank_configs(problem_m_equals_n, hardware, indentical_ai_configs);
-      REQUIRE(indentical_ai_configs[0].mt.m ==
+          origami::rank_configs(problem_m_equals_n, hardware, identical_ai_configs);
+      REQUIRE(identical_ai_configs[0].mt.m ==
               results_m_equals_n[0].config.mt.m);  // If M == N, prefer tiles with larger MT_M
 
       // Test 5: Test with different heuristics_variance values
