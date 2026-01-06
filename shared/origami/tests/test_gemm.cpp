@@ -793,15 +793,15 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
       // Test 4: Test with different tile sizes
       auto result_with_different_tile_sizes =
           origami::compute_cvt_overhead(problem, hardware, config);
-      REQUIRE(result_test_with_Float == 0.0);
+      REQUIRE(result_with_different_tile_sizes == 0.0);
 
       config                           = make_config(128, 128, 64, 32, 32, 8, 1);
       result_with_different_tile_sizes = origami::compute_cvt_overhead(problem, hardware, config);
-      REQUIRE(result_test_with_Float == 0.0);
+      REQUIRE(result_with_different_tile_sizes == 0.0);
 
       config                           = make_config(64, 64, 256, 32, 32, 8, 1);
       result_with_different_tile_sizes = origami::compute_cvt_overhead(problem, hardware, config);
-      REQUIRE(result_test_with_Float == 0.0);
+      REQUIRE(result_with_different_tile_sizes == 0.0);
     }
   }
 }
