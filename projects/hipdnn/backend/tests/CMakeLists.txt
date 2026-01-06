@@ -32,7 +32,6 @@ add_executable(
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
-    TestEnginePlugin.cpp
     TestEnginePluginResourceManager.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
@@ -66,7 +65,7 @@ clang_tidy_check(hipdnn_backend_tests)
 # libhipdnn_test_plugin1.so or hipdnn_test_plugin1.dll (used by TestPlugin.cpp and
 # TestSharedLibrary.cpp)
 add_library(${TEST_PLUGIN1_NAME} SHARED plugins/PluginApiImpl.cpp plugins/Plugin1.cpp)
-target_link_libraries(${TEST_PLUGIN1_NAME} PRIVATE hipdnn_sdk)
+target_link_libraries(${TEST_PLUGIN1_NAME} PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk)
 set_target_properties(${TEST_PLUGIN1_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 target_compile_options(${TEST_PLUGIN1_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_compile_definitions(${TEST_PLUGIN1_NAME} PRIVATE COMPONENT_NAME="plugin1")
@@ -88,7 +87,7 @@ install(TARGETS ${TEST_PLUGIN1_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_IN
 
 # libhipdnn_test_plugin2.so or hipdnn_test_plugin2.dll (used by TestPlugin.cpp)
 add_library(${TEST_PLUGIN2_NAME} SHARED plugins/PluginApiImpl.cpp plugins/Plugin2.cpp)
-target_link_libraries(${TEST_PLUGIN2_NAME} PRIVATE hipdnn_sdk)
+target_link_libraries(${TEST_PLUGIN2_NAME} PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk)
 set_target_properties(${TEST_PLUGIN2_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 target_compile_options(${TEST_PLUGIN2_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_compile_definitions(${TEST_PLUGIN2_NAME} PRIVATE COMPONENT_NAME="plugin2")
@@ -105,39 +104,6 @@ set_target_properties(
 )
 
 install(TARGETS ${TEST_PLUGIN2_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
-        RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
-)
-
-# libhipdnn_test_engine_plugin1.so or hipdnn_test_engine_plugin1.dll (used by TestEnginePlugin.cpp)
-add_library(
-    ${TEST_ENGINE_PLUGIN1_NAME} SHARED plugins/PluginApiImpl.cpp plugins/EnginePluginApiImpl.cpp
-                                       plugins/EnginePlugin1.cpp
-)
-# TODO Use HIP RTC
-set_source_files_properties(plugins/EnginePlugin1.cpp PROPERTIES LANGUAGE HIP)
-if(DEFINED GPU_TARGETS)
-    set_property(TARGET ${TEST_ENGINE_PLUGIN1_NAME} PROPERTY HIP_ARCHITECTURES ${GPU_TARGETS})
-else()
-    get_property(GPU_TARGETS GLOBAL PROPERTY HIP_ARCHITECTURES)
-endif()
-message(STATUS "Architectures for ${TEST_ENGINE_PLUGIN1_NAME}: ${GPU_TARGETS}")
-target_link_libraries(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE hipdnn_sdk hip::host)
-set_target_properties(${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
-target_compile_options(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-
-clang_tidy_check(${TEST_ENGINE_PLUGIN1_NAME})
-add_dependencies(hipdnn_backend_tests ${TEST_ENGINE_PLUGIN1_NAME})
-set_target_properties(
-    ${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
-)
-set_target_properties(
-    ${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
-)
-set_target_properties(
-    ${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
-)
-
-install(TARGETS ${TEST_ENGINE_PLUGIN1_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 

@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -151,7 +151,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   if( WIN32 )
     find_package( HIP CONFIG REQUIRED )
   else()
-    find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
+    find_package( HIP REQUIRED )
   endif()
 endif()
 
@@ -182,7 +182,7 @@ endif()
 
 foreach( target ${TEST_TARGETS} )
   set_target_properties( ${target} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     )
 

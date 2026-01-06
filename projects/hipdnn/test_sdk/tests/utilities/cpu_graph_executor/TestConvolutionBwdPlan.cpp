@@ -5,8 +5,8 @@
 
 #include "ConvolutionGraphUtils.hpp"
 #include "ConvolutionTensorBundles.hpp"
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -14,16 +14,16 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_plugin;
+using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_plugin_sdk;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
 class TestConvolutionBwdPlan : public ::testing::Test
 {
 protected:
-    static void initTensorValues(hipdnn_sdk::data_objects::TensorAttributesT& tensorAttr,
+    static void initTensorValues(hipdnn_data_sdk::data_objects::TensorAttributesT& tensorAttr,
                                  DataType dataType,
                                  const Tensor<float>& tensor,
                                  int64_t uid)
@@ -96,7 +96,8 @@ TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap
+        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -121,7 +122,8 @@ TEST(TestConvolutionBwdPlanBuilder, IsApplicable)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap
+        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;

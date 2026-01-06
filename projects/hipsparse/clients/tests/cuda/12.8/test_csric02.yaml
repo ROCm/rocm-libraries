@@ -35,7 +35,7 @@ Tests:
   category: quick
   function: csric02
   precision: *single_double_precisions_complex_real
-  M: [0, 50, 426]
+  M: [50, 426]
   solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 

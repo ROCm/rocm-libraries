@@ -27,6 +27,7 @@
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 
@@ -227,15 +228,10 @@ namespace rocRoller
                 {
                     if(!m_kernel->hasArgument(dim.argumentName))
                     {
-                        auto args  = m_command->getArguments();
-                        auto myArg = std::find_if(
-                            args.begin(), args.end(), [&dim](CommandArgumentPtr arg) {
-                                return dim.argumentName == arg->name();
-                            });
+                        auto arg = findArgumentByName(m_command, dim.argumentName);
+                        AssertFatal(arg, ShowValue(dim.argumentName));
 
-                        AssertFatal(myArg != args.end(), ShowValue(dim.argumentName));
-
-                        m_kernel->addCommandArgument(*myArg);
+                        m_kernel->addCommandArgument(arg);
                     }
                 }
 

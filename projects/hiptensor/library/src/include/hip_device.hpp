@@ -28,6 +28,8 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include "hiptensor/hiptensor_types.hpp"
+
 namespace hiptensor
 {
     class HipDevice
@@ -39,11 +41,22 @@ namespace hiptensor
             GFX90A           = 0x90A,
             GFX942           = 0x942,
             GFX950           = 0x950,
+            GFX1100          = 0x1100,
+            GFX1101          = 0x1101,
+            GFX1102          = 0x1102,
+            GFX1103          = 0x1103,
+            GFX1150          = 0x1150,
+            GFX1151          = 0x1151,
+            GFX1152          = 0x1152,
+            GFX1153          = 0x1153,
+            GFX1200          = 0x1200,
+            GFX1201          = 0x1201,
             UNSUPPORTED_ARCH = 0x0,
         };
 
         enum hipWarpSize_t : uint32_t
         {
+            Wave32                = 32u,
             Wave64                = 64u,
             UNSUPPORTED_WARP_SIZE = 0u,
         };
@@ -58,6 +71,8 @@ namespace hiptensor
 
         bool supportsF64() const;
 
+        bool matrixCoreSupport(hiptensorComputeDescriptor_t typeCompute) const;
+
     private:
         hipDevice_t     mDeviceId;
         hipDeviceProp_t mProps;
@@ -70,4 +85,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

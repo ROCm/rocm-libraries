@@ -4,10 +4,11 @@ include: hipblas_common.yaml
 Definitions:
   - &size_range
     - { N:  -1, K:  -1, lda:  -1, ldc:  -1 }
-    - { M: 600, N: 500, lda: 500, ldc: 501 }
+    - { N: 200, K:  16, lda: 200, ldc: 200 }
+    - { N: 32,  K:  33, lda:  64, ldc:  64 }
 
   - &alpha_beta_range
-    - { alpha: 2.0, alphai: -1.0, beta: 1.0, betai:  0.0 }
+    - { alpha: 1.0, alphai: 0.0, beta: 1.0, betai:  0.0 }
 
 Tests:
 
@@ -28,6 +29,7 @@ Tests:
     alpha_beta: *alpha_beta_range
     api: [ FORTRAN, C ]
     backend_flags: AMD
+    #initialization: hpl
 
   # - name: syrk_ex_bad_arg
   #   category: pre_checkin

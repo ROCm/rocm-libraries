@@ -32,6 +32,7 @@
 #endif
 
 #include "activation_functions.hpp"
+#include "miopen_cstdint.hpp"
 
 #ifdef LITE
 
@@ -55,8 +56,8 @@ extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
                                                FP_TYPE gamma,
                                                FP_TYPE beta,
                                                FP_TYPE alpha,
-                                               const long bot_offset,
-                                               const long top_offset)
+                                               const int64_t bot_offset,
+                                               const int64_t top_offset)
 {
     const unsigned int tid   = blockIdx.x * LOCAL_SIZE + threadIdx.x;
     const unsigned int index = tid * MIOPEN_READ_UNIT;
@@ -84,8 +85,8 @@ extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
                                                  FP_TYPE gamma,
                                                  FP_TYPE beta,
                                                  FP_TYPE alpha,
-                                                 const long bot_offset,
-                                                 const long top_offset,
+                                                 const int64_t bot_offset,
+                                                 const int64_t top_offset,
                                                  const uint bot_stride,
                                                  const uint top_stride)
 {
@@ -123,10 +124,10 @@ extern "C" __global__ void MIOpenActiveBwdLite(FP_TYPE* bot_diff,
                                                FP_TYPE gamma,
                                                FP_TYPE beta,
                                                FP_TYPE alpha,
-                                               const long bot_diff_offset,
-                                               const long top_diff_offset,
-                                               const long bot_offset,
-                                               const long top_offset)
+                                               const int64_t bot_diff_offset,
+                                               const int64_t top_diff_offset,
+                                               const int64_t bot_offset,
+                                               const int64_t top_offset)
 {
     const unsigned int tid = blockIdx.x * LOCAL_SIZE + threadIdx.x;
     int index              = tid * MIOPEN_READ_UNIT;
@@ -163,14 +164,14 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
                                                  FP_TYPE gamma,
                                                  FP_TYPE beta,
                                                  FP_TYPE alpha,
-                                                 const long bot_diff_offset,
-                                                 const long top_diff_offset,
-                                                 const long bot_offset,
-                                                 const long top_offset,
-                                                 const uint bot_diff_stride,
-                                                 const uint top_diff_stride,
-                                                 const uint bot_stride,
-                                                 const uint top_stride)
+                                                 const int64_t bot_diff_offset,
+                                                 const int64_t top_diff_offset,
+                                                 const int64_t bot_offset,
+                                                 const int64_t top_offset,
+                                                 const uint32_t bot_diff_stride,
+                                                 const uint32_t top_diff_stride,
+                                                 const uint32_t bot_stride,
+                                                 const uint32_t top_stride)
 {
     const unsigned int x_id = blockIdx.x * LOCAL_SIZE + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
@@ -181,10 +182,10 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
     if(y >= height)
         return;
 
-    uint bot_diff_index = y * bot_diff_stride + x_id * MIOPEN_READ_UNIT;
-    uint top_diff_index = y * top_diff_stride + x_id * MIOPEN_READ_UNIT;
-    uint bot_index      = y * bot_stride + x_id * MIOPEN_READ_UNIT;
-    uint top_index      = y * top_stride + x_id * MIOPEN_READ_UNIT;
+    uint32_t bot_diff_index = y * bot_diff_stride + x_id * MIOPEN_READ_UNIT;
+    uint32_t top_diff_index = y * top_diff_stride + x_id * MIOPEN_READ_UNIT;
+    uint32_t bot_index      = y * bot_stride + x_id * MIOPEN_READ_UNIT;
+    uint32_t top_index      = y * top_stride + x_id * MIOPEN_READ_UNIT;
 
     FP_TYPE bot_diff_dat[MIOPEN_READ_UNIT];
     FP_TYPE top_diff_dat[MIOPEN_READ_UNIT];
@@ -215,8 +216,8 @@ __launch_bounds__(
                          FP_TYPE gamma,
                          FP_TYPE beta,
                          FP_TYPE alpha,
-                         const long xOffset,
-                         const long yOffset)
+                         const int64_t xOffset,
+                         const int64_t yOffset)
 {
     const unsigned int x = blockIdx.x * MIOPEN_NRN_GROUP_SZ0 + threadIdx.x; // channel x
 
@@ -339,10 +340,10 @@ __launch_bounds__(
                          FP_TYPE gamma,
                          FP_TYPE beta,
                          FP_TYPE alpha,
-                         const long dxOffset,
-                         const long dyOffset,
-                         const long xOffset,
-                         const long yOffset)
+                         const int64_t dxOffset,
+                         const int64_t dyOffset,
+                         const int64_t xOffset,
+                         const int64_t yOffset)
 {
     const unsigned int x = blockIdx.x * MIOPEN_NRN_GROUP_SZ0 + threadIdx.x;
 
