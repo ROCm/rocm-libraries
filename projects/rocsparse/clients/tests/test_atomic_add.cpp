@@ -88,18 +88,29 @@ void test_atomic_add_accuracy(int size, int num_adds, int target_idx)
         GTEST_SKIP() << "target_idx >= size, skipping";
     }
 
-    T* d_y;
-    (void)hipMalloc(&d_y, size * sizeof(T));
+    T*         d_y;
+    hipError_t hip_status;
+
+    hip_status = hipMalloc(&d_y, size * sizeof(T));
+    ASSERT_EQ(hip_status, hipSuccess) << "hipMalloc failed: " << hipGetErrorString(hip_status);
 
     std::vector<T> h_y(size, static_cast<T>(0.0f));
-    (void)hipMemcpy(d_y, h_y.data(), size * sizeof(T), hipMemcpyHostToDevice);
+    hip_status = hipMemcpy(d_y, h_y.data(), size * sizeof(T), hipMemcpyHostToDevice);
+    ASSERT_EQ(hip_status, hipSuccess) << "hipMemcpy H2D failed: " << hipGetErrorString(hip_status);
 
     int threads_per_block = 256;
     int num_blocks        = (num_adds + threads_per_block - 1) / threads_per_block;
     kernel_atomic_add<T><<<num_blocks, threads_per_block>>>(d_y, size, num_adds, target_idx);
-    (void)hipDeviceSynchronize();
 
-    (void)hipMemcpy(h_y.data(), d_y, size * sizeof(T), hipMemcpyDeviceToHost);
+    hip_status = hipGetLastError();
+    ASSERT_EQ(hip_status, hipSuccess) << "Kernel launch failed: " << hipGetErrorString(hip_status);
+
+    hip_status = hipDeviceSynchronize();
+    ASSERT_EQ(hip_status, hipSuccess)
+        << "hipDeviceSynchronize failed: " << hipGetErrorString(hip_status);
+
+    hip_status = hipMemcpy(h_y.data(), d_y, size * sizeof(T), hipMemcpyDeviceToHost);
+    ASSERT_EQ(hip_status, hipSuccess) << "hipMemcpy D2H failed: " << hipGetErrorString(hip_status);
 
     float result    = static_cast<float>(h_y[target_idx]);
     float expected  = static_cast<float>(num_adds) * Traits::add_value;
@@ -119,7 +130,8 @@ void test_atomic_add_accuracy(int size, int num_adds, int target_idx)
         }
     }
 
-    (void)hipFree(d_y);
+    hip_status = hipFree(d_y);
+    ASSERT_EQ(hip_status, hipSuccess) << "hipFree failed: " << hipGetErrorString(hip_status);
 }
 
 // =============================================================================
