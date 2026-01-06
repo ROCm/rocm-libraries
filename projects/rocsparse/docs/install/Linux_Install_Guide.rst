@@ -126,7 +126,7 @@ The following table lists the common ways to use ``install.sh`` to build the roc
 
 .. note::
 
-   When rocBLAS is specifically requested, it's considered a mandatory requirement.
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
    To opt out of using rocBLAS when building from source with
    the ``install.sh`` script, use the ``no-rocblas`` option. 
 
