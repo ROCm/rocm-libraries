@@ -1034,19 +1034,20 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     if(auto cached_invoker =
            handle.GetInvoker(network_config, std::nullopt, AlgorithmName{"fusion"}))
     {
-        auto id_str = handle.GetFound1_0SolverId(network_config, AlgorithmName{"fusion"});
         // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        auto id_str = handle.GetFound1_0SolverId(network_config, AlgorithmName{"fusion"}).value();
         size_t reqWorkSpaceSize = 0;
         bool found              = false;
         const auto ctx          = FusionContext{handle};
-        GetAllFusionSolvers().FindById(solver::Id(*id_str), [&](auto solver) {
+
+        GetAllFusionSolvers().FindById(solver::Id(id_str), [&](auto solver) {
             reqWorkSpaceSize = solver.GetWorkspaceSize(ctx, fusion_problem);
             found            = true;
         });
 
         if(!found)
         {
-            MIOPEN_LOG_E("Cached solver id is not valid anymore: " << *id_str);
+            MIOPEN_LOG_E("Cached solver id is not valid anymore: " << id_str);
             return miopenStatusInternalError;
         }
 
