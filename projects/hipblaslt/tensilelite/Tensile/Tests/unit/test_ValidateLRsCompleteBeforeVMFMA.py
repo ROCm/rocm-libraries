@@ -264,11 +264,10 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         Case where each LR reads more than 1 WaveTile worth of data.
         Even though there are 4 tiles of A and 4 of B there are only 2 LRAs and 2 LRBs, each loading 2 tiles of A and B respectively.
         """
-        from test_CustomSchedule import create_base_kernel
-        self.kernel = create_base_kernel()
-        self.kernel["MIWaveTileA"] = 4
-        self.kernel["MIWaveTileB"] = 4
-        self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
+        self.setUp({
+            "MIWaveTileA": 4,
+            "MIWaveTileB": 4
+        })
         assert self.num_vmfma == 32
         
         optSchedule = {
@@ -358,7 +357,9 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
     LRA3 needed at 12 (0 of next iter)
     """
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
-        super().setUp({"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
+        super().setUp(kernel_updates)
 
     def validation_function(self, sched, kernel_dict, codePathIdx):
         return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)

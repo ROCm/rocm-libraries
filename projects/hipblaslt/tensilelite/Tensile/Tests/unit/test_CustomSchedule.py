@@ -44,6 +44,7 @@ def create_base_kernel():
         "EnableMatrixInstruction": True,
         "UnrollLoopSwapGlobalReadOrder": False,
         "ISA": IsaVersion(9,5,0),
+        "WavefrontSize": 64,
         "ProblemType": {
             "DataType": _mock_dtype(),
             "DataTypeA": _mock_dtype(),
