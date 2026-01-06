@@ -814,11 +814,6 @@ public:
         return toFlatBuffer(buffer);
     }
 
-    flatbuffers::DetachedBuffer serialize()
-    {
-        return toFlatBuffer();
-    }
-
     Error deserialize(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
         return fromFlatBuffer(fbGraph);
@@ -829,7 +824,8 @@ public:
         return fromFlatBuffer(buffer);
     }
 
-    /// Serialize to binary
+    /// Serialize to binary (const version)
+    /// Returns error if tensor UIDs are not set
     Error serialize(std::vector<uint8_t>& data) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -838,14 +834,13 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to binary
+    /// Serialize to binary (non-const version)
     /// Assigns tensor UIDs if not already set
-    Error serialize(std::vector<uint8_t>& data)
+    std::vector<uint8_t> toBinary()
     {
         assignTensorUids();
         auto buffer = buildFlatbufferOperationGraphConst();
-        data.assign(buffer.data(), buffer.data() + buffer.size());
-        return {ErrorCode::OK, ""};
+        return {buffer.data(), buffer.data() + buffer.size()};
     }
 
     /// Deserialize from binary packed FlatBuffer
@@ -856,7 +851,8 @@ public:
     }
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    /// Serialize to JSON
+    /// Serialize to JSON (const version)
+    /// Returns error if tensor UIDs are not set
     Error serialize(nlohmann::json& j) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -868,17 +864,15 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to JSON
+    /// Serialize to JSON (non-const version)
     /// Assigns tensor UIDs if not already set
-    Error serialize(nlohmann::json& j)
+    nlohmann::json toJson()
     {
         assignTensorUids();
         auto buffer = buildFlatbufferOperationGraphConst();
         auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
 
-        j = *sdkGraph;
-
-        return {ErrorCode::OK, ""};
+        return *sdkGraph;
     }
 
     Error deserialize(const nlohmann::json& j)

@@ -1121,7 +1121,7 @@ TEST(TestGraphSerialization, SerializeOverloadReturnsDetachedBuffer)
     prepareGraphForSerialization(graph);
 
     // Use serialize() overload that returns DetachedBuffer
-    auto buffer = graph.serialize();
+    auto buffer = graph.toFlatBuffer();
     EXPECT_GT(buffer.size(), 0u);
 
     // Verify it's equivalent to toFlatBuffer()
@@ -1251,7 +1251,7 @@ TEST(TestGraphSerialization, ConstSerializeReturnsErrorWithoutUids)
     EXPECT_EQ(err.get_code(), ErrorCode::ATTRIBUTE_NOT_SET);
 
     // Non-const serialize should succeed by assigning UIDs
-    auto nonConstBuffer = graph.serialize();
+    auto nonConstBuffer = graph.toFlatBuffer();
     EXPECT_GT(nonConstBuffer.size(), 0u);
 }
 
@@ -1279,7 +1279,7 @@ TEST(TestGraphSerialization, NonConstSerializeAssignsUids)
     EXPECT_FALSE(x->has_uid());
 
     // Non-const serialize should assign UIDs
-    auto buffer = graph.serialize();
+    auto buffer = graph.toFlatBuffer();
     EXPECT_GT(buffer.size(), 0u);
 
     // After non-const serialize, tensor should have UID
@@ -1311,10 +1311,8 @@ TEST(TestGraphSerialization, ConstJsonSerializeReturnsErrorWithoutUids)
     auto err = constGraph.serialize(json);
     EXPECT_EQ(err.get_code(), ErrorCode::ATTRIBUTE_NOT_SET);
 
-    // Non-const JSON serialize should succeed
-    nlohmann::json nonConstJson;
-    err = graph.serialize(nonConstJson);
-    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+    // Non-const toJson() should succeed
+    auto nonConstJson = graph.toJson();
     EXPECT_EQ(nonConstJson["name"], "const_json_test");
 }
 
@@ -1343,10 +1341,8 @@ TEST(TestGraphSerialization, ConstBinarySerializeReturnsErrorWithoutUids)
     auto err = constGraph.serialize(data);
     EXPECT_EQ(err.get_code(), ErrorCode::ATTRIBUTE_NOT_SET);
 
-    // Non-const binary serialize should succeed
-    std::vector<uint8_t> nonConstData;
-    err = graph.serialize(nonConstData);
-    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+    // Non-const toBinary() should succeed
+    auto nonConstData = graph.toBinary();
     EXPECT_GT(nonConstData.size(), 0u);
 }
 
