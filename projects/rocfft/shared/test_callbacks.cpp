@@ -21,6 +21,10 @@
 #include "test_callbacks.h"
 #include "rocfft_complex.h"
 
+#ifdef ROCFFT_MPI_ENABLE
+#include <mpi.h>
+#endif
+
 // load/store callbacks - cbdata in each is actually a scalar double
 // with a number to apply to each element
 template <typename Tdata>
@@ -592,7 +596,7 @@ void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input)
     }
 }
 
-// For a specified rank, get a vector of load callback function +
+// For the current rank, get a vector of load callback function +
 // data pointers.  The pointers need to be in the order that
 // fields+bricks were specified to the FFT plan.  Pointers need to be
 // copied to the host from the device specified by the respective
@@ -602,9 +606,16 @@ void get_rank_load_callbacks(const fft_params&                          params,
                              std::vector<void*>&                        load_cb_data,
                              callback_hip_error_handler                 runtime_err_handler,
                              bool                                       round_trip_inverse,
-                             std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
-                             int                                        rank)
+                             std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
 {
+    int mpi_rank = 0;
+#ifdef ROCFFT_MPI_ENABLE
+    if(params.mp_lib == fft_params::fft_mp_lib_mpi)
+    {
+        MPI_Comm_rank(*static_cast<MPI_Comm*>(params.mp_comm), &mpi_rank);
+    }
+#endif
+
     // Copy callback pointer from current device and add to output vec
     auto add_load_cb = [&]() {
         void* load_cb_host = get_load_callback_host(
@@ -663,7 +674,7 @@ void get_rank_load_callbacks(const fft_params&                          params,
         // on this rank
         for(size_t i = 0; i < params.ifields.front().bricks.size(); ++i)
         {
-            if(params.ifields.front().bricks[i].rank != rank)
+            if(params.ifields.front().bricks[i].rank != mpi_rank)
                 continue;
 
             // load cb for this brick's device
@@ -673,7 +684,7 @@ void get_rank_load_callbacks(const fft_params&                          params,
     }
 }
 
-// For a specified rank, get a vector of store callback function +
+// For the current rank, get a vector of store callback function +
 // data pointers.  The pointers need to be in the order that
 // fields+bricks were specified to the FFT plan.  Pointers need to be
 // copied to the host from the device specified by the respective
@@ -683,9 +694,16 @@ void get_rank_store_callbacks(const fft_params&                          params,
                               std::vector<void*>&                        store_cb_data,
                               callback_hip_error_handler                 runtime_err_handler,
                               bool                                       round_trip_inverse,
-                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
-                              int                                        rank)
+                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
 {
+    int mpi_rank = 0;
+#ifdef ROCFFT_MPI_ENABLE
+    if(params.mp_lib == fft_params::fft_mp_lib_mpi)
+    {
+        MPI_Comm_rank(*static_cast<MPI_Comm*>(params.mp_comm), &mpi_rank);
+    }
+#endif
+
     // Copy callback pointer from current device and add to output vec
     auto add_store_cb = [&]() {
         void* store_cb_host = get_store_callback_host(
@@ -746,7 +764,7 @@ void get_rank_store_callbacks(const fft_params&                          params,
         // on this rank
         for(size_t i = 0; i < params.ofields.front().bricks.size(); ++i)
         {
-            if(params.ofields.front().bricks[i].rank != rank)
+            if(params.ofields.front().bricks[i].rank != mpi_rank)
                 continue;
 
             // store cb for this brick's device
