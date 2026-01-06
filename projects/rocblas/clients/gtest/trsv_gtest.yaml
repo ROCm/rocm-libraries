@@ -233,7 +233,20 @@ Tests:
         - trsv_strided_batched
   arguments: *common_args
   matrix_size:
+    - { N:   128, lda:   128, stride_a: 16384 }
+    - { N:   160, lda:   160, stride_a: 25600 }
+    - { N:   176, lda:   176, stride_a: 30976 }
+    - { N:   184, lda:   184, stride_a: 33856 }
+    - { N:   188, lda:   188, stride_a: 35344 }
+    - { N:   190, lda:   190, stride_a: 36100 }
+    - { N:   191, lda:   191, stride_a: 36481 }
     - { N:   192, lda:   192, stride_a: 36864 }
+    - { N:   193, lda:   193, stride_a: 37249 }
+    - { N:   194, lda:   194, stride_a: 37636 }
+    - { N:   196, lda:   196, stride_a: 38416 }
+    - { N:   200, lda:   200, stride_a: 40000 }
+    - { N:   224, lda:   224, stride_a: 50176 }
+    - { N:   256, lda:   256, stride_a: 65536 }
   incx: [ 1 ]
   stride_scale: [ 1 ]
   batch_count: [ 3 ]

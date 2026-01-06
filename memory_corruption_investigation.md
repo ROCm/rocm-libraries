@@ -7,6 +7,21 @@
 
 ---
 
+## 📌 **IMPORTANT NOTE FOR FUTURE DEBUGGING SESSIONS**
+
+**This is the SINGLE running log for this investigation. All observations, experiments, and next steps should be added here chronologically.**
+
+**Do NOT create separate strategy documents.** Add new sections to the bottom of this file with:
+- Date/time of observation
+- What was tested
+- What was observed
+- New hypotheses
+- Next steps to try
+
+Keep this as one continuous narrative of the investigation.
+
+---
+
 ## Executive Summary
 
 Intermittent heap corruption occurs in rocBLAS `trsv`/`trsv_batched` tests **only on CI**, manifesting as:
@@ -734,3 +749,383 @@ This suggests the synchronization changes timing, not the underlying bug. The ro
 5. **Test on other platforms:**
    - Do ubuntu22 nodes also fail at N=192 now?
    - Is this specific to gfx950 or universal?
+
+---
+
+## CI-Only Debugging Strategy (January 6, 2026 - Afternoon)
+
+### The Challenge
+
+**Problem:** No direct access to CI nodes where the bug reproduces. Limited to:
+- Code modifications
+- Log analysis from CI runs
+- ~45-60 minute feedback loop per iteration
+
+**Current State:** Bug is now **deterministic at N=192** (always fails) after adding device synchronization. This is actually progress - we've made it reproducible instead of random.
+
+### Changes Implemented for Next CI Run
+
+#### 1. Graph Inspection Logging
+
+**File:** `projects/rocblas/clients/common/client_utility.cpp`
+**Location:** Right before `hipGraphLaunch()` call
+
+Added:
+```cpp
+size_t numNodes = 0;
+CHECK_HIP_ERROR(hipGraphGetNodes(instance, nullptr, &numNodes));
+rocblas_cerr << "[DEBUG]   Graph contains " << numNodes << " nodes" << std::endl;
+
+if(numNodes > 100) {
+    rocblas_cerr << "[WARNING] Unusually high node count detected!" << std::endl;
+}
+```
+
+**Purpose:** Identify if N=192 creates an unusually large or small number of graph nodes compared to other sizes.
+
+#### 2. Test Parameter Logging + N=192 Workaround
+
+**File:** `projects/rocblas/clients/include/client_utility.hpp`
+**Location:** `pre_test()` and `post_test()` methods
+
+Added:
+```cpp
+// Log test parameters
+rocblas_cerr << "[TEST_DEBUG] N=" << arg.N << " batch_count=" << arg.batch_count
+            << " lda=" << arg.lda << " stride_a=" << arg.stride_a << std::endl;
+
+// TEMPORARY WORKAROUND: Skip graph capture for N=192
+if(arg.N == 192) {
+    rocblas_cerr << "[WORKAROUND] Skipping graph capture for N=192" << std::endl;
+    return;  // Skip graph capture entirely
+}
+```
+
+**Purpose:**
+- Confirm test parameters before each graph capture
+- Test if N=192 works fine WITHOUT graph capture (confirms bug is graph-specific)
+
+#### 3. Boundary Testing - Expanded N Values
+
+**File:** `projects/rocblas/clients/gtest/trsv_gtest.yaml`
+**Change:** Expanded `trsv_graph_test` from 1 size to 14 sizes
+
+**N values now tested:**
+```yaml
+matrix_size:
+  - { N:   128, lda:   128, stride_a: 16384 }
+  - { N:   160, lda:   160, stride_a: 25600 }
+  - { N:   176, lda:   176, stride_a: 30976 }
+  - { N:   184, lda:   184, stride_a: 33856 }
+  - { N:   188, lda:   188, stride_a: 35344 }
+  - { N:   190, lda:   190, stride_a: 36100 }
+  - { N:   191, lda:   191, stride_a: 36481 }
+  - { N:   192, lda:   192, stride_a: 36864 }  # Original failing case
+  - { N:   193, lda:   193, stride_a: 37249 }
+  - { N:   194, lda:   194, stride_a: 37636 }
+  - { N:   196, lda:   196, stride_a: 38416 }
+  - { N:   200, lda:   200, stride_a: 40000 }
+  - { N:   224, lda:   224, stride_a: 50176 }
+  - { N:   256, lda:   256, stride_a: 65536 }
+```
+
+**Purpose:** Identify exact failure boundary - is it only N=192, or a range? A threshold?
+
+### What We'll Learn from This CI Run
+
+#### Question 1: What's the Failure Pattern?
+
+**Scenario A - Exact Point Failure:**
+```
+N=191: PASSED
+N=192: FAILED  ← Only this one
+N=193: PASSED
+```
+→ **Interpretation:** Something very specific about 192:
+- Could be `192 = 3 × 64` (warp size multiplication)
+- Could be `192 = 128 + 64` (crosses threshold)
+- Grid dimension calculation hits edge case
+
+**Scenario B - Threshold Failure:**
+```
+N < 192: All PASSED
+N ≥ 192: All FAILED
+```
+→ **Interpretation:** There's a limit being exceeded:
+- Graph node count limit
+- Memory pool capacity
+- Batch grid dimension threshold
+
+**Scenario C - Range Failure:**
+```
+N=188-196: All FAILED
+Others: PASSED
+```
+→ **Interpretation:** Timing/alignment window:
+- Memory alignment causes corruption in this range
+- Graph structure size issue
+
+**Scenario D - Still Random:**
+```
+Different N values fail on different runs
+```
+→ **Interpretation:** Still timing-dependent despite device sync
+
+#### Question 2: How Many Graph Nodes?
+
+Look for patterns like:
+```
+[DEBUG]   Graph contains 47 nodes    (N=128)
+[DEBUG]   Graph contains 89 nodes    (N=192) ← Compare!
+[DEBUG]   Graph contains 143 nodes   (N=256)
+```
+
+If N=192 has suspiciously high node count → Might be hitting HIP graph limits.
+
+#### Question 3: Is Bug Graph-Specific?
+
+With the N=192 skip workaround:
+```
+[WORKAROUND] Skipping graph capture for N=192
+[  PASSED  ] trsv_graph_test_f32_r_UCN_128_192_1
+```
+
+If this **passes** → Confirms bug is in graph capture, not general N=192 issue.
+
+### Hypotheses to Test (Ordered by Likelihood)
+
+#### Hypothesis 1: Grid Dimension Edge Case (MOST LIKELY)
+
+**Theory:** N=192 with specific `DIM_X` creates problematic grid dimensions.
+
+**Code Location:** `rocblas_trsv_kernels.cpp:823`
+```cpp
+rocblas_int blocks = (n + DIM_X - 1) / DIM_X;
+dim3 grid(blocks, 1, batches);
+```
+
+**What to check:**
+- What is `DIM_X` for trsv? (likely 64 or 128)
+- At N=192: `blocks = (192 + 64 - 1) / 64 = 255/64 = 3`
+- Does batch_count=3 with 3 blocks create special case?
+
+**If this is it:** Fix would be to adjust grid calculation or handle N=192 specially.
+
+#### Hypothesis 2: Graph Node Count Exceeds Limit
+
+**Theory:** Graph structure at N=192 exceeds some HIP internal limit.
+
+**Evidence needed:** Node count from new logging (this CI run will tell us).
+
+**If node count > 100:** Could be approaching/exceeding limit.
+
+**If this is it:** Fix would be to split operations or use different graph structure.
+
+#### Hypothesis 3: Memory Pool Allocation Granularity
+
+**Theory:** Workspace allocation at N=192 with batch=3 hits problematic size/alignment.
+
+**Calculations:**
+- `dev_bytes = sizeof(rocblas_int) * batch_count = 4 * 3 = 12 bytes`
+- Rounds up to: 64 bytes (seen in logs)
+- At N=192: Total allocation = 64 bytes in async pool
+
+**What to check:**
+- Do other N values also allocate 64 bytes?
+- Is there something special about 64-byte async allocations?
+
+**If this is it:** Fix would be to adjust allocation size or pool configuration.
+
+#### Hypothesis 4: Batch Grid Calculation
+
+**Theory:** `getBatchGridDim(3)` at N=192 creates problematic configuration.
+
+**Code Location:** `rocblas_trsv_kernels.cpp:820`
+```cpp
+int batches = handle->getBatchGridDim((int)batch_count);
+```
+
+**What to check:**
+- What does `getBatchGridDim(3)` return?
+- Does it vary by GPU architecture?
+- Combined with blocks from N=192, does it exceed grid limits?
+
+**If this is it:** Fix would be in batch grid calculation.
+
+### Decision Tree for Next Fix (Based on CI Results)
+
+```
+CI Shows:
+
+├─ Only N=192 fails, N=191 and N=193 pass
+│  └─> Next: Investigate grid dimension calculation
+│     - Check DIM_X value
+│     - Test with different batch_count
+│     - Look at blocks*batches total
+│
+├─ N ≥ 192 all fail, N < 192 pass
+│  └─> Next: Threshold issue
+│     - Check graph node count across sizes
+│     - Test memory pool capacity
+│     - Try pool pre-warming (see Fix #3 below)
+│
+├─ Range 188-196 fails
+│  └─> Next: Alignment/size issue
+│     - Check workspace allocation rounding
+│     - Test with forced different alignments
+│     - Look at pool allocation granularity
+│
+└─ N=192 with workaround PASSES (no graph capture)
+   └─> CONFIRMS: Bug is graph-capture-specific
+      - Focus on graph structure at N=192
+      - Not a general trsv issue
+```
+
+### Alternative Fixes to Try (Next Iteration)
+
+#### Fix #3: Memory Pool Pre-warming
+
+Add to `client_utility.cpp` in `rocblas_stream_begin_capture()`:
+
+```cpp
+// After creating m_graph_stream, before hipStreamBeginCapture
+hipMemPool_t mempool;
+int device;
+CHECK_HIP_ERROR(hipGetDevice(&device));
+CHECK_HIP_ERROR(hipDeviceGetDefaultMemPool(&mempool, device));
+
+// Set release threshold to prevent premature freeing
+uint64_t threshold = 1024 * 1024;  // 1MB
+CHECK_HIP_ERROR(hipMemPoolSetAttribute(mempool,
+    hipMemPoolAttrReleaseThreshold, &threshold));
+```
+
+**Why:** Pre-allocated pool might prevent fragmentation issues.
+
+#### Fix #4: Explicit Stream Dependencies
+
+Add to handle.hpp in `_device_malloc` destructor during graph capture:
+
+```cpp
+if(stream_order_flag && dev_mem) {
+    CHECK_HIP_ERROR(hipFreeAsync(dev_mem, m_stream));
+
+    // Add explicit ordering for graph capture
+    hipEvent_t event;
+    CHECK_HIP_ERROR(hipEventCreate(&event));
+    CHECK_HIP_ERROR(hipEventRecord(event, m_stream));
+    CHECK_HIP_ERROR(hipStreamWaitEvent(m_stream, event, 0));
+    CHECK_HIP_ERROR(hipEventDestroy(event));
+}
+```
+
+**Why:** Ensures operations are properly ordered in graph.
+
+#### Fix #5: Force Sync for Medium Sizes
+
+```cpp
+// In _device_malloc destructor after hipFreeAsync
+if(stream_order_flag && !is_stream_in_capture_mode()) {
+    // Force sync outside capture to prevent issues
+    CHECK_HIP_ERROR(hipStreamSynchronize(m_stream));
+}
+```
+
+**Why:** Ensures async operations complete before next allocation.
+
+### How to Interpret CI Logs
+
+#### Search Patterns:
+
+```bash
+# Get test parameters for each run
+grep "TEST_DEBUG" ci_log.txt
+
+# Get graph node counts
+grep "Graph contains" ci_log.txt
+
+# Check workaround activation
+grep "WORKAROUND" ci_log.txt
+
+# Find failures
+grep -A 2 "FAILED" ci_log.txt
+
+# Find segfaults
+grep -B 5 "Segmentation fault" ci_log.txt
+```
+
+#### Expected Output Example:
+
+```
+[TEST_DEBUG] N=128 batch_count=3 lda=128 stride_a=16384
+[DEBUG]   Graph contains 47 nodes
+[  PASSED  ] trsv_graph_test_f32_r_UCN_128_128_1
+
+[TEST_DEBUG] N=192 batch_count=3 lda=192 stride_a=36864
+[WORKAROUND] Skipping graph capture for N=192
+[  PASSED  ] trsv_graph_test_f32_r_UCN_128_192_1  ← With workaround
+
+[TEST_DEBUG] N=256 batch_count=3 lda=256 stride_a=65536
+[DEBUG]   Graph contains 143 nodes
+[  PASSED  ] trsv_graph_test_f32_r_UCN_128_256_1
+```
+
+### Success Criteria
+
+**Minimal Success (this iteration):**
+- ✅ Know exact failure boundary (which N values fail)
+- ✅ Confirm whether bug is graph-specific (workaround test)
+- ✅ Have graph node count data
+
+**Next Iteration Goal:**
+- ✅ Understand WHY that specific N (or range) fails
+- ✅ Implement targeted fix (not workaround)
+
+**Final Goal:**
+- ✅ All N values pass with graph capture enabled
+- ✅ No performance regression
+- ✅ Confirmed across all CI platforms
+
+### Timeline Estimate
+
+- **This CI Run:** ~45-60 minutes
+- **Log Analysis:** ~20-30 minutes
+- **Implement Next Fix:** ~30 minutes
+- **Validation CI Run:** ~45-60 minutes
+- **Total:** 2.5-3 hours to next iteration
+
+Likely 2-3 more iterations to complete fix.
+
+### Key Insight: Why Determinism is Progress
+
+The fact that the bug became deterministic at N=192 after adding device synchronization is **good news:**
+
+**Before:**
+- Random failures across platforms
+- Different sizes fail on different runs
+- Impossible to debug systematically
+
+**After:**
+- Consistent failure at N=192
+- Reproducible test case
+- Can systematically test hypotheses
+
+**The synchronization didn't "move" the bug** - it **revealed its true nature** by eliminating timing variability that was masking the underlying issue.
+
+This is like stabilizing a shaky table so you can see which leg is actually broken, rather than all legs wobbling randomly.
+
+### Next Steps (Immediate)
+
+1. ✅ Commit changes (3 files modified)
+2. ⏳ Push to CI branch
+3. ⏳ Wait for CI results (~45-60 min)
+4. ⏳ Analyze logs using patterns above
+5. ⏳ Update this document with findings
+6. ⏳ Implement targeted fix based on results
+7. ⏳ Repeat
+
+### Files Modified This Session
+
+- `projects/rocblas/clients/common/client_utility.cpp` - Graph node inspection
+- `projects/rocblas/clients/include/client_utility.hpp` - Parameter logging + workaround
+- `projects/rocblas/clients/gtest/trsv_gtest.yaml` - Expanded to 14 N values
