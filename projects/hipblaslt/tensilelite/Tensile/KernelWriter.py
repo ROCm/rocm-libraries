@@ -36,7 +36,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
 
@@ -2882,8 +2882,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.addComment0("Create a negative identity matrix used by TF32 MFMA emulation.")
     module.add(VAndB32(dst=vgpr(lane4),src0=3, src1=vgpr("Serial"), comment="lane % 4"))
-    module.add(VMovB32(dst=mfmaHigh,src=0))
-    module.add(VMovB32(dst=mfmaLow,src=0))
+    module.add(VMovB64(dst=vgpr(self.states.startVgprIdentityMatrix,2),src=0))
     module.add(VMovB32(dst=vgpr(tmp), src="0xbf80", comment=""))
 
     module.add(VCmpEQU32(dst=VCC(), src0=0, src1=vgpr(lane4), comment="Lane %4 == 0 ?"))
@@ -4776,11 +4775,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.startVgprIdentityMatrix = vgprIdx
       vgprIdx+=2
       
-    # TODO: Serial is always the first/last register in the pool so the store
-    # code doesn't have to deal with fragmentation
-    self.states.startVgprSerial = vgprIdx
-    vgprIdx += 1 # for vgpr serial id
-
     if kernel["UseDirect32XEmulation"]:
       numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
       if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
@@ -4792,7 +4786,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.startVgprCvt = vgprIdx
         vgprIdx += numVgprsEmu # for vgpr 32XEmulation
 
-
+    # TODO: Serial is always the first/last register in the pool so the store
+    # code doesn't have to deal with fragmentation
+    self.states.startVgprSerial = vgprIdx
+    vgprIdx += 1 # for vgpr serial id
 
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:

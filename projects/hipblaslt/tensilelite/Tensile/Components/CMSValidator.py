@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from copy import deepcopy
 from math import floor
+from typing import Optional, Union
 
 from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Common.Utilities import printWarning
@@ -310,18 +311,18 @@ class ValidatorInstruction(ABC):
     issued_at: float
 
     @abstractmethod
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         ...
 
 @dataclass
 class LocalRead(ValidatorInstruction):
     name: str
     num_vmfma: int
-    issued_at: int | float
-    needed_by: int | float = float('inf')
-    guaranteed_by: int | float = float('inf')
+    issued_at: Union[int, float]
+    needed_by: Union[int, float] = float('inf')
+    guaranteed_by: Union[int, float] = float('inf')
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         # For when local reads are not being guaranteed by a particular pass.
         if self.needed_by == float('inf'):
             return None
@@ -357,13 +358,13 @@ class LocalRead(ValidatorInstruction):
 class GlobalRead(ValidatorInstruction):
     name: str
     num_vmfma: int
-    issued_at: int | float
+    issued_at: Union[int, float]
     swap_global_read_order: bool
     needed_by: float = float('inf')
-    guaranteed_by: int | float = float('inf')
-    barriered_at: list[int | float] = field(default_factory=list)
+    guaranteed_by: Union[int, float] = float('inf')
+    barriered_at: list[Union[int, float]] = field(default_factory=list)
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         if self.issued_at < self.guaranteed_by < self.needed_by:
             if any(self.guaranteed_by < barriered_at < self.needed_by for barriered_at in self.barriered_at):
                     return None
@@ -409,7 +410,7 @@ class GlobalRead(ValidatorInstruction):
 
 @dataclass
 class SWait(ValidatorInstruction):
-    issued_at: int | float
+    issued_at: Union[int, float]
     dscnt: int
     vlcnt: int
     vscnt: int
@@ -419,18 +420,18 @@ class SWait(ValidatorInstruction):
     def _is_valid(self) -> bool:
         return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at >= -1
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         if self._is_valid():
             return None
         return f"SWait at index {floor(self.issued_at)} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={floor(self.issued_at)}."
 
 @dataclass
 class Barrier(ValidatorInstruction):
-    issued_at: int | float
+    issued_at: Union[int, float]
     comment: str
     name: str = "SBarrier"
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         return f"Barrier at index {floor(self.issued_at)} is not valid. Must be >= -1." if self.issued_at < -1 else None
 
 MAIN_LOOP_PREV = "ML-1"
@@ -795,7 +796,7 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
                 gr.needed_by = LR_target.issued_at
 
 
-def validate_timeline(timeline: Timeline) -> str | None:
+def validate_timeline(timeline: Timeline) -> Optional[str]:
     """
     Validate the timeline by calling the validate method of each instruction.
     
@@ -1016,7 +1017,7 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
 
     # Checks value is in [interval[0],interval[1]].
     # if lhsGt : ]interval[0],interval[1]] else  [interval[0],interval[1][
-    def inInterval(value : int, interval : list[int], lhsGt : bool):
+    def inInterval(value: int, interval: list[int], lhsGt: bool):
         if lhsGt:
             return value>interval[0] and value<=interval[1]
         else:
@@ -1031,7 +1032,7 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
     if DTL:
         names += ["GRA", "GRB"]
 
-    def verifyIndices(grIncData : GRIncData, name : str, indices : list[int]) -> str | None:
+    def verifyIndices(grIncData: GRIncData, name: str, indices: list[int]) -> Optional[str]:
         dclIndex = getDeclarationIndex(name)
         dclIndexGrInc = getDeclarationIndex(grIncData.name)
         for v in indices:
