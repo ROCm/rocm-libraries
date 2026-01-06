@@ -25,7 +25,7 @@
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countDSStoreB256, getMFMAs
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
-from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer
+from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
@@ -36,7 +36,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
 
@@ -225,6 +225,7 @@ class StateValues:
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
   startVgprCvt: int                      = -1
+  startVgprIdentityMatrix: int           = -1 
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -2866,6 +2867,47 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return module
 
   ##############################################################################
+  # Creates a negative identity matrix for 4x4x4_16b MFMA
+  # Each 4x4 block is set to this:
+  # -1  0  0
+  #  0 -1  0 
+  #  0  0 -1
+  ##############################################################################
+  def createNegIdentityMatrix(self, kernel):
+    module = Module("NegIdentityMatrix")
+    tmp = self.vgprPool.checkOut(1)
+    lane4 = self.vgprPool.checkOut(1)
+    mfmaHigh = vgpr(self.states.startVgprIdentityMatrix)
+    mfmaLow = vgpr(self.states.startVgprIdentityMatrix+1)
+
+    module.addComment0("Create a negative identity matrix used by TF32 MFMA emulation.")
+    module.add(VAndB32(dst=vgpr(lane4),src0=3, src1=vgpr("Serial"), comment="lane % 4"))
+    module.add(VMovB64(dst=vgpr(self.states.startVgprIdentityMatrix,2),src=0))
+    module.add(VMovB32(dst=vgpr(tmp), src="0xbf80", comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=0, src1=vgpr(lane4), comment="Lane %4 == 0 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaHigh, src0=mfmaHigh, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=2, src1=vgpr(lane4), comment="Lane %4 == 2 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaLow, src0=mfmaLow, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    module.add(VMovB32(dst=vgpr(tmp), src="0xbf800000", comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=1, src1=vgpr(lane4), comment="Lane %4 == 1 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaHigh, src0=mfmaHigh, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    module.add(VCmpEQU32(dst=VCC(), src0=3, src1=vgpr(lane4), comment="Lane %4 == 3 ?"))
+    module.add(SNop(1, comment=""))
+    module.add(VCndMaskB32(dst=mfmaLow, src0=mfmaLow, src1=vgpr(tmp), src2= VCC(), comment=""))
+
+    self.vgprPool.checkIn(tmp)
+    self.vgprPool.checkIn(lane4)
+    return module
+
+  ##############################################################################
   # Kernel Body
   ##############################################################################
   def kernelBody( self, kernel, tensorParametersA, tensorParametersB ):
@@ -2892,6 +2934,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.preLoop(self, kernel))
 
+    # MFMA F32XEmulation negative identity matrix
+    if kernel["UseMFMAF32XEmulation"]:
+      module.add(self.createNegIdentityMatrix(kernel))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
@@ -3028,6 +3073,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if kernel["UsePLRPack"] and self.states.numItersPLR:
                 module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete"))
                 module.add(pack[plrIdx])
+
         self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       elif self.states.numItersPLR == 0 and kernel["UseCustomMainLoopSchedule"]:
         # For numItersPLR=0 and CMS we prefetch only half the local reads
@@ -4724,11 +4770,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.b.startVgprLocalWriteSwapAddr = vgprIdx
       vgprIdx += 1
 
-    # TODO: Serial is always the first/last register in the pool so the store
-    # code doesn't have to deal with fragmentation
-    self.states.startVgprSerial = vgprIdx
-    vgprIdx += 1 # for vgpr serial id
-
+    if kernel["UseMFMAF32XEmulation"]:
+      vgprIdx = ((vgprIdx+1)//2)*2 #align 64 bit
+      self.states.startVgprIdentityMatrix = vgprIdx
+      vgprIdx+=2
+      
     if kernel["UseDirect32XEmulation"]:
       numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
       if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
@@ -4739,6 +4785,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx = ((vgprIdx+1)//2)*2
         self.states.startVgprCvt = vgprIdx
         vgprIdx += numVgprsEmu # for vgpr 32XEmulation
+
+    # TODO: Serial is always the first/last register in the pool so the store
+    # code doesn't have to deal with fragmentation
+    self.states.startVgprSerial = vgprIdx
+    vgprIdx += 1 # for vgpr serial id
 
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
