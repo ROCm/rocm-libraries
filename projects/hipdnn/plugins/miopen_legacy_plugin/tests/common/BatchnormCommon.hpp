@@ -8,7 +8,7 @@
 #include <random>
 #include <vector>
 
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 namespace test_bn_common
@@ -33,7 +33,7 @@ struct BatchnormTestCase
     friend std::ostream& operator<<(std::ostream& ss, const BatchnormTestCase& tc)
     {
         ss << "(dims:";
-        hipdnn_sdk::utilities::vecToStream(ss, tc.dims);
+        hipdnn_data_sdk::utilities::vecToStream(ss, tc.dims);
         ss << " seed:" << tc.seed;
         ss << ")";
 

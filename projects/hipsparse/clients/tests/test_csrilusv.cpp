@@ -36,7 +36,7 @@ base csrilusv_idxbase_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE
 
 std::string csrilusv_bin[] = {"scircuit.bin",
 #if defined(__HIP_PLATFORM_AMD__)
-                              //                              "bmwcra_1.bin",
+                              //                              "bmwcra_1.csr",
                               "nos1.bin",
 #endif
                               "nos6.bin",

@@ -230,7 +230,7 @@ namespace rocsparse
 
             if(row != rowp1 && row >= 0)
             {
-                y[row] = y[row] + shared_val[tid];
+                y[row] = y[row] + static_cast<Y>(shared_val[tid]);
             }
 
             __syncthreads();
@@ -391,6 +391,7 @@ namespace rocsparse
               typename Y,
               typename T>
     ROCSPARSE_DEVICE_ILF void coomvn_atomic_loops_device(int64_t nnz,
+                                                         I       m,
                                                          T       alpha,
                                                          const I* __restrict__ coo_row_ind,
                                                          const I* __restrict__ coo_col_ind,
@@ -448,7 +449,7 @@ namespace rocsparse
         {
             if(row != shared_row[tid + 1] && row >= 0)
             {
-                rocsparse::atomic_add(&y[row], alpha * val);
+                rocsparse::atomic_add(y, row, m, alpha * val);
             }
         }
 
@@ -485,7 +486,7 @@ namespace rocsparse
                     }
                     else if(prevrow >= 0)
                     {
-                        rocsparse::atomic_add(&y[prevrow], alpha * shared_val[BLOCKSIZE - 1]);
+                        rocsparse::atomic_add(y, prevrow, m, alpha * shared_val[BLOCKSIZE - 1]);
                     }
                 }
 
@@ -513,7 +514,7 @@ namespace rocsparse
                 {
                     if(row != shared_row[tid + 1] && row >= 0)
                     {
-                        rocsparse::atomic_add(&y[row], alpha * val);
+                        rocsparse::atomic_add(y, row, m, alpha * val);
                     }
                 }
             }
@@ -523,7 +524,7 @@ namespace rocsparse
         {
             if(row >= 0)
             {
-                rocsparse::atomic_add(&y[row], alpha * val);
+                rocsparse::atomic_add(y, row, m, alpha * val);
             }
         }
     }
@@ -536,6 +537,7 @@ namespace rocsparse
               typename Y,
               typename T>
     ROCSPARSE_DEVICE_ILF void coomvn_aos_atomic_loops_device(int64_t nnz,
+                                                             I       m,
                                                              T       alpha,
                                                              const I* __restrict__ coo_ind,
                                                              const A* __restrict__ coo_val,
@@ -592,7 +594,7 @@ namespace rocsparse
         {
             if(row != shared_row[tid + 1] && row >= 0)
             {
-                rocsparse::atomic_add(&y[row], alpha * val);
+                rocsparse::atomic_add(y, row, m, alpha * val);
             }
         }
 
@@ -627,7 +629,7 @@ namespace rocsparse
                 }
                 else if(prevrow >= 0)
                 {
-                    rocsparse::atomic_add(&y[prevrow], alpha * shared_val[BLOCKSIZE - 1]);
+                    rocsparse::atomic_add(y, prevrow, m, alpha * shared_val[BLOCKSIZE - 1]);
                 }
             }
 
@@ -655,7 +657,7 @@ namespace rocsparse
             {
                 if(row != shared_row[tid + 1] && row >= 0)
                 {
-                    rocsparse::atomic_add(&y[row], alpha * val);
+                    rocsparse::atomic_add(y, row, m, alpha * val);
                 }
             }
         }
@@ -664,7 +666,7 @@ namespace rocsparse
         {
             if(row >= 0)
             {
-                rocsparse::atomic_add(&y[row], alpha * val);
+                rocsparse::atomic_add(y, row, m, alpha * val);
             }
         }
     }
@@ -672,6 +674,7 @@ namespace rocsparse
     template <typename I, typename A, typename X, typename Y, typename T>
     ROCSPARSE_DEVICE_ILF void coomvt_device(rocsparse_operation  trans,
                                             int64_t              nnz,
+                                            I                    n,
                                             T                    alpha,
                                             const I*             coo_row_ind,
                                             const I*             coo_col_ind,
@@ -693,12 +696,13 @@ namespace rocsparse
                           ? rocsparse::conj(coo_val[gid])
                           : coo_val[gid];
 
-        rocsparse::atomic_add(&y[col], alpha * val * x[row]);
+        rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
     }
 
     template <typename I, typename A, typename X, typename Y, typename T>
     ROCSPARSE_DEVICE_ILF void coomvt_aos_device(rocsparse_operation  trans,
                                                 int64_t              nnz,
+                                                I                    n,
                                                 T                    alpha,
                                                 const I*             coo_ind,
                                                 const A*             coo_val,
@@ -719,6 +723,6 @@ namespace rocsparse
                           ? rocsparse::conj(coo_val[gid])
                           : coo_val[gid];
 
-        rocsparse::atomic_add(&y[col], alpha * val * x[row]);
+        rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
     }
 }

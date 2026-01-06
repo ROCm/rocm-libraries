@@ -4,12 +4,12 @@
 #pragma once
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
@@ -36,7 +36,7 @@ protected:
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
         auto pluginPath = std::filesystem::weakly_canonical(
-            hipdnn_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
+            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -62,8 +62,8 @@ protected:
     }
 
     virtual void runGraphTest(DataType tolerance,
-                              const hipdnn_sdk::utilities::TensorLayout& layout
-                              = hipdnn_sdk::utilities::TensorLayout::NCHW)
+                              const hipdnn_data_sdk::utilities::TensorLayout& layout
+                              = hipdnn_data_sdk::utilities::TensorLayout::NCHW)
         = 0;
 
 protected:
@@ -72,9 +72,7 @@ protected:
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
-        auto result = graph.validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        result = graph.build_operation_graph(_handle);
+        auto result = graph.build(_handle);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
@@ -187,20 +185,11 @@ private:
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        auto result = graph.create_execution_plans();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        result = graph.check_support();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        result = graph.build_plans();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
         int64_t workspaceSize;
-        result = graph.get_workspace_size(workspaceSize);
+        auto result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        hipdnn_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/Constants.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -18,8 +18,8 @@
 #include "GoldenReferenceCpu.hpp"
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace fs = std::filesystem;
 
@@ -143,6 +143,19 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceNchw)
     Tensor<double> scaleTensor({1, 3});
     Tensor<double> meanTensor({1, 3});
     Tensor<double> varianceTensor({1, 3});
+
+    CpuFpReferenceBatchnorm::fwdInference(
+        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormInt8, BatchnormFwdInferenceNchw)
+{
+    Tensor<int8_t> inputTensor({1, 3, 224, 224});
+    Tensor<int8_t> outputTensor({1, 3, 224, 224});
+    Tensor<float> biasTensor({1, 3});
+    Tensor<float> scaleTensor({1, 3});
+    Tensor<float> meanTensor({1, 3});
+    Tensor<float> varianceTensor({1, 3});
 
     CpuFpReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
@@ -357,6 +370,27 @@ TEST(TestCpuFpReferenceBatchnormFp16, BatchnormBackwardNchw)
     Tensor<half> xTensor({6, 3, 32, 32});
     Tensor<half> dyTensor({6, 3, 32, 32});
     Tensor<half> dxTensor({6, 3, 32, 32});
+    Tensor<float> scaleTensor({1, 3});
+    Tensor<float> meanTensor({1, 3});
+    Tensor<float> invVarianceTensor({1, 3});
+    Tensor<float> dscaleTensor({1, 3});
+    Tensor<float> dbiasTensor({1, 3});
+
+    CpuFpReferenceBatchnorm::backward(dyTensor,
+                                      xTensor,
+                                      meanTensor,
+                                      invVarianceTensor,
+                                      scaleTensor,
+                                      dxTensor,
+                                      dscaleTensor,
+                                      dbiasTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormInt8, BatchnormBackwardNchw)
+{
+    Tensor<int8_t> xTensor({6, 3, 32, 32});
+    Tensor<int8_t> dyTensor({6, 3, 32, 32});
+    Tensor<int8_t> dxTensor({6, 3, 32, 32});
     Tensor<float> scaleTensor({1, 3});
     Tensor<float> meanTensor({1, 3});
     Tensor<float> invVarianceTensor({1, 3});
@@ -1098,6 +1132,32 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingNchw)
     Tensor<double> savedInvVariance({1, 3});
 
     inputTensor.fillWithValue(1.0);
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(1.0, 0, i);
+        biasTensor.setHostValue(0.0, 0, i);
+    }
+
+    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+                                         scaleTensor,
+                                         biasTensor,
+                                         outputTensor,
+                                         BATCHNORM_DEFAULT_EPSILON,
+                                         0.1,
+                                         &savedMean,
+                                         &savedInvVariance);
+}
+
+TEST(TestCpuFpReferenceBatchnormInt8, BatchnormFwdTrainingNchw)
+{
+    Tensor<int8_t> inputTensor({2, 3, 4, 4});
+    Tensor<int8_t> outputTensor({2, 3, 4, 4});
+    Tensor<double> scaleTensor({1, 3});
+    Tensor<double> biasTensor({1, 3});
+    Tensor<double> savedMean({1, 3});
+    Tensor<double> savedInvVariance({1, 3});
+
+    inputTensor.fillWithValue(1);
     for(int i = 0; i < 3; i++)
     {
         scaleTensor.setHostValue(1.0, 0, i);

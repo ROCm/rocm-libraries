@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <hipdnn_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <mutex>
 #include <vector>
 
@@ -15,7 +15,8 @@
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_backend
 {
@@ -106,7 +107,7 @@ void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
         {
             throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "A plugin path string buffer is null.");
         }
-        hipdnn_sdk::utilities::copyMaxSizeWithNullTerminator(
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             pluginPaths[i], pathsVec[i].string().c_str(), *maxStringLen);
     }
 }
@@ -438,7 +439,7 @@ EngineDetailsWrapper::EngineDetailsWrapper(const std::shared_ptr<EnginePluginRes
     _rm->getEngineDetails(engineId, graphDesc, &_engineDetailsData);
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(_engineDetailsData.ptr),
                                    _engineDetailsData.size);
-    if(!verifier.VerifyBuffer<hipdnn_sdk::data_objects::EngineDetails>())
+    if(!verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::EngineDetails>())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
@@ -483,7 +484,7 @@ EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& oth
     return *this;
 }
 
-const hipdnn_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
+const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
 {
     if(_engineDetailsData.ptr == nullptr)
     {
@@ -492,7 +493,7 @@ const hipdnn_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
                               "get() called on an empty object");
     }
 
-    return hipdnn_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
+    return hipdnn_data_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
 }
 
 // TODO: Use engineId from engineConfig
@@ -559,6 +560,27 @@ hipdnnEnginePluginExecutionContext_t EngineExecutionContextWrapper::get() const
     }
 
     return _executionContext;
+}
+
+std::string EnginePluginResourceManager::toString() const
+{
+    if(!_pm)
+    {
+        return "EnginePluginResourceManager: {loadedPlugins=0}";
+    }
+
+    auto loadedPlugins = _pm->getLoadedPluginFiles();
+
+    std::vector<std::string> pluginPathStrings;
+    pluginPathStrings.reserve(loadedPlugins.size());
+    for(const auto& path : loadedPlugins)
+    {
+        pluginPathStrings.push_back(path.string());
+    }
+
+    return fmt::format("EnginePluginResourceManager: {{loadedPlugins={}, loadedPluginPaths=[{}]}}",
+                       loadedPlugins.size(),
+                       fmt::join(pluginPathStrings, ", "));
 }
 
 } // namespace plugin

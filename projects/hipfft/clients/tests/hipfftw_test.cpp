@@ -1695,7 +1695,7 @@ namespace
                 = std::accumulate(batches.begin(),
                                   batches.end(),
                                   static_cast<ptrdiff_t>(1),
-                                  [](ptrdiff_t& acc, ptrdiff_t x) {
+                                  [](ptrdiff_t acc, ptrdiff_t x) {
                                       return acc * std::max(ptrdiff_t(1), std::abs(x));
                                   });
             const auto placement = get_random_element_in(place_range);

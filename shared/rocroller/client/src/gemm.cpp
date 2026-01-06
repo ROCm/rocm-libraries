@@ -907,18 +907,6 @@ namespace rocRoller::Client::GEMMClient
         CommandPtr       command;
         CommandKernelPtr commandKernel;
 
-        if(doInfo)
-        {
-            std::cout << "Loading kernel from: " << io.loadCOPath << std::endl;
-            auto yaml = readMetaDataFromCodeObject(io.loadCOPath);
-            std::cout << yaml << std::endl;
-
-            auto kernelFromYAML = AssemblyKernels::fromYAML(yaml).kernels[0];
-            std::cout << *kernelFromYAML.command() << std::endl;
-
-            return ReturnCodes::OK;
-        }
-
         // Changing settings has to go before creating the context :(
         if(io.doSaveAsm)
         {
@@ -964,6 +952,30 @@ namespace rocRoller::Client::GEMMClient
             = Context::ForTarget(arch,
                                  solution.generateKernelName().shortName,
                                  {{.scaleSkipPermlane = solution.types.scaleSkipPermlane}});
+
+        if(doInfo)
+        {
+            std::cout << "Loading kernel from: " << io.loadCOPath << std::endl;
+
+            try
+            {
+                auto elfKernels = AssemblyKernels::fromELF(io.loadCOPath).kernels;
+                AssertFatal(elfKernels.size() == 1,
+                            "Expected exactly one kernel in ELF file, found ",
+                            elfKernels.size());
+                auto kernelFromELF = elfKernels.at(0);
+                auto metadataYaml  = kernelFromELF.amdgpu_metadata_yaml();
+                std::cout << metadataYaml << std::endl;
+                std::cout << *kernelFromELF.command() << std::endl;
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error loading ELF file: " << e.what() << std::endl;
+                return ReturnCodes::GenerateFailure;
+            }
+
+            return ReturnCodes::OK;
+        }
 
         bool willRunOnGPU = doValidate || doBenchmark;
         if(willRunOnGPU)
