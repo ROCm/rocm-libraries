@@ -72,9 +72,7 @@ protected:
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
-        auto result = graph.validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        result = graph.build_operation_graph(_handle);
+        auto result = graph.build(_handle);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
@@ -187,17 +185,8 @@ private:
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        auto result = graph.create_execution_plans();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        result = graph.check_support();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        result = graph.build_plans();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
         int64_t workspaceSize;
-        result = graph.get_workspace_size(workspaceSize);
+        auto result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
         hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
