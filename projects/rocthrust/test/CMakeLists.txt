@@ -9,6 +9,7 @@ file(WRITE "${INSTALL_TEST_FILE}"
 # It differs slightly from the default testfile, and you may encounter issues because of that.
 ]=]
 
+# Setting this variable is equivalent to passing ctest the "--resource-spec-file" option on the command line.
 "set(CTEST_RESOURCE_SPEC_FILE \"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/resources.json\")\n"
 )
 
@@ -342,14 +343,6 @@ if(BUILD_HIPSTDPAR_TEST)
     endif()
 endif()
 
-# Setting this variable is equivalent to passing ctest the "--resource-spec-file" option on the command line.
-# Set it here so we don't have to do that.
-# Note that this only affects the current build directory - it does not affect where the installed version of rocthrust looks for the resource file.
-# The effect of this command is that it writes "set(CTEST_RESOURCE_SPEC_FILE \"<path>\" to CTestTestfile.cmake)"
-# To ensure the installed version of rocthrust does this, We write it manually in install_CTestTestfile.cmake (above), which is then copied into the
-# install location and renamed "CTestTestfile.cmake" (below).
-set(CTEST_RESOURCE_SPEC_FILE "${CMAKE_BINARY_DIR}/resources.json")
-
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
@@ -357,19 +350,11 @@ rocm_install(
     RENAME "CTestTestfile.cmake"
 )
 
-# Generate the resource spec file while building the tests
+# Build the executable used for generating the resource spec file.
 add_executable(enum_devices ${CMAKE_SOURCE_DIR}/test/enum_devices.cpp)
 target_link_libraries(enum_devices PRIVATE hip::host)
-add_custom_command(
-    TARGET enum_devices
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo "Generating resource spec file"
-    COMMAND $<TARGET_FILE:enum_devices> ARGS resources.json
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    VERBATIM
-)
 
-# Generate the resource spec file at install time
+# Generate the resource spec file at install time.
 rocm_install(
     CODE "execute_process(COMMAND $<TARGET_FILE:enum_devices>
                                   \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/resources.json)"
