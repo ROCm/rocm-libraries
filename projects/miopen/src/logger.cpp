@@ -24,12 +24,14 @@
  *
  *******************************************************************************/
 #include <miopen/env.hpp>
+#include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/config.h>
 #include <miopen/sysinfo_utils.hpp>
 
 #include <cstdlib>
 #include <chrono>
+#include <fstream>
 #include <ios>
 #include <iomanip>
 #include <sstream>
@@ -75,6 +77,24 @@ namespace miopen {
 size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
 size_t log_buffer_i    = 0;
 std::vector<std::string> log_buffer(log_buffer_size, "");
+
+void OutputBufferedLogs()
+{
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
+    std::cerr << "Buffered " << miopen::log_buffer_i << " messages to file: " << filename.string()
+              << std::endl;
+    auto err_file = std::ofstream{filename};
+    size_t i      = miopen::log_buffer_i;
+    do
+    {
+        if(miopen::log_buffer[i] != "")
+        {
+            err_file << miopen::log_buffer[i];
+        }
+        i = (i + 1) % miopen::log_buffer_size;
+    } while(i != miopen::log_buffer_i);
+}
 
 namespace debug {
 
