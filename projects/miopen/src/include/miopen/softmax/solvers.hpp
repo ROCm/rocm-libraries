@@ -29,8 +29,6 @@
 #include <miopen/solver.hpp>
 #include <miopen/softmax/problem_description.hpp>
 
-#include <utility>
-
 namespace miopen {
 
 namespace solver {
@@ -49,8 +47,11 @@ struct Softmax final : SoftmaxSolver
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::softmax::ProblemDescription& problem) const override;
 
-    std::size_t GetWorkspaceSize(const ExecutionContext& context,
-                                 const miopen::softmax::ProblemDescription& problem) const override;
+    std::size_t GetWorkspaceSize(const ExecutionContext&,
+                                 const miopen::softmax::ProblemDescription&) const override
+    {
+        return 0;
+    }
 
     bool MayNeedWorkspace() const override { return false; }
 };

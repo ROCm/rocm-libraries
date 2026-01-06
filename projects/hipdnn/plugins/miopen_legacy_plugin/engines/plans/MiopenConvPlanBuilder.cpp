@@ -5,8 +5,8 @@
 #include <limits>
 #include <string>
 
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
@@ -22,10 +22,11 @@ namespace miopen_legacy_plugin
 namespace
 {
 
-bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph)
+bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
+                     const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
 
     size_t solutionCount = 0;
     try
@@ -48,7 +49,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -57,10 +58,11 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     return solutionCount != 0;
 }
 
-bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph)
+bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
+                     const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
 
     size_t solutionCount = 0;
     try
@@ -83,7 +85,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -92,10 +94,11 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     return solutionCount != 0;
 }
 
-bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph)
+bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
+                     const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
 
     size_t solutionCount = 0;
     try
@@ -119,7 +122,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
             return false;
         }
     }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    catch(const std::exception& e)
     {
         HIPDNN_LOG_INFO(e.what());
         return false;
@@ -129,10 +132,10 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
 }
 
 size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin::IGraph& opGraph)
+                           const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap());
     size_t workSpaceSize;
     THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
@@ -146,10 +149,10 @@ size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin::IGraph& opGraph)
+                           const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap());
     size_t workSpaceSize;
 
@@ -165,10 +168,10 @@ size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin::IGraph& opGraph)
+                           const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap());
     size_t workSpaceSize;
 
@@ -184,33 +187,33 @@ size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
 }
 
 void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
-                  const hipdnn_plugin::IGraph& opGraph,
+                  const hipdnn_plugin_sdk::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<ConvFwdPlan>(handle, std::move(params));
     executionContext.setPlan(std::move(plan));
 }
 
 void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
-                  const hipdnn_plugin::IGraph& opGraph,
+                  const hipdnn_plugin_sdk::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<ConvBwdPlan>(handle, std::move(params));
     executionContext.setPlan(std::move(plan));
 }
 
 void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
-                  const hipdnn_plugin::IGraph& opGraph,
+                  const hipdnn_plugin_sdk::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>();
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<ConvWrwPlan>(handle, std::move(params));
     executionContext.setPlan(std::move(plan));
@@ -219,7 +222,7 @@ void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
 } // namespace
 
 bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                         const hipdnn_plugin::IGraph& opGraph) const
+                                         const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -229,18 +232,25 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
         return false;
     }
 
+    if(opGraph.getNode(0).compute_data_type() != hipdnn_data_sdk::data_objects::DataType::FLOAT)
+    {
+        HIPDNN_LOG_ERROR("Convolution plan builder only supports nodes with an fp32 "
+                         "compute_data_type");
+        return false;
+    }
+
     const auto& node = opGraph.getNode(0);
     bool ret = false;
 
     switch(node.attributes_type())
     {
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         ret = isApplicableFwd(handle, opGraph);
         break;
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         ret = isApplicableBwd(handle, opGraph);
         break;
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         ret = isApplicableWrw(handle, opGraph);
         break;
     default:
@@ -255,11 +265,11 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                               const hipdnn_plugin::IGraph& opGraph) const
+                                               const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Convolution plan builder supports only single node graphs. Graph has "
                 + std::to_string(opGraph.nodeCount()) + " nodes");
@@ -269,27 +279,27 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& h
 
     switch(node.attributes_type())
     {
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         return getWorkspaceSizeFwd(handle, opGraph);
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         return getWorkspaceSizeBwd(handle, opGraph);
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         return getWorkspaceSizeWrw(handle, opGraph);
     default:
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for convolution plan builder: "
-                + std::string(hipdnn_sdk::data_objects::toString(node.attributes_type())));
+                + std::string(hipdnn_data_sdk::data_objects::toString(node.attributes_type())));
     }
 }
 
 void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin::IGraph& opGraph,
+                                      const hipdnn_plugin_sdk::IGraph& opGraph,
                                       HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Convolution plan builder supports only single node graphs. Graph has "
                 + std::to_string(opGraph.nodeCount()) + " nodes");
@@ -300,23 +310,24 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
 
     switch(nodeWrapper.attributesType())
     {
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         HIPDNN_LOG_INFO("Building convolution fwd plan for node: {}", nodeName);
         buildPlanFwd(handle, opGraph, executionContext);
         break;
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         HIPDNN_LOG_INFO("Building convolution bwd plan for node: {}", nodeName);
         buildPlanBwd(handle, opGraph, executionContext);
         break;
-    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         HIPDNN_LOG_INFO("Building convolution wrw plan for node: {}", nodeName);
         buildPlanWrw(handle, opGraph, executionContext);
         break;
     default:
-        throw hipdnn_plugin::HipdnnPluginException(
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for convolution plan builder: "
-                + std::string(hipdnn_sdk::data_objects::toString(nodeWrapper.attributesType())));
+                + std::string(
+                    hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
 }
 

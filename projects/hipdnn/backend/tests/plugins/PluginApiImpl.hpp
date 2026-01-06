@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 extern const char* const PLUGIN_NAME;
 extern const char* const PLUGIN_VERSION;

@@ -2,7 +2,12 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
-## (Unreleased) MIOpen 3.5.1 for ROCm 8.0.0
+## (Unreleased) MIOpen 3.5.1 for ROCm 7.11.0
+### Optimized
+* Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels
+
+### Resolved issues
+* Fixed calculation of workspace size for fusions when tuning is done
 
 ## MIOpen 3.5.1 for ROCm 7.2.0
 ### Changed
@@ -22,10 +27,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed an issue with the CK bwd solver applicability checks when deterministic is set
 * [BatchNorm] Fixed issue where batchnorm tuning would give incorrect results
 * Fixed issue where generic search was not providing sufficient warm-up for some kernels
-
-### Changed
-
-* `MIOPEN_FIND_ENFORCE` no longer forces Normal for `MIOPEN_FIND_MODE` when using non-database update operations.
 
 ## MIOpen 3.5.1 for ROCm 7.1.0
 ### Added

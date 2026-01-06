@@ -56,7 +56,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            ConstData_t estimatedMean,
                            ConstData_t estimatedVariance,
                            double epsilon,
-                           PerfHelper<float>& perf_helper,
+                           PerfHelper& perf_helper,
                            bool use_hip = true)
 {
     int n, c, h, w;

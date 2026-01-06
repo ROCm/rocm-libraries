@@ -177,7 +177,7 @@ void testing_spmm_batched_csr_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
+void testing_spmm_batched_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
     J                    m        = argus.M;
@@ -206,7 +206,7 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
 #if(defined(CUDART_VERSION))
     if(orderB != orderC || orderB != HIPSPARSE_ORDER_COL)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 #endif
 
@@ -228,18 +228,15 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz_A;
-    if(!generate_csr_matrix(filename,
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m,
                             nnz_A,
                             hcsr_row_ptr_temp,
                             hcsr_col_ind_temp,
                             hcsr_val_temp,
-                            idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+                            idx_base));
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;
@@ -513,8 +510,6 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMM_BATCHED_CSR_HPP

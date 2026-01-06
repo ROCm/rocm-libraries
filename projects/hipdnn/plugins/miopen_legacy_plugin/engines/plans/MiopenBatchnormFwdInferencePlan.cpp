@@ -4,7 +4,7 @@
 #include "MiopenBatchnormFwdInferencePlan.hpp"
 #include "MiopenUtils.hpp"
 
-#include <hipdnn_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -16,8 +16,9 @@ namespace miopen_legacy_plugin
 //const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& attributes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
@@ -28,9 +29,10 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
 }
 
 BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
-    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
-    const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _x(miopen_utils::createTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
     , _y(miopen_utils::createTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
@@ -104,7 +106,7 @@ void BatchnormFwdInferencePlan::execute(
     // Hardcoded values from bn_driver in miopen
     // auto alpha = static_cast<float>(1);
     // auto beta = static_cast<float>(0);
-    // double epsilon = hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
+    // double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     // auto xBuffer = miopen_utils::findDeviceBuffer(
     //     _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
@@ -165,7 +167,7 @@ void BatchnormFwdInferencePlan::execute(
     //         invVarianceBuffer.ptr,
     //         epsilon));
     // }
-    throw hipdnn_plugin::HipdnnPluginException(
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
         "BatchnormFwdInferencePlan execution is currently disabled due to implementation issues "
         "with the BatchnormInference op.");

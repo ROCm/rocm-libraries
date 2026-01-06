@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/env.hpp>
 #include <miopen/visit_float.hpp>
+#include <miopen/kernel_build_params.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW1X1)
 
@@ -385,30 +386,42 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
             std::to_string(out_pad_height) + std::string(" -DMLO_TWO_PASSES=") +
             std::to_string((n_passes == 1) ? 0 : 1) + ctx.general_compile_options;
 
+        KernelInfo ss_kernel_info;
         if(n_passes > 1 && problem.GetPadH() == 0 && problem.GetPadW() == 0 &&
            (problem.GetKernelStrideW() > 1 || problem.GetKernelStrideH() > 1))
         {
-            KernelInfo kernel;
 
-            kernel.l_wk.push_back(n_grp0_size0);
-            kernel.l_wk.push_back(1);
-            kernel.l_wk.push_back(1);
+            const auto subsample_kernel_build_params = KernelBuildParameters{
+                {"LOCAL_SIZE_X", n_grp_size0},
+                {"LOCAL_SIZE_Y", int(1)},
+                {"FILTER0_STRIDE0", kernel0_stride0},
+                {"FILTER0_STRIDE1", kernel0_stride1},
+                {"WRITE_UNIT", write_unit},
+                {"OUT_CHANNEL_STRIDE", out_channel_stride},
+                {"OUT_STRIDE", out_stride},
+                {"IN_BATCH_STRIDE", in_batch_stride},
+                {"IN0_BATCH_STRIDE", in0_batch_stride},
+                {"IN0_CHANNEL_STRIDE", in0_channel_stride},
+                {"IN0_STRIDE", in0_stride},
+                {"MIOPEN_USE_BFP16", static_cast<int>(problem.GetInDataType() == miopenBFloat16)},
+                {"MIOPEN_USE_FP16", static_cast<int>(problem.GetInDataType() == miopenHalf)},
+                {"MIOPEN_USE_FP32", static_cast<int>(problem.GetInDataType() == miopenFloat)}};
+
+            ss_kernel_info.l_wk.push_back(n_grp0_size0);
+            ss_kernel_info.l_wk.push_back(1);
+            ss_kernel_info.l_wk.push_back(1);
             // output is number of subsampled input maps
             size_t gbl_wk0 = (in_batch_stride / write_unit);
             size_t gbl_wk1 = problem.GetBatchSize();
             size_t gbl_wk2 = 1;
 
-            kernel.g_wk.push_back(gbl_wk0);
-            kernel.g_wk.push_back(gbl_wk1);
-            kernel.g_wk.push_back(gbl_wk2);
+            ss_kernel_info.g_wk.push_back(gbl_wk0);
+            ss_kernel_info.g_wk.push_back(gbl_wk1);
+            ss_kernel_info.g_wk.push_back(gbl_wk2);
 
-            kernel.kernel_file = "MIOpenUtilKernels3.cl";
-
-            kernel.kernel_name = "SubSample";
-
-            kernel.comp_options = comp_options;
-
-            result.construction_params.push_back(kernel);
+            ss_kernel_info.kernel_file  = "MIOpenSubSample.cpp";
+            ss_kernel_info.kernel_name  = "SubSample";
+            ss_kernel_info.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
         }
 
         const auto ws_sz    = GetWorkspaceSize(ctx, problem);
@@ -461,10 +474,11 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
 
         if(n_passes == 2)
         {
-            result.invoker_factory = [ws_sz](const std::vector<Kernel>& kernels) {
-                return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
-                    const auto ss_kernel   = handle.Run(kernels[0]);
-                    const auto main_kernel = handle.Run(kernels[1]);
+            result.invoker_factory = [ws_sz, ss_kernel_info = std::move(ss_kernel_info)](
+                                         const std::vector<Kernel>& kernels) mutable {
+                return [=, ss_kernel_info = std::move(ss_kernel_info)](
+                           const Handle& handle, const AnyInvokeParams& primitive_params) {
+                    const auto main_kernel = handle.Run(kernels[0]);
                     const auto& invoke_params =
                         primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
 
@@ -476,7 +490,24 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                     const auto padding_val = 0.f;
                     auto elapsed           = 0.f;
 
-                    ss_kernel(tensors.x, workSpace);
+                    auto&& ss_kernels =
+                        handle.GetKernels(ss_kernel_info.kernel_name, ss_kernel_info.comp_options);
+                    if(!ss_kernels.empty())
+                    {
+                        auto kernel = ss_kernels.front();
+                        kernel(tensors.x, workSpace);
+                    }
+                    else
+                    {
+                        handle.AddKernel(ss_kernel_info.kernel_name,
+                                         ss_kernel_info.comp_options,
+                                         ss_kernel_info.kernel_file,
+                                         ss_kernel_info.kernel_name,
+                                         ss_kernel_info.l_wk,
+                                         ss_kernel_info.g_wk,
+                                         ss_kernel_info.comp_options)(tensors.x, workSpace);
+                    }
+
                     if(handle.IsProfilingEnabled())
                         elapsed += handle.GetKernelTime();
                     visit_float(tensors.dyDesc.GetType(), [&](auto as_float) {

@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,8 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/scope_exit.hpp>
-#include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <math.h>
@@ -31,6 +29,7 @@
 
 #include "../hipfft_params.h"
 
+#include "../../shared/CLI11.hpp"
 #include "../../shared/accuracy_test.h"
 #include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
@@ -40,6 +39,38 @@
 #include "../../shared/subprocess.h"
 
 extern std::string mp_launch;
+struct user_mp_launch_command
+{
+    std::string              exe;
+    std::vector<std::string> user_mp_argv;
+};
+static user_mp_launch_command get_mp_launch_command()
+{
+    user_mp_launch_command ret;
+    try
+    {
+        CLI::App command_splitter;
+        command_splitter.allow_extras();
+        command_splitter.parse(mp_launch, /*program_name_included = */ true);
+        ret.exe          = command_splitter.get_name();
+        ret.user_mp_argv = command_splitter.remaining();
+    }
+    catch(const CLI::Error& e)
+    {
+        if(verbose)
+        {
+            if(!mp_launch.empty())
+                std::cout << "CLI11 failed to parse the command " << mp_launch << "\n";
+            std::cout << "CLI11 exception name: " << e.get_name() << "\n"
+                      << "CLI11 exception info: " << e.what() << "\n"
+                      << "CLI11 error code:" << e.get_exit_code() << std::endl;
+        }
+        // returned empty struct
+        ret.exe.clear();
+        ret.user_mp_argv.clear();
+    }
+    return ret;
+}
 
 extern last_cpu_fft_cache last_cpu_fft_data;
 
@@ -53,6 +84,8 @@ static const std::vector<std::string> symptomatic_tokens = {
     "real_forward_len_16384_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_16386_odist_8193_ioffset_0_0_ooffset_0_0",
     "real_forward_len_32768_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_32770_odist_16385_ioffset_0_0_ooffset_0_0",
     "real_forward_len_65536_half_ip_batch_2_istride_1_R_ostride_1_HI_idist_65538_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_65536_half_ip_batch_4_istride_1_R_ostride_1_HI_idist_65538_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_16384_half_ip_batch_2_istride_1_R_ostride_1_HI_idist_16386_odist_8193_ioffset_0_0_ooffset_0_0",
 #endif
     // common  to both backends
 };
@@ -98,7 +131,7 @@ TEST_P(accuracy_test, vs_fftw)
         // test tokens (e.g., by using --gtest_also_run_disabled_tests)
         const char* test_suite_name
             = ::testing::UnitTest::GetInstance()->current_test_info()->test_suite_name();
-        if(!symptomatic_tokens.empty() && std::strstr(test_suite_name, "DISABLED") == nullptr
+        if(std::strstr(test_suite_name, "DISABLED") == nullptr
            && std::find(symptomatic_tokens.begin(), symptomatic_tokens.end(), params.token())
                   != symptomatic_tokens.end())
         {
@@ -136,22 +169,14 @@ TEST_P(accuracy_test, vs_fftw)
     }
     case fft_params::fft_mp_lib_mpi:
     {
-        // split launcher into tokens since the first one is the exe
-        // and the remainder is the start of its argv
-        boost::escaped_list_separator<char>                   sep('\\', ' ', '\"');
-        boost::tokenizer<boost::escaped_list_separator<char>> tokenizer(mp_launch, sep);
-        std::string                                           exe;
-        std::vector<std::string>                              argv;
-        for(auto t : tokenizer)
-        {
-            if(t.empty())
-                continue;
+        // Multi-proc FFT.
+        static const auto mp_launch_command = get_mp_launch_command();
 
-            if(exe.empty())
-                exe = t;
-            else
-                argv.push_back(t);
-        }
+        if(mp_launch_command.exe.empty())
+            GTEST_FAIL() << "Cannot proceed due to empty multi-process executable: omitted "
+                            "\"--mp_launch\" option or invalid value thereof.";
+        auto argv = mp_launch_command.user_mp_argv;
+
         // append test token and ask for accuracy test
         argv.push_back("--token");
         argv.push_back(params.token());
@@ -159,7 +184,7 @@ TEST_P(accuracy_test, vs_fftw)
 
         // throws an exception if launch fails or if subprocess
         // returns nonzero exit code
-        execute_subprocess(exe, argv, {});
+        execute_subprocess(mp_launch_command.exe, argv, {});
         break;
     }
     default:
@@ -174,585 +199,3 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_symptomatic_tokens,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_token(test_prob, symptomatic_tokens)),
                          accuracy_test::TestName);
-
-#ifdef __HIP__
-
-// load/store callbacks - cbdata in each is actually a scalar double
-// with a number to apply to each element
-template <typename Tdata>
-__host__ __device__ Tdata load_callback(Tdata* input, size_t offset, void* cbdata, void* sharedMem)
-{
-    auto testdata = static_cast<const callback_test_data*>(cbdata);
-    // multiply each element by scalar
-    return input[offset] * testdata->scalar;
-}
-
-__device__ auto load_callback_dev_half           = load_callback<rocfft_fp16>;
-__device__ auto load_callback_dev_complex_half   = load_callback<rocfft_complex<rocfft_fp16>>;
-__device__ auto load_callback_dev_float          = load_callback<float>;
-__device__ auto load_callback_dev_complex_float  = load_callback<rocfft_complex<float>>;
-__device__ auto load_callback_dev_double         = load_callback<double>;
-__device__ auto load_callback_dev_complex_double = load_callback<rocfft_complex<double>>;
-
-// load/store callbacks - cbdata in each is actually a scalar double
-// with a number to apply to each element
-template <typename Tdata>
-__host__ __device__ Tdata
-    load_callback_round_trip_inverse(Tdata* input, size_t offset, void* cbdata, void* sharedMem)
-{
-    auto testdata = static_cast<const callback_test_data*>(cbdata);
-    // subtract each element by scalar
-    return input[offset] - testdata->scalar;
-}
-
-__device__ auto load_callback_round_trip_inverse_dev_half
-    = load_callback_round_trip_inverse<rocfft_fp16>;
-__device__ auto load_callback_round_trip_inverse_dev_complex_half
-    = load_callback_round_trip_inverse<rocfft_complex<rocfft_fp16>>;
-__device__ auto load_callback_round_trip_inverse_dev_float
-    = load_callback_round_trip_inverse<float>;
-__device__ auto load_callback_round_trip_inverse_dev_complex_float
-    = load_callback_round_trip_inverse<rocfft_complex<float>>;
-__device__ auto load_callback_round_trip_inverse_dev_double
-    = load_callback_round_trip_inverse<double>;
-__device__ auto load_callback_round_trip_inverse_dev_complex_double
-    = load_callback_round_trip_inverse<rocfft_complex<double>>;
-
-void* get_load_callback_host(fft_array_type itype,
-                             fft_precision  precision,
-                             bool           round_trip_inverse = false)
-{
-    void* load_callback_host = nullptr;
-    switch(itype)
-    {
-    case fft_array_type_complex_interleaved:
-    case fft_array_type_hermitian_interleaved:
-    {
-        switch(precision)
-        {
-        case fft_precision_half:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &load_callback_host,
-                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_half),
-                              sizeof(void*)),
-                          hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_complex_half),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return load_callback_host;
-        case fft_precision_single:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &load_callback_host,
-                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_float),
-                              sizeof(void*)),
-                          hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_complex_float),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return load_callback_host;
-        case fft_precision_double:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &load_callback_host,
-                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_double),
-                              sizeof(void*)),
-                          hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_complex_double),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return load_callback_host;
-        }
-    }
-    case fft_array_type_real:
-    {
-        switch(precision)
-        {
-        case fft_precision_half:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_half),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_half),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return load_callback_host;
-        case fft_precision_single:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&load_callback_host,
-                                        HIP_SYMBOL(load_callback_round_trip_inverse_dev_float),
-                                        sizeof(void*)),
-                    hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_float),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return load_callback_host;
-        case fft_precision_double:
-
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&load_callback_host,
-                                        HIP_SYMBOL(load_callback_round_trip_inverse_dev_double),
-                                        sizeof(void*)),
-                    hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_double),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return load_callback_host;
-        }
-    }
-    default:
-        // planar is unsupported for now
-        return load_callback_host;
-    }
-}
-
-template <typename Tdata>
-__host__ __device__ static void
-    store_callback(Tdata* output, size_t offset, Tdata element, void* cbdata, void* sharedMem)
-{
-    auto testdata = static_cast<callback_test_data*>(cbdata);
-    // add scalar to each element
-    output[offset] = element + testdata->scalar;
-}
-
-__device__ auto store_callback_dev_half           = store_callback<rocfft_fp16>;
-__device__ auto store_callback_dev_complex_half   = store_callback<rocfft_complex<rocfft_fp16>>;
-__device__ auto store_callback_dev_float          = store_callback<float>;
-__device__ auto store_callback_dev_complex_float  = store_callback<rocfft_complex<float>>;
-__device__ auto store_callback_dev_double         = store_callback<double>;
-__device__ auto store_callback_dev_complex_double = store_callback<rocfft_complex<double>>;
-
-template <typename Tdata>
-__host__ __device__ static void store_callback_round_trip_inverse(
-    Tdata* output, size_t offset, Tdata element, void* cbdata, void* sharedMem)
-{
-    auto testdata = static_cast<callback_test_data*>(cbdata);
-    // divide each element by scalar
-    output[offset] = element / testdata->scalar;
-}
-__device__ auto store_callback_round_trip_inverse_dev_half
-    = store_callback_round_trip_inverse<rocfft_fp16>;
-__device__ auto store_callback_round_trip_inverse_dev_complex_half
-    = store_callback_round_trip_inverse<rocfft_complex<rocfft_fp16>>;
-__device__ auto store_callback_round_trip_inverse_dev_float
-    = store_callback_round_trip_inverse<float>;
-__device__ auto store_callback_round_trip_inverse_dev_complex_float
-    = store_callback_round_trip_inverse<rocfft_complex<float>>;
-__device__ auto store_callback_round_trip_inverse_dev_double
-    = store_callback_round_trip_inverse<double>;
-__device__ auto store_callback_round_trip_inverse_dev_complex_double
-    = store_callback_round_trip_inverse<rocfft_complex<double>>;
-
-void* get_store_callback_host(fft_array_type otype,
-                              fft_precision  precision,
-                              bool           round_trip_inverse = false)
-{
-    void* store_callback_host = nullptr;
-    switch(otype)
-    {
-    case fft_array_type_complex_interleaved:
-    case fft_array_type_hermitian_interleaved:
-    {
-        switch(precision)
-        {
-        case fft_precision_half:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &store_callback_host,
-                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_half),
-                              sizeof(void*)),
-                          hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_complex_half),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return store_callback_host;
-        case fft_precision_single:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &store_callback_host,
-                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_float),
-                              sizeof(void*)),
-                          hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_complex_float),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return store_callback_host;
-        case fft_precision_double:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &store_callback_host,
-                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_double),
-                              sizeof(void*)),
-                          hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_complex_double),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return store_callback_host;
-        }
-    }
-    case fft_array_type_real:
-    {
-        switch(precision)
-        {
-        case fft_precision_half:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&store_callback_host,
-                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_half),
-                                        sizeof(void*)),
-                    hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_half),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return store_callback_host;
-        case fft_precision_single:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&store_callback_host,
-                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_float),
-                                        sizeof(void*)),
-                    hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_float),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return store_callback_host;
-        case fft_precision_double:
-            if(round_trip_inverse)
-            {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&store_callback_host,
-                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_double),
-                                        sizeof(void*)),
-                    hipSuccess);
-            }
-            else
-            {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_double),
-                                              sizeof(void*)),
-                          hipSuccess);
-            }
-            return store_callback_host;
-        }
-    }
-    default:
-        // planar is unsupported for now
-        return store_callback_host;
-    }
-}
-
-// implement result scaling as a store callback, as rocFFT tests do
-void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output)
-{
-    if(!params.run_callbacks)
-        return;
-
-    callback_test_data cbdata;
-    cbdata.scalar = params.store_cb_scalar;
-
-    switch(params.otype)
-    {
-    case fft_array_type_complex_interleaved:
-    case fft_array_type_hermitian_interleaved:
-    {
-        switch(params.precision)
-        {
-        case fft_precision_half:
-        {
-            const size_t elem_size = sizeof(std::complex<rocfft_fp16>);
-            const size_t num_elems = output.front().size() / elem_size;
-
-            auto output_begin
-                = reinterpret_cast<rocfft_complex<rocfft_fp16>*>(output.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                store_callback(output_begin, i, element, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_single:
-        {
-            const size_t elem_size = sizeof(std::complex<float>);
-            const size_t num_elems = output.front().size() / elem_size;
-
-            auto output_begin = reinterpret_cast<rocfft_complex<float>*>(output.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                store_callback(output_begin, i, element, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_double:
-        {
-            const size_t elem_size = sizeof(std::complex<double>);
-            const size_t num_elems = output.front().size() / elem_size;
-
-            auto output_begin = reinterpret_cast<rocfft_complex<double>*>(output.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                store_callback(output_begin, i, element, &cbdata, nullptr);
-            }
-            break;
-        }
-        }
-    }
-    break;
-    case fft_array_type_complex_planar:
-    case fft_array_type_hermitian_planar:
-    {
-        throw std::runtime_error("planar callbacks are not supported");
-    }
-    break;
-    case fft_array_type_real:
-    {
-        switch(params.precision)
-        {
-        case fft_precision_half:
-        {
-            const size_t elem_size = sizeof(rocfft_fp16);
-            const size_t num_elems = output.front().size() / elem_size;
-
-            auto output_begin = reinterpret_cast<rocfft_fp16*>(output.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                store_callback(output_begin, i, element, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_single:
-        {
-            const size_t elem_size = sizeof(float);
-            const size_t num_elems = output.front().size() / elem_size;
-
-            auto output_begin = reinterpret_cast<float*>(output.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                store_callback(output_begin, i, element, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_double:
-        {
-            const size_t elem_size = sizeof(double);
-            const size_t num_elems = output.front().size() / elem_size;
-
-            auto output_begin = reinterpret_cast<double*>(output.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                store_callback(output_begin, i, element, &cbdata, nullptr);
-            }
-            break;
-        }
-        }
-    }
-    break;
-    default:
-        // this is FFTW data which should always be interleaved (if complex)
-        abort();
-    }
-}
-
-// apply load callback if necessary
-void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input)
-{
-    if(!params.run_callbacks)
-        return;
-    // we're applying callbacks to FFTW input/output which we can
-    // assume is contiguous and non-planar
-
-    callback_test_data cbdata;
-    cbdata.scalar = params.load_cb_scalar;
-
-    switch(params.itype)
-    {
-    case fft_array_type_complex_interleaved:
-    case fft_array_type_hermitian_interleaved:
-    {
-        switch(params.precision)
-        {
-        case fft_precision_half:
-        {
-            const size_t elem_size = sizeof(std::complex<rocfft_fp16>);
-            const size_t num_elems = input.front().size() / elem_size;
-
-            auto input_begin = reinterpret_cast<rocfft_complex<rocfft_fp16>*>(input.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                input_begin[i] = load_callback(input_begin, i, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_single:
-        {
-            const size_t elem_size = sizeof(std::complex<float>);
-            const size_t num_elems = input.front().size() / elem_size;
-
-            auto input_begin = reinterpret_cast<rocfft_complex<float>*>(input.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                input_begin[i] = load_callback(input_begin, i, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_double:
-        {
-            const size_t elem_size = sizeof(std::complex<double>);
-            const size_t num_elems = input.front().size() / elem_size;
-
-            auto input_begin = reinterpret_cast<rocfft_complex<double>*>(input.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                input_begin[i] = load_callback(input_begin, i, &cbdata, nullptr);
-            }
-            break;
-        }
-        }
-    }
-    break;
-    case fft_array_type_real:
-    {
-        switch(params.precision)
-        {
-        case fft_precision_half:
-        {
-            const size_t elem_size = sizeof(rocfft_fp16);
-            const size_t num_elems = input.front().size() / elem_size;
-
-            auto input_begin = reinterpret_cast<rocfft_fp16*>(input.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                input_begin[i] = load_callback(input_begin, i, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_single:
-        {
-            const size_t elem_size = sizeof(float);
-            const size_t num_elems = input.front().size() / elem_size;
-
-            auto input_begin = reinterpret_cast<float*>(input.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                input_begin[i] = load_callback(input_begin, i, &cbdata, nullptr);
-            }
-            break;
-        }
-        case fft_precision_double:
-        {
-            const size_t elem_size = sizeof(double);
-            const size_t num_elems = input.front().size() / elem_size;
-
-            auto input_begin = reinterpret_cast<double*>(input.front().data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                input_begin[i] = load_callback(input_begin, i, &cbdata, nullptr);
-            }
-            break;
-        }
-        }
-    }
-    break;
-    default:
-        // this is FFTW data which should always be interleaved (if complex)
-        abort();
-    }
-}
-#else
-// Stubs for callback tests.
-// Many seem to be called unconditionally, so we can't throw exceptions in
-// most cases.
-
-void* get_load_callback_host(fft_array_type itype,
-                             fft_precision  precision,
-                             bool           round_trip_inverse = false)
-{
-    return nullptr;
-}
-void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input) {}
-
-void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output) {}
-
-void* get_store_callback_host(fft_array_type otype,
-                              fft_precision  precision,
-                              bool           round_trip_inverse = false)
-{
-    throw std::runtime_error("get_store_callback_host not implemented");
-    return nullptr;
-}
-#endif

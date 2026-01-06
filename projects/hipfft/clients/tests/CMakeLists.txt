@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -70,12 +70,13 @@ else()
   find_package(FFTW3f CONFIG QUIET )
   if( FFTW3_FOUND AND FFTW3f_FOUND )
     message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
     if ( NOT WIN32 )
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
     else()
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
     endif()
 
     # Look for omp (preferred) or thread libraries. These are not a
@@ -126,6 +127,8 @@ set( hipfft-test_source
   multi_device_test.cpp
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
   )
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
@@ -135,7 +138,7 @@ set( TEST_TARGETS hipfft-test )
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests
-  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp )
+  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
   list( APPEND TEST_TARGETS hipfft_mpi_worker )
   target_include_directories( hipfft_mpi_worker
     PRIVATE
@@ -179,7 +182,7 @@ endif()
 
 foreach( target ${TEST_TARGETS} )
   set_target_properties( ${target} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     )
 
