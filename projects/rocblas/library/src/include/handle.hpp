@@ -634,6 +634,10 @@ private:
                 if(!size)
                     return decltype(pointers)(sizeof...(sizes));
 
+                // DEBUG: Log allocation for tracking
+                rocblas_cerr << "[DEBUG] _device_malloc allocating: stream=" << stream_in_use 
+                             << " size=" << size << std::endl;
+
                 hipError_t hipStatus = hipMallocAsync(&dev_mem, size, stream_in_use);
                 if(hipStatus != hipSuccess)
                 {
@@ -641,6 +645,10 @@ private:
                     rocblas_cerr << " rocBLAS internal error: hipMallocAsync() failed to allocate memory of size : " << size << std::endl;
                     return decltype(pointers)(sizeof...(sizes));
                 }
+                
+                rocblas_cerr << "[DEBUG] hipMallocAsync result: SUCCESS dev_mem=" << dev_mem 
+                             << " (stream=" << stream_in_use << ")" << std::endl;
+                
                 addr = static_cast<char*>(dev_mem);
 #endif
             }
@@ -695,7 +703,14 @@ private:
 // hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
 // Support for default stream added in hip version 5.3.0
 #if HIP_VERSION >= 50300000
+                // DEBUG: Log allocation for tracking
+                rocblas_cerr << "[DEBUG] _device_malloc(count) allocating: stream=" << stream_in_use 
+                             << " size=" << size << " count=" << count << std::endl;
+
                 bool status = hipMallocAsync(&dev_mem, size, stream_in_use) == hipSuccess ;
+
+                rocblas_cerr << "[DEBUG] hipMallocAsync(count) result: " << (status ? "SUCCESS" : "FAILED")
+                             << " dev_mem=" << dev_mem << " (stream=" << stream_in_use << ")" << std::endl;
 
                 for(auto i= 0 ; i < count ; i++)
                     pointers.push_back(status ? dev_mem : nullptr);
@@ -763,8 +778,15 @@ private:
 #if HIP_VERSION >= 50300000
                         if(dev_mem)
                         {
+                            // DEBUG: Log destructor execution for use-after-free detection
+                            rocblas_cerr << "[DEBUG] _device_malloc destructor: stream=" << stream_in_use 
+                                         << " dev_mem=" << dev_mem << " size=" << size << std::endl;
 
                             bool status = hipFreeAsync(dev_mem, stream_in_use) == hipSuccess ;
+                            
+                            rocblas_cerr << "[DEBUG] hipFreeAsync result: " << (status ? "SUCCESS" : "FAILED") 
+                                         << " (stream=" << stream_in_use << ")" << std::endl;
+                            
                             if(!status)
                             {
                                 rocblas_cerr << " rocBLAS internal error: hipFreeAsync() Failed, "

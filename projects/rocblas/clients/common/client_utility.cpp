@@ -529,13 +529,19 @@ void rocblas_local_handle::rocblas_stream_begin_capture()
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle, &m_old_stream));
     CHECK_HIP_ERROR(hipStreamSynchronize(m_old_stream));
 
+    rocblas_cerr << "[DEBUG] Graph capture BEGIN: old_stream=" << m_old_stream << std::endl;
+    rocblas_cerr << "[DEBUG]   Enabling stream_order_memory_allocation" << std::endl;
+    
     m_handle->set_stream_order_memory_allocation(true);
 
     CHECK_HIP_ERROR(hipStreamCreate(&m_graph_stream));
+    rocblas_cerr << "[DEBUG]   Created graph_stream=" << m_graph_stream << std::endl;
+    
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_graph_stream));
 
     // BEGIN GRAPH CAPTURE
     CHECK_HIP_ERROR(hipStreamBeginCapture(m_graph_stream, hipStreamCaptureModeGlobal));
+    rocblas_cerr << "[DEBUG]   Graph capture started on stream=" << m_graph_stream << std::endl;
 }
 
 void rocblas_local_handle::rocblas_stream_end_capture()
@@ -543,20 +549,32 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     hipGraph_t     graph;
     hipGraphExec_t instance;
 
+    rocblas_cerr << "[DEBUG] Graph capture END: graph_stream=" << m_graph_stream << std::endl;
+
     // END GRAPH CAPTURE
     CHECK_HIP_ERROR(hipStreamEndCapture(m_graph_stream, &graph));
+    rocblas_cerr << "[DEBUG]   Graph captured, instantiating..." << std::endl;
     CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, NULL, NULL, 0));
 
     CHECK_HIP_ERROR(hipGraphDestroy(graph));
+    rocblas_cerr << "[DEBUG]   Launching graph on stream=" << m_graph_stream << std::endl;
     CHECK_HIP_ERROR(hipGraphLaunch(instance, m_graph_stream));
+    rocblas_cerr << "[DEBUG]   Synchronizing graph_stream=" << m_graph_stream << std::endl;
     CHECK_HIP_ERROR(hipStreamSynchronize(m_graph_stream));
+    rocblas_cerr << "[DEBUG]   Graph execution complete, destroying graph exec" << std::endl;
     CHECK_HIP_ERROR(hipGraphExecDestroy(instance));
 
+    rocblas_cerr << "[DEBUG]   Restoring old_stream=" << m_old_stream << std::endl;
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_old_stream));
+    rocblas_cerr << "[DEBUG]   ⚠️  DESTROYING graph_stream=" << m_graph_stream 
+              << " (Any destructors after this point will use destroyed stream!)" << std::endl;
     CHECK_HIP_ERROR(hipStreamDestroy(m_graph_stream));
     m_graph_stream = nullptr;
+    rocblas_cerr << "[DEBUG]   Stream destroyed, setting graph_stream=nullptr" << std::endl;
 
+    rocblas_cerr << "[DEBUG]   Disabling stream_order_memory_allocation" << std::endl;
     m_handle->set_stream_order_memory_allocation(false);
+    rocblas_cerr << "[DEBUG] Graph capture END complete" << std::endl;
 }
 
 void rocblas_parallel_initialize_thread(int id, size_t& memory_used)
