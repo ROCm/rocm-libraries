@@ -37,10 +37,6 @@ else()
     "Install path prefix, prepended onto install directories" )
 endif()
 
-# Workarounds..
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
-list( APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake )
-
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
 # MSVC_IDE does not use CMAKE_BUILD_TYPE
