@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 

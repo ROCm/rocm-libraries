@@ -42,12 +42,6 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/MFMA/CMPXWriteExec.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
