@@ -142,6 +142,15 @@ public:
             rocsparse_matrix_factory<A, I, J> matrix_factory(
                 arg, arg.unit_check ? to_int : false, full_rank);
             traits::sparse_initialization(matrix_factory, hA, M, N, base);
+
+            // For bf16 precision, set all matrix values to 1.0 for numerical stability
+            if constexpr(std::is_same<A, rocsparse_bfloat16>{})
+            {
+                for(size_t i = 0; i < hA.val.size(); ++i)
+                {
+                    hA.val[i] = static_cast<A>(1.0f);
+                }
+            }
         }
 
         if((matrix_type == rocsparse_matrix_type_symmetric && M != N)
@@ -153,11 +162,33 @@ public:
         device_sparse_matrix<A> dA(hA);
 
         host_dense_matrix<X> hx((trans == rocsparse_operation_none) ? N : M, 1);
-        rocsparse_matrix_utils::init_exact(hx);
+        // For bf16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(std::is_same<X, rocsparse_bfloat16>{})
+        {
+            for(size_t i = 0; i < static_cast<size_t>(hx.m * hx.n); ++i)
+            {
+                hx[i] = static_cast<X>(1.0f);
+            }
+        }
+        else
+        {
+            rocsparse_matrix_utils::init_exact(hx);
+        }
         device_dense_matrix<X> dx(hx);
 
         host_dense_matrix<Y> hy((trans == rocsparse_operation_none) ? M : N, 1);
-        rocsparse_matrix_utils::init_exact(hy);
+        // For bf16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(std::is_same<Y, rocsparse_bfloat16>{})
+        {
+            for(size_t i = 0; i < static_cast<size_t>(hy.m * hy.n); ++i)
+            {
+                hy[i] = static_cast<Y>(1.0f);
+            }
+        }
+        else
+        {
+            rocsparse_matrix_utils::init_exact(hy);
+        }
         device_dense_matrix<Y> dy(hy);
 
         rocsparse_local_spmat matA(dA);
@@ -347,6 +378,15 @@ public:
             rocsparse_matrix_factory<A, I, J> matrix_factory(
                 arg, arg.unit_check ? to_int : false, full_rank);
             traits::sparse_initialization(matrix_factory, hA, M, N, base);
+
+            // For bf16 precision, set all matrix values to 1.0 for numerical stability
+            if constexpr(std::is_same<A, rocsparse_bfloat16>{})
+            {
+                for(size_t i = 0; i < hA.val.size(); ++i)
+                {
+                    hA.val[i] = static_cast<A>(1.0f);
+                }
+            }
         }
 
         if((matrix_type == rocsparse_matrix_type_symmetric && M != N)
@@ -358,11 +398,33 @@ public:
         device_sparse_matrix<A> dA(hA);
 
         host_dense_matrix<X> hx((trans == rocsparse_operation_none) ? N : M, 1);
-        rocsparse_matrix_utils::init_exact(hx);
+        // For bf16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(std::is_same<X, rocsparse_bfloat16>{})
+        {
+            for(size_t i = 0; i < static_cast<size_t>(hx.m * hx.n); ++i)
+            {
+                hx[i] = static_cast<X>(1.0f);
+            }
+        }
+        else
+        {
+            rocsparse_matrix_utils::init_exact(hx);
+        }
         device_dense_matrix<X> dx(hx);
 
         host_dense_matrix<Y> hy((trans == rocsparse_operation_none) ? M : N, 1);
-        rocsparse_matrix_utils::init_exact(hy);
+        // For bf16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(std::is_same<Y, rocsparse_bfloat16>{})
+        {
+            for(size_t i = 0; i < static_cast<size_t>(hy.m * hy.n); ++i)
+            {
+                hy[i] = static_cast<Y>(1.0f);
+            }
+        }
+        else
+        {
+            rocsparse_matrix_utils::init_exact(hy);
+        }
         device_dense_matrix<Y> dy(hy);
 
         rocsparse_local_spmat matA(dA);
