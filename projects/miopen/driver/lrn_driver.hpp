@@ -36,6 +36,7 @@
 
 #include "../test/verify.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 
@@ -134,8 +135,7 @@ int LRNDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     }
 #if 0
 	if(inflags.GetValueInt("back") == 0 && inflags.GetValueStr("mode") == "cross") {
-		printf("Cross channel LRN needs do_backward=1\n");
-		exit(0); // NOLINT (concurrency-mt-unsafe)
+		MIOPEN_THROW(miopenStatusBadParm, "Cross channel LRN needs do_backward=1");
 	}
 #endif
     return 0;
@@ -213,8 +213,7 @@ int LRNDriver<Tgpu, Tref>::SetLRNDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect LRN Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect LRN Mode");
     }
 
     return (miopenSetLRNDescriptor(lrnDesc, mode, lrnN, lrnAlpha, lrnBeta, lrnK));
