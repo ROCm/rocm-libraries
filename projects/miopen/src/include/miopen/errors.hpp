@@ -64,8 +64,9 @@ MIOPEN_EXPORT std::string HIPErrorMessage(int error, const std::string& msg = ""
 template <class... Params>
 [[noreturn]] void MIOpenThrow(const std::string& file, int line, Params&&... args)
 {
-    miopen::OutputBufferedLogs();
-    throw miopen::Exception(std::forward<Params>(args)...).SetContext(file, line);
+    auto exe = miopen::Exception(std::forward<Params>(args)...);
+    MIOPEN_LOG_E_FROM(file + ":" + std::to_string(line), exe.message);
+    throw exe.SetContext(file, line);
 }
 
 #define MIOPEN_THROW(...)                                     \
