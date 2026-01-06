@@ -14,7 +14,7 @@ Documentation for rocSPARSE is available at
 * Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
 
 ### Resolved issues
-* Fix bug where we sometimes read memory out of bounds in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
+* Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
 
 ## rocSPARSE 4.2.0 for ROCm 7.2.0
 
