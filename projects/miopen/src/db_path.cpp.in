@@ -114,14 +114,19 @@ std::string GetUserDbSuffix() { return "${MIOPEN_USER_DB_SUFFIX}"; }
 std::string GetSystemFindDbSuffix() { return "${MIOPEN_SYSTEM_FIND_DB_SUFFIX}"; }
 
 namespace {
-// Use pointer to allow resetting for testing
-const fs::path* g_user_db_path = nullptr;
+// Use static local variable to avoid non-const globals while allowing reset for testing
+const fs::path*& UserDbPathPtrRef()
+{
+    static const fs::path* ptr = nullptr;
+    return ptr;
+}
 
 const fs::path& GetUserDbPathInternal()
 {
-    if(!g_user_db_path)
-        g_user_db_path = new fs::path(PrepareUserDbPath());
-    return *g_user_db_path;
+    auto& ptr = UserDbPathPtrRef();
+    if(ptr == nullptr)
+        ptr = new fs::path(PrepareUserDbPath());
+    return *ptr;
 }
 } // namespace
 
@@ -131,8 +136,8 @@ const fs::path& GetUserDbPath() { return GetUserDbPathInternal(); }
 namespace testing {
 void ResetUserDbPath()
 {
-    delete g_user_db_path;
-    g_user_db_path = nullptr;
+    delete UserDbPathPtrRef();
+    UserDbPathPtrRef() = nullptr;
 }
 } // namespace testing
 #endif

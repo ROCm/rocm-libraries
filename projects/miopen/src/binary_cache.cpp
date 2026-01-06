@@ -89,22 +89,33 @@ static fs::path ComputeUserCachePath()
 }
 
 namespace {
-// Use pointers to allow resetting for testing
-const fs::path* g_user_cache_path = nullptr;
-const fs::path* g_sys_cache_path  = nullptr;
+// Use static local variables to avoid non-const globals while allowing reset for testing
+const fs::path*& UserCachePathPtrRef()
+{
+    static const fs::path* ptr = nullptr;
+    return ptr;
+}
+
+const fs::path*& SysCachePathPtrRef()
+{
+    static const fs::path* ptr = nullptr;
+    return ptr;
+}
 
 const fs::path& GetUserCachePathInternal()
 {
-    if(!g_user_cache_path)
-        g_user_cache_path = new fs::path(ComputeUserCachePath());
-    return *g_user_cache_path;
+    auto& ptr = UserCachePathPtrRef();
+    if(ptr == nullptr)
+        ptr = new fs::path(ComputeUserCachePath());
+    return *ptr;
 }
 
 const fs::path& GetSysCachePathInternal()
 {
-    if(!g_sys_cache_path)
-        g_sys_cache_path = new fs::path(ComputeSysCachePath());
-    return *g_sys_cache_path;
+    auto& ptr = SysCachePathPtrRef();
+    if(ptr == nullptr)
+        ptr = new fs::path(ComputeSysCachePath());
+    return *ptr;
 }
 } // namespace
 
@@ -130,10 +141,10 @@ fs::path GetCachePath(bool is_system)
 namespace testing {
 void ResetCachedPaths()
 {
-    delete g_user_cache_path;
-    delete g_sys_cache_path;
-    g_user_cache_path = nullptr;
-    g_sys_cache_path  = nullptr;
+    delete UserCachePathPtrRef();
+    delete SysCachePathPtrRef();
+    UserCachePathPtrRef() = nullptr;
+    SysCachePathPtrRef() = nullptr;
 }
 } // namespace testing
 #endif
