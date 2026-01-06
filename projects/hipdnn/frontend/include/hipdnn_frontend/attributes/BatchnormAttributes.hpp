@@ -5,9 +5,6 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-#include <hipdnn_data_sdk/utilities/json/Common.hpp>
-#endif
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -304,61 +301,63 @@ public:
                                 : flatbuffers::nullopt);
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    void
-        deserialize(const nlohmann::json& json,
-                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    static BatchnormAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto& inputsJson = json.at("inputs");
-        auto& outputsJson = json.at("outputs");
+        BatchnormAttributes attr;
 
-        set_x(tensorMap.at(inputsJson.at("x_tensor_uid").get<int64_t>()));
-        set_scale(tensorMap.at(inputsJson.at("scale_tensor_uid").get<int64_t>()));
-        set_bias(tensorMap.at(inputsJson.at("bias_tensor_uid").get<int64_t>()));
-        set_epsilon(tensorMap.at(inputsJson.at("epsilon_tensor_uid").get<int64_t>()));
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
 
         std::vector<std::shared_ptr<TensorAttributes>> peerStats;
-        for(auto uid : inputsJson.at("peer_stats_tensor_uid").get<std::vector<int64_t>>())
+        if(fb->peer_stats_tensor_uid() != nullptr)
         {
-            peerStats.push_back(tensorMap.at(uid));
+            for(auto uid : *fb->peer_stats_tensor_uid())
+            {
+                peerStats.push_back(tensorMap.at(uid));
+            }
         }
-        set_peer_stats(peerStats);
+        attr.set_peer_stats(peerStats);
 
-        if(auto uid = inputsJson.at("prev_running_mean_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->prev_running_mean_tensor_uid().has_value())
         {
-            set_prev_running_mean(tensorMap.at(*uid));
+            attr.set_prev_running_mean(tensorMap.at(fb->prev_running_mean_tensor_uid().value()));
         }
-        if(auto uid
-           = inputsJson.at("prev_running_variance_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->prev_running_variance_tensor_uid().has_value())
         {
-            set_prev_running_variance(tensorMap.at(*uid));
+            attr.set_prev_running_variance(
+                tensorMap.at(fb->prev_running_variance_tensor_uid().value()));
         }
-        if(auto uid = inputsJson.at("momentum_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->momentum_tensor_uid().has_value())
         {
-            set_momentum(tensorMap.at(*uid));
+            attr.set_momentum(tensorMap.at(fb->momentum_tensor_uid().value()));
         }
 
-        set_y(tensorMap.at(outputsJson.at("y_tensor_uid").get<int64_t>()));
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
 
-        if(auto uid = outputsJson.at("mean_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->mean_tensor_uid().has_value())
         {
-            set_mean(tensorMap.at(*uid));
+            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
         }
-        if(auto uid = outputsJson.at("inv_variance_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->inv_variance_tensor_uid().has_value())
         {
-            set_inv_variance(tensorMap.at(*uid));
+            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
         }
-        if(auto uid = outputsJson.at("next_running_mean_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->next_running_mean_tensor_uid().has_value())
         {
-            set_next_running_mean(tensorMap.at(*uid));
+            attr.set_next_running_mean(tensorMap.at(fb->next_running_mean_tensor_uid().value()));
         }
-        if(auto uid
-           = outputsJson.at("next_running_variance_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->next_running_variance_tensor_uid().has_value())
         {
-            set_next_running_variance(tensorMap.at(*uid));
+            attr.set_next_running_variance(
+                tensorMap.at(fb->next_running_variance_tensor_uid().value()));
         }
+
+        return attr;
     }
-#endif
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;

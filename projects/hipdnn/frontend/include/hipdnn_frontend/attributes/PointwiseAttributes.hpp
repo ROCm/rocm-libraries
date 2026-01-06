@@ -4,9 +4,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-#include <hipdnn_data_sdk/utilities/json/Common.hpp>
-#endif
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
@@ -220,59 +217,57 @@ public:
             softplus_beta);
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    void
-        deserialize(const nlohmann::json& json,
-                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    static PointwiseAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::PointwiseAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto& inputsJson = json.at("inputs");
-        auto& outputsJson = json.at("outputs");
+        PointwiseAttributes attr;
 
-        set_mode(fromSdkType(
-            inputsJson.at("operation").get<hipdnn_data_sdk::data_objects::PointwiseMode>()));
+        attr.set_mode(fromSdkType(fb->operation()));
 
-        if(auto val = inputsJson.at("relu_lower_clip").get<std::optional<float>>())
+        if(fb->relu_lower_clip().has_value())
         {
-            set_relu_lower_clip(*val);
+            attr.set_relu_lower_clip(fb->relu_lower_clip().value());
         }
-        if(auto val = inputsJson.at("relu_upper_clip").get<std::optional<float>>())
+        if(fb->relu_upper_clip().has_value())
         {
-            set_relu_upper_clip(*val);
+            attr.set_relu_upper_clip(fb->relu_upper_clip().value());
         }
-        if(auto val = inputsJson.at("relu_lower_clip_slope").get<std::optional<float>>())
+        if(fb->relu_lower_clip_slope().has_value())
         {
-            set_relu_lower_clip_slope(*val);
+            attr.set_relu_lower_clip_slope(fb->relu_lower_clip_slope().value());
         }
-        if(auto val = inputsJson.at("swish_beta").get<std::optional<float>>())
+        if(fb->swish_beta().has_value())
         {
-            set_swish_beta(*val);
+            attr.set_swish_beta(fb->swish_beta().value());
         }
-        if(auto val = inputsJson.at("elu_alpha").get<std::optional<float>>())
+        if(fb->elu_alpha().has_value())
         {
-            set_elu_alpha(*val);
+            attr.set_elu_alpha(fb->elu_alpha().value());
         }
-        if(auto val = inputsJson.at("softplus_beta").get<std::optional<float>>())
+        if(fb->softplus_beta().has_value())
         {
-            set_softplus_beta(*val);
+            attr.set_softplus_beta(fb->softplus_beta().value());
         }
-        if(auto val = inputsJson.at("axis_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->axis_tensor_uid().has_value())
         {
-            set_axis(*val);
+            attr.set_axis(fb->axis_tensor_uid().value());
         }
 
-        set_input_0(tensorMap.at(inputsJson.at("in_0_tensor_uid").get<int64_t>()));
-        if(auto uid = inputsJson.at("in_1_tensor_uid").get<std::optional<int64_t>>())
+        attr.set_input_0(tensorMap.at(fb->in_0_tensor_uid()));
+        if(fb->in_1_tensor_uid().has_value())
         {
-            set_input_1(tensorMap.at(*uid));
+            attr.set_input_1(tensorMap.at(fb->in_1_tensor_uid().value()));
         }
-        if(auto uid = inputsJson.at("in_2_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->in_2_tensor_uid().has_value())
         {
-            set_input_2(tensorMap.at(*uid));
+            attr.set_input_2(tensorMap.at(fb->in_2_tensor_uid().value()));
         }
 
-        set_output_0(tensorMap.at(outputsJson.at("out_0_tensor_uid").get<int64_t>()));
+        attr.set_output_0(tensorMap.at(fb->out_0_tensor_uid()));
+
+        return attr;
     }
-#endif
 };
 typedef PointwiseAttributes Pointwise_attributes;
 } // namespace hipdnn_frontend::graph

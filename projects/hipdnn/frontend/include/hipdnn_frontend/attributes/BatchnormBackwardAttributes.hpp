@@ -5,9 +5,6 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-#include <hipdnn_data_sdk/utilities/json/Common.hpp>
-#endif
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -221,39 +218,41 @@ public:
             get_dbias()->get_uid());
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    void
-        deserialize(const nlohmann::json& json,
-                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    static BatchnormBackwardAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto& inputsJson = json.at("inputs");
-        auto& outputsJson = json.at("outputs");
+        BatchnormBackwardAttributes attr;
 
-        set_dy(tensorMap.at(inputsJson.at("dy_tensor_uid").get<int64_t>()));
-        set_x(tensorMap.at(inputsJson.at("x_tensor_uid").get<int64_t>()));
-        set_scale(tensorMap.at(inputsJson.at("scale_tensor_uid").get<int64_t>()));
+        attr.set_dy(tensorMap.at(fb->dy_tensor_uid()));
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
 
-        if(auto uid = inputsJson.at("mean_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->mean_tensor_uid().has_value())
         {
-            set_mean(tensorMap.at(*uid));
+            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
         }
-        if(auto uid = inputsJson.at("inv_variance_tensor_uid").get<std::optional<int64_t>>())
+        if(fb->inv_variance_tensor_uid().has_value())
         {
-            set_inv_variance(tensorMap.at(*uid));
+            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
         }
 
         std::vector<std::shared_ptr<TensorAttributes>> peerStats;
-        for(auto uid : inputsJson.at("peer_stats_tensor_uid").get<std::vector<int64_t>>())
+        if(fb->peer_stats_tensor_uid() != nullptr)
         {
-            peerStats.push_back(tensorMap.at(uid));
+            for(auto uid : *fb->peer_stats_tensor_uid())
+            {
+                peerStats.push_back(tensorMap.at(uid));
+            }
         }
-        set_peer_stats(peerStats);
+        attr.set_peer_stats(peerStats);
 
-        set_dx(tensorMap.at(outputsJson.at("dx_tensor_uid").get<int64_t>()));
-        set_dscale(tensorMap.at(outputsJson.at("dscale_tensor_uid").get<int64_t>()));
-        set_dbias(tensorMap.at(outputsJson.at("dbias_tensor_uid").get<int64_t>()));
+        attr.set_dx(tensorMap.at(fb->dx_tensor_uid()));
+        attr.set_dscale(tensorMap.at(fb->dscale_tensor_uid()));
+        attr.set_dbias(tensorMap.at(fb->dbias_tensor_uid()));
+
+        return attr;
     }
-#endif
 };
 typedef BatchnormBackwardAttributes Batchnorm_backward_attributes;
 } // namespace hipdnn_frontend::graph

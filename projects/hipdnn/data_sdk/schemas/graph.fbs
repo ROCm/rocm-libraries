@@ -31,6 +31,7 @@ table Graph {
 	io_data_type: DataType;
 	tensors: [TensorAttributes];
 	nodes: [Node];
+	preferred_engine_id: long = null;
 }
 
 root_type Graph;

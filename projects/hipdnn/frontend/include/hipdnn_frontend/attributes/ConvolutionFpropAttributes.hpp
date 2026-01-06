@@ -5,9 +5,6 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-#include <hipdnn_data_sdk/utilities/json/Common.hpp>
-#endif
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <unordered_map>
@@ -203,27 +200,41 @@ public:
             toSdkType(math_mode));
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    void
-        deserialize(const nlohmann::json& json,
-                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    static ConvFpropAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto& inputsJson = json.at("inputs");
-        auto& outputsJson = json.at("outputs");
-        auto& paramsJson = json.at("parameters");
+        ConvFpropAttributes attr;
 
-        set_x(tensorMap.at(inputsJson.at("x_tensor_uid").get<int64_t>()));
-        set_w(tensorMap.at(inputsJson.at("w_tensor_uid").get<int64_t>()));
-        set_y(tensorMap.at(outputsJson.at("y_tensor_uid").get<int64_t>()));
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_w(tensorMap.at(fb->w_tensor_uid()));
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
 
-        set_pre_padding(paramsJson.at("pre_padding").get<std::vector<int64_t>>());
-        set_post_padding(paramsJson.at("post_padding").get<std::vector<int64_t>>());
-        set_stride(paramsJson.at("stride").get<std::vector<int64_t>>());
-        set_dilation(paramsJson.at("dilation").get<std::vector<int64_t>>());
-        set_convolution_mode(
-            fromSdkType(paramsJson.at("conv_mode").get<hipdnn_data_sdk::data_objects::ConvMode>()));
+        if(fb->pre_padding() != nullptr)
+        {
+            std::vector<int64_t> prePadding(fb->pre_padding()->begin(), fb->pre_padding()->end());
+            attr.set_pre_padding(std::move(prePadding));
+        }
+        if(fb->post_padding() != nullptr)
+        {
+            std::vector<int64_t> postPadding(fb->post_padding()->begin(),
+                                             fb->post_padding()->end());
+            attr.set_post_padding(std::move(postPadding));
+        }
+        if(fb->stride() != nullptr)
+        {
+            std::vector<int64_t> strideVec(fb->stride()->begin(), fb->stride()->end());
+            attr.set_stride(std::move(strideVec));
+        }
+        if(fb->dilation() != nullptr)
+        {
+            std::vector<int64_t> dilationVec(fb->dilation()->begin(), fb->dilation()->end());
+            attr.set_dilation(std::move(dilationVec));
+        }
+        attr.set_convolution_mode(fromSdkType(fb->conv_mode()));
+
+        return attr;
     }
-#endif
 };
 typedef ConvFpropAttributes Conv_fprop_attributes;
 } // namespace hipdnn_frontend::graph

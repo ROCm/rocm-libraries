@@ -5,9 +5,6 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-#include <hipdnn_data_sdk/utilities/json/Common.hpp>
-#endif
 #include <memory>
 #include <unordered_map>
 
@@ -143,23 +140,21 @@ public:
             get_y()->get_uid());
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    void
-        deserialize(const nlohmann::json& json,
-                    const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    static BatchnormInferenceAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto& inputsJson = json.at("inputs");
-        auto& outputsJson = json.at("outputs");
+        BatchnormInferenceAttributes attr;
 
-        set_x(tensorMap.at(inputsJson.at("x_tensor_uid").get<int64_t>()));
-        set_mean(tensorMap.at(inputsJson.at("mean_tensor_uid").get<int64_t>()));
-        set_scale(tensorMap.at(inputsJson.at("scale_tensor_uid").get<int64_t>()));
-        set_inv_variance(tensorMap.at(inputsJson.at("inv_variance_tensor_uid").get<int64_t>()));
-        set_bias(tensorMap.at(inputsJson.at("bias_tensor_uid").get<int64_t>()));
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_mean(tensorMap.at(fb->mean_tensor_uid()));
+        attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
 
-        set_y(tensorMap.at(outputsJson.at("y_tensor_uid").get<int64_t>()));
+        return attr;
     }
-#endif
 };
 typedef BatchnormInferenceAttributes Batchnorm_inference_attributes;
 } // namespace hipdnn_frontend::graph

@@ -6,9 +6,6 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-#include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
-#endif
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_frontend/Error.hpp>
@@ -278,65 +275,69 @@ public:
                                                                            result.second);
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    void deserialize(const nlohmann::json& json)
+    static std::shared_ptr<TensorAttributes>
+        fromFlatBuffer(const hipdnn_data_sdk::data_objects::TensorAttributes* fb)
     {
-        if(json.contains("uid"))
+        if(fb == nullptr)
         {
-            set_uid(json.at("uid").get<int64_t>());
-        }
-        if(json.contains("name"))
-        {
-            set_name(json.at("name").get<std::string>());
-        }
-        if(json.contains("data_type"))
-        {
-            set_data_type(
-                fromSdkType(json.at("data_type").get<hipdnn_data_sdk::data_objects::DataType>()));
-        }
-        if(json.contains("dims"))
-        {
-            set_dim(json.at("dims").get<std::vector<int64_t>>());
-        }
-        if(json.contains("strides"))
-        {
-            set_stride(json.at("strides").get<std::vector<int64_t>>());
-        }
-        if(json.contains("virtual"))
-        {
-            set_is_virtual(json.at("virtual").get<bool>());
+            return nullptr;
         }
 
-        if(json.contains("value_type") && json.contains("value"))
+        auto tensor = std::make_shared<TensorAttributes>();
+
+        tensor->set_uid(fb->uid());
+
+        if(fb->name() != nullptr)
         {
-            auto valueType
-                = json.at("value_type").get<hipdnn_data_sdk::data_objects::TensorValue>();
+            tensor->set_name(fb->name()->c_str());
+        }
+
+        tensor->set_data_type(fromSdkType(fb->data_type()));
+
+        if(fb->dims() != nullptr)
+        {
+            std::vector<int64_t> dims(fb->dims()->begin(), fb->dims()->end());
+            tensor->set_dim(dims);
+        }
+
+        if(fb->strides() != nullptr)
+        {
+            std::vector<int64_t> strides(fb->strides()->begin(), fb->strides()->end());
+            tensor->set_stride(strides);
+        }
+
+        tensor->set_is_virtual(fb->virtual_());
+
+        auto valueType = fb->value_type();
+        if(valueType != hipdnn_data_sdk::data_objects::TensorValue::NONE)
+        {
             switch(valueType)
             {
             case hipdnn_data_sdk::data_objects::TensorValue::Float32Value:
-                set_value(json.at("value").get<float>());
+                tensor->set_value(fb->value_as_Float32Value()->value());
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::Float64Value:
-                set_value(json.at("value").get<double>());
+                tensor->set_value(fb->value_as_Float64Value()->value());
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::Float16Value:
-                set_value(static_cast<half>(json.at("value").get<float>()));
+                tensor->set_value(static_cast<half>(fb->value_as_Float16Value()->value()));
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value:
-                set_value(static_cast<hip_bfloat16>(json.at("value").get<float>()));
+                tensor->set_value(static_cast<hip_bfloat16>(fb->value_as_BFloat16Value()->value()));
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::Float8Value:
-                set_value(json.at("value").get<uint8_t>());
+                tensor->set_value(fb->value_as_Float8Value()->value());
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::Int32Value:
-                set_value(json.at("value").get<int32_t>());
+                tensor->set_value(fb->value_as_Int32Value()->value());
                 break;
             default:
                 break;
             }
         }
+
+        return tensor;
     }
-#endif
 
 private:
     int64_t _uid = 0;

@@ -1163,6 +1163,8 @@ TEST(TestGraphSerialization, DeserializeMissingTensorUidReturnsError)
     nlohmann::json json;
     json["name"] = "missing_tensor_test";
     json["compute_data_type"] = "float";
+    json["intermediate_data_type"] = "float";
+    json["io_data_type"] = "float";
 
     // Add tensors with UIDs 1 and 2 (input and output)
     json["tensors"] = nlohmann::json::array();
@@ -1172,6 +1174,7 @@ TEST(TestGraphSerialization, DeserializeMissingTensorUidReturnsError)
     inputTensor["dims"] = {1, 16, 8, 8};
     inputTensor["strides"] = {1024, 64, 8, 1};
     inputTensor["data_type"] = "float";
+    inputTensor["virtual"] = false;
     json["tensors"].push_back(inputTensor);
 
     nlohmann::json outputTensor;
@@ -1180,12 +1183,15 @@ TEST(TestGraphSerialization, DeserializeMissingTensorUidReturnsError)
     outputTensor["dims"] = {1, 16, 8, 8};
     outputTensor["strides"] = {1024, 64, 8, 1};
     outputTensor["data_type"] = "float";
+    outputTensor["virtual"] = false;
     json["tensors"].push_back(outputTensor);
 
     // Add a properly formed node that references UID 999 which doesn't exist
     json["nodes"] = nlohmann::json::array();
     nlohmann::json node;
     node["type"] = "PointwiseAttributes";
+    node["name"] = "test_node";
+    node["compute_data_type"] = "float";
     node["inputs"] = nlohmann::json::object();
     node["inputs"]["operation"] = "relu_fwd";
     node["inputs"]["relu_lower_clip"] = nullptr;

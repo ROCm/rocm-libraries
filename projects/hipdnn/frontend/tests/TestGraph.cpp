@@ -3369,6 +3369,8 @@ TEST_F(TestGraph, GetTensorByNameReturnsTensor)
     // Non-existent name returns nullptr
     auto notFound = graph.getTensor("NonExistentTensor");
     EXPECT_EQ(notFound, nullptr);
+}
+
 TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
 {
     ::testing::FLAGS_gmock_verbose = "error";
