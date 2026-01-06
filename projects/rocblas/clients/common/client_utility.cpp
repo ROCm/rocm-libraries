@@ -528,6 +528,10 @@ void rocblas_local_handle::rocblas_stream_begin_capture()
 
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle, &m_old_stream));
     CHECK_HIP_ERROR(hipStreamSynchronize(m_old_stream));
+    
+    // FIX #2: Add device sync before starting new graph capture to ensure previous operations are done
+    rocblas_cerr << "[DEBUG]   FIX #2: Device sync before graph capture BEGIN" << std::endl;
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
 
     rocblas_cerr << "[DEBUG] Graph capture BEGIN: old_stream=" << m_old_stream << std::endl;
     rocblas_cerr << "[DEBUG]   Enabling stream_order_memory_allocation" << std::endl;
