@@ -151,7 +151,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   if( WIN32 )
     find_package( HIP CONFIG REQUIRED )
   else()
-    find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
+    find_package( HIP REQUIRED )
   endif()
 endif()
 
