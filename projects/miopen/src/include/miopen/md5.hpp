@@ -10,7 +10,7 @@
 
 namespace miopen {
 
-std::string md5(const std::string&);
+MIOPEN_INTERNALS_EXPORT std::string md5(const std::string&);
 MIOPEN_INTERNALS_EXPORT std::string md5(const std::vector<char>&);
 
 } // namespace miopen

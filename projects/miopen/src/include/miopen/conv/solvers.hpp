@@ -1682,7 +1682,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsmImplicitGemmGTCDynamicBwdXdlops final : Co
 
 /// Holds common member functions for the Solvers which share the same
 /// "legacy exhaustive search" machinery.
-struct ConvOclDirectFwdLegacyExhaustiveSearch : ConvTunableSolver<LegacyPerformanceConfig>
+struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdLegacyExhaustiveSearch
+    : ConvTunableSolver<LegacyPerformanceConfig>
 {
     LegacyPerformanceConfig
     GetDefaultPerformanceConfig(const ExecutionContext&,
@@ -2789,7 +2790,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectNaiveConvWrw final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct GemmFwdBase : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT GemmFwdBase : ConvSolver
 {
     bool IsDynamic() const override { return true; }
     float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
@@ -2874,7 +2875,7 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwdRest final : GemmFwdBase
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct GemmBwdBase : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT GemmBwdBase : ConvSolver
 {
     bool IsDynamic() const override { return true; }
     float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
@@ -2940,7 +2941,7 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwdRest final : GemmBwdBase
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct GemmWrwBase : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT GemmWrwBase : ConvSolver
 {
     bool IsDynamic() const override { return true; }
     float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
@@ -2982,7 +2983,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmWrwUniversal final : GemmWrwBase
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct PerformanceConfigAsmImplicitGemmGTC : PerfConfigBase<PerformanceConfigAsmImplicitGemmGTC>
+struct MIOPEN_INTERNALS_EXPORT PerformanceConfigAsmImplicitGemmGTC
+    : PerfConfigBase<PerformanceConfigAsmImplicitGemmGTC>
 {
     std::string direction;
     std::string tensor_layout;
