@@ -64,3 +64,15 @@ Tests:
   c: [0.0, 1.0]
   s: [0.0, 4.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: rot
+  category: pre_checkin
+  function: rot
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  N: [16586]
+  nnz: [6879]
+  c: [0.8]
+  s: [0.6]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  graph_test: [true]

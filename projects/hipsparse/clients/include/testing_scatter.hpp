@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -95,8 +96,7 @@ void testing_scatter(Arguments argus)
     hipDataType          dataType = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     // Host structures
     std::vector<I> hx_ind(nnz);
@@ -137,7 +137,7 @@ void testing_scatter(Arguments argus)
     if(argus.unit_check)
     {
         // Scatter
-        CHECK_HIPSPARSE_ERROR(hipsparseScatter(handle, x, y));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseScatter(handle, x, y));
 
         // Copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * size, hipMemcpyDeviceToHost));
@@ -160,7 +160,7 @@ void testing_scatter(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseScatter(handle, x, y));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseScatter(handle, x, y));
         }
 
         double gpu_time_used = get_time_us();
@@ -168,7 +168,7 @@ void testing_scatter(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseScatter(handle, x, y));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseScatter(handle, x, y));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;

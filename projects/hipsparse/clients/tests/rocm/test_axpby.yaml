@@ -70,3 +70,17 @@ Tests:
   beta: [1.0]
   betai: [0.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: axpby
+  category: pre_checkin
+  function: axpby
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  N: [22031]
+  nnz: [16458]
+  alpha: [2.0]
+  alphai: [-0.5]
+  beta: [0.5]
+  betai: [0.7]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  graph_test: [true]
