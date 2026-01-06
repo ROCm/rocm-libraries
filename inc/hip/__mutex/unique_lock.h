@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU___MUTEX_UNIQUE_LOCK_H__
-#define __GPU___MUTEX_UNIQUE_LOCK_H__
+#ifndef __LIBHIPTHREADS___MUTEX_UNIQUE_LOCK_H__
+#define __LIBHIPTHREADS___MUTEX_UNIQUE_LOCK_H__
 
 #include "hip/thread_config"
 
@@ -179,4 +179,4 @@ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI void swap(unique_lock<_Mutex>& __
 
 } // namespace cuda
 
-#endif // __GPU___MUTEX_UNIQUE_LOCK_H__
+#endif // __LIBHIPTHREADS___MUTEX_UNIQUE_LOCK_H__

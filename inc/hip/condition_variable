@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU_CONDITION_VARIABLE__
-#define __GPU_CONDITION_VARIABLE__
+#ifndef __LIBHIPTHREADS_CONDITION_VARIABLE__
+#define __LIBHIPTHREADS_CONDITION_VARIABLE__
 
 /*
     condition_variable synopsis
@@ -128,4 +128,4 @@ public:
 #include "hip/__condition_variable/condition_variable_any.h"
 #include "hip/__condition_variable/spin_condition_variable.h"
 
-#endif // __GPU_CONDITION_VARIABLE__
+#endif // __LIBHIPTHREADS_CONDITION_VARIABLE__

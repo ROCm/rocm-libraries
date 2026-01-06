@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __GPU___THREAD_ID_H
-#define __GPU___THREAD_ID_H
+#ifndef __LIBHIPTHREADS___THREAD_ID_H
+#define __LIBHIPTHREADS___THREAD_ID_H
 
 #include <iostream>
 
@@ -137,4 +137,4 @@ operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id) {
   return __os << __sstr.str();
 }
 
-#endif // __GPU___THREAD_ID_H
+#endif // __LIBHIPTHREADS___THREAD_ID_H

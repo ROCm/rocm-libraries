@@ -17,8 +17,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU___CLIB_MEMCPY_H__
-#define __GPU___CLIB_MEMCPY_H__
+#ifndef __LIBHIPTHREADS___CLIB_MEMCPY_H__
+#define __LIBHIPTHREADS___CLIB_MEMCPY_H__
 
 #include "hip/hip_runtime_api.h"
 #include <cstddef>
@@ -37,4 +37,4 @@ inline __host__ __device__ void *memcpy(void *dest, const void *src, ::std::size
 // TODO: Should we provide a version that enables host-to-device, device-to-host, etc.?
 }
 
-#endif // __GPU___CLIB_MEMCPY_H__
+#endif // __LIBHIPTHREADS___CLIB_MEMCPY_H__

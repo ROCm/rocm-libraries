@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU_MUTEX___
-#define __GPU_MUTEX___
+#ifndef __LIBHIPTHREADS_MUTEX___
+#define __LIBHIPTHREADS_MUTEX___
 
 /*
     mutex synopsis
@@ -361,4 +361,4 @@ void __unlock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3) {
 
 } // namespace cuda
 
-#endif // __GPU_MUTEX___
+#endif // __LIBHIPTHREADS_MUTEX___

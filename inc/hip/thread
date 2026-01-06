@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU_THREAD__
-#define __GPU_THREAD__
+#ifndef __LIBHIPTHREADS_THREAD__
+#define __LIBHIPTHREADS_THREAD__
 
 /*
 
@@ -108,4 +108,4 @@ void sleep_for(const chrono::duration<Rep, Period>& rel_time);
 #include "hip/__thread/thread.h"
 #include "hip/__thread/this_thread.h"
 
-#endif // __GPU_THREAD__
+#endif // __LIBHIPTHREADS_THREAD__
