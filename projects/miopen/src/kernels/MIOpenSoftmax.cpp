@@ -140,9 +140,9 @@ get_dy_index(int n, int i, int s, int s0, int s1, const int dy_offset)
     return get_index<IS_DOUTPUT_CONTIGUOUS>(n, i, s, s0, s1, dy_offset);
 }
 
-template <typename TI, typename TO>
-__forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
-                                           TO* __restrict__ y,
+template <typename T>
+__forceinline__ __device__ void softmaxfwd(const T* __restrict__ x,
+                                           T* __restrict__ y,
                                            const int x_offset,
                                            const int y_offset,
                                            const float alpha,
@@ -395,10 +395,10 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
     }
 }
 
-template <typename TI, typename TO>
-__forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
-                                           const TI* __restrict__ dy,
-                                           TO* __restrict__ dx,
+template <typename T>
+__forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
+                                           const T* __restrict__ dy,
+                                           T* __restrict__ dx,
                                            const int y_offset,
                                            const int dy_offset,
                                            const int dx_offset,
@@ -531,24 +531,24 @@ __forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
     }
 }
 
-extern "C" __global__ void SoftmaxFwd(const INPUT_TYPE* __restrict__ x,
-                                      OUTPUT_TYPE* __restrict__ y,
+extern "C" __global__ void SoftmaxFwd(const DATA_TYPE* __restrict__ x,
+                                      DATA_TYPE* __restrict__ y,
                                       const int x_offset,
                                       const int y_offset,
                                       const float alpha,
                                       const float beta)
 {
-    softmaxfwd<INPUT_TYPE, OUTPUT_TYPE>(x, y, x_offset, y_offset, alpha, beta);
+    softmaxfwd<DATA_TYPE>(x, y, x_offset, y_offset, alpha, beta);
 }
 
-extern "C" __global__ void SoftmaxBwd(const INPUT_TYPE* __restrict__ y,
-                                      const INPUT_TYPE* __restrict__ dy,
-                                      OUTPUT_TYPE* __restrict__ dx,
+extern "C" __global__ void SoftmaxBwd(const DATA_TYPE* __restrict__ y,
+                                      const DATA_TYPE* __restrict__ dy,
+                                      DATA_TYPE* __restrict__ dx,
                                       const int y_offset,
                                       const int dy_offset,
                                       const int dx_offset,
                                       const float alpha,
                                       const float beta)
 {
-    softmaxbwd<INPUT_TYPE, OUTPUT_TYPE>(y, dy, dx, y_offset, dy_offset, dx_offset, alpha, beta);
+    softmaxbwd<DATA_TYPE>(y, dy, dx, y_offset, dy_offset, dx_offset, alpha, beta);
 }

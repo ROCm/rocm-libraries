@@ -66,8 +66,8 @@ void AddTestCasesForDifferentScales(std::vector<TestCase>& test_cases,
                                     const std::vector<std::vector<float>>& scales)
 {
     // Result does not fit in data type
-    if(miopen_type<T>{} == miopenHalf && in_dim[1] * in_dim[2] * in_dim[3] >= 2048 &&
-       mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
+    if((miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) &&
+       in_dim[1] * in_dim[2] * in_dim[3] >= 2048 && mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
     {
         return;
     }
@@ -132,8 +132,9 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
     {
         const TestCase& test_case = GetParam();
 
-        uint64_t max_value =
-            miopen_type<T>{} == miopenHalf ? (test_case.algo == MIOPEN_SOFTMAX_LOG ? 3 : 5) : 17;
+        uint64_t max_value = miopen_type<T>{} == miopenFloat        ? 17
+                             : test_case.algo == MIOPEN_SOFTMAX_LOG ? 3
+                                                                    : 5;
 
         input = tensor<T>{test_case.layout, test_case.in_dim}.generate(
             tensor_elem_gen_integer{max_value});
@@ -219,9 +220,9 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
 
                     if(test_case.algo == MIOPEN_SOFTMAX_LOG)
                     {
-                        double neg_inf = input.desc.GetType() == miopenHalf
-                                             ? NEGATIVE_CUTOFF_VAL_FP16
-                                             : NEGATIVE_CUTOFF_VAL_FP32;
+                        double neg_inf = input.desc.GetType() == miopenFloat
+                                             ? NEGATIVE_CUTOFF_VAL_FP32
+                                             : NEGATIVE_CUTOFF_VAL_FP16;
                         double sum     = neg_inf;
                         miopen::ford(in_c, in_h, in_w)([&](int w, int i, int j) {
                             sum = logaddexp(
@@ -292,9 +293,9 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
 
                     if(test_case.algo == MIOPEN_SOFTMAX_LOG)
                     {
-                        double neg_inf = input.desc.GetType() == miopenHalf
-                                             ? NEGATIVE_CUTOFF_VAL_FP16
-                                             : NEGATIVE_CUTOFF_VAL_FP32;
+                        double neg_inf = input.desc.GetType() == miopenFloat
+                                             ? NEGATIVE_CUTOFF_VAL_FP32
+                                             : NEGATIVE_CUTOFF_VAL_FP16;
                         double sum     = neg_inf;
                         miopen::ford(in_c)([&](int w) {
                             sum = logaddexp(
@@ -487,13 +488,12 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
     {
         const TestCase& test_case = GetParam();
 
-        // taken from the original c test
-        double tolerance = 8000;
-
-        if(std::is_same_v<T, half_float::half>)
-        {
-            tolerance = 80;
-        }
+        // float tolerance taken from the original c test
+        // cppcheck can't properly handle this trinary
+        // cppcheck-suppress assignBoolToFloat
+        double tolerance = std::is_same_v<T, bfloat16>           ? 10
+                           : std::is_same_v<T, half_float::half> ? 80
+                                                                 : 8000;
 
         double threshold = std::numeric_limits<T>::epsilon() * tolerance;
         double error     = miopen::rms_range(tensorCPUData, tensorGPUData);
@@ -515,11 +515,14 @@ private:
     tensor<T> dout;
 };
 
-using GPU_Softmax_FP32 = SoftmaxCommon<float>;
-using GPU_Softmax_FP16 = SoftmaxCommon<half_float::half>;
+using GPU_Softmax_FP32  = SoftmaxCommon<float>;
+using GPU_Softmax_FP16  = SoftmaxCommon<half_float::half>;
+using GPU_Softmax_BFP16 = SoftmaxCommon<bfloat16>;
 
 TEST_P(GPU_Softmax_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Softmax_FP16, TestFloat16) { this->Run(); }
+TEST_P(GPU_Softmax_BFP16, TestBFloat16) { this->Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP32, GetCases<float>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP16, GetCases<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_BFP16, GetCases<bfloat16>());
