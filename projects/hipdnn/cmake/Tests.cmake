@@ -166,7 +166,7 @@ endfunction() # finalize_test_targets
 #   WORKING_DIR - Working directory for test execution
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
-    message(STATUS "Appending unclassified check target: ${TARGET} in working directory: ${WORKING_DIR}")
+    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} in working directory: ${WORKING_DIR}")
 
     # Track the dependencies for test name validation
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
