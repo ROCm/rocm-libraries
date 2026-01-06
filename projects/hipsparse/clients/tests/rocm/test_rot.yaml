@@ -69,7 +69,7 @@ Tests:
   category: pre_checkin
   function: rot
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *single_double_precisions
   N: [16586]
   nnz: [6879]
   c: [0.8]

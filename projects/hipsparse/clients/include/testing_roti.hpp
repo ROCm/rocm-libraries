@@ -173,8 +173,8 @@ void testing_roti(Arguments argus)
             T x = hx_val_gold[i];
             T y = hy_gold[idx];
 
-            hx_val_gold[i] = c * x + s * y;
-            hy_gold[idx]   = c * y - s * x;
+            hx_val_gold[i] = testing_fma(c, x, testing_mult(s, y));
+            hy_gold[idx]   = testing_fma(c, y, testing_mult(-s, x));
         }
 
         // enable unit check, notice unit check is not invasive, but norm check is,

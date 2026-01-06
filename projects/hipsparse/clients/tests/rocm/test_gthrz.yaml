@@ -54,3 +54,12 @@ Tests:
   N: [100000, 500000]
   nnz: [0, 1000, 10000, 50000, 100000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: gthrz
+  category: pre_checkin
+  function: gthrz
+  precision: *single_double_precisions_complex_real 
+  N: [10957]
+  nnz: [5000]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  graph_test: true

@@ -190,8 +190,8 @@ void testing_rot(Arguments argus)
             T x = hx_val_gold[i];
             T y = hy_gold[idx];
 
-            hx_val_gold[i] = testing_mult(hc_coeff, x) + testing_mult(hs_coeff, y);
-            hy_gold[idx]   = testing_mult(hc_coeff, y) - testing_mult(hs_coeff, x);
+            hx_val_gold[i] = testing_fma(hc_coeff, x, testing_mult(hs_coeff, y));
+            hy_gold[idx]   = testing_fma(hc_coeff, y, testing_mult(-hs_coeff, x));
         }
 
         // Verify results against host

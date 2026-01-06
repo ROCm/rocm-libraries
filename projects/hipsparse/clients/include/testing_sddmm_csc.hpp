@@ -64,7 +64,7 @@ void testing_sddmm_csc_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSDDMMAlg_t  alg       = HIPSPARSE_SDDMM_ALG_DEFAULT;
 
-    hipsparseLocalHandle_t              handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int64_t) * safe_size), device_free};
@@ -208,7 +208,7 @@ void testing_sddmm_csc(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    hipsparseLocalHandle_t              handle;
+    hipsparseLocalHandle_t handle;
 
     // Host structures
     std::vector<I> hcsc_col_ptr;
@@ -334,8 +334,8 @@ void testing_sddmm_csc(Arguments argus)
             handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(
-            testing::hipsparseSDDMM(handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
+            handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 
         // copy output from device to CPU.
         std::vector<T> hval1(nnz);

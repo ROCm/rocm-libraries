@@ -54,7 +54,7 @@ void testing_axpby_bad_arg(const Arguments& argus)
     hipsparseIndexBase_t idxBase  = HIPSPARSE_INDEX_BASE_ZERO;
     hipDataType          dataType = HIP_R_32F;
 
-    hipsparseLocalHandle_t              handle;
+    hipsparseLocalHandle_t handle;
 
     auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(float) * nnz), device_free};
     auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
@@ -106,7 +106,7 @@ void testing_axpby(Arguments argus)
     hipDataType          dataType = getDataType<T>();
 
     // hipSPARSE handle
-    hipsparseLocalHandle_t              handle;
+    hipsparseLocalHandle_t handle;
 
     // Host structures
     std::vector<I> hx_ind(nnz);
