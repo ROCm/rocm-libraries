@@ -1,6 +1,6 @@
 # Contributing to the ROCm Libraries
 
-Thank you for contributing! This guide outlines the development workflow, contribution standards, and best practices when working in the monorepo.
+Thank you for  contributing! This guide outlines the development workflow, contribution standards, and best practices when working in the monorepo.
 
 ## Getting Started
 
