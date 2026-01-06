@@ -8,6 +8,8 @@
 hipRAND documentation
 ===========================
 
+(preview for hiprand)
+
 The hipRAND library is a wrapper library that lets you easily port NVIDIA CUDA applications that use the CUDA cuRAND library
 to the HIP layer. It sits between your application and the backend RAND library,
 where it marshals inputs to the backend and results to the application. hipRAND exports an interface that doesn't
