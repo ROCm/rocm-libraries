@@ -183,17 +183,19 @@ hipError_t find_first_of_impl(void*          temporary_storage,
                               bool           debug_synchronous)
 {
     using type   = typename std::iterator_traits<InputIterator1>::value_type;
-    using config = wrapped_find_first_of_config<Config, type>;
+    using Selector = find_first_of_config_selector<type>;
     using find_first_of_kernels
         = find_first_of_impl_kernels<InputIterator1, InputIterator2, BinaryFunction>;
 
     target_arch target_arch;
-    hipError_t  result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const find_first_of_config_params params = dispatch_target_arch<config, false>(target_arch);
+    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+
+    gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+    const target current_target(target_arch, target_gpu);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -207,7 +209,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
     ordered_bid_type::id_type* ordered_bid_storage = nullptr;
 
     // Calculate required temporary storage
-    result = temp_storage::partition(
+    hipError_t result = temp_storage::partition(
         temporary_storage,
         storage_size,
         temp_storage::make_linear_partition(
@@ -246,7 +248,8 @@ hipError_t find_first_of_impl(void*          temporary_storage,
                 compare_function);
         };
 
-        auto find_first_of_configured_kernel = make_launch_plan<config>(target_arch, kernel);
+        auto find_first_of_configured_kernel
+            = make_launch_plan<Config, Selector>(current_target, kernel);
 
         const size_t shared_memory_size = 0;
 

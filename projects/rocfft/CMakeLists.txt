@@ -22,8 +22,8 @@
 
 cmake_minimum_required( VERSION 3.16 )
 
-# We use C++17 features, this will add compile option: -std=c++17
-set( CMAKE_CXX_STANDARD 17 )
+# We use C++20 features, this will add compile option: -std=c++20
+set( CMAKE_CXX_STANDARD 20 )
 
 # This should appear before the project command, because it does not
 # use FORCE
