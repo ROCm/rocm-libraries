@@ -408,8 +408,7 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::ValidateLayoutInputP
     if(!ChkLayout_ShortName())
     {
         MIOPEN_THROW(miopenStatusBadParm,
-                     std::string("Invalid Layout Short Name = ") +
-                         inflags.FindShortName("layout"));
+                     std::string("Invalid Layout Short Name = ") + inflags.FindShortName("layout"));
     }
     if((layout_value.compare("NCHW") != 0) && (layout_value.compare("NHWC") != 0) &&
        (layout_value.compare("NCDHW") != 0) && (layout_value.compare("NDHWC") != 0))
@@ -514,7 +513,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     back = inflags.GetValueInt("back");
     if(back > 1)
     {
-        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization backwards propagation mode");
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Incorrect Batch Normalization backwards propagation mode");
     }
 
     if(back && forw)
