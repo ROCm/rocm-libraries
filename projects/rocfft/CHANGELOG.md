@@ -20,6 +20,10 @@ Documentation for rocFFT is available at
 * Added support for per precision and architecture kernel configuration entries in the library.
 * Support for the gfx1152 and gfx1153 architectures.
 
+### Changed
+
+* Moved library to C++20 standard.
+
 ### Optimized
 
 * Removed a potential unnecessary global transpose operation from MPI 3D multi-GPU pencil decompositions.

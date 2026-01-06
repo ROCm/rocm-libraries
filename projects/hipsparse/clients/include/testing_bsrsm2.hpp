@@ -540,14 +540,6 @@ void testing_bsrsm2(Arguments argus)
     // Set matrix index base
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
-    if(m == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse does not support m == 0 for csr2bsr
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures
