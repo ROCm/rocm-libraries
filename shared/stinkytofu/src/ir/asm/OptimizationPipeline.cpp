@@ -205,6 +205,7 @@ namespace stinkytofu
         }
 
         // ========== Phase 1: CFG Building ==========
+        // Build CFG first so optimizations can use block structure and liveness info
         if(config.enableCFGBuilder)
         {
             if(config.verbose)
@@ -213,11 +214,21 @@ namespace stinkytofu
             pass->run(func, ctx);
         }
 
-        // ========== Phase 2: Scheduling ==========
+        // ========== Phase 2: Optimization ==========
+        // Run optimizations AFTER CFG (for liveness analysis) but BEFORE scheduling
+        // This ensures scheduling works on the final optimized instruction count
+        if(config.enablePeephole || config.enableDCE || config.enableDuplicateElim)
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 2: Optimization (Pre-Scheduling)" << std::endl;
+            runOptimizationPasses(func, config, ctx);
+        }
+
+        // ========== Phase 3: Instruction Scheduling ==========
         if(config.enableDAGScheduler || config.enableScheduleFirstLRs)
         {
             if(config.verbose)
-                std::cout << "\nPhase 2: Instruction Scheduling" << std::endl;
+                std::cout << "\nPhase 3: Instruction Scheduling" << std::endl;
 
             if(config.enableScheduleFirstLRs)
             {
@@ -242,14 +253,6 @@ namespace stinkytofu
                 auto pass = createScheduleLastLRsPass();
                 pass->run(func, ctx);
             }
-        }
-
-        // ========== Phase 3: Optimization ==========
-        if(config.enablePeephole || config.enableDCE || config.enableDuplicateElim)
-        {
-            if(config.verbose)
-                std::cout << "\nPhase 3: Optimization" << std::endl;
-            runOptimizationPasses(func, config, ctx);
         }
 
         // ========== Phase 4: WaitCnt Insertion ==========
