@@ -235,6 +235,14 @@ namespace rocRoller::KernelGraph
 
             auto const& neverReferencedArguments = argTracer.neverReferencedArguments();
 
+            if(!neverReferencedArguments.empty())
+            {
+                std::ostringstream msg;
+                msg << "Deleting never-referenced arguments: ";
+                streamJoin(msg, neverReferencedArguments, ", ");
+                Log::debug(msg.str());
+            }
+
             auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
                                       return !neverReferencedArguments.contains(arg.name);
                                   });
@@ -246,6 +254,9 @@ namespace rocRoller::KernelGraph
                                      arg.dataDirection,
                                      std::move(arg.expression)});
             }
+
+            // Store launch-time-only args so ArgumentLoader can elide the load
+            kernel->setLaunchTimeOnlyArguments(argTracer.launchTimeOnlyArguments());
         }
     }
 

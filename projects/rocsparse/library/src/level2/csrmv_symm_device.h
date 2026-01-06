@@ -83,6 +83,7 @@ namespace rocsparse
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_symm_adaptive_device(bool                 conj,
                                                           I                    nnz,
+                                                          J                    m,
                                                           I                    max_rows,
                                                           const I*             row_blocks,
                                                           T                    alpha,
@@ -214,10 +215,12 @@ namespace rocsparse
                     if((myCol != myRow) && (col + i) < (csr_row_ptr[stop_row] - idx_base))
                     {
                         if(myCol >= (stop_cols_idx) && myCol < stop_row)
-                            rocsparse::atomic_add(&scols_in_rows[myCol - (stop_cols_idx)],
+                            rocsparse::atomic_add(scols_in_rows,
+                                                  myCol - (stop_cols_idx),
+                                                  max_rows,
                                                   (partial_sums[lid + i] * x[myRow]));
                         else
-                            rocsparse::atomic_add(&y[myCol], (partial_sums[lid + i] * x[myRow]));
+                            rocsparse::atomic_add(y, myCol, m, (partial_sums[lid + i] * x[myRow]));
                     }
 
                     // For the lower triangular, the matrix value is already in partial_sums.
@@ -241,10 +244,12 @@ namespace rocsparse
                     if((myCol != myRow) && (col + i) < (csr_row_ptr[stop_row] - idx_base))
                     {
                         if(myCol >= (stop_cols_idx) && myCol < stop_row)
-                            rocsparse::atomic_add(&scols_in_rows[myCol - (stop_cols_idx)],
+                            rocsparse::atomic_add(scols_in_rows,
+                                                  myCol - (stop_cols_idx),
+                                                  max_rows,
                                                   (partial_sums[lid + i] * x[myRow]));
                         else
-                            rocsparse::atomic_add(&y[myCol], (partial_sums[lid + i] * x[myRow]));
+                            rocsparse::atomic_add(y, myCol, m, (partial_sums[lid + i] * x[myRow]));
                     }
 
                     // For the lower triangular, the matrix value is already in partial_sums.
@@ -260,7 +265,7 @@ namespace rocsparse
 
             for(I l = lid; l < (end_cols_idx - (stop_row - row)); l += WG_SIZE)
             {
-                rocsparse::atomic_add(&y[stop_cols_idx + l], scols_in_rows[l]);
+                rocsparse::atomic_add(y, stop_cols_idx + l, m, scols_in_rows[l]);
             }
 
             __syncthreads();
@@ -318,7 +323,7 @@ namespace rocsparse
                     temp += scols_in_rows
                         [lid
                          + (end_cols_idx - (stop_row - row))]; // sum from upper triangular matrix
-                    rocsparse::atomic_add(&y[row + lid], temp);
+                    rocsparse::atomic_add(y, row + lid, m, temp);
                 }
             }
             else
@@ -343,7 +348,7 @@ namespace rocsparse
                     // put that into the output for each row.
                     temp += scols_in_rows[end_cols_idx - stop_row
                                           + local_row]; // sum from upper triangular matrix
-                    rocsparse::atomic_add(&y[local_row], temp);
+                    rocsparse::atomic_add(y, local_row, m, temp);
                     local_row += hipBlockDim_x;
                 }
             }
@@ -416,7 +421,7 @@ namespace rocsparse
                 // Write result
                 if(lid == 0)
                 {
-                    rocsparse::atomic_add(&y[myRow], alpha * partial_sums[0]);
+                    rocsparse::atomic_add(y, myRow, m, alpha * partial_sums[0]);
                 }
             }
 
@@ -431,7 +436,7 @@ namespace rocsparse
                 {
 
                     rocsparse::atomic_add(
-                        &y[myCol], (alpha * rocsparse::conj_val(csr_val[j], conj) * x[myRow]));
+                        y, myCol, m, (alpha * rocsparse::conj_val(csr_val[j], conj) * x[myRow]));
                 }
             }
         }
@@ -447,6 +452,7 @@ namespace rocsparse
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_symm_large_adaptive_device(bool                 conj,
                                                                 I                    nnz,
+                                                                J                    m,
                                                                 const I*             row_blocks,
                                                                 T                    alpha,
                                                                 const I*             csr_row_ptr,
@@ -539,7 +545,7 @@ namespace rocsparse
             // Write result
             if(lid == 0)
             {
-                rocsparse::atomic_add(&y[myRow], alpha * partial_sums[0]);
+                rocsparse::atomic_add(y, myRow, m, alpha * partial_sums[0]);
             }
         }
 
@@ -552,8 +558,8 @@ namespace rocsparse
             const J myCol  = csr_col_ind[j] - idx_base;
             if(myCol != myRow2)
             {
-                rocsparse::atomic_add(&y[myCol],
-                                      (alpha * rocsparse::conj_val(csr_val[j], conj) * x[myRow2]));
+                rocsparse::atomic_add(
+                    y, myCol, m, (alpha * rocsparse::conj_val(csr_val[j], conj) * x[myRow2]));
             }
         }
     }

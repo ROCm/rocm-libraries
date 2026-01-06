@@ -6,7 +6,7 @@
 #include <memory>
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
 namespace hipdnn_backend
 {
@@ -38,5 +38,7 @@ public:
     virtual const std::vector<int64_t>& getTensorIds() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
 };
 }

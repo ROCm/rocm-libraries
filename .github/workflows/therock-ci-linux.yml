@@ -51,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 00d29d2dfe81ddbdc1908a0b992d928d498b2826 # 2025-12-05 commit
+          ref: 6a7013e09e0affe6e21bae3c0e0a7594180fb528 # 2025-12-30 commit
 
       - name: Install python deps
         run: |
@@ -92,7 +92,9 @@ jobs:
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
-          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+          rm ./TheRock/patches/amd-mainline/rocm-libraries/0003-Find-rocm_smi-via-config-files.patch
+          rm ./TheRock/patches/amd-mainline/rocm-libraries/0007-Remove-Windows-third_party_dlls-copying-code.patch
+          # git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
 
       - name: Configure Projects
         env:
