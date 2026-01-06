@@ -94,7 +94,7 @@ bool PoolingForwardNaive::IsApplicable(const ExecutionContext&,
 }
 
 ConvSolution
-PoolingForwardNaive::GetSolution(const ExecutionContext& context,
+PoolingForwardNaive::GetSolution(const ExecutionContext&,
                                  const miopen::pooling::ProblemDescription& problem,
                                  const PerformanceConfigPoolingForwardNaive& config) const
 {
