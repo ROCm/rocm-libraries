@@ -86,8 +86,7 @@ private:
         _tensorCacheBuilt = true;
     }
 
-    /// Assigns UIDs to tensors that don't already have them.
-    void assignTensorUids()
+    void assignUnsetTensorUids()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
         gatherHipdnnTensorsSubtree(allTensors);
@@ -716,7 +715,7 @@ public:
 
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
-        assignTensorUids();
+        assignUnsetTensorUids();
 
         return buildFlatbufferOperationGraphConst();
     }
@@ -794,7 +793,8 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to FlatBuffer DetachedBuffer
+    /// Serialize to FlatBuffer DetachedBuffer (const version)
+    /// Returns error if tensor UIDs are not set
     Error toFlatBuffer(flatbuffers::DetachedBuffer& buffer) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -802,11 +802,11 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to FlatBuffer DetachedBuffer
+    /// Serialize to FlatBuffer DetachedBuffer (non-const version)
     /// Assigns tensor UIDs if not already set
     flatbuffers::DetachedBuffer toFlatBuffer()
     {
-        assignTensorUids();
+        assignUnsetTensorUids();
         return buildFlatbufferOperationGraphConst();
     }
 
@@ -836,16 +836,20 @@ public:
         return fromFlatBuffer(fbGraph);
     }
 
+    /// Serialize to FlatBuffer DetachedBuffer (const version)
+    /// Returns error if tensor UIDs are not set
     Error serialize(flatbuffers::DetachedBuffer& buffer) const
     {
         return toFlatBuffer(buffer);
     }
 
+    /// Deserialize from FlatBuffer Graph object
     Error deserialize(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
         return fromFlatBuffer(fbGraph);
     }
 
+    /// Deserialize from FlatBuffer DetachedBuffer
     Error deserialize(const flatbuffers::DetachedBuffer& buffer)
     {
         return fromFlatBuffer(buffer);
@@ -865,7 +869,7 @@ public:
     /// Assigns tensor UIDs if not already set
     std::vector<uint8_t> toBinary()
     {
-        assignTensorUids();
+        assignUnsetTensorUids();
         auto buffer = buildFlatbufferOperationGraphConst();
         return {buffer.data(), buffer.data() + buffer.size()};
     }
@@ -895,13 +899,14 @@ public:
     /// Assigns tensor UIDs if not already set
     nlohmann::json toJson()
     {
-        assignTensorUids();
+        assignUnsetTensorUids();
         auto buffer = buildFlatbufferOperationGraphConst();
         auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
 
         return *sdkGraph;
     }
 
+    /// Deserialize from JSON
     Error deserialize(const nlohmann::json& j)
     {
         try
