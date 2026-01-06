@@ -300,25 +300,23 @@ TEST_CASE("GEMM: calculate_output_utilization unit test", "[gemm]") {
       auto result_with_vector_elems = origami::calculate_output_utilization(problem, config, 23UL);
       REQUIRE(result_with_vector_elems == Approx(1.010).epsilon(1e-3));
 
-      // Test 3: Test with zero dimensions (should return 1.0)
+      // Test 4: Test with zero dimensions (should return 1.0)
       auto problem_zero_dimensions = make_problem(0, 3839, 959);
       auto result_zero_dimensions =
           origami::calculate_output_utilization(problem_zero_dimensions, config, 1UL);
       REQUIRE(result_zero_dimensions == 1.0);
 
-      // Test 4: Test with very small problems
+      // Test 5: Test with different problem sizes
       auto problem_very_small = make_problem(10, 20, 15);
       auto result_very_small =
           origami::calculate_output_utilization(problem_very_small, config, 1UL);
       REQUIRE(result_very_small == Approx(0.003051).epsilon(1e-3));
 
-      // Test 4: Test with very large problems
       auto problem_very_large = make_problem(409601, 409601, 4095);
       auto result_very_large =
           origami::calculate_output_utilization(problem_very_large, config, 1UL);
       REQUIRE(result_very_large == Approx(0.998).epsilon(1e-3));
 
-      // Test 5: Test with skinny matrices
       auto problem_skinny = make_problem(64, 81920, 1024);  // Small M, Big N
       auto result_skinny  = origami::calculate_output_utilization(problem_skinny, config, 1UL);
       REQUIRE(result_skinny == 0.25);
@@ -447,7 +445,7 @@ TEST_CASE("GEMM: compute_cu_occupancy unit test", "[gemm]") {
         REQUIRE(std::get<2>(result_max_cus) == 1);
         REQUIRE(std::get<3>(result_max_cus) == 1);
 
-        // Test 5: Test with mulitple split parameter
+        // Test 5: Test with multiple split parameter
         auto result_multiple_split_parameter =
             origami::compute_cu_occupancy(problem,
                                           hardware,
@@ -593,7 +591,7 @@ TEST_CASE("GEMM: compute_cu_occupancy unit test", "[gemm]") {
         REQUIRE(std::get<2>(result_max_cus) == 1);
         REQUIRE(std::get<3>(result_max_cus) == 1);
 
-        // Test 5: Test with mulitple split parameter
+        // Test 5: Test with multiple split parameter
         auto result_multiple_split_parameter =
             origami::compute_cu_occupancy(problem,
                                           hardware,

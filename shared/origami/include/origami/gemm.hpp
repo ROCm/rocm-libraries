@@ -102,7 +102,7 @@ double compute_l2_hit_rate_global(const problem_t& problem,
                                   size_t l2_capacity_bytes);
 
 /**
- * @brief Compute arithmic intensity.
+ * @brief Compute arithmetic intensity.
  *
  * @param m problem size M
  * @param n problem size N
