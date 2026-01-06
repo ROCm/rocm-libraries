@@ -91,7 +91,57 @@ The solution consists of two main components:
 
 Create a shared header file in the plugin SDK that only requires a single line change to add a new engine name.  Below are 3 possible options that enable this functionality.  Ideally we would have the ability to create automation to detect duplicates/collisions when new names are added without needing to modify tests.
 
-#### Option 1 Simple Strings
+#### Selected Header format: Simple Macros with Static Registration
+Easy to understand macro approach that runtime creates a set of all registered engine names for future automation
+
+Note: This shows the anticipated format but it is subject to change as we implement and test it out.
+
+```cpp
+#pragma once
+
+#include <set>
+#include <string_view>
+
+namespace hipdnn_plugin_sdk::engine_names {
+
+// Forward declare the registration set
+inline std::set<std::string_view>& getAllEngineNames() {
+    static std::set<std::string_view> allEngines;
+    return allEngines;
+}
+
+inline std::unordered_map<int64_t, std::string_view>& getEngineIdToNameMap() {
+    static std::unordered_map<int64_t, std::string_view> engineIdToNameMap;
+    return engineIdToNameMap;
+}
+
+// Registration helper class
+struct EngineRegistrar {
+    EngineRegistrar(std::string_view name) {
+        getAllEngineNames().insert(name);
+        getEngineIdToNameMap()[hipdnn_data_sdk::engineNameToId(name.data())] = name;
+    }
+};
+
+// Macro that defines engine and automatically registers it
+#define HIPDNN_REGISTER_ENGINE(name, value) \
+    inline constexpr const char* name = value; \
+    inline constexpr const int64_t name##_id = hipdnn_data_sdk::engineNameToId(value); \
+    inline const EngineRegistrar name##_registrar{value};
+
+// Define all engines using the macro, name and value should match.
+HIPDNN_REGISTER_ENGINE(MIOPEN_PLUGIN, "MIOPEN_PLUGIN")
+HIPDNN_REGISTER_ENGINE(VENDOR_FAST_CONV, "VENDOR_FAST_CONV")
+HIPDNN_REGISTER_ENGINE(CPU_REFERENCE_ENGINE, "CPU_REFERENCE_ENGINE")
+HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RENAME_THIS, "EXAMPLE_PLUGIN_RENAME_THIS")
+
+} // namespace hipdnn_plugin_sdk::engine_names
+
+```
+
+#### Other Header Options Considered
+
+##### Simple Strings
 Simple implementation with string constants.  Possible issues with creating automation to detect duplicates/hash collisions automatically
 
 ```cpp
@@ -108,47 +158,7 @@ constexpr const char* VENDOR_EXAMPLE = "VENDOR_FAST_CONV";
 } // namespace hipdnn_plugin_sdk::engine_names
 ```
 
-#### Option 2 Simple Macros with Static Registration
-Easy to understand macro approach that runtime creates a set of all registered engine names for future
-automation
-
-```cpp
-#pragma once
-
-#include <set>
-#include <string_view>
-
-namespace hipdnn_plugin_sdk::engine_names {
-
-// Forward declare the registration set
-inline std::set<std::string_view>& getAllEngineNames() {
-    static std::set<std::string_view> allEngines;
-    return allEngines;
-}
-
-// Registration helper class
-struct EngineRegistrar {
-    EngineRegistrar(std::string_view name) {
-        getAllEngineNames().insert(name);
-    }
-};
-
-// Macro that defines engine and automatically registers it
-#define HIPDNN_REGISTER_ENGINE(name, value) \
-    inline constexpr const char* name = value; \
-    inline const EngineRegistrar name##_registrar{value};
-
-// Define all engines using the macro
-HIPDNN_REGISTER_ENGINE(MIOPEN_LEGACY, "MIOPEN_PLUGIN")
-HIPDNN_REGISTER_ENGINE(VENDOR_EXAMPLE, "VENDOR_FAST_CONV")
-HIPDNN_REGISTER_ENGINE(CPU_REFERENCE, "CPU_REFERENCE_ENGINE")
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RENAME_THIS, "EXAMPLE_PLUGIN_RENAME_THIS")
-
-} // namespace hipdnn_plugin_sdk::engine_names
-
-```
-
-#### Option 3 X-Macro Pattern
+##### X-Macro Pattern
 More complex macro option that offers compile time arrays of all engine names.  Additionally developers only need to list their engine name once as stringifiation can take care of making the `const char*` definitions.
 
 A downside to this approach is the complexity.
