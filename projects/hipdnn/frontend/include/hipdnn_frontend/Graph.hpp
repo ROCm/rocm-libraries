@@ -55,6 +55,37 @@ private:
 
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
+    // Lazy tensor lookup caches (mutable for const getTensor methods)
+    mutable std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> _tensorUidCache;
+    mutable std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> _tensorNameCache;
+    mutable bool _tensorCacheBuilt = false;
+
+    void rebuildTensorCache() const
+    {
+        _tensorUidCache.clear();
+        _tensorNameCache.clear();
+
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor)
+            {
+                if(tensor->has_uid())
+                {
+                    _tensorUidCache[tensor->get_uid()] = tensor;
+                }
+                if(!tensor->get_name().empty())
+                {
+                    _tensorNameCache[tensor->get_name()] = tensor;
+                }
+            }
+        }
+
+        _tensorCacheBuilt = true;
+    }
+
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
     {
         auto tensor = std::make_shared<TensorAttributes>();
@@ -624,36 +655,33 @@ public:
         return checkTensorUidsSetImpl(allTensors);
     }
 
-    // Returns the tensor with the given UID, or nullptr if not found.
-    std::shared_ptr<TensorAttributes> getTensor(int64_t uid) const
+    /// Returns the tensor with the given UID, or nullptr if not found.
+    /// Uses lazy caching for O(1) lookups after first call.
+    /// @param uid The tensor UID to search for
+    /// @param rebuildCache If true, forces cache rebuild (use after modifying graph)
+    std::shared_ptr<TensorAttributes> getTensor(int64_t uid, bool rebuildCache = false) const
     {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
-
-        for(const auto& tensor : allTensors)
+        if(!_tensorCacheBuilt || rebuildCache)
         {
-            if(tensor && tensor->has_uid() && tensor->get_uid() == uid)
-            {
-                return tensor;
-            }
+            rebuildTensorCache();
         }
-        return nullptr;
+        auto it = _tensorUidCache.find(uid);
+        return (it != _tensorUidCache.end()) ? it->second : nullptr;
     }
 
-    // Returns the tensor with the given name, or nullptr if not found.
-    std::shared_ptr<TensorAttributes> getTensor(const std::string& name) const
+    /// Returns the tensor with the given name, or nullptr if not found.
+    /// Uses lazy caching for O(1) lookups after first call.
+    /// @param name The tensor name to search for
+    /// @param rebuildCache If true, forces cache rebuild (use after modifying graph)
+    std::shared_ptr<TensorAttributes> getTensor(const std::string& name,
+                                                bool rebuildCache = false) const
     {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
-
-        for(const auto& tensor : allTensors)
+        if(!_tensorCacheBuilt || rebuildCache)
         {
-            if(tensor && tensor->get_name() == name)
-            {
-                return tensor;
-            }
+            rebuildTensorCache();
         }
-        return nullptr;
+        auto it = _tensorNameCache.find(name);
+        return (it != _tensorNameCache.end()) ? it->second : nullptr;
     }
 
     Error topologicallySortGraph()
