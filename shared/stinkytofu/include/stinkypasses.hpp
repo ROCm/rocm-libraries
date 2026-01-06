@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,10 @@ namespace stinkytofu
     // (Common Subexpression Elimination). Works well with DCE to clean up
     // unused originals.
     std::unique_ptr<Pass> createDuplicateEliminationPass();
+
+    // DelayAluInsertionPass inserts s_delay_alu instructions for RDNA3 (gfx11xx)
+    // architectures to handle ALU instruction dependencies. Only runs on gfx11xx.
+    std::unique_ptr<Pass> createDelayAluInsertionPass();
 
     // The following passes are used for translation between rocisa and
     // stinkytofu. They are specific to tensilelite rocisa and are therefore not

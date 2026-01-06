@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "ir/asm/PeepholeOptimizationPass.hpp"
+#include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "isa/ArchHelper.hpp"
 #include "support/Casting.hpp"
@@ -54,15 +55,16 @@ namespace
         /// Analyzes a BasicBlock and builds def-use chains
         void analyze(BasicBlock& bb)
         {
-            defMap.clear();
-            useMap.clear();
-            useCount.clear();
             instPosition.clear();
+            instructions.clear();
 
+            // Use shared buildUseDefChain to populate inst->sources and inst->users
+            buildUseDefChain(bb);
+
+            // Build instruction position map for ordering queries
             IRList& irList = bb.getIR();
             int     pos    = 0;
 
-            // First pass: build instruction position map
             for(IRBase& irNode : irList)
             {
                 if(irNode.getType() != IRBase::IRType::StinkyTofu)
@@ -71,33 +73,6 @@ namespace
                 auto* inst         = cast<StinkyInstruction>(&irNode);
                 instPosition[inst] = pos++;
                 instructions.push_back(inst);
-            }
-
-            // Second pass: build def-use chains
-            for(auto* inst : instructions)
-            {
-                // Track definitions: map each destination register to its defining instruction
-                // Store ALL definitions (not just the last one) with their positions
-                for(StinkyRegister& destReg : inst->destRegs)
-                {
-                    if(destReg.isRegister())
-                    {
-                        // For simplicity, use the first register in the range as the key
-                        StinkyRegister key(destReg.reg.type, destReg.reg.idx, 1);
-                        defMap[key].push_back(inst);
-                    }
-                }
-
-                // Track uses: map each source register to the using instruction
-                for(StinkyRegister& srcReg : inst->srcRegs)
-                {
-                    if(srcReg.isRegister())
-                    {
-                        StinkyRegister key(srcReg.reg.type, srcReg.reg.idx, 1);
-                        useMap[key].insert(inst);
-                        useCount[key]++;
-                    }
-                }
             }
         }
 
@@ -112,45 +87,49 @@ namespace
         StinkyInstruction* getDefiningInstBefore(const StinkyRegister& reg,
                                                  StinkyInstruction*    beforeInst) const
         {
-            auto it = defMap.find(reg);
-            if(it == defMap.end())
-                return nullptr;
-
             auto beforePosIt = instPosition.find(beforeInst);
             if(beforePosIt == instPosition.end())
                 return nullptr;
 
             int beforePos = beforePosIt->second;
 
-            // Find the most recent definition that comes BEFORE beforeInst
+            // Search through beforeInst->sources for a def of the requested register
+            // inst->sources already contains the defining instructions (from buildUseDefChain)
             StinkyInstruction* mostRecentDef = nullptr;
             int                mostRecentPos = -1;
 
-            for(auto* defInst : it->second)
+            for(StinkyInstruction* srcInst : beforeInst->sources)
             {
-                auto defPosIt = instPosition.find(defInst);
+                // Check if this source instruction defines the requested register
+                bool definesReg = false;
+                for(const auto& destReg : srcInst->destRegs)
+                {
+                    if(destReg.isRegister() && destReg.reg.type == reg.reg.type
+                       && destReg.reg.idx == reg.reg.idx)
+                    {
+                        definesReg = true;
+                        break;
+                    }
+                }
+
+                if(!definesReg)
+                    continue;
+
+                auto defPosIt = instPosition.find(srcInst);
                 if(defPosIt == instPosition.end())
                     continue;
 
                 int defPos = defPosIt->second;
 
-                // Only consider definitions that come before the current instruction
+                // Find the most recent definition that comes BEFORE beforeInst
                 if(defPos < beforePos && defPos > mostRecentPos)
                 {
-                    mostRecentDef = defInst;
+                    mostRecentDef = srcInst;
                     mostRecentPos = defPos;
                 }
             }
 
             return mostRecentDef;
-        }
-
-        /// Returns all instructions that use the given register
-        const std::unordered_set<StinkyInstruction*>& getUsingInsts(const StinkyRegister& reg) const
-        {
-            auto                                                it = useMap.find(reg);
-            static const std::unordered_set<StinkyInstruction*> empty;
-            return (it != useMap.end()) ? it->second : empty;
         }
 
         /// Returns the number of uses for a SPECIFIC DEFINITION of a register.
@@ -170,43 +149,47 @@ namespace
                 return 0;
             int defPos = defPosIt->second;
 
-            // Find the next redefinition after defInst
-            int  nextDefPos = INT_MAX;
-            auto defMapIt   = defMap.find(reg);
-            if(defMapIt != defMap.end())
+            // Find the next redefinition after defInst by scanning forward
+            int nextDefPos = INT_MAX;
+            for(size_t i = defPos + 1; i < instructions.size(); ++i)
             {
-                for(auto* laterDefInst : defMapIt->second)
+                StinkyInstruction* inst = instructions[i];
+                for(const auto& destReg : inst->destRegs)
                 {
-                    auto laterPosIt = instPosition.find(laterDefInst);
-                    if(laterPosIt == instPosition.end())
-                        continue;
-                    int laterPos = laterPosIt->second;
-
-                    // First redefinition AFTER our definition ends our live range
-                    if(laterPos > defPos && laterPos < nextDefPos)
+                    if(destReg.isRegister() && destReg.reg.type == reg.reg.type
+                       && destReg.reg.idx == reg.reg.idx)
                     {
-                        nextDefPos = laterPos;
+                        nextDefPos = i;
+                        goto found_next_def;
                     }
                 }
             }
+        found_next_def:
 
-            // Count uses in the live range [defPos+1, nextDefPos]
-            // Note: Uses AT nextDefPos are included because in-place operations
-            // (e.g., v10 = add(v10, ...)) use the register before redefining it.
-            int  count    = 0;
-            auto useMapIt = useMap.find(reg);
-            if(useMapIt != useMap.end())
+            // Count uses from defInst->users that are in the live range [defPos+1, nextDefPos]
+            int count = 0;
+            for(auto* userInst : defInst->users)
             {
-                for(auto* useInst : useMapIt->second)
-                {
-                    auto usePosIt = instPosition.find(useInst);
-                    if(usePosIt == instPosition.end())
-                        continue;
-                    int usePos = usePosIt->second;
+                auto usePosIt = instPosition.find(userInst);
+                if(usePosIt == instPosition.end())
+                    continue;
+                int usePos = usePosIt->second;
 
-                    // Count uses after definition UP TO AND INCLUDING the next redefinition
-                    // (the redefining instruction uses the value before overwriting it)
-                    if(usePos > defPos && usePos <= nextDefPos)
+                // Count uses after definition UP TO AND INCLUDING the next redefinition
+                if(usePos > defPos && usePos <= nextDefPos)
+                {
+                    // Verify this user actually uses the register
+                    bool usesReg = false;
+                    for(const auto& srcReg : userInst->srcRegs)
+                    {
+                        if(srcReg.isRegister() && srcReg.reg.type == reg.reg.type
+                           && srcReg.reg.idx == reg.reg.idx)
+                        {
+                            usesReg = true;
+                            break;
+                        }
+                    }
+                    if(usesReg)
                     {
                         count++;
                     }
@@ -216,19 +199,6 @@ namespace
             return count;
         }
 
-        /// Returns the number of uses for the given register (all definitions)
-        int getUseCount(const StinkyRegister& reg) const
-        {
-            auto it = useCount.find(reg);
-            return (it != useCount.end()) ? it->second : 0;
-        }
-
-        /// Checks if the register has exactly one use (common constraint in fusion patterns)
-        bool hasOneUse(const StinkyRegister& reg) const
-        {
-            return getUseCount(reg) == 1;
-        }
-
         /// Build a context-aware def map for a specific instruction.
         /// Only includes definitions that come BEFORE the given instruction.
         std::unordered_map<StinkyRegister, StinkyInstruction*>
@@ -236,12 +206,17 @@ namespace
         {
             std::unordered_map<StinkyRegister, StinkyInstruction*> result;
 
-            for(const auto& entry : defMap)
+            // Use inst->sources which already has the defining instructions
+            for(StinkyInstruction* srcInst : beforeInst->sources)
             {
-                const StinkyRegister& reg = entry.first;
-                if(auto* defInst = getDefiningInstBefore(reg, beforeInst))
+                // Add all registers defined by this source instruction
+                for(const auto& destReg : srcInst->destRegs)
                 {
-                    result[reg] = defInst;
+                    if(destReg.isRegister())
+                    {
+                        StinkyRegister key(destReg.reg.type, destReg.reg.idx, 1);
+                        result[key] = srcInst;
+                    }
                 }
             }
 
@@ -275,22 +250,7 @@ namespace
             return result;
         }
 
-        /// Get the use count map as unordered_map (for pattern matchers) - LEGACY
-        std::unordered_map<StinkyRegister, int> getUseCountMap() const
-        {
-            return std::unordered_map<StinkyRegister, int>(useCount.begin(), useCount.end());
-        }
-
     private:
-        // Map from register to ALL instructions that define it (in program order)
-        std::map<StinkyRegister, std::vector<StinkyInstruction*>> defMap;
-
-        // Map from register to all instructions that use it
-        std::map<StinkyRegister, std::unordered_set<StinkyInstruction*>> useMap;
-
-        // Map from register to number of uses
-        std::map<StinkyRegister, int> useCount;
-
         // Map from instruction to its position in the BasicBlock (for ordering)
         std::unordered_map<StinkyInstruction*, int> instPosition;
 

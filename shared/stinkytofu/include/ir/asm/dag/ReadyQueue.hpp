@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,93 +26,15 @@
 #include <iostream> // TODO: don't use iostream.
 #include <queue>
 
+#include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 
 namespace
 {
     using namespace stinkytofu;
 
-    // Build a use-def chain for the instructions in the given IRList.
-    //
-    // This will link each instruction's sources to their most recent definitions
-    // and each instruction's users to the instructions that use its results.
-    //
-    // It assumes the instructions are in top-down order.
-    //
-    // The use-def chain is built based on the source and destination registers of each instruction.
-    // It also handles the case where multiple consecutive registers are used (e.g., regIdx 0, 1, 2, 3).
-    //
-    // The use-def chain is stored in the `sources` and `users` vectors of each StinkyInstruction.
-    //   * `sources` contains the instructions that define the registers used by this instruction,
-    //   * `users` contains the instructions that use the results of this instruction.
-    static void buildUseDefChain(IRList& insts)
-    {
-        struct RegisterKey
-        {
-            RegType  type;
-            unsigned regIdx;
-            bool     operator==(const RegisterKey& o) const noexcept
-            {
-                return regIdx == o.regIdx && type == o.type;
-            }
-        };
-
-        struct RegisterKeyHash
-        {
-            size_t operator()(const RegisterKey& k) const noexcept
-            {
-                size_t h1 = std::hash<int>{}(static_cast<int>(k.type));
-                size_t h2 = std::hash<unsigned>{}(k.regIdx);
-                return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
-            }
-        };
-
-        std::unordered_map<RegisterKey, StinkyInstruction*, RegisterKeyHash> lastDef;
-
-        // Build use-def chains for each instruction in top-down order.
-        for(IRBase& ir : insts)
-        {
-            StinkyInstruction& inst = static_cast<StinkyInstruction&>(ir);
-            // Link uses (sources) to their most recent defs.
-            if(inst.srcRegs.size() > 0)
-            {
-                std::unordered_set<StinkyInstruction*> added;
-                for(StinkyRegister& reg : inst.srcRegs)
-                {
-                    if(!reg.isRegister())
-                        continue;
-
-                    // TODO: Currently we assume regNum <= 4 (DWords) consecutive registers.
-                    //       So it is acceptable to iterate over them.
-                    //       If regNum > 4, maybe we want to use a different approach.
-                    for(int off = 0; off < reg.reg.num; ++off)
-                    {
-                        auto itDef
-                            = lastDef.find(RegisterKey{reg.reg.type, reg.reg.idx + off});
-                        if(itDef != lastDef.end())
-                        {
-                            StinkyInstruction* def = itDef->second;
-                            if(added.insert(def).second)
-                            {
-                                def->users.push_back(&inst);
-                                inst.sources.push_back(def);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Record current def (destination) as the latest writer for its lanes.
-            for(StinkyRegister& reg : inst.destRegs)
-            {
-                for(int off = 0; off < reg.reg.num; ++off)
-                {
-                    // Update the last definition for this register.
-                    lastDef[RegisterKey{reg.reg.type, reg.reg.idx + off}] = &inst;
-                }
-            }
-        }
-    }
+    // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
+    // from DefUseChain.hpp. All callers now use the shared implementation.
 
     struct DAGNode
     {
