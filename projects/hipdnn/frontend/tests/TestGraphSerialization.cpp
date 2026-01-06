@@ -937,6 +937,175 @@ TEST(TestGraphSerialization, BinaryVsJsonConsistency)
 }
 
 //==============================================================================
+// FlatBuffer Object Serialization Tests
+//==============================================================================
+
+TEST(TestGraphSerialization, ToFlatBufferReturnsValidBuffer)
+{
+    Graph graph;
+    graph.set_name("flatbuffer_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Get flatbuffer
+    auto buffer = graph.toFlatBuffer();
+
+    // Verify buffer is valid
+    EXPECT_NE(buffer.data(), nullptr);
+    EXPECT_GT(buffer.size(), 0);
+
+    // Verify we can read the flatbuffer
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+    EXPECT_NE(fbGraph, nullptr);
+    EXPECT_STREQ(fbGraph->name()->c_str(), "flatbuffer_test");
+}
+
+TEST(TestGraphSerialization, FromFlatBufferRestoresGraph)
+{
+    // Create original graph
+    Graph graph;
+    graph.set_name("from_flatbuffer_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::HALF);
+    graph.set_intermediate_data_type(DataType::BFLOAT16);
+
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_padding({1, 1}).set_stride({1, 1}).set_dilation({1, 1});
+    graph.conv_fprop(x, w, convAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Convert to flatbuffer
+    auto buffer = graph.toFlatBuffer();
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+    // Restore to new graph using fromFlatBuffer
+    Graph newGraph;
+    auto err = newGraph.fromFlatBuffer(fbGraph);
+
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+    EXPECT_EQ(newGraph.get_name(), "from_flatbuffer_test");
+    EXPECT_EQ(newGraph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(newGraph.get_io_data_type(), DataType::HALF);
+    EXPECT_EQ(newGraph.get_intermediate_data_type(), DataType::BFLOAT16);
+}
+
+TEST(TestGraphSerialization, FlatBufferRoundTripPreservesNodes)
+{
+    Graph graph;
+    graph.set_name("flatbuffer_nodes_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_name("ConvNode");
+    convAttrs.set_padding({1, 1}).set_stride({2, 2}).set_dilation({1, 1});
+    auto convOut = graph.conv_fprop(x, w, convAttrs);
+
+    PointwiseAttributes reluAttrs;
+    reluAttrs.set_name("ReluNode");
+    reluAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(convOut, reluAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Round-trip through flatbuffer
+    auto buffer = graph.toFlatBuffer();
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+    Graph newGraph;
+    auto err = newGraph.fromFlatBuffer(fbGraph);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+
+    // Verify by re-serializing to JSON and checking structure
+    prepareGraphForSerialization(newGraph);
+    nlohmann::json json;
+    newGraph.serialize(json);
+
+    EXPECT_EQ(json["nodes"].size(), 2);
+    EXPECT_EQ(json["tensors"].size(), 4); // x, w, conv_out, relu_out
+}
+
+TEST(TestGraphSerialization, FlatBufferPreservesPreferredEngineId)
+{
+    Graph graph;
+    graph.set_name("preferred_engine_flatbuffer_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+    graph.set_preferred_engine_id_ext(42);
+
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::IDENTITY);
+    graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Round-trip through flatbuffer
+    auto buffer = graph.toFlatBuffer();
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+    Graph newGraph;
+    auto err = newGraph.fromFlatBuffer(fbGraph);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+
+    // Verify by re-serializing to JSON and checking the value
+    prepareGraphForSerialization(newGraph);
+    nlohmann::json json;
+    newGraph.serialize(json);
+    EXPECT_TRUE(json.contains("preferred_engine_id"));
+    EXPECT_EQ(json["preferred_engine_id"], 42);
+}
+
+TEST(TestGraphSerialization, BinaryUsesPackedFlatBuffer)
+{
+    Graph graph;
+    graph.set_name("binary_flatbuffer_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Get binary serialization
+    std::vector<uint8_t> binaryData;
+    graph.serialize(binaryData);
+
+    // Verify it's a valid flatbuffer (not UBJSON)
+    // FlatBuffers can be directly parsed with GetGraph
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(binaryData.data());
+    EXPECT_NE(fbGraph, nullptr);
+    EXPECT_STREQ(fbGraph->name()->c_str(), "binary_flatbuffer_test");
+
+    // Compare with toFlatBuffer output - should be identical
+    auto directBuffer = graph.toFlatBuffer();
+    EXPECT_EQ(binaryData.size(), directBuffer.size());
+    EXPECT_EQ(std::memcmp(binaryData.data(), directBuffer.data(), binaryData.size()), 0);
+}
+
+//==============================================================================
 // Edge Case Tests
 //==============================================================================
 
