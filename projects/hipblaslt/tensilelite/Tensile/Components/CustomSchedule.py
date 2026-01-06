@@ -2406,7 +2406,7 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     n_mfma = 4 * 4 * 3    # 128 MT0 / 2 WT0 / 16 mfma dim  * 128/2/16 * 3 bf16 MFMAs per tf32 mfma
     kernel["MfmaInitCVgprs"] = True
     kernel["UsePLRPack"] = True
-    
+
     optSchedule = dict()
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     syncs = SyncSchedule()
@@ -2418,69 +2418,40 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
         reorder_packing = True
-        print(f"\nDDDDDDDDDDDDDDDD, {kernel['UseMFMAF32XEmulation']=}")
 
-        # syncs.add_barrier(-1, "sync all waves to start in lockstep")
         lra0 = [0,0,1,1]
-        if not kernel["UseMFMAF32XEmulation"]:
-            syncs.add(  3, dscnt=0, comment="Wait for LRA0 to complete before pack")
-            pack_a0 = [ 3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10, 11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11]
-            pack_b0 = [                                    11,11,12,12,13,13,14,14,15,15,16,16,17,17,18,18,19,19,20,20,21,21,22,22,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23,23]
-        elif not reorder_packing:
-            syncs.add(  3, dscnt=0, comment="Wait for LRA0 to complete before pack")
-            pack_a0 = [ 3,3,4,4, 5,5, 6,6,7,7, 8,8,9,9, 10,10, 11,11,11,11]
-            snops.extend([         (5, S4),            (10, S4) ])
-            pack_b0 = [                                        11,11,12,12, 13,13, 14,14,15,15, 16,16,17,17, 18,18, 19,19,20,20,]
-            snops.extend([                                                      (13, S4),                   (18, S4) ])
-        else:
-            syncs.add(  3, dscnt=2, comment="Wait for the first 2 LRA0 to complete before pack")
-            syncs.add(  5, dscnt=0, comment="Wait for the rest    LRA0 to complete before pack")
-            pack_a0 = [ 3,3,4,4, 7,7, 8,8,9,9, 5,5,6,6, 7,7, 10,10,11,11]
-            pack_b0 = [                                        12,12,13,13, 16,16, 17,17,18,18,  14,14,15,15, 16,16,  19,19,20,20]
+        syncs.add( 3, dscnt=2, comment="Wait for the first 2 LRA0 to complete before pack")
+        syncs.add( 5, dscnt=0, comment="Wait for the rest    LRA0 to complete before pack")
+        pack_a0 = [3,3,4,4, 7,7, 8,8,9,9, 5,5,6,6, 7,7, 10,10,11,11]
+        pack_b0 = [12,12,13,13, 16,16, 17,17,18,18,  14,14,15,15, 16,16,  19,19,20,20]
 
-        lrb0 = [               6,6,7,7]
-        syncs.add(                                        11, dscnt=0, comment="Wait for LRB0 to complete before pack",
-                                                          barrier=True, barrier_comment="Wait for all waves to finish LRs before GRs")
+        lrb0 = [6,6,7,7]
+        syncs.add(11, dscnt=0, comment="Wait for LRB0 to complete before pack",
+                  barrier=True, barrier_comment="Wait for all waves to finish LRs before GRs")
         grinca = [0,1,2, 2,2,2, 2,4,5]
-        grincb = [                    6,  8,  9,  10,     11,   12,13,14,15]
-        lrsa = [                                                   13]
-        lrsb = [                                                      14]
-        lwsa = [                                                                                                           45]
-        lwsb = [                                                                                                           45]
+        grincb = [6,8,9, 10,11,12, 13,14,15]
+        lrsa = [13]
+        lrsb = [14]
+        lwsa = [45]
+        lwsb = [45]
         
-        gra = [													           15,17,  18,19, 20,21, 25,26]
-        grb = [													                                     27,28,  31,33,   36,37,   39,40]
+        gra = [15,17, 18,19, 20,21, 25,26]
+        grb = [27,28, 31,33, 36,37, 39,40]
         num_gr = (len(gra[1::2]) + len(grb[1::2]))
         
-        gr_wait =                                                                     23
+        gr_wait = 23
         v = count_items(gra[1::2]+grb[1::2], ev=gr_wait)
-        syncs.add(                                                                    gr_wait, vlcnt=v, barrier=True, comment = "Wait for previous GRA&B")
+        syncs.add(gr_wait, vlcnt=v, barrier=True, comment = "Wait for previous GRA&B")
 
-        lrb3 = [                                                                        24,24,25,25]
-        if not kernel["UseMFMAF32XEmulation"]:
-            syncs.add(                                                                               28, dscnt=0, comment="Wait for LRB3 to complete")
-            pack_b3 = [                                                                              28,28,29,29,30,30,31,31,32,32,33,33,34,34,35,35,36,36,37,37,38,38,39,39,40,40,41,41,42,42,43,43,44,44,45,45,46,46,47,47,47,47,47,47,47,47,47,47]
-        elif not reorder_packing:
-            syncs.add(                                                                               28, dscnt=0, comment="Wait for LRB3 to complete")
-            pack_b3 = [                                                                              28,28,29,29, 30,30, 31,31,32,32, 33,33,34,34, 35,35, 36,36,37,37]
-            snops.extend([                                                                                          (30, S4),                   (35, S4) ])
-        else:
-            syncs.add(                                                                               28, dscnt=2, comment="Wait for the first 2 LRB3 to complete")
-            syncs.add(                                                                               30, dscnt=0, comment="Wait for the rest    LRB3 to complete")
-            pack_b3 = [                                                                              28,28,29,29, 32,32,  33,33,34,34,  30,30,31,31, 32,32,  35,35,36,36]
+        lrb3 = [24,24,25,25]
+        syncs.add( 28, dscnt=2, comment="Wait for the first 2 LRB3 to complete")
+        syncs.add( 30, dscnt=0, comment="Wait for the rest    LRB3 to complete")
+        pack_b3 = [28,28,29,29, 32,32,  33,33,34,34,  30,30,31,31, 32,32,  35,35,36,36]
         
-        lra3 = [                                                                                                                                     36,36,37,37]
-        if not kernel["UseMFMAF32XEmulation"]:
-            syncs.add(                                                                                                                                            39, dscnt=0, comment="Wait for LRA3 to complete")
-            pack_a3 = [                                                                                                                                           39,39,40,40,41,41,42,42,43,43,44,44,45,45,46,46,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47]
-        elif not reorder_packing:
-            syncs.add(                                                                                                                                            39, dscnt=0, comment="Wait for LRA3 to complete")
-            pack_a3 = [                                                                                                                                           39,39,40,40, 41,41, 42,42,43,43, 44,44,45,45, 46,46, 47,47,47,47]
-            snops.extend([                                                                                                                                                       (41, S4),                   (46, S4) ])
-        else:
-            syncs.add(                                                                                                                                            39, dscnt=2, comment="Wait for the first 2 LRA3 to complete")
-            syncs.add(                                                                                                                                            41, dscnt=0, comment="Wait for the rest    LRA3 to complete")
-            pack_a3 = [                                                                                                                                           39,39,40,40,  43,43,  44,44,45,45,  41,41,42,42,  43,43, 46,46,47,47]
+        lra3 = [36,36,37,37]
+        syncs.add(39, dscnt=2, comment="Wait for the first 2 LRA3 to complete")
+        syncs.add(41, dscnt=0, comment="Wait for the rest    LRA3 to complete")
+        pack_a3 = [39,39,40,40, 43,43, 44,44,45,45, 41,41,42,42, 43,43, 46,46,47,47]
 
     else:
         return False, None
@@ -2491,8 +2462,8 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         'GRIncB': [grincb],
         'LRA0':   [lra0],
         'LRB0':   [lrb0],
-        'PackA0' : [pack_a0],
-        'PackB0' : [pack_b0],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
         'GRA':    [gra],
         'GRB':    [grb],
         'LRSA':   [lrsa],
@@ -2513,7 +2484,6 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         snopCode = [s[1] for s in snops]
  
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
-    opt1.pretty_print()
 
     if reorder_packing:
         # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
