@@ -13,6 +13,7 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(hip REQUIRED)
+find_package(Threads REQUIRED)
 
 # Technically this is all found as part of hipdnn_test_sdk, but including these as an example for
 # consumers. hipdnn_test_sdk shouldn't be needed by normal users of hipDNN, and is only incuded here
@@ -31,7 +32,7 @@ function(add_hipdnn_sample NAME SOURCE)
     # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
     # (brings in hipdnn_data_sdk as well).
-    target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend hipdnn_test_sdk)
+    target_link_libraries(${NAME} PRIVATE hip::host Threads::Threads hipdnn_frontend hipdnn_test_sdk)
 endfunction()
 
 # Temporarily disabled bn_inference due to https://github.com/ROCm/rocm-libraries/issues/2459
