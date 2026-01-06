@@ -1317,3 +1317,81 @@ The right approach is NOT to find the "magic N value" - there isn't one. The rig
 3. **Test broadly** - the intermittent nature means we need many test runs to confirm fixes
 
 **Suggestion:** Revert all recent changes and go back to the drawing board. The problem is likely in the original PR #3573 implementation of `set_stream_order_memory_allocation()` during graph capture.
+
+---
+
+## 🏁 Investigation Conclusion (January 6, 2026 - Final)
+
+### Decision: Branch Abandoned, Useful Work Already Merged
+
+**Status:** Abandoning `users/todavis/memory_error_diagnostics` branch in place. Too many debugging changes made the branch unmaintainable.
+
+### What Was Salvaged
+
+The actually useful fixes from this investigation were **already merged into develop** in earlier commits:
+
+1. ✅ **host_alloc.cpp** - Double-free detection (commit f4d991b647)
+   - Detects untracked pointer frees (potential double-free)
+   - More efficient iterator usage
+   - Controlled by `ROCBLAS_CLIENT_DEBUG_ALLOC` env var
+
+2. ✅ **rmake.py** - ASAN auto-support (commits d12aabcd40, 31952e2d17)
+   - Detects `ci:asan` or `asan` labels
+   - Auto-adds `BUILD_ADDRESS_SANITIZER=ON`
+   - Auto-fixes xnack+ requirement for ASAN-compatible GPUs (gfx908, gfx90a, gfx942, gfx950)
+
+### What We Learned
+
+**About the bug:**
+- ✅ It's truly intermittent (not specific to N=192 or any value)
+- ✅ Related to async memory allocation during graph capture
+- ✅ Manifests differently on different platforms/runs
+- ✅ The synchronization "fixes" just changed timing, didn't solve root cause
+- ❌ Graph node counts are fine (1-4 nodes typical)
+- ❌ NOT a memory capacity issue
+- ❌ NOT a simple use-after-free of the stream
+
+**About debugging intermittent bugs:**
+- Boundary testing revealed the true intermittent nature
+- Debug logging confirmed proper operation order (destructors before stream cleanup)
+- CI-only bugs are extremely difficult to debug
+- Sometimes the right call is to abandon a feature rather than chase it indefinitely
+
+### Recommendation for Future Work
+
+**Option 1: Disable Graph Capture (Safest)**
+- Add a build flag or env var to disable graph capture
+- Document as "experimental, known issues"
+- Revisit when AMD/ROCm has better graph debugging tools
+
+**Option 2: Deep Dive with AMD Support**
+- Work directly with ROCm team
+- May be a HIP graph limitation or bug
+- Could be a Tensile interaction issue
+- Requires access to reproduce the issue locally
+
+**Option 3: Alternative Implementation**
+- Don't use `set_stream_order_memory_allocation()` approach
+- Pre-allocate workspace globally
+- Or document that graph capture requires `ROCBLAS_STREAM_ORDER_ALLOC=1` env var
+
+### Files to Review if Resuming Investigation
+
+- `projects/rocblas/library/src/include/handle.hpp` (lines 476-479, 526-549, 628-645)
+- `projects/rocblas/clients/common/client_utility.cpp` (lines 524-586)
+- Original PR #3573 that introduced the graph capture fix
+
+### Branch Status
+
+- **Abandoned:** `users/todavis/memory_error_diagnostics`
+- **Reason:** Too many experimental changes, CI pipeline became unreliable
+- **Preserved:** This investigation document captures all findings
+- **Action:** Do NOT merge this branch; useful changes already in develop
+
+### Time Investment
+
+- ~3-4 hours of investigation
+- ~6 CI runs
+- Conclusion: Bug exists but is too difficult to debug remotely without reproducible local case
+
+Sometimes knowing when to stop is as valuable as finding the solution. 🛑
