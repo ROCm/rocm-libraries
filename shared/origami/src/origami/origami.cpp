@@ -251,17 +251,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
           bestL2 = wgmL2Estimate;
           bestWGM = wgm;
       }
-
-      if (get_runtime_options(config).debug_enabled) {
-        config.logger.log("WGM", wgm);
-        config.logger.log("L2Estimate", wgmL2Estimate);
-      }
     }
     // Set the best WGM
     out_wgm = bestWGM;
   }
 
-  return std::make_tuple(out_wgmxcc, out_wgm);
+  return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, out_wgm};
 }
 
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,
