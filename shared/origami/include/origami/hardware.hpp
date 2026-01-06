@@ -374,8 +374,33 @@ class hardware_t {
    * @brief Map of main loop efficiency values by architecture and CMS kernel configuration.
    *
    */
-  static const std::unordered_map<architecture_t, std::unordered_map<CMS_kernel, double>>
-      CMS_MAP;
+  static inline const std::unordered_map<architecture_t, std::unordered_map<CMS_kernel, double>>
+      CMS_MAP = {
+      {hardware_t::architecture_t::gfx950,
+        {
+          // BF16
+          // NT
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 160, 256, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 192, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 208, 256, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 160, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 192, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 256, 64), 1. / 1.15},
+          // NN
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 160, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 208, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 192, 64), 1. / 1.00},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 256, 64), 1. / 1.05},
+          // TN
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 160, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 192, 256, 64), 1. / 1.05},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256,  96, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 192, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 224, 64), 1. / 1.05},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 256, 64), 1. / 1.05},
+        }
+      },
+    };
 
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
