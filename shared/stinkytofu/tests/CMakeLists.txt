@@ -39,6 +39,7 @@ set(UNIT_TEST_FILES
     unit/PeepholeOptimizationPassTest.cpp
     unit/DeadCodeEliminationPassTest.cpp
     unit/DuplicateEliminationPassTest.cpp
+    unit/DelayAluInsertionPassTest.cpp
     unit/OptimizationPipelineTest.cpp
     unit/OperationRegistryTest.cpp
 )

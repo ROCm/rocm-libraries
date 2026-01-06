@@ -68,6 +68,7 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/PeepholeOptimizationPass.cpp
     ir/asm/DeadCodeEliminationPass.cpp
     ir/asm/DuplicateEliminationPass.cpp
+    ir/asm/DelayAluInsertionPass.cpp
     ir/asm/OptimizationPipeline.cpp
     ir/asm/ScheduleLastLRsPass.cpp
     ir/asm/StinkyDAGSchedulerPass.cpp
