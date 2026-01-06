@@ -144,7 +144,7 @@ void ResetCachedPaths()
     delete UserCachePathPtrRef();
     delete SysCachePathPtrRef();
     UserCachePathPtrRef() = nullptr;
-    SysCachePathPtrRef() = nullptr;
+    SysCachePathPtrRef()  = nullptr;
 }
 } // namespace testing
 #endif
