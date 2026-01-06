@@ -54,6 +54,33 @@ void rocsparse_init_exact(
     }
 }
 
+// Specialization for bfloat16: always return 1.0 to avoid precision issues
+// due to limited representable range of bfloat16
+template <>
+void rocsparse_init_exact<rocsparse_bfloat16>(rocsparse_bfloat16* A,
+                                              size_t              M,
+                                              size_t              N,
+                                              size_t              lda,
+                                              size_t              stride,
+                                              size_t              batch_count,
+                                              int                 a,
+                                              int                 b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    const rocsparse_bfloat16 one = static_cast<rocsparse_bfloat16>(1.0f);
+    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
+    {
+        for(size_t j = 0; j < N; ++j)
+        {
+            for(size_t i = 0; i < M; ++i)
+            {
+                A[i + j * lda + i_batch * stride] = one;
+            }
+        }
+    }
+}
+
 template <typename T>
 void rocsparse_init_1d_array(T* A, size_t size, bool use_exact, T a, T b)
 {
