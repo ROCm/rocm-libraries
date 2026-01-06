@@ -86,6 +86,15 @@ private:
         _tensorCacheBuilt = true;
     }
 
+    /// Assigns UIDs to tensors that don't already have them.
+    void assignTensorUids()
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+        auto usedIds = getUsedIds(allTensors);
+        populateHipdnnTensorIds(allTensors, usedIds);
+    }
+
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
     {
         auto tensor = std::make_shared<TensorAttributes>();
@@ -625,16 +634,6 @@ public:
         HIPDNN_CHECK_ERROR(validateSubtree());
 
         return {ErrorCode::OK, ""};
-    }
-
-    /// Assigns UIDs to tensors that don't already have them.
-    /// It's recommended to call build_operation_graph() instead.
-    void assignTensorUids()
-    {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
-        auto usedIds = getUsedIds(allTensors);
-        populateHipdnnTensorIds(allTensors, usedIds);
     }
 
     Error checkNoDuplicateTensorIds()
