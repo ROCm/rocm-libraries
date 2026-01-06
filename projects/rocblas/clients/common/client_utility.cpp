@@ -564,6 +564,15 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     rocblas_cerr << "[DEBUG]   Graph execution complete, destroying graph exec" << std::endl;
     CHECK_HIP_ERROR(hipGraphExecDestroy(instance));
 
+    // FIX #1: Add device-wide synchronization to ensure ALL async operations complete
+    rocblas_cerr << "[DEBUG]   ⚠️  FIX: Adding hipDeviceSynchronize() to ensure all async ops complete" << std::endl;
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
+    rocblas_cerr << "[DEBUG]   Device synchronized successfully" << std::endl;
+
+    // FIX #1: Disable async allocation BEFORE stream operations to prevent race conditions
+    rocblas_cerr << "[DEBUG]   Disabling stream_order_memory_allocation (BEFORE stream cleanup)" << std::endl;
+    m_handle->set_stream_order_memory_allocation(false);
+
     rocblas_cerr << "[DEBUG]   Restoring old_stream=" << m_old_stream << std::endl;
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_old_stream));
     rocblas_cerr << "[DEBUG]   ⚠️  DESTROYING graph_stream=" << m_graph_stream 
@@ -572,8 +581,6 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     m_graph_stream = nullptr;
     rocblas_cerr << "[DEBUG]   Stream destroyed, setting graph_stream=nullptr" << std::endl;
 
-    rocblas_cerr << "[DEBUG]   Disabling stream_order_memory_allocation" << std::endl;
-    m_handle->set_stream_order_memory_allocation(false);
     rocblas_cerr << "[DEBUG] Graph capture END complete" << std::endl;
 }
 
