@@ -297,7 +297,9 @@ namespace
         void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
         {
             IRList& irlist = bb.getIR();
-            buildUseDefChain(irlist);
+
+            // Use-def chains are already built by OptimizationPipeline
+            // inst->sources and inst->users are ready to use
 
             PASS_DEBUG(dumpUseDefChain(irlist));
 

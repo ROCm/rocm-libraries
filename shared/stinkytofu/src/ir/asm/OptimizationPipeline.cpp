@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "ir/asm/OptimizationPipeline.hpp"
 #include "ir/asm/DeadCodeEliminationPass.hpp"
+#include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/DuplicateEliminationPass.hpp"
 #include "ir/asm/PeepholeOptimizationPass.hpp"
 
@@ -176,6 +177,14 @@ namespace stinkytofu
                                                                               : "Custom")
                       << std::endl;
         }
+
+        // ========== Initialize Use-Def Chains ==========
+        // Build use-def chains once at the start of the pipeline.
+        // All passes can then use inst->sources and inst->users directly without rebuilding.
+        //
+        // TODO: Remove this once all IR generation uses automatic builder setters
+        // (setSrcRegs/setDestRegs) which maintain use-def chains incrementally.
+        buildUseDefChain(func);
 
         // ========== Phase 0: Custom Passes (Before) ==========
         if(!config.beforeAnalysisPasses.empty() || !config.beforePasses.empty())

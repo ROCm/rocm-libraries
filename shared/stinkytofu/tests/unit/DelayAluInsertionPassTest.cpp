@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "ir/asm/DelayAluInsertionPass.hpp"
+#include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "isa/ArchHelper.hpp"
 #include "stinkytofu.hpp"
@@ -64,6 +65,7 @@ protected:
     }
 
     // Helper to create v_mul_f32 instruction
+    // Uses automatic use-def chain maintenance (LLVM-style: methods on instruction)
     StinkyInstruction* createMulF32(int destReg, int src1Reg, int src2Reg)
     {
         auto     builder   = StinkyInstIRBuilder(bb->getIR(), arch);
@@ -71,13 +73,14 @@ protected:
         auto*    inst      = builder.createStinkyInstBefore(
             bb->getIR().end(), getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src2Reg, 1));
+        // Use instruction methods to automatically maintain use-def chains (LLVM-style)
+        inst->setDestRegs({StinkyRegister("v", destReg, 1)});
+        inst->setSrcRegs({StinkyRegister("v", src1Reg, 1), StinkyRegister("v", src2Reg, 1)});
         return inst;
     }
 
     // Helper to create v_add_f32 instruction
+    // Uses automatic use-def chain maintenance (LLVM-style: methods on instruction)
     StinkyInstruction* createAddF32(int destReg, int src1Reg, int src2Reg)
     {
         auto     builder   = StinkyInstIRBuilder(bb->getIR(), arch);
@@ -85,9 +88,9 @@ protected:
         auto*    inst      = builder.createStinkyInstBefore(
             bb->getIR().end(), getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch));
 
-        inst->destRegs.push_back(StinkyRegister("v", destReg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src1Reg, 1));
-        inst->srcRegs.push_back(StinkyRegister("v", src2Reg, 1));
+        // Use instruction methods to automatically maintain use-def chains (LLVM-style)
+        inst->setDestRegs({StinkyRegister("v", destReg, 1)});
+        inst->setSrcRegs({StinkyRegister("v", src1Reg, 1), StinkyRegister("v", src2Reg, 1)});
         return inst;
     }
 

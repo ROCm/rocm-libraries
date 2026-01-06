@@ -179,8 +179,8 @@ namespace
                                           passCtx.getGemmTileConfig().arch[1],
                                           passCtx.getGemmTileConfig().arch[2]);
 
-            // Build use-def chains (stores in inst->sources and inst->users)
-            buildUseDefChain(bb);
+            // Use-def chains are already built by OptimizationPipeline
+            // inst->sources and inst->users are ready to use
 
             // Collect all instructions in this basic block
             std::vector<StinkyInstruction*> instructions;
