@@ -558,19 +558,18 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     // END GRAPH CAPTURE
     CHECK_HIP_ERROR(hipStreamEndCapture(m_graph_stream, &graph));
     rocblas_cerr << "[DEBUG]   Graph captured, instantiating..." << std::endl;
-    CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, NULL, NULL, 0));
-
-    CHECK_HIP_ERROR(hipGraphDestroy(graph));
     
-    // Inspect graph structure before launch
+    // Inspect graph structure BEFORE destroying
     size_t numNodes = 0;
-    CHECK_HIP_ERROR(hipGraphGetNodes(instance, nullptr, &numNodes));
+    CHECK_HIP_ERROR(hipGraphGetNodes(graph, nullptr, &numNodes));
     rocblas_cerr << "[DEBUG]   Graph contains " << numNodes << " nodes" << std::endl;
     
-    // Check if this is the problematic N=192 case by looking at node count
-    if(numNodes > 100) {  // Arbitrary threshold - adjust based on typical values
+    if(numNodes > 100) {
         rocblas_cerr << "[WARNING] Unusually high node count detected!" << std::endl;
     }
+    
+    CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, NULL, NULL, 0));
+    CHECK_HIP_ERROR(hipGraphDestroy(graph));
     
     rocblas_cerr << "[DEBUG]   Launching graph on stream=" << m_graph_stream << std::endl;
     CHECK_HIP_ERROR(hipGraphLaunch(instance, m_graph_stream));
