@@ -57,6 +57,12 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
+      - name: Patch rocm-libraries
+        run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          # rm ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+          # git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+
       # safe.directory must be set before Runner health status
       - name: Adjust git config
         run: |
