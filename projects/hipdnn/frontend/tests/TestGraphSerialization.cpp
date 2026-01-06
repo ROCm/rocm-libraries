@@ -1105,6 +1105,283 @@ TEST(TestGraphSerialization, BinaryUsesPackedFlatBuffer)
     EXPECT_EQ(std::memcmp(binaryData.data(), directBuffer.data(), binaryData.size()), 0);
 }
 
+TEST(TestGraphSerialization, SerializeOverloadReturnsDetachedBuffer)
+{
+    Graph graph;
+    graph.set_name("serialize_overload_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Use serialize() overload that returns DetachedBuffer
+    auto buffer = graph.serialize();
+    EXPECT_GT(buffer.size(), 0u);
+
+    // Verify it's equivalent to toFlatBuffer()
+    auto directBuffer = graph.toFlatBuffer();
+    EXPECT_EQ(buffer.size(), directBuffer.size());
+    EXPECT_EQ(std::memcmp(buffer.data(), directBuffer.data(), buffer.size()), 0);
+}
+
+TEST(TestGraphSerialization, DeserializeFromFlatBufferGraphObject)
+{
+    Graph graph;
+    graph.set_name("deserialize_graph_object_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Serialize to buffer
+    auto buffer = graph.toFlatBuffer();
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+    // Use deserialize(const Graph*) overload
+    Graph newGraph;
+    auto err = newGraph.deserialize(fbGraph);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+
+    // Verify restoration
+    prepareGraphForSerialization(newGraph);
+    nlohmann::json json;
+    newGraph.serialize(json);
+    EXPECT_EQ(json["name"], "deserialize_graph_object_test");
+    EXPECT_EQ(json["nodes"].size(), 1u);
+}
+
+TEST(TestGraphSerialization, DeserializeFromDetachedBuffer)
+{
+    Graph graph;
+    graph.set_name("deserialize_detached_buffer_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Serialize to DetachedBuffer
+    auto buffer = graph.toFlatBuffer();
+
+    // Use deserialize(const DetachedBuffer&) overload
+    Graph newGraph;
+    auto err = newGraph.deserialize(buffer);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+
+    // Verify restoration
+    prepareGraphForSerialization(newGraph);
+    nlohmann::json json;
+    newGraph.serialize(json);
+    EXPECT_EQ(json["name"], "deserialize_detached_buffer_test");
+    EXPECT_EQ(json["nodes"].size(), 1u);
+}
+
+TEST(TestGraphSerialization, FromFlatBufferDetachedBufferOverload)
+{
+    Graph graph;
+    graph.set_name("from_flatbuffer_detached_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    prepareGraphForSerialization(graph);
+
+    // Serialize to DetachedBuffer
+    auto buffer = graph.toFlatBuffer();
+
+    // Use fromFlatBuffer(const DetachedBuffer&) overload
+    Graph newGraph;
+    auto err = newGraph.fromFlatBuffer(buffer);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+
+    // Verify restoration
+    prepareGraphForSerialization(newGraph);
+    nlohmann::json json;
+    newGraph.serialize(json);
+    EXPECT_EQ(json["name"], "from_flatbuffer_detached_test");
+    EXPECT_EQ(json["nodes"].size(), 1u);
+}
+
+TEST(TestGraphSerialization, ConstSerializeReturnsErrorWithoutUids)
+{
+    Graph graph;
+    graph.set_name("const_serialize_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    // Create tensor without UID
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("x");
+    x->set_dim({1, 16});
+    x->set_stride({16, 1});
+    x->set_data_type(DataType::FLOAT);
+    // Note: NOT calling set_uid()
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    // Const serialize should return error because UIDs are not set
+    const Graph& constGraph = graph;
+    flatbuffers::DetachedBuffer buffer;
+    auto err = constGraph.serialize(buffer);
+    EXPECT_EQ(err.get_code(), ErrorCode::ATTRIBUTE_NOT_SET);
+
+    // Non-const serialize should succeed by assigning UIDs
+    auto nonConstBuffer = graph.serialize();
+    EXPECT_GT(nonConstBuffer.size(), 0u);
+}
+
+TEST(TestGraphSerialization, NonConstSerializeAssignsUids)
+{
+    Graph graph;
+    graph.set_name("nonconst_serialize_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    // Create tensor without UID
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("x");
+    x->set_dim({1, 16});
+    x->set_stride({16, 1});
+    x->set_data_type(DataType::FLOAT);
+    // Note: NOT calling set_uid()
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    // Verify UID is not set
+    EXPECT_FALSE(x->has_uid());
+
+    // Non-const serialize should assign UIDs
+    auto buffer = graph.serialize();
+    EXPECT_GT(buffer.size(), 0u);
+
+    // After non-const serialize, tensor should have UID
+    EXPECT_TRUE(x->has_uid());
+}
+
+TEST(TestGraphSerialization, ConstJsonSerializeReturnsErrorWithoutUids)
+{
+    Graph graph;
+    graph.set_name("const_json_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    // Create tensor without UID
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("x");
+    x->set_dim({1, 16});
+    x->set_stride({16, 1});
+    x->set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    // Const JSON serialize should return error
+    const Graph& constGraph = graph;
+    nlohmann::json json;
+    auto err = constGraph.serialize(json);
+    EXPECT_EQ(err.get_code(), ErrorCode::ATTRIBUTE_NOT_SET);
+
+    // Non-const JSON serialize should succeed
+    nlohmann::json nonConstJson;
+    err = graph.serialize(nonConstJson);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+    EXPECT_EQ(nonConstJson["name"], "const_json_test");
+}
+
+TEST(TestGraphSerialization, ConstBinarySerializeReturnsErrorWithoutUids)
+{
+    Graph graph;
+    graph.set_name("const_binary_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    // Create tensor without UID
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("x");
+    x->set_dim({1, 16});
+    x->set_stride({16, 1});
+    x->set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    // Const binary serialize should return error
+    const Graph& constGraph = graph;
+    std::vector<uint8_t> data;
+    auto err = constGraph.serialize(data);
+    EXPECT_EQ(err.get_code(), ErrorCode::ATTRIBUTE_NOT_SET);
+
+    // Non-const binary serialize should succeed
+    std::vector<uint8_t> nonConstData;
+    err = graph.serialize(nonConstData);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+    EXPECT_GT(nonConstData.size(), 0u);
+}
+
+TEST(TestGraphSerialization, CheckTensorUidsSetMethod)
+{
+    Graph graph;
+    graph.set_name("check_uids_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    // Create tensor without UID
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("x");
+    x->set_dim({1, 16});
+    x->set_stride({16, 1});
+    x->set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(x, pwAttrs);
+
+    // Check should fail without UIDs
+    auto err = graph.checkTensorUidsSet();
+    EXPECT_EQ(err.get_code(), ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(err.get_message().find('x') != std::string::npos);
+
+    // Assign UIDs
+    graph.assignTensorUids();
+
+    // Check should now pass
+    err = graph.checkTensorUidsSet();
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+}
+
 //==============================================================================
 // Edge Case Tests
 //==============================================================================

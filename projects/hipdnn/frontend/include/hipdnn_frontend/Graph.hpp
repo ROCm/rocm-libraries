@@ -313,6 +313,35 @@ private:
         }
     }
 
+    static Error checkTensorUidsSetImpl(
+        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+    {
+        std::vector<std::string> missingUidTensors;
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && !tensor->has_uid())
+            {
+                auto name = tensor->get_name();
+                missingUidTensors.push_back(name.empty() ? "(unnamed)" : name);
+            }
+        }
+
+        if(!missingUidTensors.empty())
+        {
+            std::string errorMsg = "Tensors without UIDs: ";
+            for(const auto& name : missingUidTensors)
+            {
+                errorMsg += name + ", ";
+            }
+            errorMsg.pop_back();
+            errorMsg.pop_back();
+            return {ErrorCode::ATTRIBUTE_NOT_SET, errorMsg};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
     static Error checkNoDuplicateTensorIdsImpl(
         std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
     {
@@ -585,6 +614,16 @@ public:
         return checkNoDuplicateTensorIdsImpl(allTensors);
     }
 
+    /// Checks if all tensors in the graph have UIDs assigned.
+    /// Returns an error if any tensor is missing a UID.
+    Error checkTensorUidsSet() const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        return checkTensorUidsSetImpl(allTensors);
+    }
+
     // Returns the tensor with the given UID, or nullptr if not found.
     std::shared_ptr<TensorAttributes> getTensor(int64_t uid) const
     {
@@ -728,13 +767,23 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // To FlatBuffer Graph object
-    flatbuffers::DetachedBuffer toFlatBuffer() const
+    /// Serialize to FlatBuffer DetachedBuffer
+    Error toFlatBuffer(flatbuffers::DetachedBuffer& buffer) const
     {
+        HIPDNN_CHECK_ERROR(checkTensorUidsSet());
+        buffer = buildFlatbufferOperationGraphConst();
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Serialize to FlatBuffer DetachedBuffer
+    /// Assigns tensor UIDs if not already set
+    flatbuffers::DetachedBuffer toFlatBuffer()
+    {
+        assignTensorUids();
         return buildFlatbufferOperationGraphConst();
     }
 
-    // From FlatBuffer Graph object
+    /// Deserialize from FlatBuffer Graph object
     Error fromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
         try
@@ -753,15 +802,53 @@ public:
         }
     }
 
-    // Binary serialization using packed FlatBuffer
+    /// Deserialize from FlatBuffer DetachedBuffer
+    Error fromFlatBuffer(const flatbuffers::DetachedBuffer& buffer)
+    {
+        auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+        return fromFlatBuffer(fbGraph);
+    }
+
+    Error serialize(flatbuffers::DetachedBuffer& buffer) const
+    {
+        return toFlatBuffer(buffer);
+    }
+
+    flatbuffers::DetachedBuffer serialize()
+    {
+        return toFlatBuffer();
+    }
+
+    Error deserialize(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
+    {
+        return fromFlatBuffer(fbGraph);
+    }
+
+    Error deserialize(const flatbuffers::DetachedBuffer& buffer)
+    {
+        return fromFlatBuffer(buffer);
+    }
+
+    /// Serialize to binary
     Error serialize(std::vector<uint8_t>& data) const
     {
-        auto buffer = toFlatBuffer();
+        HIPDNN_CHECK_ERROR(checkTensorUidsSet());
+        auto buffer = buildFlatbufferOperationGraphConst();
         data.assign(buffer.data(), buffer.data() + buffer.size());
         return {ErrorCode::OK, ""};
     }
 
-    // Binary deserialization from packed FlatBuffer
+    /// Serialize to binary
+    /// Assigns tensor UIDs if not already set
+    Error serialize(std::vector<uint8_t>& data)
+    {
+        assignTensorUids();
+        auto buffer = buildFlatbufferOperationGraphConst();
+        data.assign(buffer.data(), buffer.data() + buffer.size());
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Deserialize from binary packed FlatBuffer
     Error deserialize([[maybe_unused]] hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
         auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(data.data());
@@ -769,8 +856,23 @@ public:
     }
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    /// Serialize to JSON
     Error serialize(nlohmann::json& j) const
     {
+        HIPDNN_CHECK_ERROR(checkTensorUidsSet());
+        auto buffer = buildFlatbufferOperationGraphConst();
+        auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+        j = *sdkGraph;
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Serialize to JSON
+    /// Assigns tensor UIDs if not already set
+    Error serialize(nlohmann::json& j)
+    {
+        assignTensorUids();
         auto buffer = buildFlatbufferOperationGraphConst();
         auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
 
