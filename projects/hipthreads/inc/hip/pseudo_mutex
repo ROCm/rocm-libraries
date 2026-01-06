@@ -17,8 +17,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU_PSEUDO_MUTEX_H__
-#define __GPU_PSEUDO_MUTEX_H__
+#ifndef __LIBHIPTHREADS_PSEUDO_MUTEX_H__
+#define __LIBHIPTHREADS_PSEUDO_MUTEX_H__
 
 #include "hip/thread"
 #include "hip/hip_runtime.h"
@@ -84,4 +84,4 @@ class _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(capability("pseudo_mutex")) pseudo
 
 } // namespace cuda
 
-#endif // __GPU_PSEUDO_MUTEX_H__
+#endif // __LIBHIPTHREADS_PSEUDO_MUTEX_H__

@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU___MUTEX_LOCK_GUARD_H__
-#define __GPU___MUTEX_LOCK_GUARD_H__
+#ifndef __LIBHIPTHREADS___MUTEX_LOCK_GUARD_H__
+#define __LIBHIPTHREADS___MUTEX_LOCK_GUARD_H__
 
 #include "hip/thread_config"
 
@@ -64,4 +64,4 @@ _LIBHIPTHREADS_CTAD_SUPPORTED_FOR_TYPE(lock_guard);
 
 } // namespace cuda
 
-#endif // __GPU___MUTEX_LOCK_GUARD_H__
+#endif // __LIBHIPTHREADS___MUTEX_LOCK_GUARD_H__

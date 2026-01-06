@@ -17,8 +17,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU___SUPPORT_HIP_CHECK_H__
-#define __GPU___SUPPORT_HIP_CHECK_H__
+#ifndef __LIBHIPTHREADS___SUPPORT_HIP_CHECK_H__
+#define __LIBHIPTHREADS___SUPPORT_HIP_CHECK_H__
 
 #include <string>
 #include <stdexcept>
@@ -34,4 +34,4 @@
         }                                                                                                              \
     }
 
-#endif // __GPU___SUPPORT_HIP_CHECK_H__
+#endif // __LIBHIPTHREADS___SUPPORT_HIP_CHECK_H__

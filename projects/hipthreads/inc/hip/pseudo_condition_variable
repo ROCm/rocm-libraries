@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU_PSEUDO_CONDITION_VARIABLE__
-#define __GPU_PSEUDO_CONDITION_VARIABLE__
+#ifndef __LIBHIPTHREADS_PSEUDO_CONDITION_VARIABLE__
+#define __LIBHIPTHREADS_PSEUDO_CONDITION_VARIABLE__
 
 #include "hip/thread"
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
@@ -99,4 +99,4 @@ __device__ inline void pseudo_condition_variable::wait(_Lock &__lock, _Predicate
 
 } // namespace cuda
 
-#endif // __GPU_PSEUDO_CONDITION_VARIABLE__
+#endif // __LIBHIPTHREADS_PSEUDO_CONDITION_VARIABLE__

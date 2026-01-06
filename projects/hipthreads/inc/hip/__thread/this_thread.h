@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU___THREAD_THIS_THREAD_H__
-#define __GPU___THREAD_THIS_THREAD_H__
+#ifndef __LIBHIPTHREADS___THREAD_THIS_THREAD_H__
+#define __LIBHIPTHREADS___THREAD_THIS_THREAD_H__
 
 #include <hip/std/chrono>
 
@@ -62,4 +62,4 @@ __device__ unsigned int get_fiber_id() noexcept;
 
 } // namespace cuda
 
-#endif // __GPU___THREAD_THIS_THREAD_H__
+#endif // __LIBHIPTHREADS___THREAD_THIS_THREAD_H__

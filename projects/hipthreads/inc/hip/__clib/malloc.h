@@ -17,8 +17,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU___MEMORY_MALLOC_H__
-#define __GPU___MEMORY_MALLOC_H__
+#ifndef __LIBHIPTHREADS___MEMORY_MALLOC_H__
+#define __LIBHIPTHREADS___MEMORY_MALLOC_H__
 
 #include "hip/hip_runtime_api.h"
 #include <cstddef>
@@ -54,4 +54,4 @@ inline __host__ void free(void* ptr) {
 } // namespace cuda
 
 
-#endif // __GPU___MEMORY_MALLOC_H__
+#endif // __LIBHIPTHREADS___MEMORY_MALLOC_H__

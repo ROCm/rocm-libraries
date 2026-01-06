@@ -1,5 +1,5 @@
-#ifndef __GPU___THREAD_WORKITEM_H__
-#define __GPU___THREAD_WORKITEM_H__
+#ifndef __LIBHIPTHREADS___THREAD_WORKITEM_H__
+#define __LIBHIPTHREADS___THREAD_WORKITEM_H__
 
 #include <memory>
 
@@ -240,4 +240,4 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable)
 
 } // namespace cuda::internal
 
-#endif // __GPU___THREAD_WORKITEM_H__
+#endif // __LIBHIPTHREADS___THREAD_WORKITEM_H__
