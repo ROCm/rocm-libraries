@@ -300,7 +300,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 6
     WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
