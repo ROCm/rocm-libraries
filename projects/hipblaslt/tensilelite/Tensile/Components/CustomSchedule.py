@@ -2280,7 +2280,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
         # LRA0 + GRIncA
         lra0 = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
-        grIncA = create_range(min_val = max(lra0)+1, num = 3, step = 1, repeat = 3) #[6,6,6,7,7,7,8,8,8]
+        grIncA = create_range(min_val = max(lra0)+1, num = 3, step = 1, repeat = 3)
         # Hide LRA0 latency behind GRIncA
         waitLRA0 = max(grIncA)+5
         startPACKA0 = waitLRA0
@@ -2368,7 +2368,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
                     max(packB0)+1, SBarrier(comment="Barrier before GRA&GRB"),
 
-                    startLRB3-1,SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for previous GRA&B"),# replace HC 5
+                    startLRB3-1,SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for previous GRA&B"),
                     startLRB3-1,SBarrier(comment=""),
 
                     waitLRB3,SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),
