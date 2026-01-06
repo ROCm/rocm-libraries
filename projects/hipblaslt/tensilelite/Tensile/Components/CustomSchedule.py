@@ -79,6 +79,15 @@ class SyncSchedule:
             barrier_idx = barrier_idx if barrier_idx is not None else idx
             self.schedule.append( (barrier_idx, SBarrier(comment=barrier_comment)) )
 
+    def add_barrier(self, idx: int, comment: str = ""):
+        """ Add a SBarrier to the schedule at the given index.
+
+        Args:
+            idx:     The index at which to add the SBarrier.
+            comment: An optional comment for the SBarrier.
+        """
+        self.schedule.append( (idx, SBarrier(comment=comment)) )
+
     def get_indicies(self):
         return [item[0] for item in self.schedule]
     def get_code(self):
@@ -132,21 +141,17 @@ def count_items(input_list: list[int], sv: Optional[int] = None, ev: Optional[in
 
 
 class ScheduleInfo:
-    numCodePaths: int
-    numMfma: int
-    __skipValidation__: bool
-
     def __init__(
         self,
-        numCodePaths,
-        numMfma,
-        optSchedule,
-        syncCode,
-        nglshift,
-        nllshift,
-        nllZeroDscnt = False,
+        numCodePaths: int,
+        numMfma: int,
+        optSchedule: dict[str, list[list[int]]],
+        syncCode: list[Union[SWaitCnt, SBarrier]],
+        nglshift: int,
+        nllshift: int,
+        nllZeroDscnt: bool = False,
         mfmaReorder = [],
-        snopCode = [],
+        snopCode: list[SNop] = [],
     ):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
@@ -180,6 +185,21 @@ class ScheduleInfo:
     
     def getSkippedOrderValidationKeys(self):
         return self._skipOrderValidation
+
+    def pretty_print(self):
+        klen = max(len(k) for k in self.optSchedule.keys())
+        for k,v in self.optSchedule.items():
+            print(f"{k:>{klen}}: {v}")
+        
+        if snops := self.optSchedule.get('SNOP', []):
+            print("---- SNOP code ----")
+            for idx, code in zip(snops[0], self.snopCode):
+                print(f"{idx:>2}: {str(code).strip()}")
+        
+        if syncs := self.optSchedule.get('SYNC', []):
+            print("---- SYNC code ----")
+            for idx, code in zip(syncs[0], self.syncCode):
+                print(f"{idx:>2}: {str(code).strip()}")
 
 def removeComments(module):
     retModule = Module()
@@ -2386,11 +2406,11 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     n_mfma = 4 * 4 * 3    # 128 MT0 / 2 WT0 / 16 mfma dim  * 128/2/16 * 3 bf16 MFMAs per tf32 mfma
     kernel["MfmaInitCVgprs"] = True
     kernel["UsePLRPack"] = True
+    
     optSchedule = dict()
-    syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     syncs = SyncSchedule()
-    
+    syncCode = []   
     snops: list[tuple[int, SNop]] = []
     snopCode = []
     S4 = SNop(4)
@@ -2400,6 +2420,7 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         reorder_packing = True
         print(f"\nDDDDDDDDDDDDDDDD, {kernel['UseMFMAF32XEmulation']=}")
 
+        # syncs.add_barrier(-1, "sync all waves to start in lockstep")
         lra0 = [0,0,1,1]
         if not kernel["UseMFMAF32XEmulation"]:
             syncs.add(  3, dscnt=0, comment="Wait for LRA0 to complete before pack")
@@ -2490,16 +2511,11 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     if snops:
         optSchedule['SNOP'] = [ [s[0] for s in snops] ]
         snopCode = [s[1] for s in snops]
-
-    for k,v in optSchedule.items():
-        print(f"{k}: {v}")
-    for s in snops:
-        print(f"{s[0]}: {s[1]}")
-    for s in syncs.schedule:
-        print(f"{s[0]}: {s[1]}")
-  
+ 
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+    opt1.pretty_print()
 
     if reorder_packing:
-        opt1.disableOrderValidation(["PackA0", "PackB0", "PackA3", "PackB3", ]) # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
+        # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
+        opt1.disableOrderValidation(["PackA0", "PackB0", "PackA3", "PackB3", ])
     return True, opt1
