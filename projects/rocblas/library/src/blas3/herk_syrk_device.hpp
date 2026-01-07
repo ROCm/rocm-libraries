@@ -110,11 +110,11 @@ rocblas_syrkx_herkx_small_kernel(rocblas_int    N,
                                  rocblas_stride stride_c,
                                  rocblas_int    batch_count)
 {
-    int thx   = threadIdx.x; // thread's m position
-    int thy   = threadIdx.y; // thread's n position
-    int blx   = blockIdx.x; // block's m position
-    int bly   = blockIdx.y; // block's n position
-    int batch = blockIdx.z; // block's matrix in the batch
+    int      thx   = threadIdx.x; // thread's m position
+    int      thy   = threadIdx.y; // thread's n position
+    int      blx   = blockIdx.x; // block's m position
+    int      bly   = blockIdx.y; // block's n position
+    uint32_t batch = blockIdx.z; // block's matrix in the batch
 
 #if DEVICE_GRID_YZ_16BIT
     DEVICE_GRID_SETUP
@@ -217,11 +217,11 @@ rocblas_syrkx_herkx_small_restrict_kernel(rocblas_int    N,
                                           rocblas_stride stride_c,
                                           rocblas_int    batch_count)
 {
-    int thx   = threadIdx.x; // thread's m position
-    int thy   = threadIdx.y; // thread's n position
-    int blx   = blockIdx.x; // block's m position
-    int bly   = blockIdx.y; // block's n position
-    int batch = blockIdx.z; // block's matrix in the batch
+    int      thx   = threadIdx.x; // thread's m position
+    int      thy   = threadIdx.y; // thread's n position
+    int      blx   = blockIdx.x; // block's m position
+    int      bly   = blockIdx.y; // block's n position
+    uint32_t batch = blockIdx.z; // block's matrix in the batch
 
     auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
     auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
@@ -304,16 +304,17 @@ rocblas_syrkx_herkx_general_kernel(rocblas_int    N,
                                    rocblas_stride stride_c,
                                    rocblas_int    batch_count)
 {
-    int thx   = threadIdx.x; // thread's m position in C
-    int thy   = threadIdx.y; // thread's n position in C
-    int idt   = DIM_N * thy + thx; // thread's number
-    int blx   = blockIdx.x; // block's m position
-    int bly   = blockIdx.y; // block's n position
-    int batch = blockIdx.z; // block's matrix in the batch
-    int thxA  = idt % BLK_N; // thread's m position for loading A
-    int thyA  = idt / BLK_N; // thread's n position for loading A
-    int thxB  = idt % BLK_K; // thread's m position for loading B
-    int thyB  = idt / BLK_K; // thread's n position for loading B
+    int      thx   = threadIdx.x; // thread's m position in C
+    int      thy   = threadIdx.y; // thread's n position in C
+    int      idt   = DIM_N * thy + thx; // thread's number
+    int      blx   = blockIdx.x; // block's m position
+    int      bly   = blockIdx.y; // block's n position
+    uint32_t batch = blockIdx.z; // block's matrix in the batch
+
+    int thxA = idt % BLK_N; // thread's m position for loading A
+    int thyA = idt / BLK_N; // thread's n position for loading A
+    int thxB = idt % BLK_K; // thread's m position for loading B
+    int thyB = idt / BLK_K; // thread's n position for loading B
 
     auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
     auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
@@ -429,16 +430,17 @@ rocblas_syrkx_herkx_restricted_kernel(rocblas_int    N,
                                       rocblas_stride stride_c,
                                       rocblas_int    batch_count)
 {
-    int thx   = threadIdx.x; // thread's m position in C
-    int thy   = threadIdx.y; // thread's n position in C
-    int idt   = DIM_N * thy + thx; // thread's number
-    int blx   = blockIdx.x; // block's m position
-    int bly   = blockIdx.y; // block's n position
-    int batch = blockIdx.z; // block's matrix in the batch
-    int thxA  = idt % BLK_N; // thread's m position for loading A
-    int thyA  = idt / BLK_N; // thread's n position for loading A
-    int thxB  = idt % BLK_K; // thread's m position for loading B
-    int thyB  = idt / BLK_K; // thread's n position for loading B
+    int      thx   = threadIdx.x; // thread's m position in C
+    int      thy   = threadIdx.y; // thread's n position in C
+    int      idt   = DIM_N * thy + thx; // thread's number
+    int      blx   = blockIdx.x; // block's m position
+    int      bly   = blockIdx.y; // block's n position
+    uint32_t batch = blockIdx.z; // block's matrix in the batch
+
+    int thxA = idt % BLK_N; // thread's m position for loading A
+    int thyA = idt / BLK_N; // thread's n position for loading A
+    int thxB = idt % BLK_K; // thread's m position for loading B
+    int thyB = idt / BLK_K; // thread's n position for loading B
 
     auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
     auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
@@ -548,16 +550,17 @@ rocblas_syrkx_herkx_restricted_kernel(rocblas_int    N,
                                       rocblas_stride stride_c,
                                       rocblas_int    batch_count)
 {
-    int thx   = threadIdx.x; // thread's m position in C
-    int thy   = threadIdx.y; // thread's n position in C
-    int idt   = DIM_N * thy + thx; // thread's number
-    int blx   = blockIdx.x; // block's m position
-    int bly   = blockIdx.y; // block's n position
-    int batch = blockIdx.z; // block's matrix in the batch
-    int thxA  = idt % BLK_N; // thread's m position for loading A
-    int thyA  = idt / BLK_N; // thread's n position for loading A
-    int thxB  = idt % BLK_K; // thread's m position for loading B
-    int thyB  = idt / BLK_K; // thread's n position for loading B
+    int      thx   = threadIdx.x; // thread's m position in C
+    int      thy   = threadIdx.y; // thread's n position in C
+    int      idt   = DIM_N * thy + thx; // thread's number
+    int      blx   = blockIdx.x; // block's m position
+    int      bly   = blockIdx.y; // block's n position
+    uint32_t batch = blockIdx.z; // block's matrix in the batch
+
+    int thxA = idt % BLK_N; // thread's m position for loading A
+    int thyA = idt / BLK_N; // thread's n position for loading A
+    int thxB = idt % BLK_K; // thread's m position for loading B
+    int thyB = idt / BLK_K; // thread's n position for loading B
 
     auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
     auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);

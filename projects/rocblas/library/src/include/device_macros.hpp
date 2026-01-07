@@ -37,7 +37,7 @@
 #endif
 
 #define DEVICE_GRID_SETUP                                                                    \
-    uint32_t dc_YZ_grid_launch_limit = (int)0x7fffffff;                                      \
+    uint32_t dc_YZ_grid_launch_limit = (uint32_t)0x7fffffff;                                 \
     if(__builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201")) \
         dc_YZ_grid_launch_limit = c_YZ_grid_launch_limit;
 
