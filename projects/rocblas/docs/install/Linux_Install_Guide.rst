@@ -261,7 +261,7 @@ listed in this table.
 
    "``./install.sh -h``", "Help information."
    "``./install.sh -dc``", "Build the library dependencies, client dependencies, library, and client in your local directory. Automatically builds AOCL 5.2. The ``-d`` flag only has to be used once. For subsequent invocations of ``install.sh``, it is not necessary to rebuild the dependencies."
-   "``./install.sh -dc --skip-aocl``", "Build clients without AOCL; uses next available BLAS library."
+   "``./install.sh -dc --skip-aocl``", "Build clients without AOCL, using the next available BLAS library."
    "``./install.sh -dc --clean-deps``", "Clean and rebuild all dependencies before building."
    "``./install.sh -c``", "Build the library and client in your local directory. It is assumed the dependencies have been built."
    "``./install.sh -idc``", "Build the library  dependencies, client dependencies, library, and client, then build and install the rocBLAS package. You will be prompted for ``sudo`` access. To install rocBLAS for all users, use the ``-i`` flag. To restrict it to your local directory, do not use the ``-i`` flag."
