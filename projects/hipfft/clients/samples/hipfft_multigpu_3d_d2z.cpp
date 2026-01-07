@@ -156,7 +156,7 @@ int main()
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(rinput)::value_type);
         std::vector<decltype(rinput)::value_type> hbuf(vsize);
         std::cout << "buffer " << idx << ": "
-                  << Nxmax << " x " << Nymax << ": "
+                  << Nxmax << " x " << Nymax <<" x " << Nzmax << ": "
                   << Nxmax * Nymax <<" elements, buffer holds " << vsize << " elements\n";;
         if(hipMemcpy(hbuf.data(),
                      inoutdesc->descriptor->data[idx],
