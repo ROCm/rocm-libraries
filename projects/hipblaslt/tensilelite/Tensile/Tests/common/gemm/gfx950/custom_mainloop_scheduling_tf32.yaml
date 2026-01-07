@@ -110,4 +110,4 @@ BenchmarkProblems:
           - Range: [[256], [192], [1], [1, 1, 32]]
           - Range: [[256], [192], [1], [16, 32, 128]]
           - Range: [[8192], [6144], [1], [32, 32, 128]]
-        - BiasTypeArgs: ['b']
+        - BiasTypeArgs: ['s']
