@@ -392,23 +392,26 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
         if(candidate.empty())
             MIOPEN_THROW("Candidate vector is empty, cannot extract kernel_name.");
         const std::string& kernel_name = candidate[0];
-        
+
         // Try to get kernel string mapping - if not found, this is an unsupported kernel
         std::map<std::string, std::string> kernel_str_mapping;
-        try {
+        try
+        {
             kernel_str_mapping = metadata.GetKernelStrMapping(kernel_name);
-        } catch(const std::exception&) {
+        }
+        catch(const std::exception&)
+        {
             // Kernel not in metadata - likely a new CK kernel not yet supported by the model
             // Log warning and create sentinel encoding to preserve index alignment
             MIOPEN_LOG_W("Kernel not in metadata (new CK kernel?): " << kernel_name);
             MIOPEN_LOG_W("AI model cannot predict for this kernel - it will be ranked last");
             MIOPEN_LOG_W("Consider updating the AI model to support this kernel type");
-            
+
             // Create sentinel encoding (all NaN) to ensure this kernel ranks last
             // NaN propagates through dot product, resulting in NaN score which sorts last
-            std::vector<float> sentinel_encoding(output_params.size() - 
-                                                metadata.GetConstantOutputIndices().size(), 
-                                                std::numeric_limits<float>::quiet_NaN());
+            std::vector<float> sentinel_encoding(output_params.size() -
+                                                     metadata.GetConstantOutputIndices().size(),
+                                                 std::numeric_limits<float>::quiet_NaN());
             encoded_candidates.push_back(sentinel_encoding);
             continue; // Skip to next candidate
         }

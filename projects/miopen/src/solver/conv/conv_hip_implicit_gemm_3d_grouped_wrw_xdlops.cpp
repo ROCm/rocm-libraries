@@ -345,18 +345,18 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 std::vector<std::string> GetAllWrwKernelTypeStrings()
 {
     std::vector<std::string> all_kernels;
-    
+
     auto bilinear_ptrs = DeviceOpGBwdWeightBilinearPtrs<float>::GetInstances();
-    auto scale_ptrs = DeviceOpGBwdWeightScalePtrs<float>::GetInstances();
-    auto default_ptrs = DeviceOpGBwdWeightDefaultPtrs<float>::GetInstances();
-    
+    auto scale_ptrs    = DeviceOpGBwdWeightScalePtrs<float>::GetInstances();
+    auto default_ptrs  = DeviceOpGBwdWeightDefaultPtrs<float>::GetInstances();
+
     for(const auto& ptr : bilinear_ptrs)
         all_kernels.push_back(ptr->GetTypeString());
     for(const auto& ptr : scale_ptrs)
         all_kernels.push_back(ptr->GetTypeString());
     for(const auto& ptr : default_ptrs)
         all_kernels.push_back(ptr->GetTypeString());
-    
+
     return all_kernels;
 }
 
