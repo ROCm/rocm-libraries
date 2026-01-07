@@ -480,7 +480,7 @@ gdb ./build/debug/clients/staging/rocblas-test
 ## Notes
 
 - **Architecture Flag:** Always use `--architecture auto` for faster local builds (builds only for detected GPU)
-- **Test Duration:** Times listed are for MI300X hardware; may vary significantly by GPU model
+- **Test Duration:** Times listed are for MI300X hardware but can vary significantly by GPU model
 - **AOCL Integration:** AOCL-BLAS 5.1+ provides enhanced BLAS reference for testing
 - **Tensile:** Kernel generation happens during build; can take significant time for `--architecture all`
 - **Windows Limitations:** Some features (e.g., Fortran) may have limited support on Windows
