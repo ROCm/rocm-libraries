@@ -34,7 +34,7 @@ function( apply_omp_settings lib_target_ )
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
     list(APPEND build_rpath_list "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
     list(APPEND install_rpath_list "$ORIGIN/../llvm/${openmp_LIB_DIR}")
-    target_compile_options( ${lib_target_} PROPERTIES $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}> )
+    target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}> )
   endif()
 
   # Add AOCL library path if it's a shared library (.so)
