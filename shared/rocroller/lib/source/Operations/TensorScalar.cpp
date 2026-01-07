@@ -85,12 +85,16 @@ namespace rocRoller
 
         Tensor::Tensor(int                        numDims,
                        VariableType               variableType,
+                       std::vector<size_t> const& literalSizes,
                        std::vector<size_t> const& literalStrides)
             : Tensor(numDims, variableType)
         {
+            AssertFatal(literalSizes.size() <= numDims,
+                        "Cannot specify more literal sizes than dimensions.");
             AssertFatal(literalStrides.size() <= numDims,
                         "Cannot specify more literal strides than dimensions.");
 
+            m_literalSizes   = literalSizes;
             m_literalStrides = literalStrides;
         }
 

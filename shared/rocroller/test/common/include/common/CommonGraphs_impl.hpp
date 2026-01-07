@@ -432,9 +432,9 @@ namespace rocRollerTest::Graphs
         if(!m_literalStrides.empty())
         {
             tagInputTensor = m_command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, m_literalStrides));
+                rocRoller::Operations::Tensor(2, dataType, {}, m_literalStrides));
             tagOutputTensor = m_command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, m_literalStrides));
+                rocRoller::Operations::Tensor(2, dataType, {}, m_literalStrides));
         }
         else
         {
