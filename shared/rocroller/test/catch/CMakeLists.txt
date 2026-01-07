@@ -88,6 +88,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/SettingsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SubDwordExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKFixupTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SwizzleScaleTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TernaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext.cpp"

@@ -428,6 +428,42 @@ TEST(TestTensor, GetAndSetHostValueNdhwc)
     EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 2, 3, 4), 99.0f);
 }
 
+TEST(TestTensor, ElementAccessOperatorNchw)
+{
+    Tensor<float> tensor({1, 2, 3, 4});
+    tensor.fillWithValue(0.0f);
+    tensor(0, 1, 2, 2) = 79.0f;
+
+    EXPECT_FLOAT_EQ(tensor(0, 1, 2, 2), 79.0f);
+}
+
+TEST(TestTensor, ElementAccessOperatorNhwc)
+{
+    Tensor<float> tensor({1, 2, 3, 4}, TensorLayout::NHWC);
+    tensor.fillWithValue(0.0f);
+    tensor(0, 1, 2, 2) = 79.0f;
+
+    EXPECT_FLOAT_EQ(tensor(0, 1, 2, 2), 79.0f);
+}
+
+TEST(TestTensor, ElementAccessOperatorNcdhw)
+{
+    Tensor<float> tensor({1, 2, 3, 4, 5}, TensorLayout::NCDHW);
+    tensor.fillWithValue(0.0f);
+    tensor(0, 1, 2, 3, 4) = 79.0f;
+
+    EXPECT_FLOAT_EQ(tensor(0, 1, 2, 3, 4), 79.0f);
+}
+
+TEST(TestTensor, ElementAccessOperatorNdhwc)
+{
+    Tensor<float> tensor({1, 2, 3, 4, 5}, TensorLayout::NDHWC);
+    tensor.fillWithValue(0.0f);
+    tensor(0, 1, 2, 3, 4) = 79.0f;
+
+    EXPECT_FLOAT_EQ(tensor(0, 1, 2, 3, 4), 79.0f);
+}
+
 TEST(TestTensor, GetIndex5D)
 {
     //Strides {120, 60, 20, 5, 1}
