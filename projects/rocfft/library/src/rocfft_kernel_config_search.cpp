@@ -491,15 +491,9 @@ int main(int argc, char** argv)
                                                                   half_lds,
                                                                   direct_to_from_reg);
 
-                                auto code = compile_inprocess(kernel_src, device_prop.gcnArchName);
-                                hipModule_wrapper_t module;
-                                module.alloc(code.data());
-                                std::promise<hipModule_wrapper_t>       module_promise;
-                                std::shared_future<hipModule_wrapper_t> module_future
-                                    = module_promise.get_future();
-                                module_promise.set_value(std::move(module));
-
-                                RTCKernelStockham kernel(kernel_name, module_future);
+                                const auto code
+                                    = compile_inprocess(kernel_src, device_prop.gcnArchName);
+                                RTCKernelStockham kernel(kernel_name, code);
 
                                 float time = launch_kernel(
                                     kernel,
@@ -616,13 +610,8 @@ int main(int argc, char** argv)
                                               half_lds,
                                               direct_to_from_reg);
 
-            auto                code = compile_inprocess(kernel_src, device_prop.gcnArchName);
-            hipModule_wrapper_t module;
-            module.alloc(code.data());
-            std::promise<hipModule_wrapper_t>       module_promise;
-            std::shared_future<hipModule_wrapper_t> module_future = module_promise.get_future();
-            module_promise.set_value(std::move(module));
-            RTCKernelStockham kernel(kernel_name, module_future);
+            const auto        code = compile_inprocess(kernel_src, device_prop.gcnArchName);
+            RTCKernelStockham kernel(kernel_name, code);
 
             float time
                 = launch_kernel(kernel,

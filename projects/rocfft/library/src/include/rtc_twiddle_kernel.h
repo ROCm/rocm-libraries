@@ -38,11 +38,11 @@ struct RTCKernelTwiddle : public RTCKernel
     }
 
 protected:
-    RTCKernelTwiddle(const std::string&                       kernel_name,
-                     std::shared_future<hipModule_wrapper_t>& module,
-                     dim3                                     gridDim,
-                     dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+    RTCKernelTwiddle(const std::string&       kernel_name,
+                     const std::vector<char>& code,
+                     dim3                     gridDim,
+                     dim3                     blockDim)
+        : RTCKernel(kernel_name, code, gridDim, blockDim)
     {
     }
 };

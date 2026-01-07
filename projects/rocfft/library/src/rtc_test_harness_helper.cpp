@@ -134,12 +134,5 @@ std::unique_ptr<RTCKernel> compile(const std::string& name, const std::string& s
         throw std::runtime_error("failed to get code");
     hiprtcDestroyProgram(&prog);
 
-    hipModule_wrapper_t module;
-    module.alloc(code.data());
-
-    std::promise<hipModule_wrapper_t>       module_promise;
-    std::shared_future<hipModule_wrapper_t> module_future = module_promise.get_future();
-    module_promise.set_value(std::move(module));
-
-    return std::make_unique<RTCKernel>(name, module_future);
+    return std::make_unique<RTCKernel>(name, const_cast<const std::vector<char>&>(code));
 }

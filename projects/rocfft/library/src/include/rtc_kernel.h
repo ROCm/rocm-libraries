@@ -28,6 +28,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -123,22 +124,25 @@ struct RTCKernel
 
     // take already-compiled code object and prepare to launch the
     // named kernel
-    RTCKernel(const std::string&                       kernel_name,
-              std::shared_future<hipModule_wrapper_t>& module,
-              dim3                                     gridDim  = {},
-              dim3                                     blockDim = {});
+    template <typename T>
+    RTCKernel(const std::string& kernel_name,
+              T&                 raw_code_or_module,
+              dim3               gridDim  = {},
+              dim3               blockDim = {});
 
     virtual ~RTCKernel()
     {
         kernel = nullptr;
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
-        std::lock_guard<std::mutex> lock(active_modules_mutex);
-        // decrement refcount and remove the module from the map if it's no longer used
-        auto it = active_modules.find(rtc_module_key{kernel_name, deviceId});
-        it->second.refcount--;
-        if(it->second.refcount == 0)
-            active_modules.erase(it);
+        if(!owned_module)
+        {
+            std::lock_guard<std::mutex> lock(active_modules_mutex);
+            // decrement refcount and remove the module from the map if it's no longer used
+            auto it = active_modules.find(rtc_module_key{kernel_name, deviceId});
+            if(it != active_modules.end() && --it->second.refcount == 0)
+                active_modules.erase(it);
+        }
 #endif
     }
 
@@ -183,8 +187,10 @@ struct RTCKernel
     int         deviceId = 0;
 
 protected:
-    std::shared_future<hipModule_wrapper_t> module;
-    hipFunction_t                           kernel = nullptr;
+    // if not given a shared module at construction, this object
+    // creates (and owns) its own
+    std::optional<hipModule_wrapper_t> owned_module = std::nullopt;
+    hipFunction_t                      kernel       = nullptr;
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     struct RTCGenerator

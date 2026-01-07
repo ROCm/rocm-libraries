@@ -39,15 +39,14 @@ std::map<RTCKernel::rtc_module_key, RTCKernel::rtc_module_t> RTCKernel::active_m
 std::mutex                                                   RTCKernel::active_modules_mutex;
 #endif
 
-RTCKernel::RTCKernel(const std::string&                       kernel_name,
-                     std::shared_future<hipModule_wrapper_t>& module,
-                     dim3                                     gridDim,
-                     dim3                                     blockDim)
+template <typename T>
+RTCKernel::RTCKernel(const std::string& kernel_name, T& code_or_module, dim3 gridDim, dim3 blockDim)
     : gridDim(gridDim)
     , blockDim(blockDim)
     , kernel_name(kernel_name)
-    , module(module)
 {
+    static_assert(std::is_same_v<T, std::shared_future<hipModule_wrapper_t>> /*    */
+                  || std::is_same_v<T, const std::vector<char>>);
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     // if we're only compiling, no need to actually load the code objects
     if(rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1")
@@ -57,9 +56,27 @@ RTCKernel::RTCKernel(const std::string&                       kernel_name,
     if(hipGetDevice(&deviceId) != hipSuccess)
         throw std::runtime_error("hipGetDevice failed");
 
-    if(hipModuleGetFunction(&kernel, module.get(), kernel_name.c_str()) != hipSuccess)
-        throw std::runtime_error("failed to get function " + kernel_name);
+    if constexpr(std::is_same_v<T, std::shared_future<hipModule_wrapper_t>>)
+    {
+        if(hipModuleGetFunction(&kernel, code_or_module.get(), kernel_name.c_str()) != hipSuccess)
+            throw std::runtime_error("failed to get function " + kernel_name);
+    }
+    else
+    {
+        // code_or_module is a const std::vector<char> object (due to static_assert above)
+        owned_module = hipModule_wrapper_t{};
+        owned_module->alloc(code_or_module.data());
+        if(hipModuleGetFunction(&kernel, *owned_module, kernel_name.c_str()) != hipSuccess)
+            throw std::runtime_error("failed to get function " + kernel_name);
+    }
 }
+
+// Explicit instantiations
+template RTCKernel::RTCKernel(const std::string&,
+                              std::shared_future<hipModule_wrapper_t>&,
+                              dim3,
+                              dim3);
+template RTCKernel::RTCKernel(const std::string&, const std::vector<char>&, dim3, dim3);
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
 void RTCKernel::launch(DeviceCallIn& data, const hipDeviceProp_t& deviceProp)
