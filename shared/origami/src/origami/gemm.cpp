@@ -814,9 +814,9 @@ double compute_timestep_latency(const problem_t& problem,
                                 size_t num_active_cus,
                                 size_t splitting_factor) {
   // Assume latency of a timestep is latency of a single K-complete output tile computed on one CU.
-  double L_wave = compute_tile_latency(problem, hardware, config, num_active_cus, splitting_factor);
+  double L_timestep = compute_tile_latency(problem, hardware, config, num_active_cus, splitting_factor);
 
-  return L_wave;
+  return L_timestep;
 }
 
 double compute_total_latency(const problem_t& problem,
