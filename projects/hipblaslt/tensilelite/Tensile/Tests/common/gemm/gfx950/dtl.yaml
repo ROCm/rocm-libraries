@@ -697,6 +697,34 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [4096, 8192, 1, 128]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 16, 1, 1, 1, 1, 2, 2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [2]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - StreamK: [3]
+        - LDSTrInst: [1]
+        - UseSgprForGRO: [1]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
 
   ########################################
   # HHS TN DTL
@@ -958,6 +986,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 2, 4, 1 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
@@ -972,6 +1001,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - DirectToLds: [1]
+        - DirectToVgprA: [0,1]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]

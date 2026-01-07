@@ -24385,6 +24385,87 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
                                              int                invAsize,
                                              hipDataType        computeType);
 
+/*! \brief BLAS EX API
+
+    \details
+
+    herkEx performs one of the matrix-matrix operations for a Hermitian rank-k update
+
+    C := alpha*op( A )*op( A )^H + beta*C
+
+    where  alpha and beta are scalars, op(A) is an n by k matrix, and
+    C is a Hermitian n x n matrix stored as either upper or lower.
+
+        op( A ) = A, and A is n by k if transA == HIPBLAS_OP_N
+        op( A ) = A^H and A is k by n if transA == HIPBLAS_OP_C
+
+        - Supported types are determined by the backend. See rocBLAS/cuBLAS documentation.
+
+    @param[in]
+    handle    [hipblasHandle_t]
+              handle to the hipblas library context queue.
+    @param[in]
+    uplo      [hipblasFillMode_t]
+              Specifies whether the matrix C is an upper or lower triangular matrix as follows:
+              HIPBLAS_FILL_MODE_UPPER:  C is an upper triangular matrix.
+              HIPBLAS_FILL_MODE_LOWER:  C is a  lower triangular matrix.
+    @param[in]
+    transA    [hipblasOperation_t]
+              specifies the form of op( A ).
+    @param[in]
+    n         [int]
+              matrix dimension n.
+    @param[in]
+    k         [int]
+              matrix dimension k.
+    @param[in]
+    alpha     [const void *]
+              device pointer or host pointer specifying the scalar alpha. Same datatype as computeType.
+    @param[in]
+    A         [void *]
+              device pointer storing matrix A.
+    @param[in]
+    aType
+    [hipDataType]
+              specifies the datatype of matrix A.
+    @param[in]
+    lda       [int]
+              specifies the leading dimension of A.
+    @param[in]
+    beta      [const void *]
+              device pointer or host pointer specifying the scalar beta. Same datatype as computeType.
+    @param[in]
+    C         [void *]
+              device pointer storing matrix C.
+    @param[in]
+    cType
+    [hipDataType]
+              specifies the datatype of matrix C.
+    @param[in]
+    ldc       [int]
+              specifies the leading dimension of C.
+    @param[in]
+    computeType
+    [hipDataType]
+              specifies the datatype of computation.
+
+    ********************************************************************/
+
+HIPBLAS_EXPORT hipblasStatus_t hipblasHerkEx(hipblasHandle_t    handle,
+                                             hipblasFillMode_t  uplo,
+                                             hipblasOperation_t transA,
+                                             int                n,
+                                             int                k,
+                                             const void*        alpha,
+                                             const void*        A,
+                                             hipDataType        aType,
+                                             int                lda,
+                                             const void*        beta,
+                                             void*              C,
+                                             hipDataType        cType,
+                                             int                ldc,
+                                             hipDataType        computeType);
+
 /*! BLAS EX API
 
     \details
