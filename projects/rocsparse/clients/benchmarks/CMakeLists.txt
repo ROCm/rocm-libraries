@@ -44,10 +44,6 @@ if(TARGET OpenMP::OpenMP_CXX)
     target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-if(rocsparseio_FOUND)
-    target_link_libraries(rocsparse-bench PRIVATE roc::rocsparseio)
-endif()
-
 if(ROCSPARSE_ENABLE_MARKER)
     target_compile_definitions(rocsparse-bench PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX)
     target_include_directories(rocsparse-bench PRIVATE ${ROCTRACER_INCLUDE_DIR})
