@@ -147,6 +147,81 @@ struct DeviceHistogram
                                                 stream);
     }
 
+    template<int NUM_CHANNELS,
+             int NUM_ACTIVE_CHANNELS,
+             typename SampleIteratorT,
+             typename CounterT,
+             typename LevelT,
+             typename OffsetT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t MultiHistogramEven(void*           d_temp_storage,
+                                         size_t&         temp_storage_bytes,
+                                         SampleIteratorT d_samples,
+                                         CounterT*       d_histogram[NUM_ACTIVE_CHANNELS],
+                                         int             num_levels[NUM_ACTIVE_CHANNELS],
+                                         LevelT          lower_level[NUM_ACTIVE_CHANNELS],
+                                         LevelT          upper_level[NUM_ACTIVE_CHANNELS],
+                                         OffsetT         num_row_pixels,
+                                         OffsetT         num_rows,
+                                         size_t          row_stride_bytes,
+                                         hipStream_t     stream = 0)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceHistogram::MultiHistogramEven<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(
+                d_temp_storage,
+                temp_storage_bytes,
+                d_samples,
+                d_histogram,
+                num_levels,
+                lower_level,
+                upper_level,
+                num_row_pixels,
+                num_rows,
+                row_stride_bytes,
+                reinterpret_cast<cudaStream_t>(stream)));
+    }
+
+    template<int NUM_CHANNELS,
+             int NUM_ACTIVE_CHANNELS,
+             typename SampleIteratorT,
+             typename CounterT,
+             typename LevelT,
+             typename OffsetT>
+HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t MultiHistogramEven(void*           d_temp_storage,
+                                         size_t&         temp_storage_bytes,
+                                         SampleIteratorT d_samples,
+                                         CounterT*       d_histogram[NUM_ACTIVE_CHANNELS],
+                                         int             num_levels[NUM_ACTIVE_CHANNELS],
+                                         LevelT          lower_level[NUM_ACTIVE_CHANNELS],
+                                         LevelT          upper_level[NUM_ACTIVE_CHANNELS],
+                                         OffsetT         num_row_pixels,
+                                         OffsetT         num_rows,
+                                         size_t          row_stride_bytes,
+                                         hipStream_t     stream,
+                                         bool            debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+
+        return MultiHistogramEven<NUM_CHANNELS,
+                                  NUM_ACTIVE_CHANNELS,
+                                  SampleIteratorT,
+                                  CounterT,
+                                  LevelT,
+                                  OffsetT>(d_temp_storage,
+                                           temp_storage_bytes,
+                                           d_samples,
+                                           d_histogram,
+                                           num_levels,
+                                           lower_level,
+                                           upper_level,
+                                           num_row_pixels,
+                                           num_rows,
+                                           row_stride_bytes,
+                                           stream);
+    }
+
     template<typename SampleIteratorT, typename CounterT, typename LevelT, typename OffsetT>
     HIPCUB_RUNTIME_FUNCTION static hipError_t HistogramRange(void*           d_temp_storage,
                                                              size_t&         temp_storage_bytes,
