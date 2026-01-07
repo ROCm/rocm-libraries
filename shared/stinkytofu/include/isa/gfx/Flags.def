@@ -42,6 +42,11 @@ MACRO(IF_ConditionalBranch)
 MACRO(IF_WaitCnt)
 MACRO(IF_WaitTensorCnt)
 
+// ALU instruction classifications for delay_alu and scheduling
+MACRO(IF_VALU)
+MACRO(IF_SALU)
+MACRO(IF_Transcendental)
+
 // Instructions that have side effects but not belongs to any of the
 // following categories:
 // - memory stores, ds writes, branches, barriers, and waitcnts

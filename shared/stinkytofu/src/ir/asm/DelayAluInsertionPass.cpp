@@ -25,6 +25,7 @@
 #include "StinkyBuilder.hpp"
 #include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/StinkyModifiers.hpp"
 #include "isa/ArchHelper.hpp"
 #include "support/Casting.hpp"
 
@@ -60,42 +61,22 @@ namespace
     /// Classifies an instruction by its ALU type for delay encoding
     DelayAluType classifyDelayAluType(const StinkyInstruction* inst)
     {
-        if(!inst || !inst->getHwInstDesc() || !inst->getHwInstDesc()->mnemonic)
+        if(!inst || !inst->getHwInstDesc())
             return DelayAluType::OTHER;
 
-        std::string opcode = inst->getHwInstDesc()->mnemonic;
-
-        // Transcendental instructions: v_s_* or v_exp/log/rcp/rsq/sqrt
-        if(opcode.compare(0, 4, "v_s_") == 0)
+        // Use helper functions for type-safe instruction classification
+        if(isTranscendental(*inst))
         {
             return DelayAluType::TRANS;
         }
 
-        if(opcode.compare(0, 6, "v_exp_") == 0 || opcode.compare(0, 6, "v_log_") == 0
-           || opcode.compare(0, 6, "v_rcp_") == 0 || opcode.compare(0, 6, "v_rsq_") == 0
-           || opcode.compare(0, 7, "v_sqrt_") == 0)
-        {
-            return DelayAluType::TRANS;
-        }
-
-        // Vector ALU: v_*
-        if(opcode.compare(0, 2, "v_") == 0)
+        if(isVectorALU(*inst))
         {
             return DelayAluType::VALU;
         }
 
-        // Scalar ALU: s_* but excluding control flow, memory ops, waitcnt, barrier, delay_alu
-        if(opcode.compare(0, 2, "s_") == 0)
+        if(isScalarALU(*inst))
         {
-            // Exclude instructions that don't need delay
-            if(opcode == "s_waitcnt" || opcode == "s_barrier" || opcode == "s_delay_alu"
-               || opcode == "s_endpgm" || opcode == "s_nop" || opcode == "s_branch"
-               || opcode.compare(0, 10, "s_cbranch_") == 0 || opcode.compare(0, 6, "s_load") == 0
-               || opcode.compare(0, 7, "s_store") == 0 || opcode.compare(0, 8, "s_buffer") == 0)
-            {
-                return DelayAluType::OTHER;
-            }
-
             return DelayAluType::SALU;
         }
 
@@ -293,29 +274,30 @@ namespace
 
             StinkyInstruction* inst = irBuilder.createStinkyInstBefore(insertPoint, desc);
 
-            // Build operand string based on delay type and distance
-            std::string operand;
+            // Convert DelayAluType to SDelayAluData::InstType and create modifier
+            SDelayAluData::InstType instType;
+            int8_t                  distance = delay.dist;
+
             switch(delay.type)
             {
             case DelayAluType::VALU:
-                operand = "instid0(VALU_DEP_" + std::to_string(delay.dist) + ")";
+                instType = SDelayAluData::InstType::VALU;
                 break;
             case DelayAluType::SALU:
-                operand = "instid0(SALU_CYCLE_1)"; // SALU always uses CYCLE_1
+                instType = SDelayAluData::InstType::SALU;
+                distance = 1; // SALU always uses distance 1
                 break;
             case DelayAluType::TRANS:
-                operand = "instid0(TRANS32_DEP_" + std::to_string(delay.dist) + ")";
+                instType = SDelayAluData::InstType::TRANS;
                 break;
             default:
-                operand = "instid0(NO_DEP)";
+                instType = SDelayAluData::InstType::NO_DEP;
+                distance = 0;
                 break;
             }
 
-            // Add operand as a literal string (s_delay_alu has special operand syntax)
-            StinkyRegister symbolicOperand;
-            symbolicOperand.dataType     = StinkyRegister::Type::LiteralString;
-            symbolicOperand.literalValue = operand;
-            inst->addSrcReg(symbolicOperand);
+            // Add modifier with proper delay information
+            inst->addModifier(SDelayAluData(instType, distance));
 
             return true;
         }

@@ -642,6 +642,10 @@ namespace stinkytofu
                     cloned->modifiers.push_back(std::make_unique<SWaitTensorCntData>(
                         *static_cast<SWaitTensorCntData*>(mod.get())));
                     break;
+                case Modifier::Type::SDELAYALU_DATA:
+                    cloned->modifiers.push_back(
+                        std::make_unique<SDelayAluData>(*static_cast<SDelayAluData*>(mod.get())));
+                    break;
                 case Modifier::Type::LABEL_NAME:
                     cloned->modifiers.push_back(
                         std::make_unique<LabelData>(*static_cast<LabelData*>(mod.get())));
@@ -1003,6 +1007,28 @@ namespace stinkytofu
 
         return false;
     }
+
+    /// Check if instruction is a vector ALU instruction (v_*)
+    /// Excludes transcendental instructions which are classified separately
+    inline bool isVectorALU(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_VALU) && !inst.is(InstFlag::IF_Transcendental);
+    }
+
+    /// Check if instruction is a transcendental instruction
+    /// Includes: v_s_*, v_exp_*, v_log_*, v_rcp_*, v_rsq_*, v_sqrt_*
+    inline bool isTranscendental(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_Transcendental);
+    }
+
+    /// Check if instruction is a scalar ALU instruction (s_*)
+    /// Excludes: control flow, memory operations, waitcnt, barrier, delay_alu
+    inline bool isScalarALU(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_SALU);
+    }
+
 } // namespace stinkytofu
 
 // Hash specialization for StinkyRegister (required for std::unordered_map)
