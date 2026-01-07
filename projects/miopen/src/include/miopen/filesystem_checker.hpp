@@ -29,7 +29,7 @@ public:
 
 /// Get the global filesystem checker instance
 /// @return Reference to the current filesystem checker (default or test override)
-MIOPEN_INTERNALS_EXPORT IFilesystemChecker& GetFilesystemChecker();
+MIOPEN_INTERNALS_EXPORT const IFilesystemChecker& GetFilesystemChecker();
 
 /// Set a custom filesystem checker (for testing purposes only)
 /// @param checker Pointer to custom checker, or nullptr to restore default
