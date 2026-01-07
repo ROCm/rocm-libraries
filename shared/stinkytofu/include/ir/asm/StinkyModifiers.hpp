@@ -47,6 +47,7 @@ namespace stinkytofu
             SMEM,
             SDWA,
             DPP,
+            VOP3,
             VOP3P,
             TRUE16,
             EXEC,
@@ -225,6 +226,38 @@ namespace stinkytofu
             , bound_ctrl(bound_ctrl)
         {
         }
+    };
+
+    struct VOP3Modifiers : public Modifier
+    {
+        VOP3Modifiers(bool neg_src0 = false,
+                      bool neg_src1 = false,
+                      bool neg_src2 = false,
+                      bool abs_src0 = false,
+                      bool abs_src1 = false,
+                      bool abs_src2 = false,
+                      bool clamp    = false,
+                      int  omod     = 0)
+            : Modifier(Type::VOP3)
+            , neg_src0(neg_src0)
+            , neg_src1(neg_src1)
+            , neg_src2(neg_src2)
+            , abs_src0(abs_src0)
+            , abs_src1(abs_src1)
+            , abs_src2(abs_src2)
+            , clamp(clamp)
+            , omod(omod)
+        {
+        }
+
+        bool neg_src0; // Negate source operand 0
+        bool neg_src1; // Negate source operand 1
+        bool neg_src2; // Negate source operand 2
+        bool abs_src0; // Absolute value of source operand 0
+        bool abs_src1; // Absolute value of source operand 1
+        bool abs_src2; // Absolute value of source operand 2
+        bool clamp; // Clamp result to [0.0, 1.0]
+        int  omod; // Output modifier: 0=*1, 1=*2, 2=*4, 3=*0.5
     };
 
     struct VOP3PModifiers : public Modifier
@@ -441,6 +474,7 @@ namespace stinkytofu
     template<> constexpr Modifier::Type getModifierType<SMEMModifiers>() { return Modifier::Type::SMEM; }
     template<> constexpr Modifier::Type getModifierType<SDWAModifiers>() { return Modifier::Type::SDWA; }
     template<> constexpr Modifier::Type getModifierType<DPPModifiers>() { return Modifier::Type::DPP; }
+    template<> constexpr Modifier::Type getModifierType<VOP3Modifiers>() { return Modifier::Type::VOP3; }
     template<> constexpr Modifier::Type getModifierType<VOP3PModifiers>() { return Modifier::Type::VOP3P; }
     template<> constexpr Modifier::Type getModifierType<True16Modifiers>() { return Modifier::Type::TRUE16; }
     template<> constexpr Modifier::Type getModifierType<EXEC>() { return Modifier::Type::EXEC; }

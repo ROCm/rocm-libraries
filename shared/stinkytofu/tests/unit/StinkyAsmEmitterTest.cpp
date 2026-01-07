@@ -551,3 +551,109 @@ TEST_F(AsmEmitterTest, EmitCycleInfoOnlyWithUserComment)
     std::string expected = "    ds_read_b128 v[0:3], v[40] // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
+
+TEST_F(AsmEmitterTest, VOP3ModifierNegation)
+{
+    StinkyInstruction* inst = createInstruction("v_add_f32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->setDestRegs({StinkyRegister("v", 0, 1)});
+    inst->setSrcRegs({StinkyRegister("v", 1, 1), StinkyRegister("v", 2, 1)});
+
+    // Add VOP3 modifier to negate src0
+    VOP3Modifiers mod;
+    mod.neg_src0 = true;
+    inst->addModifier(mod);
+
+    AsmEmitterOptions options;
+    options.emitComments  = false;
+    options.emitCycleInfo = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string      assembly = emitter.emit(*inst);
+
+    // Should render as: v_add_f32 v[0], -v[1], v[2]
+    std::string expected = "    v_add_f32 v[0], -v[1], v[2]\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+TEST_F(AsmEmitterTest, VOP3ModifierAbsoluteValue)
+{
+    StinkyInstruction* inst = createInstruction("v_add_f32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->setDestRegs({StinkyRegister("v", 10, 1)});
+    inst->setSrcRegs({StinkyRegister("v", 11, 1), StinkyRegister("v", 12, 1)});
+
+    // Add VOP3 modifier for absolute value of src0
+    VOP3Modifiers mod;
+    mod.abs_src0 = true;
+    inst->addModifier(mod);
+
+    AsmEmitterOptions options;
+    options.emitComments  = false;
+    options.emitCycleInfo = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string      assembly = emitter.emit(*inst);
+
+    // Should render as: v_add_f32 v[10], abs(v[11]), v[12]
+    std::string expected = "    v_add_f32 v[10], abs(v[11]), v[12]\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+TEST_F(AsmEmitterTest, VOP3ModifierNegatedAbsoluteValue)
+{
+    StinkyInstruction* inst = createInstruction("v_add_f32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->setDestRegs({StinkyRegister("v", 20, 1)});
+    inst->setSrcRegs({StinkyRegister("v", 21, 1), StinkyRegister("v", 22, 1)});
+
+    // Add VOP3 modifier for negated absolute value of src0
+    VOP3Modifiers mod;
+    mod.neg_src0 = true;
+    mod.abs_src0 = true;
+    inst->addModifier(mod);
+
+    AsmEmitterOptions options;
+    options.emitComments  = false;
+    options.emitCycleInfo = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string      assembly = emitter.emit(*inst);
+
+    // Should render as: v_add_f32 v[20], -abs(v[21]), v[22]
+    // This follows LLVM syntax: "-" before "abs()" is allowed
+    std::string expected = "    v_add_f32 v[20], -abs(v[21]), v[22]\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+TEST_F(AsmEmitterTest, VOP3ModifierMultipleSources)
+{
+    StinkyInstruction* inst = createInstruction("v_fma_f32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->setDestRegs({StinkyRegister("v", 30, 1)});
+    inst->setSrcRegs(
+        {StinkyRegister("v", 31, 1), StinkyRegister("v", 32, 1), StinkyRegister("v", 33, 1)});
+
+    // Add VOP3 modifiers: neg src0, abs src1, neg+abs src2
+    VOP3Modifiers mod;
+    mod.neg_src0 = true;
+    mod.abs_src1 = true;
+    mod.neg_src2 = true;
+    mod.abs_src2 = true;
+    inst->addModifier(mod);
+
+    AsmEmitterOptions options;
+    options.emitComments  = false;
+    options.emitCycleInfo = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string      assembly = emitter.emit(*inst);
+
+    // Should render with modifiers on each source according to LLVM syntax
+    std::string expected = "    v_fma_f32 v[30], -v[31], abs(v[32]), -abs(v[33])\n";
+    EXPECT_EQ(assembly, expected);
+}
