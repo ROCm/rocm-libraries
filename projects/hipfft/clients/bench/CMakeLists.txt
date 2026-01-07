@@ -46,7 +46,7 @@ if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUA
     if( WIN32 )
       find_package( HIP CONFIG REQUIRED )
     else()
-      find_package( HIP MODULE REQUIRED )
+      find_package( HIP REQUIRED )
     endif()
 
     target_link_libraries( hipfft-bench PRIVATE hip::host hip::device )
