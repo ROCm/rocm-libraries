@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-rocBLAS is AMD's ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs. It provides highly optimized implementations of standard BLAS operations (Level 1, 2, and 3) with support for multiple data types and batched operations.
+rocBLAS is the AMD ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs. It provides highly optimized implementations of standard BLAS operations (Level 1, 2, and 3) with support for multiple data types and batched operations.
 
 ## Code Style and Conventions
 
