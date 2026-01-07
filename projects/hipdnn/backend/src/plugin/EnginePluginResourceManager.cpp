@@ -149,13 +149,15 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         }
         catch(const std::exception& e)
         {
-            HIPDNN_LOG_WARN(
-                "Failed to destroy handle for plugin '{}' during cleanup: {}", plugin->name(), e.what());
+            HIPDNN_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
+                            plugin->name(),
+                            e.what());
         }
         catch(...)
         {
             HIPDNN_LOG_WARN(
-                "Failed to destroy handle for plugin '{}' during cleanup: unknown error", plugin->name());
+                "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
+                plugin->name());
         }
     };
 
