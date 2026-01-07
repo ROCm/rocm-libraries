@@ -120,6 +120,8 @@ END_HIPCUB_NAMESPACE
     #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
 
     #include <cub/util_arch.cuh>
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
     #define HIPCUB_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_DEVICE_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_HOST_WARP_THREADS CUB_PTX_WARP_THREADS
