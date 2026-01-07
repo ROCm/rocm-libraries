@@ -157,7 +157,7 @@ int main()
         std::vector<decltype(rinput)::value_type> hbuf(vsize);
         std::cout << "buffer " << idx << ": "
                   << Nxmax << " x " << Nymax <<" x " << Nzmax << ": "
-                  << Nxmax * Nymax <<" elements, buffer holds " << vsize << " elements\n";;
+                  << Nxmax * Nymax * Nzmax <<" elements, buffer holds " << vsize << " elements\n";
         if(hipMemcpy(hbuf.data(),
                      inoutdesc->descriptor->data[idx],
                      inoutdesc->descriptor->size[idx],
@@ -202,11 +202,11 @@ int main()
         const int Nxmax = Nx;
         const int Nymax = Ny / ngpus + ((idx < Ny % ngpus) ? 1 : 0);
         const int Nzmax = Nzp;
-        std::cout << "buffer " << idx << ": "
-                  << Nxmax << " x " << Nymax<< " x " << Nzmax << ": "
-                  << Nxmax * Nymax * Nzmax <<" elements\n";
         const size_t vsize
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(coutput)::value_type);
+        std::cout << "buffer " << idx << ": "
+                  << Nxmax << " x " << Nymax<< " x " << Nzmax << ": "
+                  << Nxmax * Nymax * Nzmax <<" elements, buffer holds " << vsize << " elements\n";
 
         std::vector<decltype(coutput)::value_type> hbuf(vsize);
         if(hipMemcpy(hbuf.data(),
