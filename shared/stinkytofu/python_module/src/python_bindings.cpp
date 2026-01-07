@@ -379,27 +379,89 @@ NB_MODULE(stinkytofu, m)
              &StinkyRegister::withOffset,
              nb::arg("offset"),
              "Apply an offset to this virtual register's index and mark it as physical")
-        .def_prop_ro(
+        // Read-write properties (rocisa RegisterContainer compatibility)
+        .def_prop_rw(
             "regType",
             [](const StinkyRegister& r) { return regTypeToString(r.reg.type); },
+            [](StinkyRegister& r, const std::string& type) { r.reg.type = stringToRegType(type); },
             "Register type (e.g., 'v', 's', 'a')")
-        .def_prop_ro(
-            "regIdx", [](const StinkyRegister& r) { return r.reg.idx; }, "Register index")
-        .def_prop_ro(
+        .def_prop_rw(
+            "regIdx",
+            [](const StinkyRegister& r) { return r.reg.idx; },
+            [](StinkyRegister& r, int idx) { r.reg.idx = idx; },
+            "Register index")
+        .def_prop_rw(
             "regNum",
             [](const StinkyRegister& r) { return r.reg.num; },
+            [](StinkyRegister& r, int num) { r.reg.num = num; },
             "Number of consecutive registers")
-        .def("__repr__", [](const StinkyRegister& r) {
-            if(r.reg.num == 1)
-            {
-                return regTypeToString(r.reg.type) + std::to_string(r.reg.idx);
-            }
-            else
-            {
-                return regTypeToString(r.reg.type) + "[" + std::to_string(r.reg.idx) + ":"
-                       + std::to_string(r.reg.idx + r.reg.num - 1) + "]";
-            }
-        });
+        .def("__repr__",
+             [](const StinkyRegister& r) {
+                 if(r.reg.num == 1)
+                 {
+                     return regTypeToString(r.reg.type) + std::to_string(r.reg.idx);
+                 }
+                 else
+                 {
+                     return regTypeToString(r.reg.type) + "[" + std::to_string(r.reg.idx) + ":"
+                            + std::to_string(r.reg.idx + r.reg.num - 1) + "]";
+                 }
+             })
+        .def("__str__",
+             [](const StinkyRegister& r) {
+                 if(r.reg.num == 1)
+                 {
+                     return regTypeToString(r.reg.type) + std::to_string(r.reg.idx);
+                 }
+                 else
+                 {
+                     return regTypeToString(r.reg.type) + "[" + std::to_string(r.reg.idx) + ":"
+                            + std::to_string(r.reg.idx + r.reg.num - 1) + "]";
+                 }
+             })
+        .def(
+            "__eq__",
+            [](const StinkyRegister& self, nb::object other) {
+                if(!nb::isinstance<StinkyRegister>(other))
+                    return false;
+                auto o = nb::cast<StinkyRegister>(other);
+                return self.reg.type == o.reg.type && self.reg.idx == o.reg.idx
+                       && self.reg.num == o.reg.num;
+            },
+            nb::arg("other").none())
+        .def("__hash__",
+             [](const StinkyRegister& r) {
+                 size_t h1 = std::hash<int>{}(static_cast<int>(r.reg.type));
+                 size_t h2 = std::hash<int>{}(r.reg.idx);
+                 size_t h3 = std::hash<int>{}(r.reg.num);
+                 return h1 ^ (h2 << 1) ^ (h3 << 2);
+             })
+        .def("__deepcopy__",
+             [](const StinkyRegister& self, nb::dict&) { return StinkyRegister(self); })
+        .def("__getstate__",
+             [](const StinkyRegister& self) {
+                 return std::make_tuple(regTypeToString(self.reg.type), self.reg.idx, self.reg.num);
+             })
+        .def("__setstate__",
+             [](StinkyRegister& self, std::tuple<std::string, int, int> t) {
+                 new(&self) StinkyRegister(std::get<0>(t), std::get<1>(t), std::get<2>(t));
+             })
+
+        .def(
+            "getCompleteRegName",
+            [](const StinkyRegister& self) -> std::string {
+                // Return the string representation of the register
+                if(self.reg.num == 1)
+                {
+                    return regTypeToString(self.reg.type) + std::to_string(self.reg.idx);
+                }
+                else
+                {
+                    return regTypeToString(self.reg.type) + "[" + std::to_string(self.reg.idx) + ":"
+                           + std::to_string(self.reg.idx + self.reg.num - 1) + "]";
+                }
+            },
+            "Get complete register name string");
 
     // ========================================================================
     // Bind Modifier Classes
@@ -555,6 +617,26 @@ NB_MODULE(stinkytofu, m)
         .def_rw("row_bcast", &DPPModifiers::row_bcast, "Row broadcast")
         .def_rw("bound_ctrl", &DPPModifiers::bound_ctrl, "Boundary control");
 
+    nb::class_<VOP3Modifiers>(m, "VOP3Modifiers")
+        .def(nb::init<bool, bool, bool, bool, bool, bool, bool, int>(),
+             nb::arg("neg_src0") = false,
+             nb::arg("neg_src1") = false,
+             nb::arg("neg_src2") = false,
+             nb::arg("abs_src0") = false,
+             nb::arg("abs_src1") = false,
+             nb::arg("abs_src2") = false,
+             nb::arg("clamp")    = false,
+             nb::arg("omod")     = 0,
+             "VOP3 instruction modifiers for source operand negation and absolute value")
+        .def_rw("neg_src0", &VOP3Modifiers::neg_src0, "Negate source operand 0")
+        .def_rw("neg_src1", &VOP3Modifiers::neg_src1, "Negate source operand 1")
+        .def_rw("neg_src2", &VOP3Modifiers::neg_src2, "Negate source operand 2")
+        .def_rw("abs_src0", &VOP3Modifiers::abs_src0, "Absolute value of source operand 0")
+        .def_rw("abs_src1", &VOP3Modifiers::abs_src1, "Absolute value of source operand 1")
+        .def_rw("abs_src2", &VOP3Modifiers::abs_src2, "Absolute value of source operand 2")
+        .def_rw("clamp", &VOP3Modifiers::clamp, "Clamp result to [0.0, 1.0]")
+        .def_rw("omod", &VOP3Modifiers::omod, "Output modifier: 0=*1, 1=*2, 2=*4, 3=*0.5");
+
     nb::class_<VOP3PModifiers>(m, "VOP3PModifiers")
         .def(nb::init<const std::vector<int>&, const std::vector<int>&, const std::vector<int>&>(),
              nb::arg("op_sel")    = std::vector<int>{},
@@ -600,21 +682,119 @@ NB_MODULE(stinkytofu, m)
             },
             "Get/set instruction comment")
 
-        // Destination registers (read-only)
-        .def_prop_ro(
+        // Destination register access (rocisa-compatible, type-safe)
+        // Single destination (most common case)
+        .def_prop_rw(
             "dst",
+            [](const StinkyInstruction& inst) -> StinkyRegister {
+                const auto& dsts = inst.getDestRegs();
+                if(dsts.empty())
+                {
+                    throw std::runtime_error("Instruction has no destination registers");
+                }
+                return dsts[0];
+            },
+            [](StinkyInstruction& inst, const StinkyRegister& reg) {
+                auto dsts = inst.getDestRegs();
+                if(dsts.empty())
+                {
+                    throw std::runtime_error("Instruction has no destination registers");
+                }
+                dsts[0] = reg;
+                inst.setDestRegs(dsts);
+            },
+            "Get/set first destination register")
+
+        // Second destination (for instructions with multiple destinations)
+        .def_prop_rw(
+            "dst1",
+            [](const StinkyInstruction& inst) -> StinkyRegister {
+                const auto& dsts = inst.getDestRegs();
+                if(dsts.size() < 2)
+                {
+                    throw std::runtime_error("Instruction has fewer than 2 destination registers");
+                }
+                return dsts[1];
+            },
+            [](StinkyInstruction& inst, const StinkyRegister& reg) {
+                auto dsts = inst.getDestRegs();
+                if(dsts.size() < 2)
+                {
+                    throw std::runtime_error("Instruction has fewer than 2 destination registers");
+                }
+                dsts[1] = reg;
+                inst.setDestRegs(dsts);
+            },
+            "Get/set second destination register")
+
+        // Full destination vector access (for advanced use cases)
+        .def_prop_ro(
+            "dsts",
             [](const StinkyInstruction& inst) -> std::vector<StinkyRegister> {
                 return inst.getDestRegs();
             },
-            "Get destination registers")
+            "Get all destination registers as vector")
 
-        // Source registers (read-only)
+        // Source register access (rocisa-compatible, type-safe, read-only)
+        .def_prop_ro(
+            "src0",
+            [](const StinkyInstruction& inst) -> StinkyRegister {
+                const auto& srcs = inst.getSrcRegs();
+                if(srcs.empty())
+                {
+                    throw std::runtime_error("Instruction has no source registers");
+                }
+                return srcs[0];
+            },
+            "Get first source register")
+
+        .def_prop_ro(
+            "src1",
+            [](const StinkyInstruction& inst) -> StinkyRegister {
+                const auto& srcs = inst.getSrcRegs();
+                if(srcs.size() < 2)
+                {
+                    throw std::runtime_error("Instruction has fewer than 2 source registers");
+                }
+                return srcs[1];
+            },
+            "Get second source register")
+
+        .def_prop_ro(
+            "src2",
+            [](const StinkyInstruction& inst) -> StinkyRegister {
+                const auto& srcs = inst.getSrcRegs();
+                if(srcs.size() < 3)
+                {
+                    throw std::runtime_error("Instruction has fewer than 3 source registers");
+                }
+                return srcs[2];
+            },
+            "Get third source register")
+
+        // Full source vector access (for advanced use cases)
         .def_prop_ro(
             "srcs",
             [](const StinkyInstruction& inst) -> std::vector<StinkyRegister> {
                 return inst.getSrcRegs();
             },
-            "Get source registers")
+            "Get all source registers as vector")
+
+        // Indexed source modification (similar to rocisa's setSrc)
+        .def(
+            "setSrc",
+            [](StinkyInstruction& inst, size_t idx, const StinkyRegister& reg) {
+                auto srcs = inst.getSrcRegs();
+                if(idx >= srcs.size())
+                {
+                    throw std::out_of_range("Source register index out of range");
+                }
+                srcs[idx] = reg;
+                inst.setSrcRegs(srcs);
+            },
+            nb::arg("idx"),
+            nb::arg("reg"),
+            "Set source register at index")
 
         // DPP modifier (optional)
         .def_prop_ro(
@@ -661,6 +841,25 @@ NB_MODULE(stinkytofu, m)
                 return oss.str();
             },
             "Get string representation of instruction")
+
+        // Modifier management
+        .def(
+            "addModifier",
+            [](StinkyInstruction& inst, const VOP3Modifiers& mod) { inst.addModifier(mod); },
+            nb::arg("modifier"),
+            "Add a VOP3 modifier to the instruction")
+
+        .def(
+            "getVOP3Modifiers",
+            [](const StinkyInstruction& inst) -> nb::object {
+                const VOP3Modifiers* mod = inst.getModifier<VOP3Modifiers>();
+                if(mod)
+                {
+                    return nb::cast(*mod);
+                }
+                return nb::none();
+            },
+            "Get VOP3 modifiers if present, otherwise return None")
 
         // Prevent deepcopy and pickling (same as rocisa::Instruction)
         .def("__deepcopy__",
