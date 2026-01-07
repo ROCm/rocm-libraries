@@ -1613,7 +1613,7 @@ def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple
     # TODO: Move this validation into each instructions's validation to allow for custom ordering.
     for k in scheduleInfo.optSchedule.keys():
         if k.startswith("Pack"):
-            # Packs have their own validation or ordering.
+            # Packs have their own validation for ordering.
             continue
         seq = schedule_get(k, code_path, scheduleInfo)
         for i in range(1, len(seq)):
