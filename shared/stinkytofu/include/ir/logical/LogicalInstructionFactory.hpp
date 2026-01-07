@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "ir/IntrinsicCall.hpp"
 #include "ir/logical/LogicalInstructions.hpp"
 #include <string>
 #include <vector>

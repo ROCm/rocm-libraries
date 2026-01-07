@@ -85,6 +85,7 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/StinkyAsmPrinter.cpp
     ir/asm/StinkyAsmEmitter.cpp
     ir/asm/StinkySignature.cpp
+    ir/asm/StinkyAsmModule.cpp
     ir/asm/IRLexer.cpp
     ir/asm/IRParser.cpp
     ir/asm/PatternParser.cpp
@@ -103,6 +104,7 @@ set(ROCISA_TO_STINKYTOFU_SOURCE_FILES
     ir/rocisa/ToStinkyAsmPass.cpp
     ir/rocisa/FromStinkyAsmPass.cpp
     ir/rocisa/AllHwMappings.cpp
+    ir/rocisa/ToStinkyTofuUtils.cpp
 )
 list(TRANSFORM ROCISA_TO_STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/")
 

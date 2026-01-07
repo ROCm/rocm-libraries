@@ -43,7 +43,19 @@ namespace stinkytofu
 
             // Single register without brackets (e.g., v12, BARRIER0)
             // Range with brackets (e.g., v[10:13])
-            if(reg.reg.num == 1)
+            if(reg.hasSymbolicName())
+            {
+                if(reg.reg.num == 1)
+                {
+                    os << prefix << "[" << reg.getSymbolicName() << "]";
+                }
+                else
+                {
+                    os << prefix << "[" << reg.getSymbolicName() << ":" << reg.getSymbolicName()
+                       << "+" << (reg.reg.num - 1) << "]";
+                }
+            }
+            else if(reg.reg.num == 1)
             {
                 os << prefix << reg.reg.idx;
             }

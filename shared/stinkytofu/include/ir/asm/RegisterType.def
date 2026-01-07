@@ -31,6 +31,7 @@
 REGISTER_TYPE(V,           "v",           "Vector register")
 REGISTER_TYPE(S,           "s",           "Scalar register")
 REGISTER_TYPE(A,           "a",           "Accumulator register")
+REGISTER_TYPE(M,           "m",           "Memory descriptor register")
 REGISTER_TYPE(ACC,         "acc",         "Accumulator register (alternative name)")
 REGISTER_TYPE(AGPR,        "AGPR",        "Accumulator GPR")
 REGISTER_TYPE(SCC,         "SCC",         "Scalar Condition Code")
