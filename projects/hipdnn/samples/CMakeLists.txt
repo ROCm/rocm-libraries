@@ -73,7 +73,7 @@ function(add_hipdnn_sample_test TARGET_NAME)
     )
 
     install(TARGETS ${TARGET_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${TARGET_NAME} \"../${TARGET_NAME}\")\n")
+    file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${TARGET_NAME} \"../${TARGET_NAME}\" \"--verify-cpu\")\n")
 endfunction()
 
 # Register convolution samples as tests
