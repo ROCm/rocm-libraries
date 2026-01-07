@@ -44,8 +44,7 @@ CK_TILE_DEVICE void load_and_convert_tile(WarpTile& dst, const WarpWindow& src)
     if constexpr(is_packed_type_v<SrcDataType>)
     {
         static_assert(!LoadTranspose, "LoadTranspose not supported with pk_int4_t or pk_fp4_t");
-        ConverterLoader<SrcDataType, DstDataType, UnaryOpSize>::load_interleaved_pk_type(
-            dst, src);
+        ConverterLoader<SrcDataType, DstDataType, UnaryOpSize>::load_interleaved_pk_type(dst, src);
     }
     else if constexpr(LoadTranspose)
     {

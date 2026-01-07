@@ -378,8 +378,8 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                 move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                  {nIter * flatNPerWarp, kIter * flatKPerWarp});
 
-                load_and_convert_tile<UnaryOpSize_>(
-                    b_warp_tensor_ping(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
+                load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_ping(nIter)(kIter),
+                                                    b_flat_dram_windows(nIter)(kIter));
             });
         });
         // move B window to next flat K
@@ -460,8 +460,8 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
 
                     move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                      {nIter * flatNPerWarp, kIter * flatKPerWarp});
-                    load_and_convert_tile<UnaryOpSize_>(
-                        b_warp_tensor_pong(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
+                    load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_pong(nIter)(kIter),
+                                                        b_flat_dram_windows(nIter)(kIter));
                 });
             });
             move_tile_window(b_flat_dram_window, {0, BlockGemmShape::flatKPerBlock});
@@ -489,8 +489,8 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
 
                     move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                      {nIter * flatNPerWarp, kIter * flatKPerWarp});
-                    load_and_convert_tile<UnaryOpSize_>(
-                        b_warp_tensor_ping(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
+                    load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_ping(nIter)(kIter),
+                                                        b_flat_dram_windows(nIter)(kIter));
                 });
             });
             move_tile_window(b_flat_dram_window, {0, BlockGemmShape::flatKPerBlock});
@@ -539,8 +539,8 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                     move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                      {nIter * flatNPerWarp, kIter * flatKPerWarp});
 
-                    load_and_convert_tile<UnaryOpSize_>(
-                        b_warp_tensor_pong(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
+                    load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_pong(nIter)(kIter),
+                                                        b_flat_dram_windows(nIter)(kIter));
                 });
             });
             aq_block_tile_2 = load_tile(aq_copy_dram_window);
