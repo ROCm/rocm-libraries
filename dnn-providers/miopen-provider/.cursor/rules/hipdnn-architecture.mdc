@@ -2,24 +2,55 @@
 alwaysApply: true
 ---
 
-# hipDNN Project Architecture
+# MIOpen Provider Plugin Architecture
 
-hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture.
+MIOpen Provider is a hipDNN plugin that wraps AMD's MIOpen library to provide GPU-accelerated deep learning operations.
 
-## Key Design Documents
+**hipDNN Context**: hipDNN is a graph-based deep learning library for AMD GPUs with a plugin architecture. Plugins implement the Plugin SDK to provide engine implementations that execute operation graphs.
 
-- **[Design Overview](./docs/Design.md)** - Core architecture and component interactions
-- **[Building](./docs/Building.md)** - Build system and dependencies
-- **[Testing](./docs/Testing.md)** - Testing strategy and organization
-- **[Plugin Development](./docs/PluginDevelopment.md)** - Plugin API and extension points
+## Plugin SDK Interfaces
 
-## Component Architecture (Do Not Modify Boundaries/Linkage)
+This plugin implements the following hipDNN Plugin SDK interfaces:
 
-| Component | Type | Links To | Purpose |
-|-----------|------|----------|---------|
-| **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
-| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API |
-| **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
-| **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
-| **Plugins** (`plugins/`) | Shared libraries | Plugin SDK, Data SDK | Engine implementations (e.g., MIOpen Legacy) |
-| **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
+| Interface | File | Purpose |
+|-----------|------|---------|
+| **Plugin API** | `PluginApi.h` | Plugin metadata (name, version, type), error reporting, logging callbacks |
+| **Engine Plugin API** | `EnginePluginApi.h` | Engine lifecycle - create handle, set stream, get engines, execute graphs |
+| **IEngine** | `EngineInterface.hpp` | Engine interface - checks applicability, provides details, creates plans |
+| **IPlanBuilder** | `PlanInterface.hpp` | Builds execution plans for specific operation patterns |
+| **IPlan** | `PlanInterface.hpp` | Executable plan that runs operations on GPU |
+
+## Execution Flow
+
+```
+FlatBuffer Graph → Engine Selection → Plan Creation → GPU Execution
+       ↓                  ↓                 ↓              ↓
+   IGraph API    isApplicable()     buildPlan()     execute()
+```
+
+1. **Graph Analysis**: Backend deserializes FlatBuffer graph, queries plugins for applicable engines
+2. **Engine Selection**: Plugin's `isApplicable()` checks if any plan builder can handle the graph
+3. **Plan Building**: Selected plan builder creates concrete `IPlan` instance with MIOpen setup
+4. **Execution**: Plan's `execute()` launches MIOpen kernels on GPU
+
+## Component Linkage (Do Not Modify)
+
+- **Plugin uses**: Plugin SDK (header-only), Data SDK (header-only), MIOpen library
+- **Plugin SDK uses**: Data SDK
+- **Data SDK uses**: FlatBuffers, spdlog
+- **No direct dependencies** on hipDNN Backend or Frontend
+
+## Key Classes
+
+- **HipdnnEnginePluginHandle**: Plugin instance with MIOpen handle, stream, engine manager
+- **EngineManager**: Manages available engines and routes requests to applicable engines
+- **MiopenEngine**: Concrete engine with multiple plan builders for different operations
+- **HipdnnEnginePluginExecutionContext**: Stores the execution plan for a graph
+- **Plan Builders**: `MiopenConvPlanBuilder`, `MiopenBatchnormPlanBuilder`, etc.
+- **Plans**: `MiopenConvFwdPlan`, `MiopenBatchnormFwdPlan`, etc.
+
+## Documentation
+
+- [Plugin SDK Reference](../../../projects/hipdnn/docs/PluginDevelopment.md)
+- [Operation Support](../docs/OperationSupport.md)
+- [Plugin API Headers](../../../projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/)

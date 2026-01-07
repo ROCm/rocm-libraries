@@ -1,78 +1,86 @@
-# Cline Rules for hipDNN Project
+# Cline Rules for MIOpen Provider Plugin
 
-## Project Overview & Architecture
+## Project Overview
 
-hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture.
+MIOpen Provider is a hipDNN plugin that wraps AMD's MIOpen library to provide GPU-accelerated deep learning operations. This plugin implements the hipDNN Plugin SDK interface to expose MIOpen kernels as execution engines.
 
-### Key Design Documents
-- **[Design Overview](./docs/Design.md)** - Core architecture and component interactions
-- **[Building](./docs/Building.md)** - Build system and dependencies
-- **[Testing](./docs/Testing.md)** - Testing strategy and organization
-- **[Plugin Development](./docs/PluginDevelopment.md)** - Plugin API and extension points
+**hipDNN Context**: hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture. Plugins like this one implement the Plugin SDK to provide engine implementations that execute operation graphs.
 
-### Component Architecture (Do Not Modify Boundaries (linkage))
-| Component | Type | Links To | Purpose |
-|-----------|------|----------|---------|
-| **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
-| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API |
-| **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
-| **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
-| **Plugins** (`plugins/`) | Shared libraries | Plugin SDK, Data SDK | Engine implementations (e.g., MIOpen Legacy) |
-| **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
+### Key Documentation
+- **[Plugin README](./README.md)** - Build instructions and overview
+- **[Operation Support](./docs/OperationSupport.md)** - Supported operations and data types
+- **[hipDNN Plugin Development Guide](../../projects/hipdnn/docs/PluginDevelopment.md)** - Plugin SDK reference
+- **[Plugin SDK Headers](../../projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/)** - API definitions
+
+### Plugin Architecture
+
+This plugin implements the hipDNN Plugin SDK interfaces:
+
+| Component | Purpose |
+|-----------|---------|
+| **Plugin API** (`PluginApi.h`) | Plugin metadata (name, version, type), error reporting, logging |
+| **Engine Plugin API** (`EnginePluginApi.h`) | Engine lifecycle (create, configure, execute graphs) |
+| **IEngine** | Engine interface - checks graph applicability, creates execution plans |
+| **IPlanBuilder** | Builds execution plans for specific operation types |
+| **IPlan** | Executable plan that runs on GPU using MIOpen kernels |
+| **Data SDK** | FlatBuffer schemas for serialization, logging utilities |
+
+**Execution Flow**: Graph (FlatBuffer) → Engine Selection (isApplicable) → Plan Creation (IPlanBuilder) → Execution (IPlan::execute)
+
+**Component Linkage (Do Not Modify)**:
+- Plugin uses: Plugin SDK (header-only), Data SDK (header-only), MIOpen library
+- Plugin SDK uses: Data SDK
+- No direct dependencies on hipDNN Backend or Frontend
 
 ---
 
-## Building & Testing Quickstart
+## Building & Testing
 
 ### Build Commands
+
+**Building as part of hipDNN**:
 ```bash
+# From hipDNN root directory
 cd <workspace>/projects/hipdnn
 mkdir -p build && cd build
-
-# Configure (one-time or after CMakeLists changes)
 cmake -GNinja ..
-
-# Build everything
-ninja
-
-# Build and run ALL tests (may take several minutes)
-ninja check
-
-# Build and run unit tests only (faster iteration)
-ninja unit-check
-
-# Build and run integration tests only
-ninja integration-check
+ninja  # Plugin built by default
 ```
 
-### Test Binaries in `build/bin/`
+**Building standalone** (requires hipDNN and MIOpen installed):
+```bash
+# From plugin directory
+cd <workspace>/dnn-providers/miopen-provider
+mkdir -p build && cd build
+cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ ..
+ninja
+```
+
+See [Plugin README](./README.md) for detailed build instructions.
+
+### Test Binaries
+
+Plugin-specific test binaries (in `build/bin/` when building from hipDNN root):
+
 | Binary | Tests | Typical Use |
 |--------|-------|-------------|
-| `hipdnn_backend_tests` | Backend unit tests | Core backend logic |
-| `hipdnn_frontend_tests` | Frontend unit tests | Frontend wrapper logic |
-| `hipdnn_data_sdk_tests` | Data SDK unit tests | Flatbuffer objects, utilities |
-| `hipdnn_plugin_sdk_tests` | Plugin SDK unit tests | Plugin interface utilities |
-| `hipdnn_test_sdk_tests` | Test SDK unit tests | Test utility functions |
-| `public_hipdnn_backend_tests` | Backend API tests | Public C API black-box tests |
-| `public_hipdnn_frontend_tests` | Frontend integration tests | E2E frontend tests |
-| `miopen_legacy_plugin_tests` | MIOpen plugin unit tests | Plugin-specific tests |
-| `miopen_plugin_integration_test` | MIOpen integration tests | GPU-required E2E tests |
+| `miopen_legacy_plugin_tests` | Plugin unit tests | Engine manager, plan builders, MIOpen integration |
+| `miopen_plugin_integration_test` | GPU integration tests | End-to-end operation execution |
 
 ### Running Specific Tests with `--gtest_filter`
+
 **Use `--gtest_filter` when iterating on specific functionality:**
 ```bash
-# Run a specific test suite
-./build/bin/hipdnn_backend_tests --gtest_filter="TestBackendDescriptor.*"
+# From hipDNN build directory
+./bin/miopen_legacy_plugin_tests --gtest_filter="TestMiopenEngine.*"
 
 # Run a specific test case
-./build/bin/hipdnn_frontend_tests --gtest_filter="TestGraph.SerializationRoundTrip"
-
-# Run tests matching a pattern
-./build/bin/public_hipdnn_frontend_tests --gtest_filter="*Convolution*"
+./bin/miopen_plugin_integration_test --gtest_filter="IntegrationGpuConvolutionFwdFp32.*"
 ```
 
 ### When Modifying Code
-**Only build or run tests if explicitly requested in the user's prompt.** Do not proactively run `ninja`, `ninja check`, or test binaries unless asked.
+
+**Only build or run tests if explicitly requested in the user's prompt.** Do not proactively run `ninja`, test binaries, or build commands unless asked.
 
 When requested to build/test:
 1. Rebuild with `ninja` (from build directory)
@@ -83,9 +91,9 @@ When requested to build/test:
 ## C++ Code Style
 
 ### Naming Conventions
-- Use CamelCase for class and struct names (e.g., `BatchNormTestCase`, `SimpleTensorBundle`)
-- Use camelBack for functions, variables, and private members (e.g., `setupEnvironment()`, `tensorData`)
-- Prefix private members with underscore (e.g., `_handle`, `_testData`)
+- Use CamelCase for class and struct names (e.g., `MiopenEngine`, `ConvolutionPlanBuilder`)
+- Use camelBack for functions, variables, and private members (e.g., `buildPlan()`, `engineId`)
+- Prefix private members with underscore (e.g., `_miopenHandle`, `_planBuilders`)
 
 ### File Headers
 - Always add copyright header to all source files:
@@ -121,8 +129,8 @@ When requested to build/test:
 - When discussing dependencies or build configuration, provide CMake-based solutions
 
 ### Serialization
-- Use Flatbuffers for serialization needs
-- Provide Flatbuffer schema definitions when creating serializable data structures
+- Use Flatbuffers for serialization needs (via Data SDK)
+- Access FlatBuffer data via Data SDK wrapper classes (IGraph, GraphWrapper, etc.)
 
 ### Testing
 - Use Google Test (gtest) framework for all C/C++ tests
@@ -143,26 +151,23 @@ TestCase should be PascalCase.
 
 Omit any category that does not apply.
 
-### 10.1 Keywords (reserved positions)
+### Keywords (reserved positions)
 
 - **Integration** (only for integration tests, always first if present).
 - **Gpu** (always first unless preceded by Integration).
 - **Datatypes**: Bfp16, Fp16, Fp32.
 
-### 10.2 Unit Tests
+### Unit Tests
 
-In most cases unit style tests should be named so the directly mirror the class under test.  If the class is named `MyClass`, then the test suite should be named `TestMyClass`.  In general these kinds of tests should try to avoid using anything that requires Gpu support.  This is not always possible, in the cases where Gpu support is required, the test suite should be named `GpuTestMyClass`.
+In most cases unit style tests should be named so they directly mirror the class under test. If the class is named `MyClass`, then the test suite should be named `TestMyClass`. In general these kinds of tests should try to avoid using anything that requires Gpu support. This is not always possible, in the cases where Gpu support is required, the test suite should be named `GpuTestMyClass`.
 
-### 10.3 Valid Examples
+### Valid Examples
 
 ```cpp
-IntegrationGpuConvolutionPlannerNchwFp32
-GpuTestActivationKernelNchwFp32
-GpuTestExecutionPlanBuilderFp32
-GpuTestExecutionPlanBuilderNchw
-IntegrationGraphFusion
-TestConvolutionHeuristicsFp32
-TestConvolutionHeuristics
+IntegrationGpuConvolutionFwdFp32
+GpuTestMiopenEngineFp32
+TestMiopenEngineManager
+TestConvolutionPlanBuilder
 ```
 
 ## Example Code Structure
@@ -177,21 +182,21 @@ TestConvolutionHeuristics
 #include <vector>
 
 // Class names in PascalCase
-class MyTestClass
+class MiopenPlanBuilder
 {
 public:
     // Public methods in camelCase
-    void setupTest();
-    int getValue() const;
+    void buildPlan();
+    size_t getWorkspaceSize() const;
 
 private:
     // Private members prefixed with _
-    int _testValue;
+    miopenHandle_t _handle;
     std::vector<float> _data;
 };
 
 // Functions in camelCase
-void processData(const MyTestClass& obj);
+void executePlan(const MiopenPlanBuilder& builder);
 ```
 
 ## Test File Example
@@ -202,7 +207,7 @@ void processData(const MyTestClass& obj);
 
 #include <gtest/gtest.h>
 
-class MyTestFixture : public ::testing::Test
+class TestMiopenEngine : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -211,10 +216,11 @@ protected:
     }
 
 private:
-    int _testData;
+    miopenHandle_t _handle;
 };
 
-TEST_F(MyTestFixture, testSomething)
+TEST_F(TestMiopenEngine, CreatesValidEngine)
 {
     // Test implementation
 }
+```
