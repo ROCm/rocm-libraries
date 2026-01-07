@@ -2175,11 +2175,8 @@ int main(int argc, const char* argv[])
 
     if(pretileScale)
     {
-        types.scalePretileA = {static_cast<unsigned long>(solution.macM),
-                               static_cast<unsigned long>(solution.macK / types.scaleBlockSize)};
-
-        types.scalePretileB = {static_cast<unsigned long>(solution.macK / types.scaleBlockSize),
-                               static_cast<unsigned long>(solution.macN)};
+        types.scalePretileA = {types.scaleShuffleTileA[0], types.scaleShuffleTileA[1]};
+        types.scalePretileB = {types.scaleShuffleTileB[1], types.scaleShuffleTileB[0]};
     }
 
     problem.types  = types;
