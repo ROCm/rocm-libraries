@@ -157,7 +157,7 @@ rocblas_status rocblas_<operation>_launcher(..., void* workspace = nullptr)
 }
 ```
 
-Note: Pattern A is preferred for clarity, Pattern B is useful for large existing functions.
+Note: Pattern A is preferred for clarity. Pattern B is useful for large existing functions.
 
 ## Pointer Mode Patterns
 
