@@ -35,15 +35,21 @@ macro(_rocm_detect_os)
 endmacro()
 
 # Set up OpenMP package variables for current OS
+# Only sets variables if OpenMP is found
 macro(rocm_setup_posix_openmp_packages)
     _rocm_detect_os()
 
-    set(OPENMP_RPM "libgomp")
-    set(OPENMP_DEB "libomp-dev")
+    if(OPENMP_FOUND)
+        set(OPENMP_RPM "libgomp")
+        set(OPENMP_DEB "libomp-dev")
 
-    # OS-specific overrides
-    if(HOST_OS STREQUAL "sles")
-        set(OPENMP_RPM "libgomp1")
+        # OS-specific overrides
+        if(HOST_OS STREQUAL "sles")
+            set(OPENMP_RPM "libgomp1")
+        endif()
+    else()
+        set(OPENMP_RPM "")
+        set(OPENMP_DEB "")
     endif()
 endmacro()
 

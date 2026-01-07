@@ -37,6 +37,15 @@ if(DEFINED BUILD_CLIENTS_TESTS)
     endif()
 endif()
 
+# BUILD_TESTING (standard CMake variable) → ROCSPARSE_BUILD_TESTING
+# BUILD_TESTING is the standard CMake variable used by CTest, so support it without deprecation
+if(DEFINED BUILD_TESTING AND BUILD_TESTING)
+    if(NOT DEFINED ROCSPARSE_BUILD_TESTING)
+        set(ROCSPARSE_BUILD_TESTING ${BUILD_TESTING} CACHE BOOL 
+            "Build tests (requires googletest)" FORCE)
+    endif()
+endif()
+
 # BUILD_CLIENTS_BENCHMARKS → ROCSPARSE_ENABLE_BENCHMARKS
 if(DEFINED BUILD_CLIENTS_BENCHMARKS)
     _rocsparse_check_conflict(BUILD_CLIENTS_BENCHMARKS ROCSPARSE_ENABLE_BENCHMARKS)
@@ -180,6 +189,15 @@ if(DEFINED AMDGPU_TARGETS)
         set(GPU_TARGETS ${AMDGPU_TARGETS} CACHE STRING 
             "AMD GFX targets to cross-compile" FORCE)
         _rocsparse_deprecation_warning(AMDGPU_TARGETS GPU_TARGETS)
+    endif()
+endif()
+
+# BUILD_SHARED_LIBS → ROCSPARSE_BUILD_SHARED_LIBS
+# Note: BUILD_SHARED_LIBS is a standard CMake variable, so we support it without deprecation
+if(DEFINED BUILD_SHARED_LIBS)
+    if(NOT DEFINED ROCSPARSE_BUILD_SHARED_LIBS)
+        set(ROCSPARSE_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL 
+            "Build rocSPARSE as a shared library" FORCE)
     endif()
 endif()
 

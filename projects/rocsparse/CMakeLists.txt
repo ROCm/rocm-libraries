@@ -30,6 +30,7 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
 include(fetch_rocm_cmake)
 include(rocsparse_supported_architectures.cmake)
+include(rocsparse_target_configure_sanitizers)
 include(CMakeDependentOption)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -194,17 +195,27 @@ endif()
 # --- Packaging and installation ---
 
 if(ROCSPARSE_ENABLE_CLIENT)
-    include(rocm_client_packages.cmake)
+    include(rocm_client_prerequisites)
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
 endif()
 
 if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
-    rocm_package_setup_client_component(tests DEPENDS COMPONENT clients-common)
+    rocm_package_setup_client_component(tests
+        DEPENDS
+            COMPONENT clients-common
+            DEB "${OPENMP_DEB}"
+            RPM "${OPENMP_RPM}"
+    )
 endif()
 
 if(ROCSPARSE_ENABLE_BENCHMARKS)
-    rocm_package_setup_client_component(benchmarks DEPENDS COMPONENT clients-common)
+    rocm_package_setup_client_component(benchmarks
+        DEPENDS
+            COMPONENT clients-common
+            DEB "${OPENMP_DEB}"
+            RPM "${OPENMP_RPM}"
+    )
 endif()
 
 if(ROCSPARSE_ENABLE_SAMPLES)
@@ -271,12 +282,18 @@ rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= ${HIP_RUNTIME_M
 
 # rocBLAS dependency
 if(rocblas_FOUND)
-    set(ROCBLAS_MINIMUM "4.1.0")
-    rocm_package_add_dependencies(DEPENDS "rocblas >= ${ROCBLAS_MINIMUM}" COMPONENT runtime)
+    rocm_package_add_dependencies(DEPENDS "rocblas >= ${ROCSPARSE_MIN_ROCBLAS_VERSION}" COMPONENT runtime)
+    # Static library dependencies for rocBLAS
+    rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${ROCSPARSE_MIN_ROCBLAS_VERSION}")
+    rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${ROCSPARSE_MIN_ROCBLAS_VERSION}")
 endif()
 
 # Add rocm-core dependency
 rocm_package_add_dependencies(DEPENDS "rocm-core" COMPONENT runtime)
+
+# Static library dependencies for HIP
+rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
+rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
 
 # Development package depends on runtime package
 rocm_package_add_deb_dependencies(DEPENDS "rocsparse (>= ${rocsparse_VERSION})" COMPONENT devel)

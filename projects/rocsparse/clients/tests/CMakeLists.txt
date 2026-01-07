@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 find_package(GTest 1.11.0 REQUIRED)
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 
 add_executable(rocsparse-test)
 
@@ -180,7 +180,7 @@ target_compile_options(rocsparse-test PRIVATE
 target_compile_features(rocsparse-test PRIVATE cxx_std_17)
 
 target_include_directories(rocsparse-test PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    ${PROJECT_SOURCE_DIR}/clients/include
 )
 
 # OpenMP RPATH handling for hip-clang
@@ -231,15 +231,15 @@ string(REGEX REPLACE ".cpp" ".yaml" ROCSPARSE_TEST_YAMLS "${ROCSPARSE_TEST_SOURC
 
 add_custom_command(
     OUTPUT "${ROCSPARSE_TEST_DATA}"
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../common/rocsparse_gentest.py
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/clients/common/rocsparse_gentest.py
             -m ${PROJECT_BINARY_DIR}/matrices
-            -I ${CMAKE_CURRENT_SOURCE_DIR}/../include
+            -I ${PROJECT_SOURCE_DIR}/clients/include
             rocsparse_test.yaml
             -o "${ROCSPARSE_TEST_DATA}"
     DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/../common/rocsparse_gentest.py
+        ${PROJECT_SOURCE_DIR}/clients/common/rocsparse_gentest.py
         rocsparse_test.yaml
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include/rocsparse_common.yaml
+        ${PROJECT_SOURCE_DIR}/clients/include/rocsparse_common.yaml
         ${ROCSPARSE_TEST_YAMLS}
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
