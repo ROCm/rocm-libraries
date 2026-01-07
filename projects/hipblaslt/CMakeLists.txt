@@ -221,11 +221,15 @@ if(HIPBLASLT_ENABLE_MSGPACK)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: This is a temporary solution to prevent the installation of the origami license files.
-    block(SCOPE_FOR VARIABLES)
-        set(ORIGAMI_ENABLE_INSTALL OFF)
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
-    endblock()
+    if(HIPBLASLT_ENABLE_THEROCK)
+        find_package(origami REQUIRED)
+    else()
+        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+        block(SCOPE_FOR VARIABLES)
+            set(ORIGAMI_ENABLE_INSTALL OFF)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+        endblock()
+    endif()
 endif()
 
 add_subdirectory(tensilelite)
