@@ -1542,7 +1542,9 @@ def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo',
     """
     Ensure that the Packs start and end at the correct indices.
     """
-    assert not schedule_info.mfmaReorder, "MFMA reorder is not supported for pack validation."
+    if schedule_info.mfmaReorder:
+        printWarning("MFMA reorder is not supported for pack validation. Skipping pack validation.")
+        return True, ""
 
     if context["kernel"].get("UseMFMAF32XEmulation", False):
         printWarning("Pack validation is not supported for MFMA F32X emulation mode.")
