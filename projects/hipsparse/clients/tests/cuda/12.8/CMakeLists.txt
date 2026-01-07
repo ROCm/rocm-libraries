@@ -30,10 +30,6 @@ set(HIPSPARSE_TEST_SOURCES
     # Level 3
     test_bsrmm.cpp
     test_bsrsm2.cpp
-    # Extra
-    test_csrgeam2.cpp
-    # Reorder
-    test_csrcolor.cpp
     # Precond  
     test_bsric02.cpp
     test_bsrilu02.cpp
@@ -44,6 +40,10 @@ set(HIPSPARSE_TEST_SOURCES
     test_gtsv2_nopivot.cpp
     test_gtsv2_strided_batch.cpp
     test_gtsv_interleaved_batch.cpp
+    # Extra
+    test_csrgeam2.cpp
+    # Reorder
+    test_csrcolor.cpp
     # Conversion
     test_bsr2csr.cpp
     test_coo2csr.cpp
@@ -126,6 +126,8 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_gtsv2_nopivot.yaml
     cuda/12.8/test_gtsv2_strided_batch.yaml
     cuda/12.8/test_gtsv_interleaved_batch.yaml
+    # Extra
+    cuda/12.8/test_csrgeam2.yaml
     # Reorder
     cuda/12.8/test_csrcolor.yaml
     # Conversion

@@ -1289,14 +1289,11 @@ namespace TensileLite
         static_cast<void>(hipGetDevice(&deviceId));
         static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
         auto gpu_arch_no_prefix = removePrefix(deviceProperties.gcnArchName);
-        if(stoi(gpu_arch_no_prefix) / 100 != 12)
+        if(internalArgsSupport.version >= 1)
         {
-            if(internalArgsSupport.version >= 1)
-            {
-                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-                rv.numWorkGroups.y = 1;
-                rv.numWorkGroups.z = 1;
-            }
+            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+            rv.numWorkGroups.y = 1;
+            rv.numWorkGroups.z = 1;
         }
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;

@@ -92,7 +92,7 @@ void testing_rotmg_batched(const Arguments& arg)
     if(batch_count <= 0)
         return;
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     hipblasLocalHandle handle(arg);
 

@@ -91,7 +91,9 @@ namespace rocisa
            {"bf16", 2},
            {"f16", 2},
            {"f32", 4},
+           {"f32c", 8},
            {"f64", 8},
+           {"f64c", 16},
            {"pkf16", 4},
            {"struct", 8}};
 } // namespace rocisa

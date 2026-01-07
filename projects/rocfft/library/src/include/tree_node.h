@@ -62,7 +62,7 @@ enum FuseType
     FT_STOCKHAM_WITH_TRANS_XY_Z, // R_T-XY_Z
     FT_R2C_TRANSPOSE, // post-r2c + transpose
     FT_TRANSPOSE_C2R, // transpose + pre-c2r
-    FT_STOCKHAM_R2C_TRANSPOSE, // Stokham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
+    FT_STOCKHAM_R2C_TRANSPOSE, // Stockham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
 };
 
 struct GridParam
@@ -97,6 +97,9 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx1100",
                                                        "gfx1101",
                                                        "gfx1102",
+                                                       "gfx1151",
+                                                       "gfx1152",
+                                                       "gfx1153",
                                                        "gfx1200",
                                                        "gfx1201"};
 
@@ -794,7 +797,7 @@ public:
         // Since large twiddle multiply (i.e. middle T of L1D_TRTRT)
         // cannot be fused with an FFT kernel, we should not try too
         // hard to pad its output.  The other T nodes of that plan can
-        // keep their buffer assigments so that padding doesn't upset
+        // keep their buffer assignments so that padding doesn't upset
         // the current choice of which nodes we fuse.
         return large1D == 0;
     }
