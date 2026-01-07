@@ -6,7 +6,7 @@ These rules help AI agents understand rocBLAS conventions, architecture, and bes
 
 ## Project Overview & Architecture
 
-rocBLAS is AMD's ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs.
+rocBLAS is the AMD ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs.
 
 ### Key Documentation
 - **[README](./README.md)** - Project overview and requirements
