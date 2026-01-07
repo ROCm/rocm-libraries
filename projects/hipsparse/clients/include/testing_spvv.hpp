@@ -43,7 +43,7 @@ template <typename I, typename T>
 void testing_spvv_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     int64_t size = 100;
     int64_t nnz  = 100;
 
@@ -119,7 +119,7 @@ template <typename I, typename T>
 void testing_spvv(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     I                    size    = argus.N;
     I                    nnz     = argus.nnz;
     hipsparseOperation_t trans   = argus.transA;
