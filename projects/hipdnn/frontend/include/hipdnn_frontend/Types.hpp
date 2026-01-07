@@ -12,6 +12,7 @@
 
 #include <bitset>
 #include <set>
+#include <spdlog/fmt/fmt.h>
 
 namespace hipdnn_frontend
 {
@@ -86,6 +87,7 @@ enum class DataType
     DOUBLE = 4,
     UINT8 = 5,
     INT32 = 6,
+    INT8 = 7,
 };
 typedef DataType DataType_t; // NOLINT(readability-identifier-naming)
 
@@ -94,6 +96,13 @@ enum class HeuristicMode
     FALLBACK,
 };
 typedef HeuristicMode HeurMode_t; // NOLINT(readability-identifier-naming)
+
+enum class BuildPlanPolicy
+{
+    HEURISTICS_CHOICE, // Use heuristics to select the best plan
+    ALL // Build all available plans (currently unused)
+};
+typedef BuildPlanPolicy BuildPlanPolicy_t; // NOLINT(readability-identifier-naming)
 
 template <typename T>
 DataType getDataTypeEnumFromType()
@@ -121,6 +130,10 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, int32_t>)
     {
         return DataType::INT32;
+    }
+    else if constexpr(std::is_same_v<T, int8_t>)
+    {
+        return DataType::INT8;
     }
     else
     {
@@ -157,6 +170,8 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::UINT8;
     case DataType::INT32:
         return hipdnn_data_sdk::data_objects::DataType::INT32;
+    case DataType::INT8:
+        return hipdnn_data_sdk::data_objects::DataType::INT8;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -178,6 +193,8 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::UINT8;
     case hipdnn_data_sdk::data_objects::DataType::INT32:
         return hipdnn_frontend::DataType::INT32;
+    case hipdnn_data_sdk::data_objects::DataType::INT8:
+        return hipdnn_frontend::DataType::INT8;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -314,6 +331,8 @@ inline const char* to_string(const DataType& type)
         return "uint8";
     case DataType::INT32:
         return "int32";
+    case DataType::INT8:
+        return "int8";
     default:
         return "unknown";
     }
@@ -322,6 +341,42 @@ inline const char* to_string(const DataType& type)
 inline std::ostream& operator<<(std::ostream& os, const DataType& type)
 {
     return os << to_string(type);
+}
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const BuildPlanPolicy& policy)
+{
+    switch(policy)
+    {
+    case BuildPlanPolicy::HEURISTICS_CHOICE:
+        return "HEURISTICS_CHOICE";
+    case BuildPlanPolicy::ALL:
+        return "ALL";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const BuildPlanPolicy& policy)
+{
+    return os << to_string(policy);
+}
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const HeuristicMode& mode)
+{
+    switch(mode)
+    {
+    case HeuristicMode::FALLBACK:
+        return "FALLBACK";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const HeuristicMode& mode)
+{
+    return os << to_string(mode);
 }
 
 // Frontend functions delegate to SDK for single source of truth
@@ -359,3 +414,33 @@ inline const auto& getTernaryModesBitset()
 }
 
 } // namespace hipdnn_frontend
+
+template <>
+struct fmt::formatter<hipdnn_frontend::DataType> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::DataType type, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(type), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_frontend::BuildPlanPolicy> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::BuildPlanPolicy policy, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(policy), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_frontend::HeuristicMode> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::HeuristicMode mode, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(mode), ctx);
+    }
+};

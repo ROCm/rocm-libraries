@@ -17,6 +17,7 @@ exclude: |
     # ==========================================================================
     projects/composablekernel/.*|
     projects/hipblas/.*|
+    projects/hipblaslt/.*|
     projects/hipblas-common/.*|
     projects/hipcub/.*|
     projects/hipfft/.*|
@@ -46,12 +47,6 @@ exclude: |
     projects/hipdnn/data_sdk/include/hipdnn_data_sdk/data_objects/.*_generated\.h|
     # Reference data
     projects/hipdnn/hipdnn_reference_data/.*|
-    # Large yaml files
-    projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/.*|
-    # Large (20k+ LOC) source files
-    projects/hipblaslt/tensilelite/Tensile/CustomKernels/.*|
-    # Generated test yaml files
-    projects/hipblaslt/tensilelite/Tensile/Tests/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)
