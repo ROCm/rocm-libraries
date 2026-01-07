@@ -49,7 +49,7 @@ ninja  # Plugin built by default
 
 **Building standalone** (requires hipDNN and MIOpen installed):
 ```bash
-# From plugin directory
+# From workspace root, navigate to plugin directory
 cd <workspace>/dnn-providers/miopen-provider
 mkdir -p build && cd build
 cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ ..

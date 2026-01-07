@@ -27,7 +27,7 @@ ninja
 Requires hipDNN and MIOpen already installed on the system.
 
 ```bash
-# From plugin directory
+# From workspace root, navigate to plugin directory
 cd <workspace>/dnn-providers/miopen-provider
 mkdir -p build && cd build
 
