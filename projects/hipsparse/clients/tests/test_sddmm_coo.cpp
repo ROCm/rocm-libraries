@@ -39,4 +39,5 @@ TEST_ROUTINE_WITH_CONFIG(sddmm_coo,
                          arg.orderA,
                          arg.orderB,
                          arg.baseC,
-                         arg.sddmm_alg);
+                         arg.sddmm_alg,
+                         arg.graph_test);

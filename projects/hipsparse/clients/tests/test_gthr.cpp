@@ -25,5 +25,5 @@
 #include "testing_gthr.hpp"
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
-TEST_ROUTINE(gthr, level1, arg.N, arg.nnz, arg.baseA);
+TEST_ROUTINE(gthr, level1, arg.N, arg.nnz, arg.baseA, arg.graph_test);
 #endif

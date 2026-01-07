@@ -24,5 +24,12 @@
 #include "test.hpp"
 #include "testing_rot.hpp"
 
-TEST_ROUTINE_WITH_CONFIG(
-    rot, generic, hipsparse_test_config_it, arg.N, arg.nnz, arg.s, arg.c, arg.baseA);
+TEST_ROUTINE_WITH_CONFIG(rot,
+                         generic,
+                         hipsparse_test_config_it,
+                         arg.N,
+                         arg.nnz,
+                         arg.s,
+                         arg.c,
+                         arg.baseA,
+                         arg.graph_test);

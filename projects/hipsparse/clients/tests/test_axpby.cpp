@@ -33,4 +33,5 @@ TEST_ROUTINE_WITH_CONFIG(axpby,
                          arg.alphai,
                          arg.beta,
                          arg.betai,
-                         arg.baseA);
+                         arg.baseA,
+                         arg.graph_test);

@@ -39,4 +39,5 @@ TEST_ROUTINE_WITH_CONFIG(spmm_coo,
                          arg.orderB,
                          arg.orderC,
                          arg.baseA,
-                         arg.spmm_alg);
+                         arg.spmm_alg,
+                         arg.graph_test);

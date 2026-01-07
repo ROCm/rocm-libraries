@@ -24,4 +24,4 @@
 #include "test.hpp"
 #include "testing_axpyi.hpp"
 
-TEST_ROUTINE(axpyi, level1, arg.N, arg.nnz, arg.alpha, arg.alphai, arg.baseA);
+TEST_ROUTINE(axpyi, level1, arg.N, arg.nnz, arg.alpha, arg.alphai, arg.baseA, arg.graph_test);

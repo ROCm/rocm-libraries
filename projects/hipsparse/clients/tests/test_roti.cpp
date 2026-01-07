@@ -25,6 +25,13 @@
 #include "testing_roti.hpp"
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
-TEST_ROUTINE_WITH_CONFIG(
-    roti, level1, hipsparse_test_config_real_only, arg.N, arg.nnz, arg.c, arg.s, arg.baseA);
+TEST_ROUTINE_WITH_CONFIG(roti,
+                         level1,
+                         hipsparse_test_config_real_only,
+                         arg.N,
+                         arg.nnz,
+                         arg.c,
+                         arg.s,
+                         arg.baseA,
+                         arg.graph_test);
 #endif
