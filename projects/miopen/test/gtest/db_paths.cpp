@@ -8,10 +8,14 @@
 #include <miopen/version.h>
 #include <miopen/stringutils.hpp>
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include "gtest_common.hpp"
 
 #include <string>
 #include <sstream>
+
+using ::testing::_;
+using ::testing::Return;
 
 namespace fs = miopen::fs;
 
@@ -37,9 +41,7 @@ bool PathContains(const fs::path& path, const std::string& substring)
 class MockFilesystemChecker : public miopen::IFilesystemChecker
 {
 public:
-    bool should_return_networked = false;
-
-    bool IsNetworkedFilesystem(const fs::path&) const override { return should_return_networked; }
+    MOCK_METHOD(bool, IsNetworkedFilesystem, (const fs::path& path), (const, override));
 };
 
 // Test fixture for db_path tests with filesystem mocking
@@ -72,7 +74,7 @@ protected:
 TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
 {
     // Scenario 1: Local filesystem, no environment variable set
-    mock_checker.should_return_networked = false;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
     const auto& user_db_path = miopen::GetUserDbPath();
 
@@ -93,7 +95,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
 TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_EnvVarSet)
 {
     // Scenario 2: Local filesystem, environment variable set
-    mock_checker.should_return_networked = false;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
     const std::string custom_path = "/custom/user/db/path";
     ScopedEnvironment<std::string> scoped_env(MIOPEN_USER_DB_PATH, custom_path);
@@ -118,7 +120,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
 #endif
 
     // Scenario 3: Network filesystem, no environment variable set
-    mock_checker.should_return_networked = true;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(true));
 
     const auto& user_db_path = miopen::GetUserDbPath();
 
@@ -144,7 +146,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_EnvVarSet)
 {
     // Scenario 4: Network filesystem, environment variable set
     // Environment variable should take precedence over network detection
-    mock_checker.should_return_networked = true;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(true));
 
     const std::string custom_path = "/custom/network/db/path";
     ScopedEnvironment<std::string> scoped_env(MIOPEN_USER_DB_PATH, custom_path);
@@ -169,7 +171,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_EnvVarSet)
 TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_NoEnvVar)
 {
     // Scenario 1: Local filesystem, no environment variable set
-    mock_checker.should_return_networked = false;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
     const auto cache_path = miopen::GetCachePath(false);
 
@@ -195,9 +197,9 @@ TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_NoEnvVar)
 TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_EnvVarSet)
 {
     // Scenario 2: Local filesystem, environment variable set
-    mock_checker.should_return_networked = false;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
-    const std::string custom_cache = "/custom/cache/dir";
+    const std::string custom_cache = (fs::temp_directory_path() / "custom/cache/dir").string();
     ScopedEnvironment<std::string> scoped_env(MIOPEN_CUSTOM_CACHE_DIR, custom_cache);
 
     const auto cache_path = miopen::GetCachePath(false);
@@ -220,7 +222,7 @@ TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_NoEnvVar)
 #endif
 
     // Scenario 3: Network filesystem, no environment variable set
-    mock_checker.should_return_networked = true;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(true));
 
     const auto cache_path = miopen::GetCachePath(false);
 
@@ -248,9 +250,9 @@ TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_EnvVarSet)
 {
     // Scenario 4: Network filesystem, environment variable set
     // Environment variable should take precedence over network detection
-    mock_checker.should_return_networked = true;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(true));
 
-    const std::string custom_cache = "/custom/network/cache";
+    const std::string custom_cache = (fs::temp_directory_path() / "custom/network/cache").string();
     ScopedEnvironment<std::string> scoped_env(MIOPEN_CUSTOM_CACHE_DIR, custom_cache);
 
     const auto cache_path = miopen::GetCachePath(false);
@@ -287,7 +289,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbSuffix_ContainsVersionInfo)
 
 TEST_F(CPU_DbPaths_NONE, UserAndSystemCachePaths_AreDifferent)
 {
-    mock_checker.should_return_networked = false;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
     const auto user_cache = miopen::GetCachePath(false);
     const auto sys_cache  = miopen::GetCachePath(true);
@@ -300,7 +302,7 @@ TEST_F(CPU_DbPaths_NONE, UserAndSystemCachePaths_AreDifferent)
 
 TEST_F(CPU_DbPaths_NONE, Paths_AreValid)
 {
-    mock_checker.should_return_networked = false;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
     const auto& user_db_path  = miopen::GetUserDbPath();
     const auto cache_path     = miopen::GetCachePath(false);
@@ -325,7 +327,7 @@ TEST_F(CPU_DbPaths_NONE, Paths_AreValid)
 
 TEST_F(CPU_DbPaths_NONE, CacheDisabled_ReturnsCorrectly)
 {
-    mock_checker.should_return_networked = false;
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
     const bool is_disabled = miopen::IsCacheDisabled();
 

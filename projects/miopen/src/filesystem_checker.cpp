@@ -160,18 +160,17 @@ const IFilesystemChecker*& FilesystemCheckerPtrRef()
     static const IFilesystemChecker* ptr = nullptr;
     return ptr;
 }
-
-const FilesystemChecker& GetDefaultChecker()
-{
-    static FilesystemChecker default_checker;
-    return default_checker;
-}
 } // namespace
 
 const IFilesystemChecker& GetFilesystemChecker()
 {
     auto& ptr = FilesystemCheckerPtrRef();
-    return (ptr != nullptr) ? *ptr : GetDefaultChecker();
+    if(ptr != nullptr)
+        return *ptr;
+    
+    // Only initialize the default checker when actually needed
+    static FilesystemChecker default_checker;
+    return default_checker;
 }
 
 void SetFilesystemChecker(IFilesystemChecker* checker) { FilesystemCheckerPtrRef() = checker; }
