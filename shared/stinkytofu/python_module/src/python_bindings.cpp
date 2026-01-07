@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
@@ -578,10 +579,99 @@ NB_MODULE(stinkytofu, m)
         .def_rw("high_bit", &True16Modifiers::high_bit, "High/low bit selection");
 
     // ========================================================================
-    // Bind StinkyInstruction (opaque pointer for Python)
+    // Bind StinkyInstruction (exposing rocisa-compatible API)
     // ========================================================================
 
-    nb::class_<StinkyInstruction>(m, "StinkyInstruction", "An instruction in the StinkyTofu IR");
+    nb::class_<StinkyInstruction>(m, "StinkyInstruction", "An instruction in the StinkyTofu IR")
+        // Comment property (read/write)
+        .def_prop_rw(
+            "comment",
+            [](const StinkyInstruction& inst) -> std::string {
+                const CommentData* comment = inst.getModifier<CommentData>();
+                return comment ? comment->comment : "";
+            },
+            [](StinkyInstruction& inst, const std::string& comment) {
+                // This is a simplified version - actual implementation would need
+                // to handle modifier mutation properly through StinkyInstruction API
+                if(!comment.empty())
+                {
+                    inst.addModifier(CommentData(comment));
+                }
+            },
+            "Get/set instruction comment")
+
+        // Destination registers (read-only)
+        .def_prop_ro(
+            "dst",
+            [](const StinkyInstruction& inst) -> std::vector<StinkyRegister> {
+                return inst.getDestRegs();
+            },
+            "Get destination registers")
+
+        // Source registers (read-only)
+        .def_prop_ro(
+            "srcs",
+            [](const StinkyInstruction& inst) -> std::vector<StinkyRegister> {
+                return inst.getSrcRegs();
+            },
+            "Get source registers")
+
+        // DPP modifier (optional)
+        .def_prop_ro(
+            "dpp",
+            [](const StinkyInstruction& inst) -> std::optional<DPPModifiers> {
+                const DPPModifiers* dpp = inst.getModifier<DPPModifiers>();
+                return dpp ? std::optional<DPPModifiers>(*dpp) : std::nullopt;
+            },
+            "Get DPP modifier if present")
+
+        // SDWA modifier (optional)
+        .def_prop_ro(
+            "sdwa",
+            [](const StinkyInstruction& inst) -> std::optional<SDWAModifiers> {
+                const SDWAModifiers* sdwa = inst.getModifier<SDWAModifiers>();
+                return sdwa ? std::optional<SDWAModifiers>(*sdwa) : std::nullopt;
+            },
+            "Get SDWA modifier if present")
+
+        // VOP3P modifier (optional)
+        .def_prop_ro(
+            "vop3",
+            [](const StinkyInstruction& inst) -> std::optional<VOP3PModifiers> {
+                const VOP3PModifiers* vop3 = inst.getModifier<VOP3PModifiers>();
+                return vop3 ? std::optional<VOP3PModifiers>(*vop3) : std::nullopt;
+            },
+            "Get VOP3P modifier if present")
+
+        // getParams() - return tuple of (dests, srcs) like rocisa
+        .def(
+            "getParams",
+            [](const StinkyInstruction& inst)
+                -> std::tuple<std::vector<StinkyRegister>, std::vector<StinkyRegister>> {
+                return std::make_tuple(inst.getDestRegs(), inst.getSrcRegs());
+            },
+            "Get instruction parameters as (dests, srcs) tuple")
+
+        // String representation
+        .def(
+            "__str__",
+            [](const StinkyInstruction& inst) {
+                std::ostringstream oss;
+                inst.dump(oss, false);
+                return oss.str();
+            },
+            "Get string representation of instruction")
+
+        // Prevent deepcopy and pickling (same as rocisa::Instruction)
+        .def("__deepcopy__",
+             [](const StinkyInstruction& self, const nb::dict&) {
+                 throw std::runtime_error("Deepcopy not supported for StinkyInstruction");
+                 return nullptr;
+             })
+        .def("__reduce__", [](const StinkyInstruction& self) {
+            throw std::runtime_error("Pickling not supported for StinkyInstruction");
+            return nullptr;
+        });
 
     // ========================================================================
     // Bind IRListModule Class
