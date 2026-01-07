@@ -86,7 +86,7 @@ void testing_axpyi(const Arguments& argus)
     T                    h_alpha  = make_DataType<T>(argus.alpha);
     hipsparseIndexBase_t idx_base = argus.baseA;
 
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<int> hxInd(nnz);

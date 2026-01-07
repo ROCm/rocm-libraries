@@ -219,7 +219,7 @@ void testing_spmm_csr(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hcsr_row_ptr;

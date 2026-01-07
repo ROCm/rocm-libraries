@@ -79,7 +79,7 @@ void testing_gthrz(Arguments argus)
     int                  nnz      = argus.nnz;
     hipsparseIndexBase_t idx_base = argus.baseA;
 
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<int> hx_ind(nnz);

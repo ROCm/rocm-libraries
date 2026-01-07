@@ -95,7 +95,7 @@ void testing_roti(Arguments argus)
     T                    s        = argus.get_beta<T>();
     hipsparseIndexBase_t idx_base = argus.baseA;
 
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<int> hx_ind(nnz);

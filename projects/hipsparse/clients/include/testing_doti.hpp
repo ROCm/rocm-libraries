@@ -84,7 +84,7 @@ void testing_doti(Arguments argus)
     int                  nnz      = argus.nnz;
     hipsparseIndexBase_t idx_base = argus.baseA;
 
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Grab stream used by handle
     hipStream_t stream;

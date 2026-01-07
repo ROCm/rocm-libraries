@@ -50,8 +50,7 @@ void testing_scatter_bad_arg(const Arguments& argus)
     hipsparseIndexBase_t idxBase  = HIPSPARSE_INDEX_BASE_ZERO;
     hipDataType          dataType = HIP_R_32F;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(float) * nnz), device_free};
     auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
@@ -96,7 +95,7 @@ void testing_scatter(Arguments argus)
     hipDataType          dataType = getDataType<T>();
 
     // hipSPARSE handle
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hx_ind(nnz);

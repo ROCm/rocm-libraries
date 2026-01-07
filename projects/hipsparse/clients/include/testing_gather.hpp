@@ -94,7 +94,7 @@ void testing_gather(Arguments argus)
     hipDataType          dataType = getDataType<T>();
 
     // hipSPARSE handle
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hx_ind(nnz);

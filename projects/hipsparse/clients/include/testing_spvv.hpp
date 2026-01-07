@@ -130,7 +130,7 @@ void testing_spvv(Arguments argus)
     hipDataType          dataType = getDataType<T>();
 
     // hipSPARSE handle
-    hipsparseLocalHandle_t handle;
+    hipsparseLocalHandle_t handle(argus);
 
     hipStream_t stream;
     CHECK_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
