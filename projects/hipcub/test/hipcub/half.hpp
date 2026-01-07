@@ -39,6 +39,8 @@
 #include <stdint.h>
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
     #include <cuda_fp16.h>
 #else
     #include <rocprim/type_traits.hpp>
@@ -53,6 +55,29 @@
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 
+struct half_t;
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+
+namespace cuda
+{
+namespace std
+{
+template<>
+struct is_floating_point<half_t> : true_type
+{};
+
+template<>
+class numeric_limits<half_t>
+{
+public:
+    static constexpr bool is_specialized = true;
+};
+
+} // namespace std
+} // namespace cuda
+
+#endif // __HIP_PLATFORM_NVIDIA__
 
 /******************************************************************************
  * half_t
