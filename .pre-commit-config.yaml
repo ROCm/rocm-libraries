@@ -17,6 +17,7 @@ exclude: |
     # ==========================================================================
     projects/composablekernel/.*|
     projects/hipblas/.*|
+    projects/hipblaslt/.*|
     projects/hipblas-common/.*|
     projects/hipcub/.*|
     projects/hipfft/.*|
@@ -43,15 +44,9 @@ exclude: |
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
-    projects/hipdnn/sdk/include/hipdnn_sdk/data_objects/.*_generated\.h|
+    projects/hipdnn/data_sdk/include/hipdnn_data_sdk/data_objects/.*_generated\.h|
     # Reference data
     projects/hipdnn/hipdnn_reference_data/.*|
-    # Large yaml files
-    projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/.*|
-    # Large (20k+ LOC) source files
-    projects/hipblaslt/tensilelite/Tensile/CustomKernels/.*|
-    # Generated test yaml files
-    projects/hipblaslt/tensilelite/Tensile/Tests/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)
@@ -88,7 +83,7 @@ repos:
         name: flatc (hipDNN)
         entry: python projects/hipdnn/scripts/run_flatc.py
         language: python
-        files: ^projects/hipdnn/sdk/schemas/.*\.fbs$
+        files: ^projects/hipdnn/data_sdk/schemas/.*\.fbs$
         pass_filenames: true
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit

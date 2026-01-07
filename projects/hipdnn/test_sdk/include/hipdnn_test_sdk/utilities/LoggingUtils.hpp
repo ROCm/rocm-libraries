@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_sdk/logging/CallbackTypes.h>
-#include <hipdnn_sdk/logging/ComponentFormatter.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -40,7 +40,7 @@ inline hipdnnSeverity_t stringToSeverity(const std::string& levelStr)
 inline void testLoggingCallback(hipdnnSeverity_t severity, const char* message)
 {
 #ifndef DISABLE_TEST_LOGGING
-    std::string logLevelStr = hipdnn_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+    std::string logLevelStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
 
     if(logLevelStr == "off")
     {
@@ -61,7 +61,7 @@ inline void initializeSpdlogDefaultLogger(const std::string& componentName)
 #ifndef DISABLE_TEST_LOGGING
     spdlog::drop_all();
     auto logger = spdlog::stdout_color_mt(componentName);
-    logger->set_formatter(std::make_unique<hipdnn_sdk::logging::ComponentFormatter>());
+    logger->set_formatter(std::make_unique<hipdnn_data_sdk::logging::ComponentFormatter>());
     spdlog::set_default_logger(logger);
     spdlog::set_level(spdlog::level::info); // Set default log level
 #endif

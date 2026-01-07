@@ -99,7 +99,7 @@ inline std::string get_filename(const std::string& matrix_filename)
     size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
     if(last_dot_pos == std::string::npos || last_dot_pos == 0)
     {
-        matrix_filename_with_ext += ".csr";
+        matrix_filename_with_ext += ".bin";
     }
 
     const char* matrices_dir = get_hipsparse_clients_matrices_dir();
@@ -227,6 +227,24 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     return "<undefined HIPSPARSE_STATUS value>";
 }
 #endif
+
+// CHECK_GENERATE_MATRIX_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+#else
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
+    do                                                                                             \
+    {                                                                                              \
+        auto error = ERROR;                                                                        \
+        if(error != true)                                                                          \
+        {                                                                                          \
+            fprintf(                                                                               \
+                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
+    } while(0)
+#endif
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
 
 // CHECK_HIP_ERROR
 #ifdef GOOGLE_TEST
@@ -1119,7 +1137,9 @@ int read_bin_matrix(const char*          filename,
 
     int err;
 
-    int nrowf, ncolf, nnzf;
+    int nrowf = 0;
+    int ncolf = 0;
+    int nnzf  = 0;
 
     err = fread(&nrowf, sizeof(int), 1, f);
     err |= fread(&ncolf, sizeof(int), 1, f);
@@ -1243,6 +1263,11 @@ bool generate_csr_matrix(const std::string    filename,
             {
                 return true;
             }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
+            }
         }
         else if(extension == "mtx")
         {
@@ -1276,6 +1301,11 @@ bool generate_csr_matrix(const std::string    filename,
 
                     return true;
                 }
+            }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
             }
         }
     }

@@ -1411,6 +1411,10 @@ try
     ROCSPARSE_CHECKARG(4, Y, (Y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
 
+    ROCSPARSE_CHECKARG(2, A, (A->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, X, (X->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, Y, (Y->batch_count != 1), rocsparse_status_not_implemented);
+
     const rocsparse_datatype compute_type = sptrsm_descr->get_compute_datatype();
 
     // Check for matching types while we do not support mixed precision computation
