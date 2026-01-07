@@ -51,7 +51,7 @@ Use `#pragma once` for header include guards.
 - Follow const-correctness patterns
 
 ### Device Memory Allocation
-**Critical:** rocBLAS code must NOT call `hipMalloc()` or `hipFree()` directly as they are synchronizing APIs.
+**Critical:** rocBLAS code must NOT call `hipMalloc()` or `hipFree()` directly because they are synchronizing APIs.
 
 Use the rocBLAS device memory manager instead:
 ```cpp
