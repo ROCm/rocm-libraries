@@ -5,7 +5,7 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -16,7 +16,7 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_bn_common;
@@ -47,33 +47,22 @@ protected:
             "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto meanAttr
-            = graph::makeTensorAttributes("mean",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
+        // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
+        auto meanAttr = graph::makeTensorAttributes(
+            "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-        auto invVarianceAttr
-            = graph::makeTensorAttributes("inv_variance",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
+        auto invVarianceAttr = graph::makeTensorAttributes(
+            "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
 
-        auto scaleAttr
-            = graph::makeTensorAttributes("scale",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
+        auto scaleAttr = graph::makeTensorAttributes(
+            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr
-            = graph::makeTensorAttributes("bias",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
+        auto biasAttr = graph::makeTensorAttributes(
+            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         graph::BatchnormInferenceAttributes bnAttrs;

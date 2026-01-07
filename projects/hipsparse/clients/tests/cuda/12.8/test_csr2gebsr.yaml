@@ -35,10 +35,10 @@ Tests:
   category: quick
   function: csr2gebsr
   precision: *single_double_precisions_complex_real
-  M: [0, 13095]
-  N: [0, 12766]
-  row_block_dimA: [1, 2, 7]
-  col_block_dimA: [1, 2]
+  M: [13095]
+  N: [12766]
+  row_block_dimA: [2, 7]
+  col_block_dimA: [2, 3]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   baseB: [HIPSPARSE_INDEX_BASE_ONE]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]

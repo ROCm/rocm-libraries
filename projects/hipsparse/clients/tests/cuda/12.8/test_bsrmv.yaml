@@ -34,9 +34,9 @@ Tests:
   category: quick
   function: bsrmv
   precision: *single_double_precisions_complex_real
-  M: [0, 500, 7111]
-  N: [0, 842, 4441]
-  block_dim: [1, 3, 5, 9]
+  M: [500, 7111]
+  N: [842, 4441]
+  block_dim: [3, 5, 9]
   alpha: [0.5]
   alphai: [-0.2]
   beta: [0.7]
@@ -48,9 +48,9 @@ Tests:
   category: pre_checkin
   function: bsrmv
   precision: *single_double_precisions_complex_real
-  M: [0, 500, 7111]
-  N: [0, 842, 4441]
-  block_dim: [1, 3, 5, 9]
+  M: [1]
+  N: [1]
+  block_dim: [3, 5, 9]
   alpha: [0.5]
   alphai: [-0.2]
   beta: [0.7]

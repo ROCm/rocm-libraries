@@ -397,6 +397,20 @@ install_packages( )
     fi
   fi
 
+  # wget and openssl are needed for cmake
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
+    if $update_cmake == true; then
+      library_dependencies_ubuntu+=("wget" "libssl-dev")
+      library_dependencies_centos_rhel+=("wget" "openssl-devel")
+      library_dependencies_centos_8+=("wget" "openssl-devel")
+      library_dependencies_rhel_8+=("wget" "openssl-devel")
+      library_dependencies_rhel_9+=("wget" "openssl-devel")
+      library_dependencies_rhel_10+=("wget" "openssl-devel")
+      library_dependencies_fedora+=("wget")
+      library_dependencies_sles+=("wget" "libopenssl-devel")
+    fi
+  fi
+
   if [[ "${build_clients}" == true ]]; then
     # dependencies to build the client
     library_dependencies_ubuntu+=( "gfortran" "libomp-dev" )
@@ -407,6 +421,18 @@ install_packages( )
     library_dependencies_rhel_10+=( "gcc-gfortran" "libgomp" )
     library_dependencies_fedora+=( "gcc-gfortran" "libgomp" )
     library_dependencies_sles+=( "gcc-fortran" "libgomp1" )
+
+    # wget is needed for blis
+    if [[ ! -e "${build_dir}/deps/blis/lib/libblis.a" ]] && [[ ! -e "/usr/local/lib/libblis.a" ]]; then
+      library_dependencies_ubuntu+=("wget")
+      library_dependencies_centos_rhel+=("wget")
+      library_dependencies_centos_8+=("wget")
+      library_dependencies_rhel_8+=("wget")
+      library_dependencies_rhel_9+=("wget")
+      library_dependencies_rhel_10+=("wget")
+      library_dependencies_fedora+=("wget")
+      library_dependencies_sles+=("wget")
+    fi
   fi
 
   case "${ID}" in

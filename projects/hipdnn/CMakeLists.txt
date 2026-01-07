@@ -7,6 +7,7 @@ cmake_minimum_required(VERSION 3.25.2)
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
+set(HIPDNN_FMTLIB_VERSION "11.1.3" CACHE STRING "Version of fmtlib to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -32,12 +33,15 @@ if(NOT WIN32)
     endif()
 endif()
 
-if(NOT WIN32)
-    # Only set if not already specified by user
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
-        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-    endif()
-    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+# Only set if not already specified by user
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_PATH: ${CMAKE_INSTALL_PREFIX}")
+elseif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_CMAKE_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_CMAKE_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_CMAKE_PATH: ${CMAKE_INSTALL_PREFIX}")
+else()
+    message(STATUS "CMAKE_INSTALL_PREFIX set to default: ${CMAKE_INSTALL_PREFIX}")
 endif()
 
 include(GNUInstallDirs)
@@ -132,6 +136,7 @@ include(cmake/Tests.cmake)
 set(EXTRA_COMPILE_OPTIONS)
 set(EXTRA_LINK_OPTIONS)
 if(HIPDNN_ENABLE_COVERAGE)
+    message(VERBOSE "Enabling compile flags for coverage-mapping")
     list(PREPEND EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
     list(PREPEND EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
 endif()
@@ -163,7 +168,7 @@ list(
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
-add_subdirectory(sdk)
+add_subdirectory(data_sdk)
 
 if(HIP_DNN_BUILD_BACKEND)
     add_subdirectory(backend)
@@ -175,7 +180,6 @@ endif()
 
 add_subdirectory(test_sdk)
 add_subdirectory(plugin_sdk)
-add_subdirectory(data_sdk)
 
 add_subdirectory(tests)
 
@@ -184,18 +188,10 @@ if(HIP_DNN_BUILD_PLUGINS)
     add_subdirectory(plugins)
 endif()
 
-# keep this after all build folder have been added so they have a chance to register their tests
-# using append_test_to_check_target
-
 if(NOT HIP_DNN_SKIP_TESTS)
-    create_test_name_validation_target()
-
-    finalize_custom_check_target()
-    finalize_unit_check_target()
-    finalize_integration_check_target()
-
-    add_dependencies(check validate_test_names)
-    add_dependencies(check_ctest validate_test_names)
+    # keep this after all build folder have been added so they have a chance to register their tests
+    # using append_test_to_check_target
+    finalize_test_targets()
 endif()
 
 # keep this after all the targets have been added that could use the HIP language compiler.
@@ -212,7 +208,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)"
+        "\(.*deps.*\)|\(.*tests.*\)|\(.*data_sdk/include/hipdnn_data_sdk/data_objects.*\)"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -224,8 +220,6 @@ if(HIPDNN_ENABLE_COVERAGE)
         -object
         ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
         -object
-        ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests
-        -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
@@ -234,31 +228,69 @@ if(HIPDNN_ENABLE_COVERAGE)
         ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT}
     )
 
-    add_custom_target(
-        code_coverage
-        COMMAND find . -name \"*.profraw\" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge -sparse
-                -o ./coverage_report/hipdnn.profdata
-        COMMAND
-            ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
-            -instr-profile=./coverage_report/hipdnn.profdata
-            -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
-            ./coverage_report/code_cov_hipdnn.report
-        COMMAND
-            ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
-            -instr-profile=./coverage_report/hipdnn.profdata
-            -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
-            --output-dir=coverage_report
-        COMMAND
-            ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
-            -instr-profile=./coverage_report/hipdnn.profdata --format=lcov >
-            ./coverage_report/coverage.info
-        DEPENDS check
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Generating code coverage report"
-    )
+    # Helper function to create a code coverage target
+    # ~~~
+    # Parameters:
+    #   TARGET_NAME - Name of the coverage target to create
+    #   DEPENDS_TARGET - The target that must be built before generating
+    #                    coverage (required, use "" for no dependency)
+    # ~~~
+    function(add_custom_coverage_target TARGET_NAME DEPENDS_TARGET)
+        # Build the DEPENDS clause
+        set(DEPENDS_CLAUSE "")
+        if(NOT "${DEPENDS_TARGET}" STREQUAL "")
+            set(DEPENDS_CLAUSE DEPENDS ${DEPENDS_TARGET})
+        endif()
 
-    # Make alias to target coverage
-    add_custom_target(coverage DEPENDS code_coverage COMMENT "Alias to match mathci")
+        # cmake-format: off
+        add_custom_target(
+            ${TARGET_NAME}
+            COMMAND find . -name "*.profraw" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge
+                    -sparse -o ./coverage_report/hipdnn.profdata
+            COMMAND
+                ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage_report/hipdnn.profdata
+                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
+                ./coverage_report/code_cov_hipdnn.report
+            COMMAND
+                ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage_report/hipdnn.profdata
+                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
+                --output-dir=coverage_report
+            COMMAND
+                ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
+                -instr-profile=./coverage_report/hipdnn.profdata --format=lcov >
+                ./coverage_report/coverage.info
+            ${DEPENDS_CLAUSE}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Generating code coverage report"
+            VERBATIM
+            USES_TERMINAL
+        )
+        # cmake-format: on
+    endfunction()
+
+    if(HIP_DNN_SKIP_TESTS)
+        message(
+            WARNING
+                "\nThe code coverage targets depend on test targets but test targets don't exist because HIP_DNN_SKIP_TESTS is enabled."
+        )
+    else()
+        add_custom_coverage_target(code_coverage check) # code_coverage depends on 'check'
+        add_custom_coverage_target(unit-coverage unit-check) # unit-coverage depends on 'unit-check'
+        add_custom_coverage_target(integration-coverage integration-check) # ... 'integration-check'
+
+        # Make alias to target coverage
+        add_custom_target(
+            coverage DEPENDS code_coverage COMMENT "Alias for code_coverage to match mathci"
+        )
+    endif()
+
+    # Create a coverage target that does not depend on any other target and will use the coverage
+    # data that already exists on disk from prior / manual target runs performed before this target
+    # is run.
+    add_custom_coverage_target(current-coverage "")
+
 endif()
 
 if(NOT HIP_DNN_SKIP_TESTS)

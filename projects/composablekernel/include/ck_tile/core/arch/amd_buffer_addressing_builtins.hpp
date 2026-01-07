@@ -16,6 +16,7 @@
 #include "ck_tile/core/utility/bit_cast.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
+#include "ck_tile/core/arch/amd_buffer_coherence.hpp"
 
 using as3_uint32_ptr = uint32_t __attribute__((address_space(3)))*;
 
@@ -1277,30 +1278,6 @@ CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
-// memory coherency bit for buffer store/load instruction
-// check ISA manual for each GFX target
-// e.g. for
-// https://www.amd.com/system/files/TechDocs/instinct-mi200-cdna2-instruction-set-architecture.pdf,
-// page 67~68
-enum struct amd_buffer_coherence_enum
-{
-    coherence_default = 0, // default value
-    glc               = 1,
-    slc               = 2,
-    glc_slc           = 3,
-    // gfx94: bit 0 = sc0, bit 1 = nt, bit 3 = swz, bit 4 = sc1
-    // SC[1:0] System Cache level: 0=wave, 1=group, 2=device, 3=system
-    // NT Non-Temporal: 0=expect temporal reuse; 1=do not expect temporal reuse
-    WAVE_NT0   = 0,
-    WAVE_NT1   = 2,
-    GROUP_NT0  = 1,
-    GROUP_NT1  = 3,
-    DEVICE_NT0 = 16,
-    DEVICE_NT1 = 18,
-    SYSTEM_NT0 = 17,
-    SYSTEM_NT1 = 19,
-};
-
 template <index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
 CK_TILE_DEVICE thread_buffer<int8_t, N>
@@ -2399,12 +2376,23 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
     return amd_buffer_load_impl<T, N, coherence>(
         src_wave_buffer_resource, src_addr_shift + src_thread_addr_offset, 0);
 #else
-    thread_buffer<T, N> tmp =
-        amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
     if constexpr(oob_conditional_check)
-        return src_thread_element_valid ? tmp : thread_buffer<T, N>{numeric<T>::zero()};
+    {
+        if(src_thread_element_valid)
+        {
+            return amd_buffer_load_impl<T, N, coherence>(
+                src_wave_buffer_resource, src_thread_addr_offset, 0);
+        }
+        else
+        {
+            return thread_buffer<T, N>{numeric<T>::zero()};
+        }
+    }
     else
-        return tmp;
+    {
+        return amd_buffer_load_impl<T, N, coherence>(
+            src_wave_buffer_resource, src_thread_addr_offset, 0);
+    }
 #endif
 }
 
