@@ -319,6 +319,10 @@ validParameters = { # we need to make sure this matches develop
     "DirectToVgprA": [False, True],
     "DirectToVgprB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
+    # B address interleave (restricted): non-contiguous tile columns for TN/NN-like B (TLUB == False),
+    # with runtime G chosen as the largest power-of-two factor of (N/MT1), capped by LVCB.
+    # Requires SizeJ % MT1 == 0 at runtime; otherwise falls back to original mapping.
+    "BAddrInterleave": [False, True],
     # Attempt to load directly from global memory into LDS.
     # Assembly only
     # Requires BufferLoad, assembler support for lds modifier on buffer

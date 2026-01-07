@@ -1779,6 +1779,18 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["SupportUserArgs"]:
         moduleRegInit.add(SMovB32(dst=sgpr("ArgType"),src=sgpr(sgprArgType)))
 
+      # B address interleave (restricted) - compute runtime G once and reuse later.
+      if kernel.get("BAddrInterleave", False):
+        moduleRegInit.addComment1("Interleave: define SGPR and init runtime G once")
+        # Use defineSgprIdx + explicit RegSet here (instead of defineSgpr) to avoid interacting
+        # with freeSgprVarPool state transitions during pre-loop init.
+        sgprG  = self.defineSgprIdx("BInterleaveG", 1)
+        # Keep these SGPRs live into post-loop (store) - prevent endSummation from undefining them.
+        if "BInterleaveG" not in self.states.nonPostLoopSgpr:
+          self.states.nonPostLoopSgpr.append("BInterleaveG")
+        moduleRegInit.add(RegSet("s", "sgprBInterleaveG", sgprG))
+        moduleRegInit.addModuleAsFlatItems(self.initBInterleaveG(kernel))
+
     self.sgprPool.checkIn(sgprPackedArgs)
 
     if kernel["StorePriorityOpt"]:
@@ -2466,6 +2478,48 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMovB32(dst=sgpr(dstBase), src=sgpr(srcBase), comment="Set to %s"%(srcBase)))
     return module
 
+  def initBInterleaveG(self, kernel) -> Module:
+    """
+    Compute interleave runtime G once and keep in fixed SGPRs for reuse.
+      - sgprBInterleaveG  : G (power-of-two, capped by LVCB, or 1 when disabled)
+
+    Guards:
+      - SizeJ % MT1 == 0
+      - G >= 2
+    """
+    module = Module("initBInterleaveG")
+    module.addComment1("Interleave: init G once (reuse across groB/loadSRD/storeSRD/storeStride)")
+
+    # Default (disabled): G==1 means disabled.
+    module.add(SMovB32(dst=sgpr("BInterleaveG"),  src=1, comment="disabled (G=1)"))
+
+    labelDone = Label(self.labels.getNameInc("BInterleave_init_done"), "")
+    mt1 = kernel["MacroTile1"]
+    lvcb = kernel.get("LVCB", 1)
+
+    # IMPORTANT: scalarStaticDivideAndRemainder uses tmpSgprRes internally; qReg/rReg must NOT overlap tmpSgprRes.
+    with self.allocTmpSgpr(6) as tS:
+      tmpDiv = tS.idx
+      tmpDivRes = ContinuousRegister(tmpDiv, 2)
+      sTiles = tmpDiv + 2
+      sRem   = tmpDiv + 3
+      sNeg   = tmpDiv + 4
+      sLow   = tmpDiv + 5
+
+      module.add(scalarStaticDivideAndRemainder(qReg=sTiles, rReg=sRem, dReg="SizeJ", divisor=mt1, tmpSgprRes=tmpDivRes, doRemainder=1))
+      module.add(SCmpEQU32(src0=sgpr(sRem), src1=0, comment="guard: SizeJ % MT1 == 0"))
+      module.add(SCBranchSCC0(labelName=labelDone.getLabelName(), comment="disabled (edge tiles)"))
+
+      module.add(SSubU32(dst=sgpr(sNeg), src0=0, src1=sgpr(sTiles), comment="-tiles1"))
+      module.add(SAndB32(dst=sgpr(sLow), src0=sgpr(sTiles), src1=sgpr(sNeg), comment="lowbit(tiles1)"))
+      module.add(SCmpLeU32(src0=sgpr(sLow), src1=lvcb, comment="lowbit <= LVCB ?"))
+      module.add(SCSelectB32(dst=sgpr("BInterleaveG"), src0=sgpr(sLow), src1=lvcb, comment="G = min(lowbit,LVCB)"))
+      module.add(SCmpGtU32(src0=sgpr("BInterleaveG"), src1=1, comment="enabled? (G>1)"))
+      module.add(SCBranchSCC0(labelName=labelDone.getLabelName(), comment="disabled (G==1)"))
+
+    module.add(labelDone)
+    return module
+
   ##############################################################################
   # Global Read Addresses: Tile Offsets A/B
   ##############################################################################
@@ -2475,6 +2529,7 @@ class KernelWriterAssembly(KernelWriter):
     tP["vgprPackedOffsets"] = None
     tP["vgprTileOffsetsCheckOut"] = False
     tP["numVgprTileOffsets"] = 0
+    skipGroTileOffsetsLoop = False
     if kernel["_UseSgprForGRO"]:
       # Let the vgprTileOffsets checkin handle tReg later since these are same vgpr
       tP["vgprTileOffsets"] = tP["gpr"]["tReg"]
@@ -2502,7 +2557,67 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VLShiftLeftB32(dst=vgpr(v), shiftHex=hex(log2(margin)), src=vgpr(v), comment="gro%s%s_%u *= %d"%(tP["tensorChar"], tP["tileChar"], 0, margin)))
       else:
         if not tP["isSwizzled"]:
-          module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"]), comment="gro%s%s_%u"%(tP["tensorChar"], tP["tileChar"], 0) ))
+          # B address interleave (restricted): non-contiguous tile columns with runtime G based on (SizeJ/MT1).
+          useBInterleave = bool(kernel.get("BAddrInterleave", False))
+          useBInterleave = useBInterleave and tP["isB"] and (not tP["tlu"])
+
+          if useBInterleave:
+            # Runtime guard: only enable if SizeJ % MT1 == 0 and computed G>=2.
+            # G = min(LVCB, lowbit(SizeJ/MT1)), lowbit(x)=x&-x (largest power-of-two divisor).
+            # Addressing:
+            #   baseCol = (wg1/G)*(MT1*G) + (wg1%G)
+            #   groB1J(r,l) = G*(r + l*LSPB)
+            #
+            # This partitions columns across workgroups without changing host launch (requires SizeJ multiple of MT1).
+            lspb = kernel[tP["lsp"]]
+
+            labelI = Label(self.labels.getNameInc("BInterleave_groB"), "")
+            labelOrig = Label(self.labels.getNameInc("BInterleave_groB_orig"), "")
+            labelDone = Label(self.labels.getNameInc("BInterleave_groB_done"), "")
+
+            # Pre-init original groB1J_0 outside labelOrig so it's easy to find and avoids duplication:
+            # - If interleave fires, v38 will be overwritten by v_mul_lo_u32 (r*G).
+            # - If it falls back, labelOrig can start from groB1J_1.
+            module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"]), comment="preinit groB1J_0 = r (orig)"))
+
+            # Reuse precomputed G from fixed SGPR (init once in prolog).
+            module.add(SCmpGtU32(src0=sgpr("BInterleaveG"), src1=1, comment="enabled? (G>1)"))
+            module.add(SCBranchSCC0(labelName=labelOrig.getLabelName(), comment="disabled (G==1)"))
+
+            module.add(labelI)
+
+            # Vector: groB1J_0 = r*G, step = G*LSPB
+            gV = self.vgprPool.checkOut(1)
+            stepV = self.vgprPool.checkOut(1)
+            module.add(VMovB32(dst=vgpr(gV), src=sgpr("BInterleaveG"), comment="G"))
+            if (lspb & (lspb - 1)) == 0:
+              module.add(VLShiftLeftB32(dst=vgpr(stepV), shiftHex=hex(log2(lspb)), src=vgpr(gV), comment="step=G*LSPB"))
+            else:
+              module.add(VMulLOU32(dst=vgpr(stepV), src0=vgpr(gV), src1=hex(lspb), comment="step=G*LSPB"))
+
+            module.add(VMulLOU32(dst=vgpr(v), src0=vgpr(tP["gpr"]["tReg"]), src1=vgpr(gV), comment="groB1J_0 = r*G"))
+            for l in range(1, tP["nrt"]):
+              module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=vgpr(stepV), src1=vgpr(v+l-1),
+                                   comment="groB1J_%u += step(G*LSPB)" % l))
+            self.vgprPool.checkIn(stepV)
+            self.vgprPool.checkIn(gV)
+
+            module.add(SBranch(labelName=labelDone.getLabelName()))
+            module.add(labelOrig)
+
+            # Original groB1J:
+            for l in range(1, tP["nrt"]):
+              strideValue = stride
+              if strideInterleave and (l & strideMask) != 0:
+                strideValue = 1
+              module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=strideValue, \
+                src1=vgpr(v+l-1), comment="gro%s%s_%u += %s"%(tP["tensorChar"], tP["tileChar"], l, strideIdx) ))
+
+            module.add(labelDone)
+            skipGroTileOffsetsLoop = True
+
+          else:
+            module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"]), comment="gro%s%s_%u"%(tP["tensorChar"], tP["tileChar"], 0) ))
         else:
           lsu = kernel["LocalSplitU"] # localSplitU
           if tP["isA"]:
@@ -2560,23 +2675,25 @@ class KernelWriterAssembly(KernelWriter):
                 comment="swzBlkVWOffset = swzBlkWvGSize - laneSize * (VW - 1)"))
               module.add(VMovB32(dst=vgpr(swzBlkVWSizeVgpr), src=sgpr(swzBlkVWSizeSgpr)) )
 
-      for l in range(1, tP["nrt"]):
-        strideValue = stride
-        if strideInterleave and (l & strideMask) != 0:
-          strideValue = 1
-        if not tP["isSwizzled"]:
-          module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=strideValue, \
-            src1=vgpr(v+l-1), comment="gro%s%s_%u += %s"%(tP["tensorChar"], tP["tileChar"], l, strideIdx) ))
-        # swizzle
-        else:
-          # VW > 1
-          if (strideInterleave and (l & strideMask) != 0):
-            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=laneSize, \
-              src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
-          # VW == 1
+      # If groB1J_* was emitted above (interleave path), skip this generic loop to avoid duplicate emissions.
+      if not skipGroTileOffsetsLoop:
+        for l in range(1, tP["nrt"]):
+          strideValue = stride
+          if strideInterleave and (l & strideMask) != 0:
+            strideValue = 1
+          if not tP["isSwizzled"]:
+            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=strideValue, \
+              src1=vgpr(v+l-1), comment="gro%s%s_%u += %s"%(tP["tensorChar"], tP["tileChar"], l, strideIdx) ))
+          # swizzle
           else:
-            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=vgpr(swzBlkVWSizeVgpr), \
-              src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
+            # VW > 1
+            if (strideInterleave and (l & strideMask) != 0):
+              module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=laneSize, \
+                src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
+            # VW == 1
+            else:
+              module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=vgpr(swzBlkVWSizeVgpr), \
+                src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
       if tP["isSwizzled"]:
         self.vgprPool.checkIn(swzBlkVWSizeVgpr)
 
@@ -3414,8 +3531,58 @@ class KernelWriterAssembly(KernelWriter):
         wroteTileStart = True
         #tP['ia'][1]
 
-        # This is guaranteed to fit in 32-bit since the WG*MT is a number of elements in some unsigned direction:
+        # Default tileStart = WorkGroup[01] * MT
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
+
+        # Interleave (restricted): for B (tlu==False), overwrite wg1*MT1 with baseCol:
+        #   baseCol = (wg1/G)*(MT1*G) + (wg1%G),  G=min(lowbit(SizeJ/MT1), LVCB)
+        # Guarded by SizeJ % MT1 == 0 and G>=2.
+        if kernel.get("BAddrInterleave", False) and tP["isB"] and (not tP["tlu"]) and (tP["wg"] == "WorkGroup1"):
+          labelSkip = Label(self.labels.getNameInc("BInterleave_loadSrd_skip"), "")
+          labelCase16 = Label(self.labels.getNameInc("BInterleave_loadSrd_case16"), "")
+          labelCase8  = Label(self.labels.getNameInc("BInterleave_loadSrd_case8"), "")
+          labelCase4  = Label(self.labels.getNameInc("BInterleave_loadSrd_case4"), "")
+          labelCase2  = Label(self.labels.getNameInc("BInterleave_loadSrd_case2"), "")
+          labelAfterShift = Label(self.labels.getNameInc("BInterleave_loadSrd_afterShift"), "")
+
+          # Reuse precomputed G from fixed SGPR.
+          module.add(SCmpGtU32(src0=sgpr("BInterleaveG"), src1=1, comment="enabled? (G>1)"))
+          module.add(SCBranchSCC0(labelName=labelSkip.getLabelName(), comment="disabled (G==1)"))
+
+          # mask = G-1
+          module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr("BInterleaveG"), src1=1, comment="mask=G-1"))
+          module.add(SAndB32(dst=sgpr(tileStart+0), src0=sgpr("WorkGroup1"), src1=sgpr(stmp+0), comment="phase = wg1&(G-1)"))
+
+          # super = wg1 >> log2(G) (G in {2,4,8,16})
+          module.add(SMovB32(dst=sgpr(stmp+1), src=sgpr("WorkGroup1"), comment="super = wg1"))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=16))
+          module.add(SCBranchSCC1(labelName=labelCase16.getLabelName()))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=8))
+          module.add(SCBranchSCC1(labelName=labelCase8.getLabelName()))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=4))
+          module.add(SCBranchSCC1(labelName=labelCase4.getLabelName()))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=2))
+          module.add(SCBranchSCC1(labelName=labelCase2.getLabelName()))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase16)
+          module.add(SLShiftRightB32(dst=sgpr(stmp+1), src=sgpr(stmp+1), shiftHex=hex(4)))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase8)
+          module.add(SLShiftRightB32(dst=sgpr(stmp+1), src=sgpr(stmp+1), shiftHex=hex(3)))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase4)
+          module.add(SLShiftRightB32(dst=sgpr(stmp+1), src=sgpr(stmp+1), shiftHex=hex(2)))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase2)
+          module.add(SLShiftRightB32(dst=sgpr(stmp+1), src=sgpr(stmp+1), shiftHex=hex(1)))
+          module.add(labelAfterShift)
+
+          # baseCol = phase + super*(MT1*G)
+          module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr("BInterleaveG"), src1="MT1", comment="MT1*G"))
+          module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1), comment="super*(MT1*G)"))
+          module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="baseCol"))
+          module.add(SMovB32(dst=sgpr(tileStart+1), src=0))
+          module.add(labelSkip)
         strideF = self.strideRef(tc, tP['tileIdx'])
         if not self.isConstUnitStride(strideF):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
@@ -10121,19 +10288,68 @@ class KernelWriterAssembly(KernelWriter):
     else:
       useSize = [False for _ in srdTcList]
 
-    with self.allocTmpSgpr(3) as tmpSgprInfo:
+    with self.allocTmpSgpr(9) as tmpSgprInfo:
       tmpS0 = tmpSgprInfo.idx
       tmpS1 = tmpS0+1
       wgMT1 = tmpS0+2
+      sRem  = tmpS0+3
+      sNeg  = tmpS0+4
+      sLow  = tmpS0+5
+      sG    = tmpS0+6
+      sMask = tmpS0+7
+      sTiles = tmpS0+8
 
-      # Compute and save wg1*MT1 - the element offset that is top of the macro-tile in output space
+      # Compute and save the element offset for Index1 in output space.
+      # Default is wg1*MT1. Interleave (if enabled) replaces this with baseCol:
+      #   baseCol = (wg1/G)*(MT1*G) + (wg1%G),  G=min(lowbit(SizeJ/MT1), LVCB)
       assert kernel["BufferStore"]
       module.addSpaceLine()
-      module.add(SMulI32(
-          dst=sgpr(wgMT1), \
-          src0="MT1", \
-          src1=sgpr("WorkGroup1"), \
-          comment="<- wg1*MT1"))
+      module.add(SMulI32(dst=sgpr(wgMT1), src0="MT1", src1=sgpr("WorkGroup1"), comment="<- wg1*MT1"))
+
+      if kernel.get("BAddrInterleave", False):
+        labelKeep = Label(self.labels.getNameInc("BInterleave_storeSrd_keep"), "")
+        labelCase16 = Label(self.labels.getNameInc("BInterleave_storeSrd_case16"), "")
+        labelCase8  = Label(self.labels.getNameInc("BInterleave_storeSrd_case8"), "")
+        labelCase4  = Label(self.labels.getNameInc("BInterleave_storeSrd_case4"), "")
+        labelCase2  = Label(self.labels.getNameInc("BInterleave_storeSrd_case2"), "")
+        labelAfterShift = Label(self.labels.getNameInc("BInterleave_storeSrd_afterShift"), "")
+
+        # Reuse precomputed G from fixed SGPR.
+        module.add(SCmpGtU32(src0=sgpr("BInterleaveG"), src1=1, comment="enabled? (G>1)"))
+        module.add(SCBranchSCC0(labelName=labelKeep.getLabelName(), comment="disabled (G==1)"))
+
+        module.add(SSubU32(dst=sgpr(sMask), src0=sgpr("BInterleaveG"), src1=1, comment="mask=G-1"))
+        module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("WorkGroup1"), src1=sgpr(sMask), comment="phase = wg1 & (G-1)"))
+
+        # super = wg1 >> log2(G) (G in {2,4,8,16})
+        module.add(SMovB32(dst=sgpr(tmpS0), src=sgpr("WorkGroup1"), comment="super = wg1"))
+        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=16))
+        module.add(SCBranchSCC1(labelName=labelCase16.getLabelName()))
+        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=8))
+        module.add(SCBranchSCC1(labelName=labelCase8.getLabelName()))
+        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=4))
+        module.add(SCBranchSCC1(labelName=labelCase4.getLabelName()))
+        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=2))
+        module.add(SCBranchSCC1(labelName=labelCase2.getLabelName()))
+        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+        module.add(labelCase16)
+        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(4), comment="super = wg1>>4"))
+        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+        module.add(labelCase8)
+        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(3), comment="super = wg1>>3"))
+        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+        module.add(labelCase4)
+        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(2), comment="super = wg1>>2"))
+        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+        module.add(labelCase2)
+        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(1), comment="super = wg1>>1"))
+        module.add(labelAfterShift)
+
+        # wgMT1 = baseCol = phase + super*(MT1*G)
+        module.add(SMulI32(dst=sgpr(wgMT1), src0=sgpr("BInterleaveG"), src1="MT1", comment="MT1*G"))
+        module.add(SMulI32(dst=sgpr(wgMT1), src0=sgpr(wgMT1), src1=sgpr(tmpS0), comment="super*(MT1*G)"))
+        module.add(SAddU32(dst=sgpr(wgMT1), src0=sgpr(wgMT1), src1=sgpr(tmpS1), comment="baseCol = super*(MT1*G)+phase"))
+        module.add(labelKeep)
 
       # Overall strategy is to set the SRD to the top-left of the macro-tile.
       # TT offsets are from this base (and include the column)
@@ -10239,12 +10455,29 @@ class KernelWriterAssembly(KernelWriter):
   def computeStoreVgprs(self, kernel, divisor=None, tid0Scale=None, tid1Scale=None):
     module = Module("computeStoreVgprs")
     module.addComment0("computeStoreVgprs")
+
+    # Interleave (restricted): scale StrideC1J/StrideD1J by runtime G before store vgpr math,
+    # while SRD base was already computed using unscaled strides.
+    if kernel.get("BAddrInterleave", False) and kernel["EnableMatrixInstruction"] and kernel["BufferStore"]:
+      labelSkip = Label(self.labels.getNameInc("BInterleave_storeStride_skip"), "")
+      module.add(SCmpGtU32(src0=sgpr("BInterleaveG"), src1=1, comment="enabled? (G>1)"))
+      module.add(SCBranchSCC0(labelName=labelSkip.getLabelName(), comment="disabled (G==1)"))
+
+      packedC1 = kernel["PackedC1IndicesX"]
+      strideC1 = "StrideC%s" % (self.states.indexChars[packedC1[0]])
+      strideD1 = "StrideD%s" % (self.states.indexChars[packedC1[0]])
+      module.add(SMulI32(dst=sgpr(strideC1), src0=sgpr(strideC1), src1=sgpr("BInterleaveG"), comment="StrideC1 *= G"))
+      module.add(SMulI32(dst=sgpr(strideD1), src0=sgpr(strideD1), src1=sgpr("BInterleaveG"), comment="StrideD1 *= G"))
+
+      module.add(labelSkip)
+
     component = Component.ComputeStoreVgprs.find(self)
     if component:
       if kernel["EnableMatrixInstruction"]:
         module.add(component(self, kernel))
       else:
         module.add(component(self, kernel, divisor, tid0Scale, tid1Scale))
+
     return module
 
   ##############################################################################
