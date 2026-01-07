@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,6 +53,7 @@ namespace stinkytofu
             VCC,
             SWAITCNT_DATA,
             SWAITTENSORCNT_DATA,
+            SDELAYALU_DATA,
             LABEL_NAME,
             COMMENT,
         };
@@ -344,6 +345,33 @@ namespace stinkytofu
         int8_t tlcnt;
     };
 
+    /// Delay ALU instruction data for RDNA3/RDNA4 (gfx11xx/gfx12xx)
+    /// Specifies dependencies between ALU instructions
+    struct SDelayAluData : public Modifier
+    {
+        enum class InstType : uint8_t
+        {
+            VALU, ///< Vector ALU instruction
+            SALU, ///< Scalar ALU instruction
+            TRANS, ///< Transcendental instruction
+            NO_DEP ///< No dependency
+        };
+
+        // Simple constructor for common case (single dependency)
+        SDelayAluData(InstType type, int8_t distance = 0)
+            : Modifier(Type::SDELAYALU_DATA)
+            , type(type)
+            , distance(distance)
+        {
+        }
+
+        InstType type; ///< Instruction type (VALU/SALU/TRANS/NO_DEP)
+        int8_t   distance; ///< Dependency distance (1-4 for VALU, 1 for SALU, 1-3 for TRANS)
+
+        // TODO: Add support for dual dependencies (instid1) if needed in the future
+        // For now, we only support single dependency which covers 99% of cases
+    };
+
     struct CommentData : public Modifier
     {
         CommentData(const std::string& comment)
@@ -369,6 +397,40 @@ namespace stinkytofu
         return os;
     }
 
+    inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluData)
+    {
+        auto typeToString = [](SDelayAluData::InstType type) -> const char* {
+            switch(type)
+            {
+            case SDelayAluData::InstType::VALU:
+                return "VALU";
+            case SDelayAluData::InstType::SALU:
+                return "SALU";
+            case SDelayAluData::InstType::TRANS:
+                return "TRANS";
+            case SDelayAluData::InstType::NO_DEP:
+                return "NO_DEP";
+            default:
+                return "UNKNOWN";
+            }
+        };
+
+        os << "instid0(" << typeToString(delayAluData.type);
+
+        // SALU always uses CYCLE_1, others use DEP_N
+        if(delayAluData.type == SDelayAluData::InstType::SALU)
+        {
+            os << "_CYCLE_1";
+        }
+        else if(delayAluData.type != SDelayAluData::InstType::NO_DEP)
+        {
+            os << "_DEP_" << (int)delayAluData.distance;
+        }
+
+        os << ")";
+        return os;
+    }
+
     // clang-format off
     // Helper template for type mapping
     template<typename T> constexpr Modifier::Type getModifierType();
@@ -385,6 +447,7 @@ namespace stinkytofu
     template<> constexpr Modifier::Type getModifierType<VCC>() { return Modifier::Type::VCC; }
     template<> constexpr Modifier::Type getModifierType<SWaitCntData>() { return Modifier::Type::SWAITCNT_DATA; }
     template<> constexpr Modifier::Type getModifierType<SWaitTensorCntData>() { return Modifier::Type::SWAITTENSORCNT_DATA; }
+    template<> constexpr Modifier::Type getModifierType<SDelayAluData>() { return Modifier::Type::SDELAYALU_DATA; }
     template<> constexpr Modifier::Type getModifierType<LabelData>() { return Modifier::Type::LABEL_NAME; }
     template<> constexpr Modifier::Type getModifierType<CommentData>() { return Modifier::Type::COMMENT; }
     // clang-format on

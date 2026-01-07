@@ -595,7 +595,7 @@ namespace stinkytofu
         // Vector ALU
         // ============================================
         DEF_T(VALU, "v_fma_mix_f32");
-        DEF_T(VALU, "v_rsq_iflag_f32");
+        DEF_T(VTrans, "v_rsq_iflag_f32");
 
         // Vector control/sync instructions
         DEF_T(HasSideEffectInst, "v_nop");

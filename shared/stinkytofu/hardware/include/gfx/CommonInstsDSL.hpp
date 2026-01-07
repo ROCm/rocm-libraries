@@ -263,10 +263,27 @@ namespace stinkytofu
     // The following instruction types are placeholders for future use.
     struct SALU : GfxInstDef
     {
+        SALU()
+        {
+            hwInstDesc.flags.set(IF_SALU);
+        }
     };
 
     struct VALU : GfxInstDef
     {
+        VALU()
+        {
+            hwInstDesc.flags.set(IF_VALU);
+        }
+    };
+
+    // Transcendental VALU instructions (v_s_*, v_exp_*, v_log_*, v_rcp_*, v_rsq_*, v_sqrt_*)
+    struct Transcendental : VALU
+    {
+        Transcendental()
+        {
+            hwInstDesc.flags.set(IF_Transcendental);
+        }
     };
 
     // Commutative VALU instructions (add, mul, min, max, and, or, xor, etc.)
@@ -290,8 +307,12 @@ namespace stinkytofu
     {
     };
 
-    struct VTrans : GfxInstDef
+    struct VTrans : VALU
     {
+        VTrans()
+        {
+            hwInstDesc.flags.set(IF_Transcendental);
+        }
     };
 
     // fp8/bf8 scale-variants (pk/sr)
