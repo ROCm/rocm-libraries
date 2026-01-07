@@ -25,6 +25,7 @@
 #include "ir/IntrinsicLibrary.hpp"
 #include "ir/IntrinsicRegistry.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/StinkyAsmModule.hpp"
 #include "ir/logical/LogicalInstructionFactory.hpp"
 #include "ir/logical/LogicalInstructions.hpp"
 #include "ir/python/PyLogicalModule.hpp"
@@ -44,6 +45,19 @@ using namespace stinkytofu;
 NB_MODULE(_stinkytofu, m)
 {
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
+
+    // ========================================================================
+    // Bind StinkyAsmModule Class
+    // ========================================================================
+    nb::class_<StinkyAsmModule>(m, "StinkyAsmModule")
+        .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
+        .def("emitAssembly",
+             &StinkyAsmModule::emitAssembly,
+             "Emit the assembly code for all instructions in this module")
+        .def("runOptimizationPipeline",
+             &StinkyAsmModule::runOptimizationPipeline,
+             "Run the optimization pipeline on this module")
+        .def("__str__", &StinkyAsmModule::toString, "Get a string representation of this module");
 
     // ========================================================================
     // Register Types
