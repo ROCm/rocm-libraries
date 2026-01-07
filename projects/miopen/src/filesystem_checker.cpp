@@ -154,15 +154,26 @@ bool FilesystemChecker::IsNetworkedFilesystem(const fs::path&) const { return fa
 #endif
 
 namespace {
-IFilesystemChecker* g_filesystem_checker = nullptr;
-FilesystemChecker g_default_checker;
+// Use static local variables to avoid non-const globals while allowing reset for testing
+const IFilesystemChecker*& FilesystemCheckerPtrRef()
+{
+    static const IFilesystemChecker* ptr = nullptr;
+    return ptr;
+}
+
+FilesystemChecker& GetDefaultChecker()
+{
+    static FilesystemChecker default_checker;
+    return default_checker;
+}
 } // namespace
 
 IFilesystemChecker& GetFilesystemChecker()
 {
-    return g_filesystem_checker ? *g_filesystem_checker : g_default_checker;
+    auto& ptr = FilesystemCheckerPtrRef();
+    return (ptr != nullptr) ? const_cast<IFilesystemChecker&>(*ptr) : GetDefaultChecker();
 }
 
-void SetFilesystemChecker(IFilesystemChecker* checker) { g_filesystem_checker = checker; }
+void SetFilesystemChecker(IFilesystemChecker* checker) { FilesystemCheckerPtrRef() = checker; }
 
 } // namespace miopen
