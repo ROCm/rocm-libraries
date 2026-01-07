@@ -46,7 +46,6 @@ compile_commands.json
 *.out
 *.app
 *.x
-stinkytofu-opt
 
 # Debug files
 *.dSYM/
