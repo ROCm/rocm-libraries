@@ -24,137 +24,11 @@
 #include "logging.hpp"
 #include "rocblas_gemm_ex.hpp"
 #include "rocblas_syrk_ex.hpp"
+#include "rocblas_syrk_herk_ex_kernels.hpp"
 
 #include "../blas3/herk_syrk_device.hpp"
 #include "../blas3/rocblas_syrk_herk.hpp"
 #include "../blas3/rocblas_syrk_imp.hpp"
-
-// syrkx/herkx name to show original source
-// general alpha, beta, m, n, k
-template <typename API_INT,
-          typename Tex,
-          typename T,
-          typename Tc,
-          int  DIM_N,
-          int  BLK_N,
-          int  BLK_K,
-          bool BETA_EQ_ZERO,
-          bool HERM,
-          char TRANS,
-          char UPLO,
-          typename TConstPtr,
-          typename TPtr>
-ROCBLAS_KERNEL(DIM_N* DIM_N)
-rocblas_syrkx_herkx_ex_general_kernel(rocblas_int    N,
-                                      API_INT        K,
-                                      const Tex      alpha,
-                                      TConstPtr*     A,
-                                      API_INT        lda,
-                                      rocblas_stride stride_A,
-                                      TConstPtr*     B,
-                                      API_INT        ldb,
-                                      rocblas_stride stride_B,
-                                      const Tex      beta,
-                                      TPtr*          C,
-                                      API_INT        ldc,
-                                      rocblas_stride stride_C,
-                                      rocblas_int    batch_count)
-{
-    int thx  = threadIdx.x; // thread's m position in C
-    int thy  = threadIdx.y; // thread's n position in C
-    int idt  = DIM_N * thy + thx; // thread's number
-    int blx  = blockIdx.x; // block's m position
-    int bly  = blockIdx.y; // block's n position
-    int blz  = blockIdx.z; // block's matrix in the batch
-    int thxA = idt % BLK_N; // thread's m position for loading A
-    int thyA = idt / BLK_N; // thread's n position for loading A
-    int thxB = idt % BLK_K; // thread's m position for loading B
-    int thyB = idt / BLK_K; // thread's n position for loading B
-
-    auto* dA = load_ptr_batch(A, blz, 0, stride_A);
-    auto* dB = load_ptr_batch(B, blz, 0, stride_B);
-    auto* dC = load_ptr_batch(C, blz, 0, stride_C);
-
-    __shared__ Tex sA[BLK_K][BLK_N]; // shared memory for A
-    __shared__ Tex sB[BLK_N][BLK_K]; // shared memory for B
-    Tex            rC[BLK_N / DIM_N][BLK_N / DIM_N]; // registers for C
-
-    int a_i_offset = thxA + BLK_N * blx;
-    int a_j_offset = thyA;
-    int b_i_offset = thxB;
-    int b_j_offset = thyB + BLK_N * bly;
-
-    for(int n = 0; n < BLK_N / DIM_N; ++n)
-        for(int m = 0; m < BLK_N / DIM_N; ++m)
-            rC[n][m] = Tex(0);
-
-    API_INT kk = 0;
-    for(; kk < K; kk += BLK_K)
-    {
-        API_INT i = a_i_offset;
-        API_INT j = kk + a_j_offset;
-        if(i < N && j < K)
-        {
-            if(TRANS == 'N')
-                sA[thyA][thxA] = Tex(dA[i + j * size_t(lda)]);
-            if(TRANS == 'T')
-                sA[thyA][thxA] = Tex(dA[i * size_t(lda) + j]);
-            if(TRANS == 'C')
-                sA[thyA][thxA] = conj_if_true<HERM>(Tex(dA[i * size_t(lda) + j]));
-        }
-        else
-        {
-            sA[thyA][thxA] = Tex(0);
-        }
-        i = kk + b_i_offset;
-        j = b_j_offset;
-        if(i < K && j < N)
-        {
-            if(TRANS == 'C')
-                sB[thyB][thxB] = Tex(dB[i + j * size_t(lda)]);
-            if(TRANS == 'T')
-                sB[thyB][thxB] = Tex(dB[i + j * size_t(lda)]);
-            if(TRANS == 'N')
-                sB[thyB][thxB] = conj_if_true<HERM>(Tex(dB[i * size_t(lda) + j]));
-        }
-        else
-        {
-            sB[thyB][thxB] = Tex(0);
-        }
-
-        __syncthreads();
-
-        for(int k = 0; k < BLK_K; ++k)
-            for(int n = 0; n < BLK_N / DIM_N; ++n)
-                for(int m = 0; m < BLK_N / DIM_N; ++m)
-                    rC[n][m] += sA[k][m * DIM_N + thx] * sB[n * DIM_N + thy][k];
-
-        __syncthreads();
-    }
-
-    for(int n = 0; n < BLK_N / DIM_N; ++n)
-    {
-        int coord_dCn = bly * BLK_N + n * DIM_N + thy;
-        for(int m = 0; m < BLK_N / DIM_N; ++m)
-        {
-            int coord_dCm = blx * BLK_N + m * DIM_N + thx;
-            if((UPLO == 'L' && coord_dCn <= coord_dCm && coord_dCm < N)
-               || (UPLO == 'U' && coord_dCm <= coord_dCn && coord_dCn < N))
-            {
-                if(BETA_EQ_ZERO)
-                    dC[coord_dCn * size_t(ldc) + coord_dCm] = Tc(alpha * rC[n][m]);
-                else
-                    dC[coord_dCn * size_t(ldc) + coord_dCm] = Tc(
-                        alpha * rC[n][m] + beta * Tex(dC[coord_dCn * size_t(ldc) + coord_dCm]));
-
-                // Zero out imaginary part of diagonal if herk
-                if(HERM && coord_dCn == coord_dCm)
-                    dC[coord_dCn * size_t(ldc) + coord_dCm]
-                        = std::real(dC[coord_dCn * size_t(ldc) + coord_dCm]);
-            }
-        }
-    }
-}
 
 template <typename Tex, typename Ta, typename T>
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
@@ -182,12 +56,9 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     constexpr bool BATCHED = false;
     constexpr bool HERM    = false;
 
-    if constexpr(sizeof(Tex) < 8)
+    if constexpr(rocblas_internal_syrk_herk_ex_use_gemm<Tex>())
     {
-        constexpr bool FORCEDGEMM = true;
-
-        size_t size
-            = rocblas_internal_syrk_herk_workspace<T, FORCEDGEMM>(handle, n, k, batch_count);
+        size_t size = rocblas_internal_syrk_herk_ex_workspace<HERM>(handle, n, k, batch_count);
 
         //Allocate Workspace memory
         auto w_mem = handle->device_malloc(size);
@@ -295,75 +166,258 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
         if(*alpha_in == 0)
             k = 0;
 
-        // upgrade to complex if needed
-        // TODO: Graph safety?
-        const Tex alpha_val = (Tex)(*alpha_in);
-        const Tex beta_val  = (Tex)(*beta_in);
+        const Tex alpha = (Tex)(*alpha_in);
+        const Tex beta  = (Tex)(*beta_in);
 
-        const int dim_n = 16;
-        const int blk_n = 32;
-        const int blk_k = 8;
-        dim3      dimBlock(dim_n, dim_n, 1);
-        dim3      dimGrid(((n - 1) / blk_n) + 1, ((n - 1) / blk_n) + 1, batches);
-
-        // clang-format off
-        if(beta_val == 0)
+        if((n % 32 == 0) && (k % 8 == 0)) // restricted kernels
         {
-            // general n, k, alpha_val; beta_val == 0
-            if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'T', 'L'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'C', 'L'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'N', 'L'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'T', 'U'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'C', 'U'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'N', 'U'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
+            // Can also be used with:
+            // n is mult of 64, k is mult of 4
+            // const int dim_n = 16;
+            // const int blk_n = 64;
+            // const int blk_k = 4;
+
+            // n is mult of 32, k is mult of 8
+            const int dim_n = 16;
+            const int blk_n = 32;
+            const int blk_k = 8;
+            dim3      dimBlock(dim_n, dim_n, 1);
+            dim3      dimGrid(n / blk_n, n / blk_n, batches);
+
+            // clang-format off
+            if(alpha == Tex(1.0) && beta == Tex(1.0))
+            {
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 1, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 1, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 1, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 1, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 1, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 1, HERM, 'N', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+            }
+            else if(alpha == Tex(1.0) && beta == Tex(-1.0))
+            {
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, -1, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, -1, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, -1, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, -1, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, -1, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, -1, HERM, 'N', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+            }
+            else if(alpha == Tex(1.0) && beta == Tex(0.0))
+            {
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 0, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 0, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 0, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 0, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 0, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, 1, 0, HERM, 'N', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+            }
+            else if(alpha == Tex(-1.0) && beta == Tex(0.0))
+            {
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, -1, 0, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, -1, 0, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, -1, 0, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, -1, 0, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                    <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, -1, 0, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_kernel
+                        <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, -1, 0, HERM, 'N', 'U'>),
+                        dimGrid, dimBlock, 0, stream, n, k, A, lda, stride_A, A, lda, stride_A, C, ldc, stride_C, batch_count);
+            }
+            else if(beta == Tex(0))
+            {
+                // general alpha; beta == 0
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'N', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+            }
+            else
+            {
+                // general alpha, beta
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_restricted_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'N', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+            }
+            // clang-format on
         }
         else
         {
-            // general n, k, alpha_val, beta_val
-            if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'T', 'L'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'C', 'L'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'N', 'L'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'T', 'U'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'C', 'U'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
-            else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
-                ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
-                <API_INT, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'N', 'U'>),
-                dimGrid, dimBlock, 0, stream, n, k, alpha_val, A, lda, stride_A, A, lda, stride_A, beta_val, C, ldc, stride_C, batch_count);
+            const int dim_n = 16;
+            const int blk_n = 32;
+            const int blk_k = 8;
+            dim3      dimBlock(dim_n, dim_n, 1);
+            dim3      dimGrid(((n - 1) / blk_n) + 1, ((n - 1) / blk_n) + 1, batches);
+
+            // clang-format off
+            if(beta == Tex(0))
+            {
+                // general n, k, alpha; beta == 0
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, true, HERM, 'N', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+            }
+            else
+            {
+                // general n, k, alpha, beta
+                if((rocblas_operation_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'T', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'C', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_lower == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'N', 'L'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'T', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_conjugate_transpose == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'C', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+                else if((rocblas_operation_none == trans_A) && (rocblas_fill_upper == uplo))
+                    ROCBLAS_LAUNCH_KERNEL((rocblas_syrkx_herkx_ex_general_kernel
+                    <API_INT, Tex, Tex, Ta, T, dim_n, blk_n, blk_k, false, HERM, 'N', 'U'>),
+                    dimGrid, dimBlock, 0, stream, n, k, alpha, A, lda, stride_A, A, lda, stride_A, beta, C, ldc, stride_C, batch_count);
+            }
+            // clang-format on
         }
-        // clang-format on
 
         return rocblas_status_success;
     }

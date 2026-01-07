@@ -32,10 +32,10 @@
 #include <vector>
 
 // CK includes
-#include <contraction_bilinear.hpp>
-#include <contraction_scale.hpp>
-#include <device_contraction_multiple_d.hpp>
-#include <element_wise_operation.hpp>
+#include <ck/library/tensor_operation_instance/gpu/contraction_bilinear.hpp>
+#include <ck/library/tensor_operation_instance/gpu/contraction_scale.hpp>
+#include <ck/tensor_operation/gpu/device/device_contraction_multiple_d.hpp>
+#include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
 
 #include "device/device_element_wise_operation_complex.hpp"
 
@@ -165,4 +165,3 @@ namespace hiptensor
 } // namespace hiptensor
 
 #include "contraction_solution_impl.hpp"
-

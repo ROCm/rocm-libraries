@@ -82,16 +82,15 @@ namespace AddDeallocateTest
         transforms.push_back(std::make_shared<OrderEpilogueBlocks>());
         transforms.push_back(std::make_shared<CleanLoops>());
         transforms.push_back(std::make_shared<AddPrefetch>(params, context.get()));
-        transforms.push_back(std::make_shared<AddComputeIndex>());
+        transforms.push_back(std::make_shared<UpdateWavefrontParameters>(params));
+        transforms.push_back(
+            std::make_shared<AssignIndexExpressions>(context.get(), example.getCommand()));
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
 
         SECTION("Downstream Barriers")
         {
-            auto topo
-                = TopologicalCompare(std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph));
-
             auto graph  = kgraph;
             auto tracer = LastRWTracer(graph);
 
@@ -103,7 +102,7 @@ namespace AddDeallocateTest
                 if(maybeLDS)
                 {
                     AddDeallocateDetail::addDownstreamBarrierInLoop(
-                        dependencies, coordinate, controls, kgraph, topo);
+                        dependencies, coordinate, controls, kgraph);
                     CHECK(dependencies.size() >= 1);
                     if(dependencies.size() == 1)
                     {
@@ -171,7 +170,7 @@ namespace AddDeallocateTest
 
             // With 4 unrolls and 2 inflight prefetches, we expect the following
             // 1. A, B deallocated three times in the main loop
-            // 2. A, B deallocate once after the main loop
+            // 2. A, B deallocate after the main loop
             // 3. C deallocated once after the prolog
             CHECK(ldsDeallocateFromKernel.size() == 5);
             CHECK(ldsDeallocateInsideLoop.size() == 3);

@@ -4,14 +4,12 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
@@ -261,7 +259,7 @@ public:
             .set_momentum(std::move(momentum));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto peerStatsVector = std::vector<int64_t>{};
@@ -281,7 +279,7 @@ public:
         auto nextRunningMean = get_next_running_mean();
         auto nextRunningVariance = get_next_running_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormAttributesDirect(
+        return hipdnn_data_sdk::data_objects::CreateBatchnormAttributesDirect(
             builder,
             get_x()->get_uid(),
             get_scale()->get_uid(),
@@ -302,51 +300,7 @@ public:
             nextRunningVariance ? flatbuffers::Optional<int64_t>(nextRunningVariance->get_uid())
                                 : flatbuffers::nullopt);
     }
-
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
-    {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    BatchnormAttributes& setInput(InputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-    BatchnormAttributes& setInput(InputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
-
-    BatchnormAttributes& setOutput(OutputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-    BatchnormAttributes& setOutput(OutputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
-    }
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

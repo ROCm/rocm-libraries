@@ -72,7 +72,7 @@ void testing_gthr_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gthr(Arguments argus)
+void testing_gthr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
@@ -90,7 +90,7 @@ hipsparseStatus_t testing_gthr(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, N);
+    hipsparseInitIndex(hx_ind.data(), nnz, idx_base, N + idx_base);
     hipsparseInit<T>(hy, 1, N);
 
     // allocate memory on device
@@ -160,8 +160,6 @@ hipsparseStatus_t testing_gthr(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GTHR_HPP

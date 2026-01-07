@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_sddmm_coo_aos_bad_arg(void)
+template <typename I, typename T>
+void testing_sddmm_coo_aos_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              n         = 100;
@@ -179,7 +180,7 @@ void testing_sddmm_coo_aos_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
+void testing_sddmm_coo_aos(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
     I                    m        = argus.M;
@@ -192,7 +193,7 @@ hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
     hipsparseOrder_t     orderA   = argus.orderA;
     hipsparseOrder_t     orderB   = argus.orderB;
     hipsparseIndexBase_t idx_base = argus.baseC;
-    hipsparseSDDMMAlg_t  alg      = static_cast<hipsparseSDDMMAlg_t>(argus.sddmm_alg);
+    hipsparseSDDMMAlg_t  alg      = argus.sddmm_alg;
     std::string          filename = argus.filename;
 
     // Index and data type
@@ -213,11 +214,8 @@ hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
 
     // Read or construct CSR matrix
     I nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     std::vector<I> hrowcol_ind(nnz * 2);
     // Convert to COO_AOS
@@ -449,8 +447,6 @@ hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SDDMM_COO_AOS_HPP

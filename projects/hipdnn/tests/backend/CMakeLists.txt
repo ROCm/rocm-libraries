@@ -5,7 +5,10 @@ include(GoogleTest)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(public_hipdnn_backend_tests
+# Main integration test executable WITH HipErrorHandler
+add_executable(
+    public_hipdnn_backend_tests
+    main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
     IntegrationEngineApi.cpp
@@ -14,6 +17,7 @@ add_executable(public_hipdnn_backend_tests
     IntegrationExecutionPlanApi.cpp
     IntegrationGetLastErrorString.cpp
     IntegrationHandleApi.cpp
+    IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationVariantPackApi.cpp
@@ -21,36 +25,36 @@ add_executable(public_hipdnn_backend_tests
 )
 
 target_compile_options(public_hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_link_libraries(public_hipdnn_backend_tests
-    GTest::gtest 
-    GTest::gtest_main 
-    Threads::Threads 
-    hipdnn_sdk
+target_link_libraries(
+    public_hipdnn_backend_tests
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+    hipdnn_test_sdk
+    hipdnn_plugin_sdk
     hipdnn_backend
     hip::host
 )
 
-target_include_directories(public_hipdnn_backend_tests
-    PRIVATE
-    ${HIPDNN_TEST_INCLUDE_DIRS}
-)
+target_include_directories(public_hipdnn_backend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
 
-target_compile_definitions(public_hipdnn_backend_tests
-    PRIVATE
-    TEST_GOOD_PLUGIN_NAME="${TEST_GOOD_PLUGIN_NAME}"
-    TEST_EXECUTE_FAILS_PLUGIN_NAME="${TEST_EXECUTE_FAILS_PLUGIN_NAME}"
-    TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}"
-    TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME}"
-    TEST_DUPLICATE_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_ID_A_PLUGIN_NAME}"
-    TEST_DUPLICATE_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_ID_B_PLUGIN_NAME}"
-    TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
-    TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
+target_compile_definitions(
+    public_hipdnn_backend_tests
+    PRIVATE TEST_GOOD_PLUGIN_NAME="${TEST_GOOD_PLUGIN_NAME}"
+            TEST_EXECUTE_FAILS_PLUGIN_NAME="${TEST_EXECUTE_FAILS_PLUGIN_NAME}"
+            TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}"
+            TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME}"
+            TEST_DUPLICATE_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_ID_A_PLUGIN_NAME}"
+            TEST_DUPLICATE_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_ID_B_PLUGIN_NAME}"
+            TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
+            TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests
-add_dependencies(public_hipdnn_backend_tests 
-    test_good_plugin 
-    test_execute_fails_plugin 
+add_dependencies(
+    public_hipdnn_backend_tests
+    test_good_plugin
+    test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin
     test_good_default_plugin

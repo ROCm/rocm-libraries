@@ -16,7 +16,11 @@ The hipTensor library is a work in progress (WIP).
 For more information, see :doc:`What is hipTensor? <./what-is-hiptensor>`
 
 
-The hipTensor public repository is located at `<https://github.com/ROCm/hipTensor>`_.
+The hipTensor library is included in the rocm-libraries public repository, and it is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiptensor>`_.
+
+.. note::
+
+  The hipTensor repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/hipTensor>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -40,7 +44,7 @@ The hipTensor public repository is located at `<https://github.com/ROCm/hipTenso
 
   .. grid-item-card:: Examples
 
-    * `Samples <https://github.com/ROCm/hipTensor/tree/develop/samples>`_
+    * `Samples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiptensor/samples>`_
 
   .. grid-item-card:: API reference
 

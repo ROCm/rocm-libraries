@@ -1,11 +1,11 @@
 # hipDNN
 
 > [!CAUTION]
-> **hipDNN is in the early stages of development. There is currently limited functionality available to solve problems. See [Operation Support](./docs/OperationSupport.md) for reference.**
+> **hipDNN is in the early stages of development. There is currently limited functionality available to execute graphs. See [Operation Support](./docs/OperationSupport.md) for reference.**
 
 ## Overview
 
-hipDNN is a graph-based deep learning library for AMD GPUs that leverages a flexible plugin architecture to provide optimized implementations and utilities for various routines. 
+hipDNN is a graph-based deep learning library for AMD GPUs that leverages a flexible plugin architecture to provide optimized implementations and utilities for various routines.
 
 ---
 
@@ -58,7 +58,8 @@ hipDNN is organized into several key components. For detailed architecture descr
 |-----------|-------------|
 | **[Backend](./backend/)** | Core shared library providing C API for operation graphs and managing plugins |
 | **[Frontend](./frontend/)** | Header-only C++ API wrapper around the backend |
-| **[SDK](./sdk/)** | Header-only library for plugin development and utilities |
+| **[Data SDK](./data_sdk/)** | Header-only library with data objects, utilities, and logging |
+| **[Plugin SDK](./plugin_sdk/)** | Header-only library for plugin development |
 | **[Plugins](./plugins/)** | Plugin implementations, including [MIOpen Legacy Plugin](./plugins/miopen_legacy_plugin/) |
 | **[Samples](./samples/)** | Example implementations demonstrating hipDNN usage |
 | **[Tests](./tests/)** | Tests for the public API (incl. frontend integration tests) |

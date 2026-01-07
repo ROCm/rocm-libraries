@@ -28,7 +28,7 @@
 
 // Variation of StockhamKernelCC that implements the partial pass
 // method. Similarities of StockhamPartialPassKernelCC with
-// StockhamKernelCC include the overal kernel structure with the
+// StockhamKernelCC include the overall kernel structure with the
 // main operations: (1) global-to-LDS, (2) LDS-to-register,
 // (3) full forward/backward pass in the designated direction,
 // (4) register-to-LDS and (5) LDS-to-global. The main difference

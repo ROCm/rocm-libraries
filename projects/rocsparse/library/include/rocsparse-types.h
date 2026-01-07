@@ -729,7 +729,8 @@ typedef enum rocsparse_spmv_input_
     rocsparse_spmv_input_operation, /**< Select matrix transpose operation for input on SpMV descriptor. */
     rocsparse_spmv_input_scalar_datatype, /**< Select scalar  datatype for input on SpMV descriptor. */
     rocsparse_spmv_input_compute_datatype, /**< Select compute datatype for input on SpMV descriptor. */
-    rocsparse_spmv_input_nnz_use_starting_block_ids
+    rocsparse_spmv_input_nnz_use_starting_block_ids, /**< Configure usage of starting block IDs for non-zero split. */
+    rocsparse_spmv_input_enable_extra /**< Enable/disable extra vectors computation for SpMV descriptor. */
 } rocsparse_spmv_input;
 
 /*! \ingroup types_module

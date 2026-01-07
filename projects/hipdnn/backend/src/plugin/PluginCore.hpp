@@ -16,15 +16,13 @@
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "PlatformUtils.hpp"
 #include "logging/Logging.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
-#include <hipdnn_sdk/plugin/PluginDataTypeHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 
 #include "HipdnnException.hpp"
 #include "SharedLibrary.hpp"
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 // The PluginBase is the base class for all plugins.
@@ -112,7 +110,7 @@ protected:
         getPluginSearchPaths(const char* envVarName,
                              const std::set<std::filesystem::path>& defaultPaths)
     {
-        const auto envPath = hipdnn_sdk::utilities::getEnv(envVarName);
+        const auto envPath = hipdnn_data_sdk::utilities::getEnv(envVarName);
         if(!envPath.empty())
         {
             // Could make this take multiple dirs
@@ -211,7 +209,7 @@ private:
             {
                 const auto& path = entry.path();
                 if(entry.is_regular_file()
-                   && path.extension() == hipdnn_sdk::utilities::SHARED_LIB_EXT)
+                   && path.extension() == hipdnn_data_sdk::utilities::SHARED_LIB_EXT)
                 {
                     pathsToLoad.insert(std::filesystem::weakly_canonical(path));
                 }
@@ -279,5 +277,4 @@ private:
     std::set<std::filesystem::path> _defaultPluginPaths;
 };
 
-} // namespace plugin
-} // namespace hipdnn_backend
+} // namespace hipdnn_backend::plugin

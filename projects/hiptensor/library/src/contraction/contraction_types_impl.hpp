@@ -27,9 +27,9 @@
 #pragma once
 
 // CK includes
-#include <contraction_bilinear.hpp>
-#include <contraction_scale.hpp>
-#include <element_wise_operation.hpp>
+#include <ck/library/tensor_operation_instance/gpu/contraction_bilinear.hpp>
+#include <ck/library/tensor_operation_instance/gpu/contraction_scale.hpp>
+#include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
 
 #include "contraction_types.hpp"
 #include "device/device_element_wise_operation_complex.hpp"

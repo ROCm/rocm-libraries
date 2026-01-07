@@ -4,15 +4,13 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
+#include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class ConvDgradAttributes : public Attributes<ConvDgradAttributes>
 {
@@ -185,65 +183,20 @@ public:
         return math_mode;
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        return hipdnn_sdk::data_objects::CreateConvolutionBwdAttributesDirect(builder,
-                                                                              get_dy()->get_uid(),
-                                                                              get_w()->get_uid(),
-                                                                              get_dx()->get_uid(),
-                                                                              &pre_padding,
-                                                                              &post_padding,
-                                                                              &stride,
-                                                                              &dilation,
-                                                                              toSdkType(math_mode));
-    }
-
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
-    {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
-        {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    ConvDgradAttributes& setInput(InputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-
-    ConvDgradAttributes& setInput(InputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
-
-    ConvDgradAttributes& setOutput(OutputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-
-    ConvDgradAttributes& setOutput(OutputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
+        return hipdnn_data_sdk::data_objects::CreateConvolutionBwdAttributesDirect(
+            builder,
+            get_dy()->get_uid(),
+            get_w()->get_uid(),
+            get_dx()->get_uid(),
+            &pre_padding,
+            &post_padding,
+            &stride,
+            &dilation,
+            toSdkType(math_mode));
     }
 };
 typedef ConvDgradAttributes Conv_dgrad_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

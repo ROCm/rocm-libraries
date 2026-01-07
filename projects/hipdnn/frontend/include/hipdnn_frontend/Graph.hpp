@@ -5,6 +5,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -14,6 +15,7 @@
 #include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
@@ -21,22 +23,24 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
+#include <spdlog/fmt/ranges.h>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 // When an error occurs, get the backend error string and append it to the error_message.
-#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                        \
-    if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
-    {                                                                                   \
-        std::array<char, 256> backend_err_msg{};                                        \
-        hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
-                                                             backend_err_msg.size());   \
-        std::string full_error_msg                                                      \
-            = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
-        return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
-    }
+#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                            \
+    do                                                                                      \
+    {                                                                                       \
+        if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
+        {                                                                                   \
+            std::array<char, 256> backend_err_msg{};                                        \
+            hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
+                                                                 backend_err_msg.size());   \
+            std::string full_error_msg                                                      \
+                = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
+            return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
+        }                                                                                   \
+    } while(0)
 
 class Graph : public INode
 {
@@ -45,6 +49,8 @@ private:
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineHeuristicDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _executionPlanDesc;
+
+    std::optional<int64_t> _preferredEngineId = std::nullopt;
 
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
     {
@@ -108,7 +114,9 @@ private:
                     "No engine configurations available for the graph."};
         }
 
-        int requiredCount = 1;
+        // Get only top hit if preferred engine id isn't set.
+        // Otherwise get all available engine configs to search for preferred id.
+        int64_t requiredCount = _preferredEngineId.has_value() ? availableEngineCount : 1;
         std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
         for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
@@ -141,10 +149,64 @@ private:
                     "No engine configurations retrieved from the heuristic desc."};
         }
 
-        //TODO
-        // Add filtering and logic to select the best engine configuration that meets the requirements.
-        _engineConfigDesc = std::move(engineConfigs[0]);
-        engineConfigs.erase(engineConfigs.begin(), engineConfigs.begin() + 1);
+        // Finalize and get ids for engine configs
+        std::vector<int64_t> engineIds(static_cast<size_t>(count), -1);
+        for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+        {
+            auto engineConfigDesc = engineConfigsShallow[i];
+            RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc),
+                                      "Failed to finalize engine config descriptor");
+
+            hipdnnBackendDescriptor_t engineDesc = nullptr;
+            RETURN_ON_BACKEND_FAILURE(
+                hipdnnBackend()->backendGetAttribute(engineConfigDesc,
+                                                     HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                                     HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                     1,
+                                                     nullptr,
+                                                     &engineDesc),
+                "Failed to get engine from engine configuration descriptor.");
+
+            // Clean-up engineDesc once we no longer need it within this scope.
+            ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
+
+            RETURN_ON_BACKEND_FAILURE(
+                hipdnnBackend()->backendGetAttribute(engineDesc,
+                                                     HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
+                                                     HIPDNN_TYPE_INT64,
+                                                     1,
+                                                     nullptr,
+                                                     &engineIds[i]),
+                "Failed to get engine id from engine descriptor.");
+        }
+
+        // Select engine config based on preferred ID or use first available
+        size_t selectedIndex = 0;
+        if(_preferredEngineId.has_value())
+        {
+            bool found = false;
+
+            for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+            {
+
+                if(engineIds[i] == _preferredEngineId.value())
+                {
+                    selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+
+            if(!found)
+            {
+                HIPDNN_FE_LOG_WARN(
+                    "Preferred engine id {} not found, using top engine config instead.",
+                    _preferredEngineId.value());
+            }
+        }
+
+        HIPDNN_FE_LOG_INFO("Selected engine id {} for execution plan.", engineIds[selectedIndex]);
+        _engineConfigDesc = std::move(engineConfigs[selectedIndex]);
 
         return {ErrorCode::OK, ""};
     }
@@ -280,6 +342,31 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    std::pair<std::unordered_set<std::shared_ptr<TensorAttributes>>,
+              std::unordered_set<std::shared_ptr<TensorAttributes>>>
+        getGraphInputTensorAttributesAndRemainder() const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allNodeOutputs;
+        std::unordered_set<std::shared_ptr<TensorAttributes>> graphInputs;
+
+        auto collectNodeOutputs = [&](const INode& node) {
+            auto nodeOutputs = node.getNodeOutputTensorAttributes();
+            allNodeOutputs.insert(nodeOutputs.begin(), nodeOutputs.end());
+        };
+        auto collectGraphInputs = [&](const INode& node) {
+            auto nodeInputs = node.getNodeInputTensorAttributes();
+            std::copy_if(nodeInputs.begin(),
+                         nodeInputs.end(),
+                         std::inserter(graphInputs, graphInputs.end()),
+                         [&](const auto& nodePtr) { return allNodeOutputs.count(nodePtr) == 0; });
+        };
+
+        visit(collectNodeOutputs);
+        visit(collectGraphInputs);
+
+        return {graphInputs, allNodeOutputs};
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -291,35 +378,22 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
+        auto [inputTensors, remainingTensors] = getGraphInputTensorAttributesAndRemainder();
 
-        auto result = checkNoDuplicateTensorIdsImpl(allTensors);
-        if(result.code != ErrorCode::OK)
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors = inputTensors;
+        allTensors.insert(remainingTensors.begin(), remainingTensors.end());
+
+        HIPDNN_CHECK_ERROR(checkNoDuplicateTensorIdsImpl(allTensors));
+
+        HIPDNN_CHECK_ERROR(topologicallySortGraph());
+
+        for(const auto& tensor : inputTensors)
         {
-            return result;
+            tensor->fill_from_context(graph_attributes);
+            HIPDNN_CHECK_ERROR(tensor->validate());
         }
 
-        result = topologicallySortGraph();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        result = validateSubtree();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        for(const auto& tensor : allTensors)
-        {
-            result = tensor->validate();
-            if(result.code != ErrorCode::OK)
-            {
-                return result;
-            }
-        }
+        HIPDNN_CHECK_ERROR(validateSubtree());
 
         return {ErrorCode::OK, ""};
     }
@@ -374,7 +448,7 @@ public:
 
         flatbuffers::FlatBufferBuilder builder;
 
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
             tensorAttributes;
         for(auto& tensor : allTensors)
         {
@@ -384,7 +458,7 @@ public:
             }
         }
 
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
         for(auto& node : _sub_nodes)
         {
             if(node)
@@ -392,7 +466,7 @@ public:
                 nodes.emplace_back(node->pack_node(builder));
             }
         }
-        auto graph = hipdnn_sdk::data_objects::CreateGraphDirect(
+        auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
             builder,
             graph_attributes.get_name().c_str(),
             toSdkType(graph_attributes.get_compute_data_type()),
@@ -434,7 +508,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plans(std::vector<HeuristicMode> const& modes
+    Error create_execution_plans(const std::vector<HeuristicMode>& modes
                                  = {HeuristicMode::FALLBACK})
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
@@ -482,9 +556,6 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Building plans for graph {}", graph_attributes.get_name());
 
-        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
-                                  "Failed to finalize engine config descriptor");
-
         RETURN_ON_BACKEND_FAILURE(
             hipdnnBackend()->backendSetAttribute(_executionPlanDesc->get(),
                                                  HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
@@ -496,6 +567,31 @@ public:
         RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_executionPlanDesc->get()),
                                   "Failed to finalize execution plan descriptor");
 
+        return {ErrorCode::OK, ""};
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    Error build(hipdnnHandle_t handle,
+                std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
+                [[maybe_unused]] BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
+                [[maybe_unused]] bool do_multithreaded_builds = false)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        HIPDNN_FE_LOG_INFO("BUILD with handle for graph '{}', policy: {}, modes: [{}]",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name(),
+                           policy,
+                           fmt::join(modes, ", "));
+
+        HIPDNN_CHECK_ERROR(validate());
+        HIPDNN_CHECK_ERROR(build_operation_graph(handle));
+        HIPDNN_CHECK_ERROR(create_execution_plans(modes));
+        HIPDNN_CHECK_ERROR(check_support());
+        HIPDNN_CHECK_ERROR(build_plans());
+
+        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph {}",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name());
         return {ErrorCode::OK, ""};
     }
 
@@ -733,6 +829,35 @@ public:
         return y;
     }
 
+    std::shared_ptr<TensorAttributes>
+        batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
+                                         std::shared_ptr<TensorAttributes> mean,
+                                         std::shared_ptr<TensorAttributes> variance,
+                                         std::shared_ptr<TensorAttributes> scale,
+                                         std::shared_ptr<TensorAttributes> bias,
+                                         BatchnormInferenceAttributesVarianceExt attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BatchnormInferenceVarianceExt_"
+                                + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_mean(std::move(mean));
+        attributes.set_variance(std::move(variance));
+        attributes.set_scale(std::move(scale));
+        attributes.set_bias(std::move(bias));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
+            std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
 
@@ -914,6 +1039,13 @@ public:
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
+    void set_preferred_engine_id_ext(std::optional<int64_t> engineId)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        _preferredEngineId = engineId;
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
     static std::shared_ptr<TensorAttributes>
         tensor_like(const std::shared_ptr<TensorAttributes>& tensor, const std::string& name = "")
     // NOLINTEND(readability-identifier-naming)
@@ -933,5 +1065,5 @@ public:
         return newTensor;
     }
 };
-}
-}
+
+} // namespace hipdnn_frontend::graph

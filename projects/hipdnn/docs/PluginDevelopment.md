@@ -4,13 +4,14 @@
 
 - [Overview](#overview)
 - [Plugin Types](#plugin-types)
-- [hipDNN-SDK Library](#hipdnn-sdk-library)
+- [SDK Libraries](#sdk-libraries)
 - [Plugin API](#plugin-api)
 - [Creating a Kernel Engine Plugin](#creating-a-kernel-engine-plugin)
   - [Steps Overview](#steps-overview)
   - [Implementation Details & Best Practices](#implementation-details)
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
+- [Plugin Loading](#plugin-loading)
 - [Example: MIOpen Legacy Plugin](#example-miopen-legacy-plugin)
 
 ---
@@ -35,23 +36,43 @@ These plugins provide the actual kernel implementations for operations. They con
 > [!IMPORTANT]
 > 🕒 **Current Status**: Only kernel engine plugins are presently supported in hipDNN. Support for engine heuristic/selection and benchmarking/tuning plugins will be added in future releases. See the [Roadmap](./Roadmap.md#plugins) for future development plans.
 
-## hipDNN-SDK Library
+## SDK Libraries
 
-The hipDNN-SDK API is a Header-Only C++ library which provides the requirements needed to create a plugin that hipDNN can consume. It includes:
+hipDNN provides several C++ SDK libraries for plugin development:
+
+### Data SDK (`data_sdk`)
+
+The Data SDK contains the FlatBuffers schemas and data structures for graph representation. It includes:
+
+- FlatBuffers schema definitions for graphs, nodes, and attributes
+- Data structures for deserializing serialized graphs
+- Utilities for working with graph data
+
+For adding new operations to the Data SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
+
+### Plugin SDK (`plugin_sdk`)
+
+The Plugin SDK contains the plugin API and utilities needed to create a plugin that hipDNN can consume. It includes:
 
 - Plugin interface definitions
-- Data structures for graph representation
-- Utilities for serialization/deserialization
 - Base classes for engine implementation
+- Utilities for plugin development
 
-For adding new operations to the SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
+### Test SDK (`test_sdk`)
+
+The Test SDK provides utilities for testing plugins. It includes:
+
+- CPU reference implementations for validation (convolution, batchnorm, etc.)
+- Test utilities (tolerances, seeds, logging)
+- Mock objects for unit testing
+- FlatBuffer test utilities
 
 ## Plugin API
 
 The plugin API defines how kernel engine plugins interact with hipDNN:
 
 - **Graph Processing**: Topologically sorted graphs are passed in a serialized format to plugins using FlatBuffers
-- **SDK Data Objects**: Plugins use SDK data objects to deserialize and process graphs
+- **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
 
@@ -61,18 +82,18 @@ This section focuses on developing kernel engine plugins; currently the only sup
 
 ### Prerequisites
 
-Before creating a plugin, ensure you have **built and installed hipDNN**. Plugins depend on the hipDNN SDK headers and libraries. See the [Quick Start Guide](./Building.md#quick-start-guide) for build and installation instructions.
+Before creating a plugin, ensure you have **built and installed hipDNN**. Plugins depend on the hipDNN Data SDK and Plugin SDK headers. See the [Quick Start Guide](./Building.md#quick-start-guide) for build and installation instructions.
 
 ### Steps Overview
 
 1. **Create Plugin Structure**
    - Create a new project/repository for your plugin
-   - Implement the plugin interface defined in [`sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h)
+   - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
    - See [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/) as a reference implementation (currently included but will become a separate project)
 
 2. **Implement Plugin API Functions**
 
-   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability; the only true requirement is to implement the exported API functions defined in `engine_plugin_api.h`. However, the common architectural pattern consists of:
+   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in `engine_plugin_api.h`. However, the common architectural pattern consists of:
    - **Engine Manager**: Manages available engines and their capabilities
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
    - **Execution Plans**: Define how operations are executed
@@ -108,16 +129,16 @@ For **Engine Implementations**:
 In general, the **best practices** consist of:
 
 1. Organizing kernels by operation type
-2. Efficiently manage device memory allocations and transfers
-3. Validate inputs and provide meaningful error messages and logs via the sdk
-4. Properly manage compute streams for asynchronous execution
-5. Profile kernels and optimize for target hardware
-6. Validate and document supported operations, hardware requirements, and limitations
-7. Include unit tests and integration tests
+2. Efficiently managing device memory allocations and transfers
+3. Validating inputs and provide meaningful error messages and logs via the sdk
+4. Properly managing compute streams for asynchronous execution
+5. Profiling kernels and optimize for target hardware
+6. Validating and documenting supported operations, hardware requirements, and limitations
+7. Including unit tests and integration tests
 
 ### Key Files Reference
 
-- **Plugin API Interface**: [`sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h`](../sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h)
+- **Plugin API Interface**: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
 - **Example Plugin Implementation**: [`plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp`](../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp)
 - **Example Engine Manager**: [`plugins/miopen_legacy_plugin/EngineManager.hpp`](../plugins/miopen_legacy_plugin/EngineManager.hpp)
 - **Example Engine Implementation**: [`plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp`](../plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp)
@@ -144,25 +165,25 @@ your_kernel_plugin_project/
 ### Build Configuration
 Your plugin's CMakeLists.txt should:
 - Build as a shared library
-- Link against hipDNN SDK
+- Link against hipDNN Data SDK and Plugin SDK
 - Set appropriate install paths
 - Link to required compute libraries (ie. HIP)
 
-#### Using hipDNN SDK in External Plugins
+#### Using hipDNN SDKs in External Plugins
 
-When building an external plugin, the hipDNN SDK provides CMake variables to help you install your plugin in the correct location:
+When building an external plugin, the hipDNN Data SDK provides CMake variables to help you install your plugin in the correct location:
 
-- **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`): 
+- **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`):
   - Hardcoded at CMake configure time
-  - This is intended for **developer-use only**
-  
+  - This is intended for **developer use only**
+
 - **Relative path** (`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`):
   - **Recommended for installations**
-  - Automatically prepends the `CMAKE_INSTALL_PREFIX` of the consumer 
-  - Remains correct when setting the prefix during the CMake install command 
+  - Automatically prepends the `CMAKE_INSTALL_PREFIX` of the consumer
+  - Remains correct when setting the prefix during the CMake install command
 
 ```cmake
-find_package(hipdnn_sdk CONFIG REQUIRED) # or hipdnn_frontend which includes hipdnn_sdk
+find_package(hipdnn_data_sdk CONFIG REQUIRED) # or hipdnn_frontend which includes hipdnn_data_sdk
 
 # Example: Configure your plugin to install to the correct location
 install(
@@ -248,6 +269,10 @@ hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     hipdnnPluginLoadingMode_ext_t loading_mode
 );
 ```
+
+### Plugin Symbol Resolution
+All plugins are loaded with `RTLD_NOW` to ensure that all symbols are resolved at load time. This means
+that all dependencies must be satisfied when the plugin is loaded. To avoid symbol conflicts, all plugins must be built with with `-fvisibility=hidden` to limit symbol exposure.
 
 #### Path Resolution
 

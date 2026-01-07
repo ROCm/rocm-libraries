@@ -78,7 +78,7 @@ The bound indices are also known as summation indices. These indices are not pre
 Benchmark run
 ==============
 
-In a benchmark run, a set of potential solutions are generated to solve the problems defined by the parameters in the provided benchmark `config <https://github.com/ROCm/Tensile/tree/develop/Tensile/Configs>`_. The generated kernels with specified sizes or ranges are run and their performance is recorded. The best performing kernels for the given benchmark are selected and written to output as Library logic.
+In a benchmark run, a set of potential solutions are generated to solve the problems defined by the parameters in the provided benchmark `config <https://github.com/ROCm/rocm-libraries/tree/develop/shared/tensile/Tensile/Configs>`_. The generated kernels with specified sizes or ranges are run and their performance is recorded. The best performing kernels for the given benchmark are selected and written to output as Library logic.
 
 Library logic
 ==============

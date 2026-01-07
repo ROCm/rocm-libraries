@@ -71,20 +71,18 @@ class xorwow_engine
 public:
     struct xorwow_state
     {
-        // Weyl sequence value
-        unsigned int d;
-
     #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
         // The Box–Muller transform requires two inputs to convert uniformly
         // distributed real values [0; 1] to normally distributed real values
         // (with mean = 0, and stddev = 1). Often user wants only one
         // normally distributed number, to save performance and random
         // numbers the 2nd value is saved for future requests.
-        unsigned int boxmuller_float_state; // is there a float in boxmuller_float
-        unsigned int boxmuller_double_state; // is there a double in boxmuller_double
-        float boxmuller_float; // normally distributed float
         double boxmuller_double; // normally distributed double
+        float  boxmuller_float; // normally distributed float
     #endif
+
+        // Weyl sequence value
+        unsigned int d;
 
         // Xorshift values (160 bits)
         unsigned int x[5];
@@ -127,8 +125,8 @@ public:
         discard(offset);
 
     #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-        m_state.boxmuller_float_state = 0;
-        m_state.boxmuller_double_state = 0;
+        m_state.boxmuller_float  = ROCRAND_NAN_FLOAT;
+        m_state.boxmuller_double = ROCRAND_NAN_DOUBLE;
     #endif
     }
 

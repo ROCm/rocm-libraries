@@ -111,7 +111,9 @@ namespace rocwmma
                        || (deviceArch == DeviceInfo::GFX1102)
                        || (deviceArch == DeviceInfo::GFX1103)
                        || (deviceArch == DeviceInfo::GFX1150)
-                       || (deviceArch == DeviceInfo::GFX1151);
+                       || (deviceArch == DeviceInfo::GFX1151)
+                       || (deviceArch == DeviceInfo::GFX1152)
+                       || (deviceArch == DeviceInfo::GFX1153);
 
         auto isGfx12 = (deviceArch == DeviceInfo::GFX1200) || (deviceArch == DeviceInfo::GFX1201);
 
@@ -334,6 +336,7 @@ namespace rocwmma
                                               inputBatchOffset,
                                               outputBatchOffset,
                                               accBatchOffset);
+                        CHECK_HIP_ERROR(hipGetLastError());
                     };
                 }
             }
@@ -369,6 +372,7 @@ namespace rocwmma
                                               mB,
                                               upstreamBatchOffset,
                                               accBatchOffset);
+                        CHECK_HIP_ERROR(hipGetLastError());
                         CHECK_HIP_ERROR(hipEventRecord(syncEvent));
                         CHECK_HIP_ERROR(hipEventSynchronize(syncEvent));
 
@@ -391,6 +395,7 @@ namespace rocwmma
                                               inputBatchOffset,
                                               upstreamBatchOffset,
                                               accBatchOffset);
+                        CHECK_HIP_ERROR(hipGetLastError());
                     };
                 }
             }

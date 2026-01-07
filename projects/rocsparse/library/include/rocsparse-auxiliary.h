@@ -2102,8 +2102,8 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
  *  @param[out]
  *  sell_colval_size       actual number of elements stored in the sliced ELL matrix.
  *  @param[out]
- *  sell_slice_offsets     slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1 
- *                         where \p nslices=(rows-1)/sell_slice_size+1 ). 
+ *  sell_slice_offsets     slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1
+ *                         where \p nslices=(rows-1)/sell_slice_size+1 ).
  *  @param[out]
  *  sell_col_ind            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
  *  @param[out]

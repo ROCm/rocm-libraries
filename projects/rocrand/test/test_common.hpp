@@ -179,24 +179,22 @@ double get_variance(const std::vector<T>& values, double mean)
     return variance / values.size();
 }
 
-// class to represent a Emperical Distribution Function (EDF) of some distribution
-class EDF{
-    private:
-        std::vector<double> dis;
-        double n;
+// struct to represent a Emperical Distribution Function (EDF) 
+// of some sample
+struct EDF{
+    std::vector<double> sample;
+    double n;
+    EDF(const std::vector<double> & x){
+        sample = x;
+        std::sort(sample.begin(), sample.end());
+        n = static_cast<double>(sample.size());
+    }
 
-    public:
-        EDF(const std::vector<double> & x){
-            dis = x;
-            std::sort(dis.begin(), dis.end());
-            n = static_cast<double>(dis.size());
-        }
-
-        double operator()(double x) const{
-            auto it = std::upper_bound(dis.begin(), dis.end(), x);
-            double pos = static_cast<double>(it - dis.begin());
-            return pos / n;
-        }
+    double operator()(double x) const{
+        auto it = std::upper_bound(sample.begin(), sample.end(), x);
+        double pos = static_cast<double>(it - sample.begin());
+        return pos / n;
+    }
 };
 
 // Perform Two-Sample Kolmogorov-Smirnov Test
@@ -204,25 +202,25 @@ bool ks_test_2(const std::vector<double> & expected, const std::vector<double> &
     EDF aEDF(expected);
     EDF eEDF(actual);
 
-    double n = static_cast<double>(expected.size());
-    double m = static_cast<double>(actual.size());
+    double n = aEDF.n;
+    double m = eEDF.n;
 
-    double iter = 1.0 / (static_cast<double>(actual.size()) * 2);
+    double max_diff = std::numeric_limits<double>::min();
 
+    // Calculate the statistical value: the maximum difference between the two EDF.
+    for(const double & x : aEDF.sample){
+        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
+    }
 
-    // Calculate the statistical value: the maximum difference between the two EDF functions.
-    // Since the original distributions are discrete, we can split [0, 1.0] into n points
-    // and check at those points. We double the points here just for extra coverage, but
-    // its not really needed.
-    double d = -1;
-    for(double x = 0; x <= 1.0; x += iter)
-        d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
+    for(const double & x : eEDF.sample){
+        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
+    }
 
     // calculating the critical value
     double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
     double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
 
-    return d <= cv; // <= because we reject if d > cv
+    return max_diff <= cv; // <= because we reject if d > cv
 }
 
 #endif // TEST_COMMON_HPP_

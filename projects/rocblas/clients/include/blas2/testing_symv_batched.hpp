@@ -345,7 +345,7 @@ void testing_symv_batched(const Arguments& arg)
             CHECK_HIP_ERROR(d_alpha.transfer_from(alpha));
             CHECK_HIP_ERROR(d_beta.transfer_from(beta));
 
-            dy.transfer_from(hy_gold);
+            CHECK_HIP_ERROR(dy.transfer_from(hy_gold));
 
             handle.pre_test(arg);
             DAPI_CHECK(rocblas_symv_batched_fn,

@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename U>
 void sygvdj_hegvdj_checkBadArgs(const rocblas_handle handle,
@@ -444,7 +445,7 @@ void sygvdj_hegvdj_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -461,12 +462,12 @@ void sygvdj_hegvdj_getPerfData(const rocblas_handle handle,
         sygvdj_hegvdj_initData<false, true, T>(handle, itype, evect, n, dA, lda, stA, dB, ldb, stB,
                                                bc, hA, hB, A, B, false, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_sygvdj_hegvdj(STRIDED, handle, itype, evect, uplo, n, dA.data(), lda, stA,
                                 dB.data(), ldb, stB, dD.data(), stD, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -615,7 +616,7 @@ void testing_sygvdj_hegvdj(Arguments& argus)
                                                hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdj_hegvdj_getPerfData<STRIDED, T>(
                 handle, itype, evect, uplo, n, dA, lda, stA, dB, ldb, stB, dD, stD, dInfo, bc, hA,
                 hB, hD, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -655,7 +656,7 @@ void testing_sygvdj_hegvdj(Arguments& argus)
                                                hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdj_hegvdj_getPerfData<STRIDED, T>(
                 handle, itype, evect, uplo, n, dA, lda, stA, dB, ldb, stB, dD, stD, dInfo, bc, hA,
                 hB, hD, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

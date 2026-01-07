@@ -71,6 +71,10 @@ GPU support
 hipTensor is supported on the AMD CDNA class GPUs featuring matrix core support,
 including the gfx908, gfx90a, gfx942, and gfx950 GPUs (collectively labeled as gfx9).
 
+Additionally, hipTensor is supported on AMD RDNA GPUs:
+ - gfx11-generic: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152 and gfx1153.
+ - gfx12-generic; gfx1200 and gfx1201.
+
 .. note::
 
    Double precision ``FP64`` datatype support requires the gfx90a, gfx942, or gfx950.
@@ -99,8 +103,12 @@ The following dependencies are required:
 Downloading hipTensor
 -------------------------------------------
 
-The hipTensor source code is available from the `hipTensor GitHub <https://github.com/ROCm/hipTensor>`_.
+The hipTensor source code is available from the `hipTensor GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiptensor>`_.
 ROCm version 7.0 or later is required.
+
+.. note::
+
+  The hipTensor repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/hipTensor>`_.
 
 To verify the ROCm version installed on an Ubuntu system, use this command:
 
@@ -121,10 +129,22 @@ The hipTensor GitHub has branches with names like ``rocm-major.minor.x``,
 where ``major`` and ``minor`` are the same as for the ROCm version.
 To download hipTensor on ROCm version `x.y`, use this command:
 
-.. code-block:: shell
+.. tab-set::
+    .. tab-item:: ROCm 7.2.0 and later
 
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/hipTensor.git
-   cd hipTensor
+        .. code-block:: shell
+
+           git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+           cd rocm-libraries/projects/hiptensor
+
+        Alternatively, you can use ``sparse-checkout`` to clone only the hipTensor project from the ``rocm-libraries`` monorepo. For more information, see `Contributing to the ROCm Libraries <https://github.com/ROCm/rocm-libraries/blob/develop/CONTRIBUTING.md#option-b-clone-the-monorepo-with-sparse-checkout>`_.
+
+    .. tab-item:: ROCm 7.1.1 and prior
+
+        .. code-block:: shell
+
+           git clone -b release/rocm-rel-x.y https://github.com/ROCm/hipTensor.git
+           cd hipTensor
 
 Replace ``x.y`` in the above command with the version of ROCm installed on your machine.
 For example, if you have ROCm 7.0 installed, then replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-7.0``.
@@ -151,7 +171,7 @@ Here are the available options to build the hipTensor library, with or without c
         -   **Default value**
     *   -   ``GPU_TARGETS``
         -   Build the code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1200``; ``gfx1201``; ``gfx12-generic``
     *   -   ``HIPTENSOR_BUILD_TESTS``
         -   Build the tests
         -   ``ON``
