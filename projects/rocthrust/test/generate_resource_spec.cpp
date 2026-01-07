@@ -41,15 +41,14 @@
 }
 
 // This program queries available AMD GPUs in the system and outputs
-// a JSON structure that conforms to ctest's resource spec file format.
+// a JSON structure that conforms to CTest's resource spec file format.
 // See https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-specification-file
 // for more information about the format.
-// The JSON structure maps gfxIDs to device ids. This output can be piped to
-// a file and passed to ctest (currently we do this by setting the cmake variable
-// CTEST_RESOURCE_SPEC_FILE to the path to the generated file).
+// The JSON structure maps gfxIDs to device ids. This output can be passed to CTest
+// via the --resource-spec-file option.
 //
-// Usage: hipcc enum_devices.cpp -o enum_devices
-// ./enum_device <output file>
+// Usage: hipcc generate_resource_spec.cpp -o generate_resource_spec
+// ./generate_resource_spec <output file>
 //
 //  Sample output:
 // 	{
@@ -90,7 +89,7 @@ int main(int argc, char* argv[])
 {
   if (argc != 2)
   {
-    std::cout << "Usage: ./enum_devices <output file path>" << std::endl;
+    std::cout << "Usage: ./generate_resource_spec <output file path>" << std::endl;
     std::exit(EXIT_FAILURE);
   }
 

@@ -11,11 +11,11 @@ To run tests on multiple GPUs, CTest provides the resource allocation feature. T
   * the resource specification file which describes the resources available on the system, and
   * the ``RESOURCE_GROUPS`` property of tests, which describes the resources required by each individual test.
 
-When you build rocThrust with the ``-DBUILD_TESTS=ON`` option, an executable named ``enum_devices`` will be built and running it will generate the resource specification file. For example, in your build folder
+When you build rocThrust with the ``-DBUILD_TESTS=ON`` option, an executable named ``generate_resource_spec`` will be built and running it will generate the resource specification file. For example, in your build folder
 
 .. code:: shell
 
-    ./test/enum_devices resources.json
+    ./test/generate_resource_spec resources.json
 
 will generate a resource specification file named ``resources.json``. This file describes the GPUs available on your system. In addition, CMake also defines the ``RESOURCE_GROUPS`` property for each test that refers to the default GPU resource ``gpus`` in ``resources.json``. Then when your run ``ctest`` with specified number of jobs:
 

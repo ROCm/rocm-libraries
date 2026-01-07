@@ -199,14 +199,14 @@ variable. CTest Resource Allocation requires a resource spec file.
 
 #### Auto resource spec generation
 
-An executable named `enum_devices` will be built when you run `cmake -DBUILD_TEST=ON`. It can be used to generate the resource spec file, which describes the GPU resources available on your system:
+An executable named `generate_resource_spec` will be built when you run `cmake -DBUILD_TEST=ON`. It can be used to generate the resource spec file, which describes the GPU resources available on your system:
 
 ```shell
 # Go to rocThrust build directory
 cd projects/rocthrust; cd build
 
-# Invoke the enum_devices executable with a name for the output json file
-./test/enum_devices resources.json
+# Invoke the executable with a name for the output json file
+./test/generate_resource_spec resources.json
 
 # Run tests in parallel with specified number of jobs
 ctest --resource-spec-file ./resources.json --parallel <number-of-jobs>
