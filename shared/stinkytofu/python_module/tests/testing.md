@@ -10,40 +10,40 @@ pip install pytest pytest-cov pytest-xdist
 
 # Set PYTHONPATH and run all tests
 cd /path/to/rocm-libraries/shared/stinkytofu
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -v
 ```
 
 ## Running Tests
 
 ### Run All Tests
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -v
 ```
 
 ### Run Specific Test File
 ```bash
 # Run basic tests
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/test_basic.py -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/test_basic.py -v
 
 # Run MFMA tests
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/test_mfma.py -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/test_mfma.py -v
 
 # Run gfx1250-specific instruction tests
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/test_gfx1250.py -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/test_gfx1250.py -v
 ```
 
 ### Run Specific Test
 ```bash
 # Run a specific test from test_basic.py
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/test_basic.py::test_composite_instruction -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/test_basic.py::test_composite_instruction -v
 
 # Run a specific test from test_mfma.py
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/test_mfma.py::TestBasicMFMA::test_mfma_bf16_gfx942 -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/test_mfma.py::TestBasicMFMA::test_mfma_bf16_gfx942 -v
 ```
 
 ### Run Tests with Output (-s shows print statements)
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -v -s
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -v -s
 ```
 
 ## Using Markers
@@ -52,27 +52,27 @@ Tests are organized with markers for easy filtering:
 
 ### Run Only Composite Instruction Tests
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -m "composite" -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -m "composite" -v
 ```
 
 ### Run Only Architecture-Specific Tests
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -m "architecture" -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -m "architecture" -v
 ```
 
 ### Run Only MFMA Instruction Tests
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -m "mfma" -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -m "mfma" -v
 ```
 
 ### Run Only Sparse Matrix Tests
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -m "sparse" -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -m "sparse" -v
 ```
 
 ### Exclude Slow Tests
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -m "not slow" -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -m "not slow" -v
 ```
 
 ## Keyword Filtering
@@ -80,17 +80,17 @@ PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -m "not s
 ### Run Tests Matching a Keyword
 ```bash
 # Run all tests with "valu" in the name
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -k "valu" -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -k "valu" -v
 
 # Run all tests for gfx942
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -k "gfx942" -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -k "gfx942" -v
 ```
 
 ## Coverage Reports
 
 ### Generate HTML Coverage Report
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ \
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ \
     --cov=stinkytofu \
     --cov-report=html \
     --cov-report=term
@@ -100,7 +100,7 @@ View the report: `open htmlcov/index.html`
 
 ### Terminal Coverage Report
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ \
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ \
     --cov=stinkytofu \
     --cov-report=term-missing
 ```
@@ -111,10 +111,10 @@ Run tests in parallel for faster execution:
 
 ```bash
 # Auto-detect number of CPUs
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -n auto
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -n auto
 
 # Use specific number of workers
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -n 4
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -n 4
 ```
 
 ## Test Fixtures
@@ -156,13 +156,13 @@ def test_architecture_support(arch, arch_name):
 
 ```
 python_module/tests/
-├── conftest.py          # Shared fixtures and pytest configuration
-├── pytest.ini           # pytest configuration file
-├── requirements.txt     # Test dependencies
-├── test_basic.py        # Basic functionality tests
-├── test_mfma.py         # MFMA/WMMA/SMFMA instruction tests
-├── test_gfx1250.py      # gfx1250-specific instruction tests
-└── testing.md           # This file
++-- conftest.py          # Shared fixtures and pytest configuration
++-- pytest.ini           # pytest configuration file
++-- requirements.txt     # Test dependencies
++-- test_basic.py        # Basic functionality tests
++-- test_mfma.py         # MFMA/WMMA/SMFMA instruction tests
++-- test_gfx1250.py      # gfx1250-specific instruction tests
++-- testing.md           # This file
 ```
 
 ## Writing New Tests
@@ -174,13 +174,13 @@ def test_my_feature(gfx942_builder):
     """Clear description of what this test validates."""
     st = gfx942_builder
     module = st.createIRList("test_name")
-    
+
     # Create instructions
     module.add(st.VAddU32(vgpr(0), vgpr(1), vgpr(2), "test"))
-    
+
     # Get assembly
     asm = module.emitAssembly(emit_comments=True)
-    
+
     # Assertions
     assert "v_add_u32" in asm.lower()
 ```
@@ -199,22 +199,22 @@ def test_complex_feature(gfx942_builder):
 
 ### Run with More Verbose Output
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -vv
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -vv
 ```
 
 ### Show Local Variables on Failure
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -l
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -l
 ```
 
 ### Drop into Debugger on Failure
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ --pdb
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ --pdb
 ```
 
 ### Run Last Failed Tests
 ```bash
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ --lf
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ --lf
 ```
 
 ## CI/CD Integration
@@ -229,7 +229,7 @@ set -e
 cmake --build build --target stinkytofu_python
 
 # Run tests with coverage
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ \
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ \
     --cov=stinkytofu \
     --cov-report=xml \
     --cov-report=term \

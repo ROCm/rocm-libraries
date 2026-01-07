@@ -28,12 +28,12 @@ cmake .. -DSTINKYTOFU_BUILD_PYTHON=ON
 cmake --build . --target stinkytofu_python -j12
 ```
 
-The Python module will be built to `build/python_module/stinkytofu.*.so`.
+The Python module will be built to `build/lib/stinkytofu.*.so`.
 
 ### Add to Python Path
 
 ```bash
-export PYTHONPATH=/path/to/build/python_module:$PYTHONPATH
+export PYTHONPATH=/path/to/build/lib:$PYTHONPATH
 ```
 
 ## Examples
@@ -165,7 +165,7 @@ The test suite uses **pytest** for better test organization and reporting.
 pip install -r python_module/tests/requirements.txt
 
 # Run all tests
-PYTHONPATH=build/python_module:$PYTHONPATH pytest python_module/tests/ -v
+PYTHONPATH=build/lib:$PYTHONPATH pytest python_module/tests/ -v
 ```
 
 ### Detailed Testing Guide

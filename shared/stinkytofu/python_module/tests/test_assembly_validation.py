@@ -2078,8 +2078,8 @@ class TestBF16Conversions:
         st = StinkyAsmIR([9, 5, 0])  # gfx950
         module = st.createIRList("bf16_f32_test")
 
-        # BF16 to F32
-        module.add(st.VCvtBF16toFP32(vgpr(0), vgpr(10), "convert bf16 to fp32"))
+        # BF16 to F32 - signature: (dst, src, vgprMask=None, vi=0, comment="")
+        module.add(st.VCvtBF16toFP32(vgpr(0), vgpr(10), None, 0, "convert bf16 to fp32"))
         # Packed F32 to BF16
         module.add(st.VCvtPkF32toBF16(vgpr(1), vgpr(11), vgpr(12), "convert pk f32 to bf16"))
 
@@ -2205,8 +2205,8 @@ class TestDSMemory:
         module.add(st.DSStoreB32(vgpr(11), vgpr(0), "write 32-bit to LDS"))
 
         # DS Read/Write B64
-        module.add(st.DSReadB64(vgpr(2, 2), vgpr(12), "read 64-bit from LDS"))
-        module.add(st.DSWriteB64(vgpr(13), vgpr(2, 2), "write 64-bit to LDS"))
+        module.add(st.DSLoadB64(vgpr(2, 2), vgpr(12), "read 64-bit from LDS"))
+        module.add(st.DSStoreB64(vgpr(13), vgpr(2, 2), "write 64-bit to LDS"))
 
         asm = module.emitAssembly()
 
@@ -2226,10 +2226,10 @@ class TestDSMemory:
         module = st.createIRList("ds_typed_test")
 
         # Unsigned/signed variants
-        module.add(st.DSReadU8(vgpr(0), vgpr(10), "read u8"))
-        module.add(st.DSReadI8(vgpr(1), vgpr(11), "read i8"))
-        module.add(st.DSReadU16(vgpr(2), vgpr(12), "read u16"))
-        module.add(st.DSReadI16(vgpr(3), vgpr(13), "read i16"))
+        module.add(st.DSLoadU8(vgpr(0), vgpr(10), "read u8"))
+        module.add(st.DSLoadI8(vgpr(1), vgpr(11), "read i8"))
+        module.add(st.DSLoadU16(vgpr(2), vgpr(12), "read u16"))
+        module.add(st.DSLoadI16(vgpr(3), vgpr(13), "read i16"))
 
         asm = module.emitAssembly()
 
@@ -2245,12 +2245,12 @@ class TestDSMemory:
         module = st.createIRList("ds_dual_test")
 
         # Dual reads
-        module.add(st.DSRead2B32(vgpr(0, 2), vgpr(10), vgpr(11), "read two 32-bit"))
-        module.add(st.DSRead2B64(vgpr(4, 4), vgpr(12), vgpr(13), "read two 64-bit"))
+        module.add(st.DSLoad2B32(vgpr(0, 2), vgpr(10), vgpr(11), "read two 32-bit"))
+        module.add(st.DSLoad2B64(vgpr(4, 4), vgpr(12), vgpr(13), "read two 64-bit"))
 
         # Dual writes
-        module.add(st.DSWrite2B32(vgpr(14), vgpr(15), vgpr(0), "write two 32-bit"))
-        module.add(st.DSWrite2B64(vgpr(16), vgpr(17), vgpr(4, 2), "write two 64-bit"))
+        module.add(st.DSStore2B32(vgpr(14), vgpr(15), vgpr(0), "write two 32-bit"))
+        module.add(st.DSStore2B64(vgpr(16), vgpr(17), vgpr(4, 2), "write two 64-bit"))
 
         asm = module.emitAssembly()
 
