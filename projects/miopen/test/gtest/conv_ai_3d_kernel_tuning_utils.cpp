@@ -41,6 +41,7 @@
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::solver::conv;
+using namespace miopen::ai::tuning::candidate_selection;
 
 namespace {
 // Helper: layout string to code (must match GetFeatures3D)
@@ -224,6 +225,106 @@ Conv3DKernelTuningTestName(const ::testing::TestParamInfo<Conv3DKernelTuningTest
 {
     return info.param.test_name;
 }
+
+// Helper function for metadata encoding validation
+// Validates that all CK kernel instances can be encoded without errors
+void ValidateMetadataEncoding(
+    const std::string& solver_name,
+    const std::vector<std::string>& all_ck_kernels,
+    const std::string& device_arch)
+{
+    ASSERT_FALSE(all_ck_kernels.empty()) << "No CK instances found for " << solver_name;
+    MIOPEN_LOG_I("Testing " << all_ck_kernels.size() << " total CK instances for " << solver_name);
+    
+    const auto& model = GetCandidateSelectionModel(device_arch, solver_name);
+    const auto& metadata = model.metadata();
+    
+    // Get supported kernel names from metadata (check both encodings and constants)
+    std::set<std::string> supported_kernel_names;
+    
+    auto encodings_it = metadata.sequence_encodings().find("000_kernel_name");
+    if(encodings_it != metadata.sequence_encodings().end()) {
+        // Variable kernel names - get all encoded values
+        for(const auto& [name, value] : encodings_it->second) {
+            supported_kernel_names.insert(name);
+        }
+    } else {
+        // Check if it's a constant (single kernel type)
+        auto constant_kernel = metadata.GetOutputConstant("000_kernel_name");
+        if(constant_kernel.has_value()) {
+            supported_kernel_names.insert(constant_kernel.value());
+            MIOPEN_LOG_I("Kernel name is constant: " << constant_kernel.value());
+        }
+    }
+    
+    // Separate kernels into supported and unsupported
+    std::vector<std::string> supported_kernels;
+    std::vector<std::string> unsupported_kernels;
+    
+    if(!supported_kernel_names.empty()) {
+        for(const auto& typestring : all_ck_kernels) {
+            auto tokens = GetKernelAsTokens(typestring);
+            if(!tokens.empty()) {
+                const std::string& kernel_name = tokens[0];
+                if(supported_kernel_names.count(kernel_name) > 0) {
+                    supported_kernels.push_back(typestring);
+                } else {
+                    unsupported_kernels.push_back(typestring);
+                }
+            }
+        }
+    } else {
+        // No kernel name filtering available - test all kernels
+        MIOPEN_LOG_I("No kernel name filtering available - testing all kernels");
+        supported_kernels = all_ck_kernels;
+    }
+    
+    // Log unsupported kernels (expected - these are CK kernels not in the model)
+    if(!unsupported_kernels.empty()) {
+        MIOPEN_LOG_I("Found " << unsupported_kernels.size() << " CK kernels not in metadata (expected)");
+    }
+    
+    ASSERT_FALSE(supported_kernels.empty()) << "No supported kernels found";
+    MIOPEN_LOG_I("Testing " << supported_kernels.size() << " supported kernels");
+    
+    // Create kernel parameter vectors from supported TypeStrings
+    std::vector<std::vector<std::string>> kernel_params;
+    for(const auto& typestring : supported_kernels) {
+        auto tokens = GetKernelAsTokens(typestring);
+        kernel_params.push_back(tokens);
+    }
+    
+    // Encode all supported kernels
+    auto encoded = EncodeKernelParams(kernel_params, metadata);
+    
+    // Verify no NaN values (which indicate encoding failures)
+    int nan_count = 0;
+    std::vector<std::string> failed_kernels;
+    
+    for(size_t i = 0; i < encoded.size(); ++i) {
+        bool has_nan = false;
+        for(size_t j = 0; j < encoded[i].size(); ++j) {
+            if(std::isnan(encoded[i][j])) {
+                nan_count++;
+                has_nan = true;
+            }
+        }
+        if(has_nan) {
+            failed_kernels.push_back(supported_kernels[i]);
+        }
+    }
+    
+    if(nan_count > 0) {
+        MIOPEN_LOG_E("Found " << nan_count << " NaN encodings across " 
+                    << failed_kernels.size() << " kernels");
+        for(const auto& kernel : failed_kernels) {
+            MIOPEN_LOG_E("  Failed kernel: " << kernel);
+        }
+    }
+    
+    EXPECT_EQ(nan_count, 0) << "Found " << nan_count << " NaN encodings - indicates missing metadata entries";
+}
+
 } // anonymous namespace
 
 // ------------------- Base Test Fixture -------------------
@@ -365,6 +466,33 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
     ASSERT_FALSE(ai_success);
     ASSERT_TRUE(kernel_id.empty());
 }
+
+// ------------------- Metadata Encoding Validation Tests -------------------
+
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
+{
+    ValidateMetadataEncoding("ConvHipImplicitGemm3DGroupWrwXdlops", 
+                            GetAllWrwKernelTypeStrings(), 
+                            device_arch);
+}
+
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
+{
+    ValidateMetadataEncoding("ConvHipImplicitGemm3DGroupFwdXdlops", 
+                            GetAllFwdKernelTypeStrings(), 
+                            device_arch);
+}
+
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
+{
+    ValidateMetadataEncoding("ConvHipImplicitGemm3DGroupBwdXdlops", 
+                            GetAllBwdKernelTypeStrings(), 
+                            device_arch);
+}
+
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 // ------------------- Full Solver Tests -------------------
 
