@@ -63,8 +63,35 @@ jobs:
           "https://api.github.com/app/installations/$APP_INSTALLATION_ID/access_tokens" | jq -r .token)
 
         PR_NUMBER=$(echo "$(Build.SourceBranch)" | sed 's|refs/pull/\([0-9]*\)/.*|\1|')
-        PR_HEAD_SHA=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/pulls/$PR_NUMBER" | jq -r '.head.sha')
-        CHECK=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/commits/$PR_HEAD_SHA/check-runs" | jq -r '.check_runs[] | select(.name == "Azure CI Summary")')
+        BUILD_ID="$(Build.BuildId)"
+        echo "PR Number: $PR_NUMBER, Build ID: $BUILD_ID"
+
+        # Get the current HEAD SHA
+        PR_HEAD_SHA=$(curl -s -H "Authorization: token $GH_TOKEN" \
+          "https://api.github.com/repos/ROCm/rocm-libraries/pulls/$PR_NUMBER" | jq -r '.head.sha')
+        echo "Current HEAD SHA: $PR_HEAD_SHA"
+
+        # Find the Azure CI Summary check-run on current HEAD
+        # GitHub API returns max 30 check-runs per page, so we paginate for PRs with many checks
+        PAGE=1
+        CHECK=""
+        while true; do
+          echo "Searching for Azure CI Summary (page $PAGE)..."
+          RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/ROCm/rocm-libraries/commits/$PR_HEAD_SHA/check-runs?per_page=100&page=$PAGE")
+          CHECK=$(echo "$RESPONSE" | jq -r '.check_runs[] | select(.name == "Azure CI Summary")')
+          PAGE_COUNT=$(echo "$RESPONSE" | jq '.check_runs | length')
+
+          if [[ -n "$CHECK" ]] || [[ $PAGE_COUNT -eq 0 ]]; then
+            break
+          fi
+          PAGE=$((PAGE + 1))
+          if [[ $PAGE -gt 10 ]]; then
+            echo "Warning: Exceeded 1000 check-runs without finding Azure CI Summary"
+            break
+          fi
+        done
+
         CHECK_ID=$(echo "$CHECK" | jq -r '.id')
         CHECK_SUMMARY=$(echo "$CHECK" | jq -r '.output.summary')
         CHECK_TEXT=$(echo "$CHECK" | jq -r '.output.text')
@@ -73,12 +100,20 @@ jobs:
           echo "No Azure CI Summary check found for commit $PR_HEAD_SHA"
           exit 0
         fi
-        if [[ "$CHECK_SUMMARY" == *"$(Build.BuildId)"* ]]; then
-          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/buildId=$(Build.BuildId)[^|]*|[^|]*|/buildId=$(Build.BuildId)) | ${{ parameters.checkConclusion }} |/")
+
+        # Verify this check-run contains our build ID (prevents updating wrong check-run)
+        # This handles the case where a build was cancelled due to a newer commit
+        if [[ "$CHECK_TEXT" != *"$BUILD_ID="* ]]; then
+          echo "Check-run does not contain this build ID ($BUILD_ID)."
+          echo "This build was likely superseded by a newer commit. Exiting gracefully."
+          exit 0
         fi
-        if [[ "$CHECK_TEXT" == *"$(Build.BuildId)="* ]]; then
-          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/$(Build.BuildId)=[^;]*;/$(Build.BuildId)=${{ parameters.checkConclusion }};/")
-        fi
+
+        echo "Found check-run ID $CHECK_ID with build ID $BUILD_ID"
+
+        # Update summary and text with this build's status
+        CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/buildId=$BUILD_ID[^|]*|[^|]*|/buildId=$BUILD_ID) | ${{ parameters.checkConclusion }} |/")
+        CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/$BUILD_ID=[^;]*;/$BUILD_ID=${{ parameters.checkConclusion }};/")
 
         CHECK_STATUS=$(echo "$CHECK_TEXT" | grep -q "pending" && echo "in_progress" || echo "completed")
         CHECK_CONCLUSION=$(echo "$CHECK_TEXT" | grep -q -e "cancelled" -e "failure" && echo "failure" || echo "success")

@@ -273,4 +273,65 @@ auto hipblas_gemm_dispatch(const Arguments& arg)
     return TEST<void>{}(arg);
 }
 
+// syrk_ex
+template <template <typename...> class TEST>
+auto hipblas_syrk_ex_dispatch(const Arguments& arg)
+{
+    const auto Ti = arg.a_type, To = arg.c_type, Tex = arg.compute_type;
+
+    if(Ti != Tex && (Ti == HIP_R_16F || Ti == HIP_R_16BF) && (To == Ti || To == HIP_R_32F))
+    {
+        if(Ti == HIP_R_16F && To == Ti && Tex == HIP_R_32F)
+        {
+            return TEST<hipblasHalf, hipblasHalf, float>{}(arg);
+        }
+        else if(Ti == HIP_R_16F && To == Tex && Tex == HIP_R_32F)
+        {
+            return TEST<hipblasHalf, float, float>{}(arg);
+        }
+        else if(Ti == HIP_R_16BF && To == Ti && Tex == HIP_R_32F)
+        {
+            return TEST<hipblasBfloat16, hipblasBfloat16, float>{}(arg);
+        }
+        else if(Ti == HIP_R_16BF && To == Tex && Tex == HIP_R_32F)
+        {
+            return TEST<hipblasBfloat16, float, float>{}(arg);
+        }
+    }
+    else if(Ti != Tex && (Ti == HIP_R_32F && Tex == HIP_R_64F))
+    {
+        if(To == HIP_R_32F && To == Ti && Tex == HIP_R_64F)
+        {
+            return TEST<float, float, double>{}(arg);
+        }
+        else if(To == Tex && Tex == HIP_R_64F)
+        {
+            return TEST<float, double, double>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
+// herk_ex
+template <template <typename...> class TEST>
+auto hipblas_herk_ex_dispatch(const Arguments& arg)
+{
+    const auto Ti = arg.a_type, To = arg.c_type, Tex = arg.compute_type;
+
+    if(Ti != Tex && (Ti == HIP_C_32F && Tex == HIP_C_64F))
+    {
+        if(To == HIP_C_32F && To == Ti && Tex == HIP_C_64F)
+        {
+            return TEST<std::complex<float>, std::complex<float>, std::complex<double>>{}(arg);
+        }
+        else if(To == Tex)
+        {
+            return TEST<std::complex<float>, std::complex<double>, std::complex<double>>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
 #endif
