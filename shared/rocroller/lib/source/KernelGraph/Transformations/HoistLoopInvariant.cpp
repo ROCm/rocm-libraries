@@ -158,7 +158,6 @@ namespace rocRoller::KernelGraph
                 continue;
             }
 
-            auto stack          = controlStack(record.control, graph);
             auto containingLoop = getParentLoop(graph, record.control);
             if(containingLoop.has_value())
             {
