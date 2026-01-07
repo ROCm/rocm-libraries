@@ -34,6 +34,7 @@
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -122,11 +123,10 @@ namespace rocRoller::KernelGraph
         return visitor.tags;
     }
 
-    // If the control node is inside a loop, return the loop node, else -1
-    int getParentLoop(KernelGraph const& graph, int control)
+    // If the control node is inside a loop, return the loop node, else std::nullopt
+    std::optional<int> getParentLoop(KernelGraph const& graph, int control)
     {
-        auto stack          = controlStack(control, graph);
-        int  containingLoop = -1;
+        auto stack = controlStack(control, graph);
         for(auto it = stack.rbegin(); it != stack.rend(); ++it)
         {
             int node = *it;
@@ -136,7 +136,7 @@ namespace rocRoller::KernelGraph
                 return node;
             }
         }
-        return -1;
+        return std::nullopt;
     }
 
     CoordinateToLoops buildCoordinateLoopMapping(KernelGraph const&         graph,
@@ -159,10 +159,10 @@ namespace rocRoller::KernelGraph
             }
 
             auto stack          = controlStack(record.control, graph);
-            int  containingLoop = getParentLoop(graph, record.control);
-            if(containingLoop != -1)
+            auto containingLoop = getParentLoop(graph, record.control);
+            if(containingLoop.has_value())
             {
-                result[record.coordinate][containingLoop].insert(record.control);
+                result[record.coordinate][containingLoop.value()].insert(record.control);
             }
         }
         return result;
