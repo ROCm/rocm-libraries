@@ -79,7 +79,7 @@ function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
         if(_dep_includes)
             foreach(_include IN LISTS _dep_includes)
                 message(VERBOSE "${TARGET_NAME} adding include from ${HEADER_LIB_TARGET_NAME}: ${_include}")
-                target_include_directories(${TARGET_NAME} SYSTEM INTERFACE ${_include})
+                target_include_directories(${TARGET_NAME} SYSTEM INTERFACE $<BUILD_INTERFACE:${_include}>)
             endforeach()
         endif()
 
