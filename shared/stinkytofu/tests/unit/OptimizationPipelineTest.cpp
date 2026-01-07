@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,16 +38,15 @@ class OptimizationPipelineTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // Initialize kernel info for GFX94X (gfx942)
-        kernelInfo.arch          = {9, 4, 2};
-        kernelInfo.WavefrontSize = 64;
-        kernelInfo.NumWaves      = 2;
-        kernelInfo.TileA0        = 16;
-        kernelInfo.TileB0        = 16;
-        kernelInfo.TileM0        = 16;
-        kernelInfo.NumGRA        = 4;
-        kernelInfo.NumGRB        = 4;
-        kernelInfo.NumGRM        = 4;
+        // Initialize GEMM config for GFX94X (gfx942)
+        gemmConfig.arch     = {9, 4, 2};
+        gemmConfig.NumWaves = 2;
+        gemmConfig.TileA0   = 16;
+        gemmConfig.TileB0   = 16;
+        gemmConfig.TileM0   = 16;
+        gemmConfig.NumGRA   = 4;
+        gemmConfig.NumGRB   = 4;
+        gemmConfig.NumGRM   = 4;
     }
 
     // Parse IR and return a non-owning pointer
@@ -77,7 +76,7 @@ protected:
         return count;
     }
 
-    StinkyKernelInfo kernelInfo;
+    GemmTileConfig gemmConfig;
 };
 
 // Test OptimizationOnly profile with O0
@@ -94,12 +93,10 @@ v[0] = "st.v_add_f32"(v[1], v[2])
     int instCountBefore = countInstructions(*func);
 
     // Run OptimizationOnly with O0
-    PassContext ctx;
-    ctx.addKernelInfo(kernelInfo);
-
     PipelineConfig config
         = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O0);
-    OptimizationPipeline::run(*func, config, ctx);
+    config.gemmTileConfig = std::make_unique<GemmTileConfig>(gemmConfig);
+    OptimizationPipeline::run(*func, config);
 
     int instCountAfter = countInstructions(*func);
 
@@ -125,12 +122,10 @@ v[0] = "st.v_add_f32"(v[1], v[2])
         = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O2);
     config.verbose                = false; // Don't spam test output
     config.optimizationIterations = 10; // Custom iteration count
-
-    PassContext ctx;
-    ctx.addKernelInfo(kernelInfo);
+    config.gemmTileConfig         = std::make_unique<GemmTileConfig>(gemmConfig);
 
     // Should not crash
-    OptimizationPipeline::run(*func, config, ctx);
+    OptimizationPipeline::run(*func, config);
 
     // Basic sanity check
     EXPECT_GT(countInstructions(*func), 0);

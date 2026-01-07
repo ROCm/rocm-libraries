@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,16 +38,15 @@ class DeadCodeEliminationPassTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // Initialize kernel info for GFX94X (gfx942)
-        kernelInfo.arch          = {9, 4, 2};
-        kernelInfo.WavefrontSize = 64;
-        kernelInfo.NumWaves      = 2;
-        kernelInfo.TileA0        = 16;
-        kernelInfo.TileB0        = 16;
-        kernelInfo.TileM0        = 16;
-        kernelInfo.NumGRA        = 4;
-        kernelInfo.NumGRB        = 4;
-        kernelInfo.NumGRM        = 4;
+        // Initialize GEMM config for GFX94X (gfx942)
+        gemmConfig.arch     = {9, 4, 2};
+        gemmConfig.NumWaves = 2;
+        gemmConfig.TileA0   = 16;
+        gemmConfig.TileB0   = 16;
+        gemmConfig.TileM0   = 16;
+        gemmConfig.NumGRA   = 4;
+        gemmConfig.NumGRB   = 4;
+        gemmConfig.NumGRM   = 4;
     }
 
     // Parse IR and return a non-owning pointer
@@ -82,7 +81,7 @@ protected:
         return oss.str();
     }
 
-    StinkyKernelInfo kernelInfo;
+    GemmTileConfig gemmConfig;
 };
 
 // Test 1: Remove dead store (register overwritten before use)
@@ -102,14 +101,14 @@ v[6] = "st.v_sub_f32"(v[0], v[3])
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
 
     std::string result = getFunctionIR(*func);
 
-    // First v0 definition is overwritten by second v0 definition → removed
+    // First v0 definition is overwritten by second v0 definition -> removed
     EXPECT_EQ(result.find("st.v_mul_f32"), std::string::npos);
 
     // All other instructions are live
@@ -136,19 +135,19 @@ v[0] = "st.v_sub_f32"(v[10], v[11])
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
 
     std::string result = getFunctionIR(*func);
 
-    // First three v0 definitions are overwritten → removed
+    // First three v0 definitions are overwritten -> removed
     EXPECT_EQ(result.find("st.v_mul_f32"), std::string::npos);
     EXPECT_EQ(result.find("st.v_add_f32"), std::string::npos);
     EXPECT_EQ(result.find("st.v_fma_f32"), std::string::npos);
 
-    // Last v0 definition is used by store → kept
+    // Last v0 definition is used by store -> kept
     EXPECT_NE(result.find("st.v_sub_f32"), std::string::npos);
     EXPECT_NE(result.find("global_store_dword"), std::string::npos);
 }
@@ -169,7 +168,7 @@ v[5] = "st.v_fma_f32"(v[3], v[0], 1.0)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
@@ -200,7 +199,7 @@ v[7] = "st.v_fma_f32"(v[3], v[1], 1.0)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
@@ -212,7 +211,7 @@ v[7] = "st.v_fma_f32"(v[3], v[1], 1.0)
     EXPECT_NE(result.find("st.v_sub_f32"), std::string::npos);
     EXPECT_NE(result.find("st.v_fma_f32"), std::string::npos);
 
-    // First v3 definition is overwritten by second v3 → removed
+    // First v3 definition is overwritten by second v3 -> removed
     EXPECT_EQ(result.find("st.v_add_f32"), std::string::npos);
 }
 
@@ -231,7 +230,7 @@ v[4] = "st.v_mul_f32"(v[1], v[2])
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
@@ -257,7 +256,7 @@ TEST_F(DeadCodeEliminationPassTest, EmptyIR)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
@@ -279,14 +278,14 @@ TEST_F(DeadCodeEliminationPassTest, AllDeadCode)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
 
     std::string result = getFunctionIR(*func);
 
-    // First two v0 definitions are overwritten → removed
+    // First two v0 definitions are overwritten -> removed
     EXPECT_EQ(result.find("st.v_mul_f32"), std::string::npos);
     EXPECT_EQ(result.find("st.v_add_f32"), std::string::npos);
 
@@ -313,7 +312,7 @@ v[10] = "st.v_add_f32"(v[6], v[7])
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
@@ -352,7 +351,7 @@ v[6] = "st.v_fma_f32"(v[0], v[3], 3.0)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);
@@ -381,7 +380,7 @@ v[4] = "st.v_sub_f32"(v[0], v[5])
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
     dcePass->run(*func, passCtx);

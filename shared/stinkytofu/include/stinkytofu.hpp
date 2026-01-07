@@ -64,52 +64,6 @@ namespace stinkytofu
         uint32_t           NumWaves; ///< Number of wavefronts
     };
 
-    // Backwards compatibility: old structure with WavefrontSize
-    struct StinkyKernelInfo
-    {
-        std::array<int, 3> arch{0, 0, 0};
-        uint32_t           TileA0;
-        uint32_t           TileB0;
-        uint32_t           TileM0;
-        uint32_t           NumGRA;
-        uint32_t           NumGRB;
-        uint32_t           NumGRM;
-        uint32_t           WavefrontSize; ///< @deprecated Derived from arch, don't set manually
-        uint32_t           NumWaves;
-
-        // Convert to new structure (ignores WavefrontSize)
-        GemmTileConfig toGemmTileConfig() const
-        {
-            GemmTileConfig config;
-            config.arch     = arch;
-            config.TileA0   = TileA0;
-            config.TileB0   = TileB0;
-            config.TileM0   = TileM0;
-            config.NumGRA   = NumGRA;
-            config.NumGRB   = NumGRB;
-            config.NumGRM   = NumGRM;
-            config.NumWaves = NumWaves;
-            return config;
-        }
-
-        // Convert from new structure (WavefrontSize provided separately)
-        static StinkyKernelInfo fromGemmTileConfig(const GemmTileConfig& config,
-                                                   uint32_t              wavefrontSize)
-        {
-            StinkyKernelInfo info;
-            info.arch          = config.arch;
-            info.TileA0        = config.TileA0;
-            info.TileB0        = config.TileB0;
-            info.TileM0        = config.TileM0;
-            info.NumGRA        = config.NumGRA;
-            info.NumGRB        = config.NumGRB;
-            info.NumGRM        = config.NumGRM;
-            info.WavefrontSize = wavefrontSize;
-            info.NumWaves      = config.NumWaves;
-            return info;
-        }
-    };
-
     /// Pass-specific feature configuration
     /// Categorizes optimization behaviors into semantics, properties, and features
     struct PassFeatureConfig
@@ -138,35 +92,6 @@ namespace stinkytofu
         BarrierConfig barrierConfig;
         LoopConfig    loopConfig;
         DagFeatures   dagFeatures;
-    };
-
-    // Backwards compatibility alias (deprecated)
-    // Legacy flat structure for old code
-    struct StinkyOptInfo
-    {
-        bool unrollGemmMovableBarrier = false;
-        bool unrollGemm               = false;
-        bool distributeGlobalRead     = false;
-
-        // Convert to new structure
-        PassFeatureConfig toPassFeatureConfig() const
-        {
-            PassFeatureConfig config;
-            config.barrierConfig.unrollMovableBarrier = unrollGemmMovableBarrier;
-            config.loopConfig.unrollGemm              = unrollGemm;
-            config.dagFeatures.distributeGlobalRead   = distributeGlobalRead;
-            return config;
-        }
-
-        // Convert from new structure
-        static StinkyOptInfo fromPassFeatureConfig(const PassFeatureConfig& config)
-        {
-            StinkyOptInfo info;
-            info.unrollGemmMovableBarrier = config.barrierConfig.unrollMovableBarrier;
-            info.unrollGemm               = config.loopConfig.unrollGemm;
-            info.distributeGlobalRead     = config.dagFeatures.distributeGlobalRead;
-            return info;
-        }
     };
 
     class IRBase : public IntrusiveListNode<IRBase>
@@ -350,10 +275,10 @@ namespace stinkytofu
     class Function
     {
     private:
-        std::string      name;
-        BasicBlockList   basicBlocks;
-        BasicBlock*      entryBlock = nullptr;
-        StinkyKernelInfo kernelInfo;
+        std::string    name;
+        BasicBlockList basicBlocks;
+        BasicBlock*    entryBlock = nullptr;
+        GemmTileConfig gemmConfig;
 
     public:
         explicit Function(const std::string& name = "")
@@ -442,14 +367,14 @@ namespace stinkytofu
             return entryBlock;
         }
 
-        // Kernel info
-        void setKernelInfo(const StinkyKernelInfo& info)
+        // GEMM tile configuration
+        void setGemmTileConfig(const GemmTileConfig& config)
         {
-            kernelInfo = info;
+            gemmConfig = config;
         }
-        const StinkyKernelInfo& getKernelInfo() const
+        const GemmTileConfig& getGemmTileConfig() const
         {
-            return kernelInfo;
+            return gemmConfig;
         }
 
         // Iteration over basic blocks
@@ -764,62 +689,6 @@ namespace stinkytofu
             return passConfig;
         }
 
-        // ========== Backwards Compatibility API (deprecated) ==========
-
-        // @deprecated Use setGemmTileConfig() instead
-        void addKernelInfo(const GemmTileConfig& kernelCfg)
-        {
-            setGemmTileConfig(kernelCfg);
-        }
-
-        // @deprecated Use setGemmTileConfig() instead - accepts legacy StinkyKernelInfo
-        void addKernelInfo(const StinkyKernelInfo& kernelCfg)
-        {
-            setGemmTileConfig(kernelCfg.toGemmTileConfig());
-        }
-
-        // @deprecated Use getGemmTileConfig() instead - returns legacy format with WavefrontSize
-        StinkyKernelInfo getKernelInfo() const
-        {
-            return StinkyKernelInfo::fromGemmTileConfig(gemmConfig, wavefrontSize);
-        }
-
-        // @deprecated Use getGemmTileConfig() instead
-        const GemmTileConfig& getGemmConfig() const
-        {
-            return gemmConfig;
-        }
-
-        // @deprecated Use setPassFeatureConfig() instead
-        void setOptInfo(const PassFeatureConfig& opt)
-        {
-            passConfig = opt;
-        }
-
-        // @deprecated Use setPassFeatureConfig() with conversion
-        void setOptInfo(const StinkyOptInfo& opt)
-        {
-            passConfig = opt.toPassFeatureConfig();
-        }
-
-        // @deprecated Use getPassFeatureConfig() instead
-        const PassFeatureConfig& getOptInfo() const
-        {
-            return passConfig;
-        }
-
-        // @deprecated Use getPassFeatureConfig() instead
-        const PassFeatureConfig& getPassConfig() const
-        {
-            return passConfig;
-        }
-
-        // @deprecated Legacy accessor for old code
-        StinkyOptInfo getOptInfoLegacy() const
-        {
-            return StinkyOptInfo::fromPassFeatureConfig(passConfig);
-        }
-
         /// Set global BasicBlock filter for all StinkyInstPass instances.
         /// This filter determines which BasicBlocks should be processed by passes.
         void setBasicBlockFilter(BasicBlockFilter filter)
@@ -945,7 +814,10 @@ namespace stinkytofu
     public:
         void setDebugConfig(std::unique_ptr<PassManagerDebugConfig> cfg);
 
-        // Set kernel configuration (wavefront size automatically determined from architecture)
+        // Set GEMM tile configuration (wavefront size automatically determined from architecture)
+        void setGemmTileConfig(const GemmTileConfig& config);
+
+        // Deprecated: Use setGemmTileConfig instead
         void setKernelConfig(std::array<int, 3> arch,
                              uint32_t           ta0,
                              uint32_t           tb0,
@@ -955,10 +827,26 @@ namespace stinkytofu
                              uint32_t           nGRM,
                              uint32_t           numWaves);
 
-        void setOptConfig(const StinkyOptInfo& opt);
+        // Set pass feature configuration
+        void setPassFeatureConfig(const PassFeatureConfig& config);
+
         void setBasicBlockFilter(BasicBlockFilter filter)
         {
             passCtx.setBasicBlockFilter(filter);
+        }
+
+        // Set the Function to operate on (transfers ownership from external Function to PassContext)
+        void setFunction(Function& externalFunc);
+
+        // Get access to the PassContext (for advanced usage)
+        PassContext& getPassContext()
+        {
+            return passCtx;
+        }
+
+        const PassContext& getPassContext() const
+        {
+            return passCtx;
         }
 
     protected:

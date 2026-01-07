@@ -2,6 +2,7 @@
 #include "ErrorHandling.hpp"
 #include "ir/StinkyIR.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu.hpp"
 #include <cassert>
 #include <sstream>
 
@@ -39,6 +40,11 @@ namespace stinkytofu
         cfg.enableDCE              = false;
         cfg.enableDuplicateElim    = false;
         cfg.optimizationIterations = 0;
+
+        // Set architecture from StinkyIR (required by passes that need arch info)
+        cfg.gemmTileConfig       = std::make_unique<GemmTileConfig>();
+        cfg.gemmTileConfig->arch = ir.getArch();
+
         return cfg;
     }
 
@@ -208,8 +214,7 @@ namespace stinkytofu
         }
 
         // Run optimization pipeline
-        PassContext ctx;
-        OptimizationPipeline::run(func, config, ctx);
+        OptimizationPipeline::run(func, config);
 
         // Extract optimized instructions
         std::vector<StinkyInstruction*> result;

@@ -121,7 +121,15 @@ namespace stinkytofu
         {
             return builder;
         }
+        const StinkyTofu& getBuilder() const
+        {
+            return builder;
+        }
         StinkyIR& getIR()
+        {
+            return ir;
+        }
+        const StinkyIR& getIR() const
         {
             return ir;
         }

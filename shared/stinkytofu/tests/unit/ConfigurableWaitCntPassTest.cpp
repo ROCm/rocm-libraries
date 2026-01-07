@@ -39,9 +39,9 @@ protected:
     void SetUp() override
     {
         arch               = getGfxArchID(12, 5, 0); // GFX1250
-        kernelInfo.arch[0] = 12;
-        kernelInfo.arch[1] = 5;
-        kernelInfo.arch[2] = 0;
+        gemmConfig.arch[0] = 12;
+        gemmConfig.arch[1] = 5;
+        gemmConfig.arch[2] = 0;
 
         // Create a Function with a single BasicBlock for testing
         func = std::make_unique<Function>("test_function");
@@ -403,7 +403,7 @@ protected:
     void runPass(const WaitCntConfig& config)
     {
         PassContext passCtx;
-        passCtx.addKernelInfo(kernelInfo);
+        passCtx.setGemmTileConfig(gemmConfig);
         auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
         pass->run(*func, passCtx);
     }
@@ -415,7 +415,7 @@ protected:
 
     std::unique_ptr<Function> func;
     BasicBlock*               bb = nullptr;
-    StinkyKernelInfo          kernelInfo;
+    GemmTileConfig            gemmConfig;
     GfxArchID                 arch;
 };
 
@@ -785,7 +785,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_NoLoop)
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
     PassContext   passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
     auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
     pass->run(*noLoopFunc, passCtx);
 
@@ -883,7 +883,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
     PassContext   passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
     auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
     pass->run(*loopFunc, passCtx);
 
@@ -1034,7 +1034,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
     PassContext   passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
     auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
     pass->run(*func, passCtx);
 
@@ -1191,7 +1191,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
     PassContext   passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
     auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
     pass->run(*func, passCtx);
 
@@ -1340,7 +1340,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
     PassContext   passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
     auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
     pass->run(*testFunc, passCtx);
 
@@ -1462,7 +1462,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
     PassContext   passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
     auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
     pass->run(*testFunc, passCtx);
 

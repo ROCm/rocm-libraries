@@ -39,20 +39,19 @@ protected:
     void SetUp() override
     {
         arch               = getGfxArchID(9, 4, 2); // GFX942
-        kernelInfo.arch[0] = 9;
-        kernelInfo.arch[1] = 4;
-        kernelInfo.arch[2] = 2;
+        gemmConfig.arch[0] = 9;
+        gemmConfig.arch[1] = 4;
+        gemmConfig.arch[2] = 2;
 
-        kernelInfo.TileA0        = 0;
-        kernelInfo.TileB0        = 0;
-        kernelInfo.TileM0        = 0;
-        kernelInfo.NumGRA        = 0;
-        kernelInfo.NumGRB        = 0;
-        kernelInfo.NumGRM        = 0;
-        kernelInfo.WavefrontSize = 64;
-        kernelInfo.NumWaves      = 0;
+        gemmConfig.TileA0   = 0;
+        gemmConfig.TileB0   = 0;
+        gemmConfig.TileM0   = 0;
+        gemmConfig.NumGRA   = 0;
+        gemmConfig.NumGRB   = 0;
+        gemmConfig.NumGRM   = 0;
+        gemmConfig.NumWaves = 0;
 
-        passCtx.addKernelInfo(kernelInfo);
+        passCtx.setGemmTileConfig(gemmConfig);
 
         irBuilder = std::make_unique<StinkyInstIRBuilder>(insts, arch);
     }
@@ -72,7 +71,7 @@ protected:
 
     IRList                               insts;
     PassContext                          passCtx;
-    StinkyKernelInfo                     kernelInfo;
+    GemmTileConfig                       gemmConfig;
     GfxArchID                            arch;
     std::unique_ptr<StinkyInstIRBuilder> irBuilder;
 };

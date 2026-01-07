@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,9 +61,9 @@ namespace
         void run(Function& func, PassContext& passCtx) override
         {
             IRList&   insts = func.getEntryBlock()->getIR();
-            GfxArchID arch  = getGfxArchID(passCtx.getKernelInfo().arch[0],
-                                          passCtx.getKernelInfo().arch[1],
-                                          passCtx.getKernelInfo().arch[2]);
+            GfxArchID arch  = getGfxArchID(passCtx.getGemmTileConfig().arch[0],
+                                          passCtx.getGemmTileConfig().arch[1],
+                                          passCtx.getGemmTileConfig().arch[2]);
 
             std::string irText = readFile(stinkytofuIRFile);
 
@@ -213,13 +213,13 @@ int main(int argc, char** argv)
 
     std::string filename = argv[irFileIdx];
 
-    auto                      debugConfig = getPassManagerDebugConfig();
-    stinkytofu::StinkyOptInfo optInfo     = getStinkyOptInfo();
+    auto                          debugConfig       = getPassManagerDebugConfig();
+    stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
 
     stinkytofu::PassManager passManager;
 
     passManager.setDebugConfig(std::move(debugConfig));
-    passManager.setOptConfig(optInfo);
+    passManager.setPassFeatureConfig(passFeatureConfig);
     setKernelConfig(passManager, arch);
 
     // Add deserialization pass first to load the IR with the specified architecture

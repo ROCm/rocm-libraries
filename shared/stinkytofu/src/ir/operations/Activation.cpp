@@ -2,6 +2,7 @@
 #include "ErrorHandling.hpp"
 #include "StinkyBuilder.hpp"
 #include "ir/StinkyIR.hpp"
+#include "stinkytofu.hpp"
 #include <cassert>
 #include <sstream>
 
@@ -117,6 +118,11 @@ namespace stinkytofu
         cfg.enableDuplicateElim    = true;
         cfg.optimizationIterations = 3;
         // All other passes disabled (CFG, Scheduling, WaitCnt)
+
+        // Set architecture from StinkyIR (required by passes that need arch info)
+        cfg.gemmTileConfig       = std::make_unique<GemmTileConfig>();
+        cfg.gemmTileConfig->arch = getIR().getArch();
+
         return cfg;
     }
 

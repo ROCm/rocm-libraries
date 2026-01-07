@@ -232,45 +232,56 @@ namespace stinkytofu
     /// Example usage:
     /// ```cpp
     /// // Simple optimization only
-    /// PassContext ctx;
-    /// ctx.addKernelInfo(kernelInfo);
+    /// Function func("kernel");
     /// PipelineConfig config = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly);
-    /// OptimizationPipeline::run(func, config, ctx);
+    /// OptimizationPipeline::run(func, config);
     ///
     /// // Production kernel (full pipeline)
     /// config = PipelineConfig::forProductionKernel(OptLevel::O3);
-    /// OptimizationPipeline::run(func, config, ctx);
+    /// OptimizationPipeline::run(func, config);
     ///
     /// // Custom fine-grained control
     /// config = PipelineConfig::fromProfile(PipelineProfile::Custom);
     /// config.enablePeephole = true;
     /// config.enableDCE = true;
     /// config.enableDAGScheduler = true;
-    /// OptimizationPipeline::run(func, config, ctx);
+    /// OptimizationPipeline::run(func, config);
     /// ```
     class OptimizationPipeline
     {
     public:
-        /// Run pipeline on a function with given configuration
+        /// Run pipeline with PassManager's internal Function (for use with custom passes)
         ///
-        /// This is the main entry point. It executes passes in the correct order
-        /// based on the configuration.
+        /// This version creates a PassManager with an empty Function. Custom passes
+        /// added via config (e.g., RocisaToStinkyAsmPass) populate and consume the Function.
+        ///
+        /// @param config Pipeline configuration (includes GEMM config, pass features, etc.)
+        /// @param bbFilter Basic block filter to apply
+        static void run(const PipelineConfig&        config,
+                        stinkytofu::BasicBlockFilter bbFilter
+                        = stinkytofu::BasicBlockFilterBuilder::all());
+
+        /// Run pipeline on an external Function (for standalone optimization)
+        ///
+        /// This version transfers an external Function into PassManager, runs passes,
+        /// and transfers the results back. Used when you have an existing Function to optimize.
         ///
         /// @param func Function to process (modified in-place)
-        /// @param config Pipeline configuration
-        /// @param ctx Pass context with kernel info
-        static void run(Function& func, const PipelineConfig& config, PassContext& ctx);
+        /// @param config Pipeline configuration (includes GEMM config, pass features, etc.)
+        static void run(Function& func, const PipelineConfig& config);
 
         /// Convenience: run full production pipeline with default O2
-        static void runFullPipeline(Function& func, PassContext& ctx)
+        static void runFullPipeline(Function& func)
         {
-            run(func, PipelineConfig::forProductionKernel(), ctx);
+            run(func, PipelineConfig::forProductionKernel());
         }
 
     private:
-        /// Run optimization passes iteratively
-        static void
-            runOptimizationPasses(Function& func, const PipelineConfig& config, PassContext& ctx);
+        /// Shared implementation for both run() overloads
+        static void runPipelineInternal(PassManager& passManager, const PipelineConfig& config);
+
+        /// Run optimization passes iteratively using PassManager
+        static void runOptimizationPasses(PassManager& passManager, const PipelineConfig& config);
     };
 
 } // namespace stinkytofu

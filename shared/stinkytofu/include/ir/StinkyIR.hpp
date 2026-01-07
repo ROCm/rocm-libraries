@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,12 +40,12 @@ namespace stinkytofu
 
     /**
      * @brief High-level IR builder for StinkyTofu
-     * 
+     *
      * StinkyIR provides high-level functions that generate complex instruction sequences.
      * These functions (@function) implement common algorithms like division, multiplication,
      * and branching logic. Each function uses a provided StinkyTofu builder to create
      * instructions that can be added to an IRListModule.
-     * 
+     *
      * Usage:
      *   StinkyTofu st([9, 4, 2]);  // Builder that owns instructions
      *   StinkyIR ir([9, 4, 2]);     // High-level function generator
@@ -71,18 +71,24 @@ namespace stinkytofu
         StinkyIR(const StinkyIR&)            = delete;
         StinkyIR& operator=(const StinkyIR&) = delete;
 
+        /**
+         * @brief Get the target architecture
+         * @return Architecture version as [major, minor, stepping]
+         */
+        std::array<int, 3> getArch() const;
+
         // ========================================================================
         // Division & Remainder Functions (@function)
         // ========================================================================
 
         /**
          * @brief Static division with power-of-2 or magic number algorithm (@function).
-         * 
+         *
          * Divides a vector register by a compile-time constant divisor.
          * Automatically selects optimal implementation:
          * - Power of 2: Simple shift operation
          * - Other: Magic number multiplication + shift
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param qReg Quotient destination VGPR index
          * @param dReg Dividend source VGPR index
@@ -101,9 +107,9 @@ namespace stinkytofu
 
         /**
          * @brief Static division and remainder with power-of-2 or magic number (@function).
-         * 
+         *
          * Computes both quotient and remainder for division by a constant.
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param qReg Quotient destination VGPR index
          * @param rReg Remainder destination VGPR index
@@ -126,10 +132,10 @@ namespace stinkytofu
 
         /**
          * @brief Vector unsigned 32-bit division using floating-point reciprocal (@function).
-         * 
+         *
          * Dynamic division using FP32 reciprocal approximation.
          * Handles arbitrary divisors at runtime.
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param qReg Quotient destination VGPR
          * @param dReg Dividend VGPR
@@ -150,7 +156,7 @@ namespace stinkytofu
 
         /**
          * @brief Scalar static division with magic number algorithm (@function).
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param qReg Quotient destination SGPR
          * @param rReg Remainder destination SGPR
@@ -177,9 +183,9 @@ namespace stinkytofu
 
         /**
          * @brief Vector multiplication by compile-time constant (@function).
-         * 
+         *
          * Optimizes multiplication by using shifts/adds when beneficial.
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param productReg Destination VGPR
          * @param operandReg Source VGPR
@@ -198,10 +204,10 @@ namespace stinkytofu
 
         /**
          * @brief Multiply vector register by bytes-per-element (@function).
-         * 
+         *
          * Common operation for address calculation. Optimized for
          * common BPE values (0.5, 0.75, 1, 2, 4, 8, 16).
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param dstReg Destination VGPR
          * @param srcReg Source VGPR
@@ -217,7 +223,7 @@ namespace stinkytofu
 
         /**
          * @brief Multiply 64-bit vector register by BPE (@function).
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param dstReg Destination VGPR pair (dstReg, dstReg+1)
          * @param srcReg Source VGPR pair
@@ -235,7 +241,7 @@ namespace stinkytofu
 
         /**
          * @brief Scalar multiplication by BPE (@function).
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param dstReg Destination SGPR
          * @param srcReg Source SGPR
@@ -255,9 +261,9 @@ namespace stinkytofu
 
         /**
          * @brief Branch if scalar register is zero (@function).
-         * 
+         *
          * Implements conditional branching based on scalar comparison.
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param sgprName SGPR name/index to test
          * @param tmpSgpr Temporary SGPR index
@@ -273,7 +279,7 @@ namespace stinkytofu
 
         /**
          * @brief Branch if scalar register is not zero (@function).
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param sgprName SGPR to test
          * @param label Target label
@@ -287,9 +293,9 @@ namespace stinkytofu
 
         /**
          * @brief Branch if scalar register is zero with data type support (@function).
-         * 
+         *
          * Supports: "i32", "i64", "f32", "f64"
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param sgprName SGPR to test
          * @param dataType Data type ("i32", "i64", "f32", "f64")
@@ -308,9 +314,9 @@ namespace stinkytofu
 
         /**
          * @brief Branch if scalar register is not zero with data type support (@function).
-         * 
+         *
          * Supports: "i32", "i64", "f32", "f64"
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param sgprName SGPR to test
          * @param dataType Data type ("i32", "i64", "f32", "f64")
@@ -331,14 +337,14 @@ namespace stinkytofu
 
         /**
          * @brief Saturate cast integer to bounds (@function).
-         * 
+         *
          * Clamps an integer value to [lowerBound, upperBound] range.
          * Supports different saturation modes:
          * - "normal": Both bounds (uses v_med3_i32)
          * - "upper": Upper bound only (uses v_min_i32)
          * - "lower": Lower bound only (requires v_max_i32, not yet implemented)
          * - "none": No saturation
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param valueReg VGPR containing value to clamp (modified in-place)
          * @param tmpVgpr Temporary VGPR index (for upper bound)
@@ -367,13 +373,13 @@ namespace stinkytofu
 
         /**
          * @brief Initialize LDS (Local Data Share) memory (@function).
-         * 
+         *
          * This function initializes LDS memory by:
          * 1. Synchronizing threads with barrier
          * 2. Setting up per-thread addresses
          * 3. Writing initialization value to LDS in parallel
          * 4. Synchronizing again to ensure completion
-         * 
+         *
          * @param builder StinkyTofu builder that creates and owns instructions
          * @param tmpVgprStart Starting VGPR index for temps (needs 2 consecutive VGPRs)
          * @param serialVgpr VGPR containing thread serial number
@@ -589,21 +595,21 @@ namespace stinkytofu
 
     /**
      * @brief Helper class for loading kernel arguments
-     * 
+     *
      * ArgumentLoader manages the state and offset tracking needed to load
      * kernel arguments from memory into SGPRs using SLoadBX instructions.
      * It automatically selects the appropriate instruction size (32/64/128/256/512)
      * and advances the offset after each load.
-     * 
+     *
      * Usage:
      *   StinkyAsmIR st([9, 4, 2]);
      *   auto module = st.createIRList("kernel");
      *   ArgumentLoader loader(st);
-     *   
+     *
      *   // Load a 32-bit argument
      *   auto insts = loader.loadKernArg(0, 2, 1, true);  // dst=s0, src=s[2:3], dword=1
      *   module.add(insts);
-     *   
+     *
      *   // Load a 64-bit argument (2 dwords)
      *   insts = loader.loadKernArg(1, 2, 2, true);       // dst=s[1:2], dword=2
      *   module.add(insts);
@@ -636,14 +642,14 @@ namespace stinkytofu
 
         /**
          * @brief Load a kernel argument using SLoadBX instruction
-         * 
+         *
          * Generates an SLoadBX instruction (B32/B64/B128/B256/B512) based on
          * the dword count. The instruction loads from kernarg memory at
          * [srcAddr + kernArgOffset] into the destination SGPR(s).
-         * 
+         *
          * After loading, kernArgOffset is automatically advanced by (dword * 4)
          * bytes, unless sgprOffset is provided.
-         * 
+         *
          * @param dstSgpr Destination SGPR index
          * @param srcAddr Source address SGPR pair index (64-bit pointer)
          * @param dword Number of dwords to load (1, 2, 4, 8, 16)
@@ -662,13 +668,13 @@ namespace stinkytofu
 
         /**
          * @brief Load all kernel arguments efficiently
-         * 
+         *
          * Loads a contiguous range of SGPRs from kernel arguments, automatically
          * selecting the largest possible SLoadBX instructions (B512 -> B256 -> B128 -> B64 -> B32)
          * based on SGPR alignment and remaining count.
-         * 
+         *
          * This minimizes the number of load instructions by using wider loads when possible.
-         * 
+         *
          * @param sgprStartIndex Starting SGPR index to load into
          * @param srcAddr Source address SGPR pair index (64-bit pointer)
          * @param numSgprToLoad Total number of SGPRs to load

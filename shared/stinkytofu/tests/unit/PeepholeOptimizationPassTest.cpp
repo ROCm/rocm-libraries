@@ -38,7 +38,7 @@ using namespace stinkytofu;
 class PeepholeOptimizationPassTest : public ::testing::Test
 {
 protected:
-    StinkyKernelInfo          kernelInfo;
+    GemmTileConfig            gemmConfig;
     GfxArchID                 arch;
     std::unique_ptr<Function> func;
     BasicBlock*               bb;
@@ -47,9 +47,9 @@ protected:
     void SetUp() override
     {
         arch               = getGfxArchID(12, 5, 0); // GFX1250
-        kernelInfo.arch[0] = 12;
-        kernelInfo.arch[1] = 5;
-        kernelInfo.arch[2] = 0;
+        gemmConfig.arch[0] = 12;
+        gemmConfig.arch[1] = 5;
+        gemmConfig.arch[2] = 0;
 
         // Create a Function with a single BasicBlock for testing
         func = std::make_unique<Function>("test_peephole");
@@ -312,7 +312,7 @@ protected:
     void runPass()
     {
         PassContext ctx;
-        ctx.addKernelInfo(kernelInfo);
+        ctx.setGemmTileConfig(gemmConfig);
 
         // Build use-def chains before running the pass (standalone test mode)
         // In production, OptimizationPipeline builds this once at the start
@@ -753,22 +753,22 @@ TEST_F(PeepholeOptimizationPassTest, NoFusion_RegisterReuseWithMultipleUsesBefor
 class PeepholePassManagerTest : public ::testing::Test, public stinkytofu::PassManager
 {
 protected:
-    StinkyKernelInfo kernelInfo;
-    GfxArchID        arch;
-    BasicBlock*      bb;
+    GemmTileConfig gemmConfig;
+    GfxArchID      arch;
+    BasicBlock*    bb;
 
     void SetUp() override
     {
         arch               = getGfxArchID(12, 5, 0); // GFX1250
-        kernelInfo.arch[0] = 12;
-        kernelInfo.arch[1] = 5;
-        kernelInfo.arch[2] = 0;
+        gemmConfig.arch[0] = 12;
+        gemmConfig.arch[1] = 5;
+        gemmConfig.arch[2] = 0;
 
         // PassManager has its own Function (passCtx.getFunction())
         bb = passCtx.getFunction().createBasicBlock("entry");
         passCtx.getFunction().setEntryBlock(bb);
 
-        passCtx.addKernelInfo(kernelInfo);
+        passCtx.setGemmTileConfig(gemmConfig);
     }
 
     void TearDown() override
