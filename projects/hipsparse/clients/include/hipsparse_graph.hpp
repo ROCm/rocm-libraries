@@ -49,32 +49,32 @@
 #define END_GRAPH_CAPTURE()
 #endif
 
-#define TESTING_TEMPLATE(NAME_)                                                   \
-    template <typename... P>                                                      \
-    hipsparseStatus_t hipsparse##NAME_(hipsparseLocalHandle_t& handle, P&& ... p) \
+#define TESTING_TEMPLATE(NAME_)                                                  \
+    template <typename... P>                                                     \
+    hipsparseStatus_t hipsparse##NAME_(hipsparseLocalHandle_t& handle, P&&... p) \
+    {                                                                            \
+        hipsparseStatus_t status;                                                \
+        BEGIN_GRAPH_CAPTURE();                                                   \
+                                                                                 \
+        status = ::hipsparse##NAME_(handle, std::forward<P>(p)...);              \
+                                                                                 \
+        END_GRAPH_CAPTURE();                                                     \
+                                                                                 \
+        return status;                                                           \
+    };
+
+#define TESTING_COMPUTE_TEMPLATE(NAME_)                                           \
+    template <typename T, typename... P>                                          \
+    hipsparseStatus_t hipsparseX##NAME_(hipsparseLocalHandle_t& handle, P&&... p) \
     {                                                                             \
         hipsparseStatus_t status;                                                 \
         BEGIN_GRAPH_CAPTURE();                                                    \
                                                                                   \
-        status = ::hipsparse##NAME_(handle, std::forward<P>(p)...);               \
+        status = hipsparse::hipsparseX##NAME_<T>(handle, std::forward<P>(p)...);  \
                                                                                   \
         END_GRAPH_CAPTURE();                                                      \
                                                                                   \
         return status;                                                            \
-    };
-
-#define TESTING_COMPUTE_TEMPLATE(NAME_)                                            \
-    template <typename T, typename... P>                                           \
-    hipsparseStatus_t hipsparseX##NAME_(hipsparseLocalHandle_t& handle, P&& ... p) \
-    {                                                                              \
-        hipsparseStatus_t status;                                                  \
-        BEGIN_GRAPH_CAPTURE();                                                     \
-                                                                                   \
-        status = hipsparse::hipsparseX##NAME_<T>(handle, std::forward<P>(p)...);   \
-                                                                                   \
-        END_GRAPH_CAPTURE();                                                       \
-                                                                                   \
-        return status;                                                             \
     };
 
 namespace testing
