@@ -891,6 +891,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "DirectToLds%s + input conversion + ConvertAfterDS=False not supported"%(tc))
         return False
 
+    # does not work with UnrollLoopSwapGlobalReadOrder
+    if state["UnrollLoopSwapGlobalReadOrder"]:
+      reject(state, printRejectionReason, "DirectToLds%c does not supports UnrollLoopSwapGlobalReadOrder"%(tc))
+      return False
+
     return True
 
   @staticmethod
@@ -1199,8 +1204,10 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     # Init vars early since there are early-exit return statements below
-    state["DirectToLdsA"] = False
-    state["DirectToLdsB"] = False
+    # initialize DTLA, DTLB
+    state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
+    state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
     state["StoreSwapAddr"] = False
@@ -1279,6 +1286,8 @@ class Solution(collections.abc.Mapping):
     bufferLoad = state["BufferLoad"] and state["KernelLanguage"] == "Assembly"
     if not bufferLoad:
       state["DirectToLds"] = False
+      state["DirectToLdsA"] = False
+      state["DirectToLdsB"] = False
       state["_UseSgprForGRO"] = False
       if state["PrefetchGlobalRead"] == 2:
         reject(state, printRejectionReason, "BufferLoad=0 does not support PrefetchGlobalRead=2")
@@ -2043,13 +2052,15 @@ class Solution(collections.abc.Mapping):
          and not disableGNLC:
 
         for tc in ['A', 'B']:
-          # Check if we are requesting b64 loads for A/B - these are not compatible with DTL
-          grwidth = state["GlobalReadVectorWidth%s"%tc] * state["ProblemType"]["DataType%s"%tc].numBytes()
-          # Check that GR layout is the same as LDS layout for A/B
-          sameLayout = state["ProblemType"]["TLU%s"%tc] != state["UnrollMajorLDS%s"%tc]
-          state["UseGeneralizedNLCOne%s"%tc] = grwidth != 8 and sameLayout \
-            and state["WaveSeparateGlobalRead%s"%tc] == 0 and not state["DirectToVgpr%s"%tc]
-
+          if state["DirectToLds%s"%tc]:
+            # Check if we are requesting b64 loads for A/B - these are not compatible with DTL
+            grwidth = state["GlobalReadVectorWidth%s"%tc] * state["ProblemType"]["DataType%s"%tc].numBytes()
+            # Check that GR layout is the same as LDS layout for A/B
+            sameLayout = state["ProblemType"]["TLU%s"%tc] != state["UnrollMajorLDS%s"%tc]
+            state["UseGeneralizedNLCOne%s"%tc] = grwidth != 8 and sameLayout \
+              and state["WaveSeparateGlobalRead%s"%tc] == 0 and not state["DirectToVgpr%s"%tc]
+          else:
+            state["UseGeneralizedNLCOne%s"%tc] = False
         state["UseGeneralizedNLCOneMetadata"] = False
         state["_UseSgprForGRO"] = 0
       else:
@@ -2530,37 +2541,45 @@ class Solution(collections.abc.Mapping):
     # DirectToLDS is supported for TLU=0  (make sure transposeLDS=1)
     # LDS (load size coalesced) * LSPA must load some multiple of 256 bytes.
     # No longer support loadX2/loadx4 .
-    if state["DirectToLds"]:
-
-      for tc in ['A', 'B']:
+    for tc in ['A', 'B']:
+      if state["DirectToLds%s"%tc]:
         isDtlDoable = Solution.isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason)
         if (not state["DirectToVgpr%s"%tc]) and isDtlDoable:
           state['tailLoopOpt%s'%tc] = False
           state["DirectToLds%s"%tc] = True
           state["LocalWriteUseSgpr%s"%tc] = True
-        elif not isDtlDoable:
-          if state["UseGeneralizedNLCOne%s"%tc]:
-            reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
+        else:
+          state["DirectToLds%s"%tc] = False
+          if not isDtlDoable:
+            if state["UseGeneralizedNLCOne%s"%tc]:
+              reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
 
-      # Update parent variable so kernel display is accurate
-      state["DirectToLds"] = state["DirectToLdsA"] or state["DirectToLdsB"]
-      if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
-        #1LDS buffer must be 0 for DirectToLdsA
-        state["1LDSBuffer"] = 0
+    # Update parent variable so kernel display is accurate
+    if state["DirectToLdsA"] and state["DirectToLdsB"]:
+      state["DirectToLds"] = 1
+    elif state["DirectToLdsA"]:
+      state["DirectToLds"] = 2
+    elif state["DirectToLdsB"]:
+      state["DirectToLds"] = 3
+    else:
+      state["DirectToLds"] = 0
+    if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
+      #1LDS buffer must be 0 for DirectToLdsA
+      state["1LDSBuffer"] = 0
 
-      # Temp: Force enable CLR when DTL is used for TF32.
-      # TODO: Determine why DTL+CLR=0 causes issues
-      if state["UseF32XEmulation"] and state["DirectToLds"]:
-        state["ClusterLocalRead"] = 1
+    # Temp: Force enable CLR when DTL is used for TF32.
+    # TODO: Determine why DTL+CLR=0 causes issues
+    if state["UseF32XEmulation"] and state["DirectToLds"]:
+      state["ClusterLocalRead"] = 1
 
-      # Re-check DTV + WaveGroup after DTL is confirmed
-      if state["DirectToLds"]:
-        if state["DirectToVgprA"] and state['MIWaveGroup'][1] > 1:
-          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprA + WaveGroups along N-Dim) is not supported yet")
-          return False
-        if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
-          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
-          return False
+    # Re-check DTV + WaveGroup after DTL is confirmed
+    if state["DirectToLds"]:
+      if state["DirectToVgprA"] and state['MIWaveGroup'][1] > 1:
+        reject(state, printRejectionReason, "DirectToLds + (DirectToVgprA + WaveGroups along N-Dim) is not supported yet")
+        return False
+      if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
+        reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
+        return False
 
     auto_LdsBlockSizePerPadA_for_mix = 0
     if state["LdsBlockSizePerPadA"] == -1:
