@@ -306,6 +306,44 @@ void ValidateMetadataEncoding(const std::string& solver_name,
     for(const auto& typestring : supported_kernels)
     {
         auto tokens = GetKernelAsTokens(typestring);
+
+        // Check if this kernel type requires split_k to be appended
+        // by checking if the kernel_str_mapping includes a parameter with "splitk" in its name
+        if(!tokens.empty())
+        {
+            const std::string& kernel_name = tokens[0];
+            try
+            {
+                auto kernel_mapping = metadata.GetKernelStrMapping(kernel_name);
+
+                // Check if any parameter name contains "splitk" (case-insensitive)
+                bool has_split_k_mapping = false;
+                for(const auto& [idx, param_name] : kernel_mapping)
+                {
+                    std::string param_lower = param_name;
+                    std::transform(param_lower.begin(),
+                                   param_lower.end(),
+                                   param_lower.begin(),
+                                   [](unsigned char c) { return std::tolower(c); });
+                    if(param_lower.find("splitk") != std::string::npos)
+                    {
+                        has_split_k_mapping = true;
+                        break;
+                    }
+                }
+
+                // If split_k is expected in the mapping, append a default value
+                if(has_split_k_mapping)
+                {
+                    tokens.push_back("1"); // Add default split_k value
+                }
+            }
+            catch(const std::exception&)
+            {
+                // Kernel not in metadata - skip split_k append
+            }
+        }
+
         kernel_params.push_back(tokens);
     }
 
