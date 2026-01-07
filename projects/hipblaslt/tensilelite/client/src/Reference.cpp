@@ -26,7 +26,7 @@
 
 #include "Reference.hpp"
 #include "DataInitialization.hpp"
-#include "Tensile/Debug.hpp"
+#include "Tensile/TensorDescriptor_fwd.hpp"
 #include "Tensile/Utils.hpp"
 #include "TypedId.hpp"
 
@@ -37,6 +37,274 @@
 
 namespace TensileLite
 {
+
+    namespace
+    {
+
+        // Helper to shadow-copy 16-bit types to float.
+        template <typename SrcType>
+        std::vector<float> loadToFloat(void const* src, size_t count)
+        {
+            std::vector<float> buffer(count);
+            const SrcType*     sPtr = static_cast<const SrcType*>(src);
+            for(size_t i = 0; i < count; ++i)
+            {
+                buffer[i] = static_cast<float>(sPtr[i]);
+            }
+            return buffer;
+        }
+
+        // Helper to write back float to 16-bit types.
+        template <typename DstType>
+        void storeFromFloat(void* dst, const std::vector<float>& buffer, size_t count)
+        {
+            DstType* dPtr = static_cast<DstType*>(dst);
+            for(size_t i = 0; i < count; ++i)
+            {
+                dPtr[i] = static_cast<DstType>(buffer[i]);
+            }
+        }
+
+        // Helper class that wraps a shadow copy of input buffers in float format.
+        // In quietly manages the indirection between directly using the input pointer
+        // (for float) and a shadow copy (for half / bfloat16).
+        class ShadowBuffer
+        {
+            std::vector<float> m_storage;
+            const float*       m_ptr = nullptr;
+
+        public:
+            ShadowBuffer() = default;
+
+            ShadowBuffer(void const* ptr, rocisa::DataType type, size_t count)
+            {
+                if(ptr == nullptr)
+                    return;
+
+                if(type == rocisa::DataType::Float)
+                {
+                    m_ptr = static_cast<const float*>(ptr);
+                }
+                else if(type == rocisa::DataType::Half)
+                {
+                    m_storage = loadToFloat<TensileLite::Half>(ptr, count);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat16)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat16>(ptr, count);
+                    m_ptr     = m_storage.data();
+                }
+                else
+                {
+                    throw std::runtime_error("Unsupported type for ShadowBuffer");
+                }
+            }
+
+            const float* data() const
+            {
+                return m_ptr;
+            }
+
+            explicit operator bool() const
+            {
+                return m_ptr != nullptr;
+            }
+
+            // Array access convenience
+            float operator[](size_t idx) const
+            {
+                return m_ptr[idx];
+            }
+        };
+
+        // Solve various forms of f16, bf16, f32 gemm problems using efficient CPU code.
+        // Only solves for a subset of geometries, this is what allows it to be faster than
+        // the 'legacy' reference implementation.
+        bool solveCPUFastInF32(ContractionProblemGemm const& problem,
+                               ContractionInputs const&      inputs,
+                               int64_t                       elementsToValidate)
+        {
+
+            // This fast solver computes all elements. If the number of elements to validate
+            // is in [0, 0.2 * totalElements), skip this solver, falling through to another
+            // solver that handles the partial validation sparsity efficiently.
+            if(elementsToValidate >= 0
+               && elementsToValidate < 0.2 * problem.d().totalLogicalElements())
+            {
+                return false;
+            }
+
+            // Guard rails to check that the fast path is appropriate to use. Some of these can be relaxed
+            // as support on this path is generalized.
+            auto isSupportedType = [](rocisa::DataType t) {
+                return t == rocisa::DataType::Float || t == rocisa::DataType::Half
+                       || t == rocisa::DataType::BFloat16;
+            };
+
+            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
+               || !isSupportedType(problem.c().dataType())
+               || !isSupportedType(problem.d().dataType()))
+            {
+                return false;
+            }
+
+            if(problem.batchIndices().empty())
+            {
+                return false;
+            }
+
+            if(problem.useBias())
+            {
+                return false;
+            }
+
+            // Resolve strides & dimensions
+            if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
+               || problem.freeIndicesB().size() != 1)
+                return false;
+
+            size_t idx_M_A = problem.freeIndicesA()[0].i;
+            size_t idx_K_A = problem.boundIndices()[0].a;
+            size_t idx_N_B = problem.freeIndicesB()[0].i;
+            size_t idx_K_B = problem.boundIndices()[0].b;
+            size_t idx_M_D = problem.freeIndices()[0].d;
+            size_t idx_N_D = problem.freeIndices()[1].d;
+
+            size_t stride_M_A = problem.a().strides()[idx_M_A];
+            size_t stride_K_A = problem.a().strides()[idx_K_A];
+            size_t stride_N_B = problem.b().strides()[idx_N_B];
+            size_t stride_K_B = problem.b().strides()[idx_K_B];
+            size_t stride_N_D = problem.d().strides()[idx_N_D];
+            size_t stride_N_C = problem.c().strides()[idx_N_D];
+
+            size_t stride_Batch_A = problem.a().strides()[problem.batchIndices()[0].a];
+            size_t stride_Batch_B = problem.b().strides()[problem.batchIndices()[0].b];
+            size_t stride_Batch_C = problem.c().strides()[problem.batchIndices()[0].d];
+            size_t stride_Batch_D = problem.d().strides()[problem.batchIndices()[0].d];
+
+            // Layout validation
+            bool isPackedA = (stride_M_A == 1 || stride_K_A == 1);
+            bool isPackedB = (stride_N_B == 1 || stride_K_B == 1);
+            bool isPackedD = (problem.d().strides()[idx_M_D] == 1);
+
+            if(!isPackedA || !isPackedB || !isPackedD)
+                return false;
+
+            // 4. Shadow copies
+            ShadowBuffer shadowA(
+                inputs.a, problem.a().dataType(), problem.a().totalAllocatedElements());
+            ShadowBuffer shadowB(
+                inputs.b, problem.b().dataType(), problem.b().totalAllocatedElements());
+            ShadowBuffer shadowC(
+                inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
+
+            std::vector<float> shadowD;
+            float*             ptrD = nullptr;
+            if(problem.d().dataType() == rocisa::DataType::Float)
+            {
+                ptrD = static_cast<float*>(inputs.d);
+            }
+            else
+            {
+                shadowD.resize(problem.d().totalAllocatedElements());
+                ptrD = shadowD.data();
+            }
+
+            // --- Alpha Vector ---
+            bool useScaleAlphaVec = problem.useScaleAlphaVec();
+            int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
+
+            // AlphaVec is conditional
+            ShadowBuffer shadowAlphaVec;
+            if(problem.useScaleAlphaVec())
+            {
+                size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
+                shadowAlphaVec = ShadowBuffer(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
+            }
+
+            // -------------------------------------------------------------------------
+            // 5. Math Loop
+            // -------------------------------------------------------------------------
+            size_t size_Batch = problem.batchSize(0);
+            size_t size_K     = problem.boundSize(0);
+            size_t size_M     = problem.freeSizeA(0);
+            size_t size_N     = problem.freeSizeB(0);
+
+            float alpha = std::get<float>(inputs.alpha);
+            float beta  = std::get<float>(inputs.beta);
+
+#pragma omp parallel for collapse(2)
+            for(size_t b = 0; b < size_Batch; ++b)
+            {
+                for(size_t n = 0; n < size_N; ++n)
+                {
+                    const float* curBatchA = shadowA.data() + (b * stride_Batch_A);
+                    const float* curBatchB = shadowB.data() + (b * stride_Batch_B);
+                    const float* curBatchC = shadowC.data() + (b * stride_Batch_C);
+                    float*       curBatchD = ptrD + (b * stride_Batch_D);
+
+                    const float* ptrB_N = curBatchB + (n * stride_N_B);
+
+                    for(size_t m = 0; m < size_M; ++m)
+                    {
+                        const float* ptrA_M = curBatchA + (m * stride_M_A);
+
+                        float sum = 0.0f;
+                        for(size_t k = 0; k < size_K; ++k)
+                        {
+                            float valA = ptrA_M[k * stride_K_A];
+                            float valB = ptrB_N[k * stride_K_B];
+                            sum += valA * valB;
+                        }
+
+                        // Apply Scale Alpha Vec
+                        float finalAlpha = alpha;
+                        if(useScaleAlphaVec)
+                        {
+                            if(factorDim == 1)
+                            {
+                                finalAlpha *= shadowAlphaVec[n];
+                            }
+                            else
+                            {
+                                finalAlpha *= shadowAlphaVec[m];
+                            }
+                        }
+
+                        size_t idxD = m + (n * stride_N_D);
+
+                        if(beta != 0.0f)
+                        {
+                            size_t idxC     = m + (n * stride_N_C);
+                            curBatchD[idxD] = (finalAlpha * sum) + (beta * curBatchC[idxC]);
+                        }
+                        else
+                        {
+                            curBatchD[idxD] = (finalAlpha * sum);
+                        }
+                    }
+                }
+            }
+
+            // -------------------------------------------------------------------------
+            // 6. Write Back
+            // -------------------------------------------------------------------------
+            if(problem.d().dataType() == rocisa::DataType::Half)
+            {
+                storeFromFloat<TensileLite::Half>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::BFloat16)
+            {
+                storeFromFloat<TensileLite::BFloat16>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+
+            return true;
+        }
+    }
+
     namespace Client
     {
         template <typename T>
@@ -314,7 +582,8 @@ namespace TensileLite
                                        || std::is_same<int32_t, Accumulator>::value
                                        || std::is_same<int64_t, Accumulator>::value
                                        || std::is_same<int8_t, Accumulator>::value,
-                                   bool> = true>
+                                   bool>
+                  = true>
         void SetValue(rocisa::DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
@@ -404,7 +673,8 @@ namespace TensileLite
                                        && !std::is_same<BFloat8, Accumulator>::value
                                        && !std::is_same<Float8_fnuz, Accumulator>::value
                                        && !std::is_same<BFloat8_fnuz, Accumulator>::value,
-                                   bool> = true>
+                                   bool>
+                  = true>
         void SetValue(rocisa::DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
@@ -463,12 +733,13 @@ namespace TensileLite
                     return static_cast<T>(
                         std::min(static_cast<castT>(val), static_cast<castT>(args[1])));
                 return static_cast<T>(
-                        std::min(static_cast<castT>(0.0), static_cast<castT>(args[1])));
+                    std::min(static_cast<castT>(0.0), static_cast<castT>(args[1])));
             }
             else if(new_type == ActivationType::Clamp)
             {
-	      return static_cast<T>(
-                  std::max(static_cast<castT>(args[0]), std::min(static_cast<castT>(val), static_cast<castT>(args[1]))));
+                return static_cast<T>(
+                    std::max(static_cast<castT>(args[0]),
+                             std::min(static_cast<castT>(val), static_cast<castT>(args[1]))));
             }
             else if(new_type == ActivationType::Exp)
             {
@@ -609,7 +880,8 @@ namespace TensileLite
                     || std::is_same<Float8, Input>::value || std::is_same<BFloat8, Input>::value
                     || std::is_same<Float8_fnuz, Input>::value
                     || std::is_same<BFloat8_fnuz, Input>::value,
-                bool> = true>
+                bool>
+            = true>
         std::string ReductionCPU(TensorDescriptor const&  biasTensor,
                                  TensorDescriptor const&  tensor,
                                  void const*              src,
@@ -676,7 +948,8 @@ namespace TensileLite
                     && !std::is_same<Float8, Input>::value && !std::is_same<BFloat8, Input>::value
                     && !std::is_same<Float8_fnuz, Input>::value
                     && !std::is_same<BFloat8_fnuz, Input>::value,
-                bool> = true>
+                bool>
+            = true>
         std::string ReductionCPU(TensorDescriptor const&  biasTensor,
                                  TensorDescriptor const&  tensor,
                                  void const*              src,
@@ -687,12 +960,175 @@ namespace TensileLite
             throw std::runtime_error("Unsupported input type.");
         }
 
-        template <typename Inputs, typename Accumulator, typename MathOpAccum>
-        void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
-            ContractionProblemGemm const& problem,
-            ContractionInputs const&      inputs,
-            size_t                        elementsToValidate)
+        template <typename Inputs, typename Accumulator>
+        void performEndOfKMath(ContractionInputs const&      inputs,
+                               ContractionProblemGemm const& problem,
+                               bool                          aConjugate,
+                               size_t                        dNum,
+                               Accumulator                   value,
+                               typename Inputs::CType const* cPtr,
+                               size_t                        cIndex,
+                               std::vector<int64_t> const&   biasCoord,
+                               size_t                        dIndex,
+                               Accumulator*                  ws,
+                               Accumulator&                  amaxD,
+                               std::vector<int64_t> const&   dCoord,
+                               typename Inputs::DType*       dPtr,
+                               bool                          scaleABscalar,
+                               bool                          scaleABvector)
         {
+
+            constexpr bool notCmplxAmaxD = !std::is_same<Accumulator, std::complex<double>>()
+                                           && !std::is_same<Accumulator, std::complex<float>>();
+            // Ensure zero*nan returns zero
+            Accumulator alpha = constVariantCast<Accumulator>(inputs.alpha);
+            Accumulator beta  = constVariantCast<Accumulator>(inputs.beta);
+            auto        zero  = static_cast<Accumulator>(0);
+
+            if(scaleABscalar)
+            {
+                Accumulator scaleA
+                    = GetValue<Accumulator>(problem.alphaType(), inputs.scaleA, 0, aConjugate);
+                Accumulator scaleB
+                    = GetValue<Accumulator>(problem.alphaType(), inputs.scaleB, 0, aConjugate);
+                if constexpr(sizeof(typename Inputs::AType)
+                             <= sizeof(typename Inputs::ComputeInputType))
+                    alpha *= scaleA;
+
+                if constexpr(sizeof(typename Inputs::BType)
+                             <= sizeof(typename Inputs::ComputeInputType))
+                    alpha *= scaleB;
+            }
+            else if(scaleABvector)
+            {
+                auto        posB = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
+                auto        posA = int(dNum % problem.d().sizes()[0]);
+                Accumulator scaleA
+                    = GetValue<Accumulator>(problem.alphaType(), inputs.scaleA, posA, aConjugate);
+                Accumulator scaleB
+                    = GetValue<Accumulator>(problem.alphaType(), inputs.scaleB, posB, aConjugate);
+                if constexpr(sizeof(typename Inputs::AType)
+                             <= sizeof(typename Inputs::ComputeInputType))
+                    alpha *= scaleA;
+
+                if constexpr(sizeof(typename Inputs::BType)
+                             <= sizeof(typename Inputs::ComputeInputType))
+                    alpha *= scaleB;
+            }
+
+            auto resultD = multiply<Accumulator>(alpha, value);
+
+            if(problem.useScaleAlphaVec())
+            {
+                int pos = 0;
+                if(problem.getParams().factorDim())
+                    pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
+                else
+                    pos = int(dNum % problem.d().sizes()[0]);
+                Accumulator scaleAlphaVec = GetValue<Accumulator>(
+                    problem.alphaType(), inputs.scaleAlphaVec, pos, aConjugate);
+                resultD *= scaleAlphaVec;
+            }
+
+            if(beta != zero)
+            {
+                Accumulator cValue = multiply<Accumulator>(beta, cPtr[cIndex]);
+                if(problem.useScaleCD())
+                {
+                    Accumulator scaleC
+                        = GetValue<Accumulator>(problem.betaType(), inputs.scaleC, 0, aConjugate);
+                    cValue *= scaleC;
+                }
+
+                resultD += cValue;
+            }
+
+            // bias
+            if(problem.useBias() && inputs.bias && !problem.useGradient())
+            {
+                auto biasIndex = problem.bias().index(biasCoord);
+                int  pos       = 0;
+                if(problem.getParams().factorDim())
+                    pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1])
+                          + biasIndex;
+                else
+                    pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
+                Accumulator bias = GetValue<Accumulator>(
+                    problem.bias().dataType(), inputs.bias, pos, aConjugate);
+                resultD += bias;
+            }
+            // E
+            if(problem.useE() && !problem.useGradient())
+            {
+                auto eIndex = problem.tensors()[ContractionProblemGemm::TENSOR::E].index(dCoord);
+                SetValue<Accumulator>(
+                    problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType(),
+                    resultD,
+                    inputs.e,
+                    eIndex);
+            }
+            // Activation adds here
+            std::vector<Accumulator> actArgs;
+            for(int i = 0; i < inputs.activationArgs.size(); i++)
+                actArgs.push_back(constVariantCast<Accumulator>(inputs.activationArgs[i]));
+            if(problem.useGradient() && problem.activationType() != ActivationType::None
+               && problem.getParams().activationEnum() != ActivationType::None)
+            {
+                Accumulator dataE = static_cast<Accumulator>(0);
+                if(problem.useE())
+                {
+                    auto eIndex
+                        = problem.tensors()[ContractionProblemGemm::TENSOR::E].index(dCoord);
+                    dataE = GetValue<Accumulator>(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType(),
+                        inputs.e,
+                        eIndex,
+                        aConjugate);
+                }
+                dataE = Activation(
+                    problem.activationType(), dataE, problem.getParams().activationEnum(), actArgs);
+                resultD *= dataE;
+            }
+            else
+            {
+                resultD = Activation(problem.activationType(),
+                                     resultD,
+                                     problem.getParams().activationEnum(),
+                                     actArgs);
+            }
+
+            if constexpr(notCmplxAmaxD)
+            {
+
+                Accumulator negOne(-1);
+                if(problem.outputAmaxD())
+                {
+                    Accumulator absResultD = (resultD > zero) ? resultD : resultD * negOne;
+                    if(absResultD > amaxD)
+                        amaxD = absResultD;
+                }
+            }
+
+            if(problem.useScaleCD())
+            {
+                Accumulator scaleD
+                    = GetValue<Accumulator>(problem.betaType(), inputs.scaleD, 0, aConjugate);
+                resultD *= scaleD;
+            }
+            if(problem.useBias() && problem.useGradient()
+               && (problem.biasSrc() == ContractionProblemGemm::D))
+            {
+                ws[dIndex] = resultD;
+            }
+            dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
+        }
+
+        template <typename Inputs, typename Accumulator, typename MathOpAccum>
+        void solveCPULegacy(ContractionProblemGemm const& problem,
+                            ContractionInputs const&      inputs,
+                            size_t                        elementsToValidate)
+        {
+
             Accumulator* ws                   = nullptr;
             size_t       validationStrideGemm = 1;
             if(problem.useGradient() && problem.useBias()
@@ -771,10 +1207,9 @@ namespace TensileLite
                 }
             }
 
-            Accumulator    amaxD(0);
-            Accumulator    negOne(-1);
-            constexpr bool notCmplxAmaxD = !std::is_same<Accumulator, std::complex<double>>()
-                                           && !std::is_same<Accumulator, std::complex<float>>();
+            Accumulator amaxD(0);
+
+            auto enteringIntoGemm = std::chrono::high_resolution_clock::now();
 
             // gemm
             omp_set_num_threads(MAX_OMP_THREADS);
@@ -970,152 +1405,24 @@ namespace TensileLite
                 auto cIndex = c.index(cCoord);
                 auto dIndex = d.index(dCoord);
 
-                // Ensure zero*nan returns zero
-                Accumulator alpha = constVariantCast<Accumulator>(inputs.alpha);
-                Accumulator beta  = constVariantCast<Accumulator>(inputs.beta);
-                auto        zero  = static_cast<Accumulator>(0);
+                bool scaleABscalar = problem.useScaleAB() == "Scalar";
+                bool scaleABvector = problem.useScaleAB() == "Vector";
 
-                if(problem.useScaleAB() == "Scalar")
-                {
-                    Accumulator scaleA
-                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleA, 0, aConjugate);
-                    Accumulator scaleB
-                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleB, 0, aConjugate);
-                    if constexpr(sizeof(typename Inputs::AType)
-                                 <= sizeof(typename Inputs::ComputeInputType))
-                        alpha *= scaleA;
-
-                    if constexpr(sizeof(typename Inputs::BType)
-                                 <= sizeof(typename Inputs::ComputeInputType))
-                        alpha *= scaleB;
-                }
-                else if(problem.useScaleAB() == "Vector")
-                {
-                    auto posB = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
-                    auto posA = int(dNum % problem.d().sizes()[0]);
-                    Accumulator scaleA = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleA, posA, aConjugate);
-                    Accumulator scaleB = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleB, posB, aConjugate);
-                    if constexpr(sizeof(typename Inputs::AType)
-                                 <= sizeof(typename Inputs::ComputeInputType))
-                        alpha *= scaleA;
-
-                    if constexpr(sizeof(typename Inputs::BType)
-                                 <= sizeof(typename Inputs::ComputeInputType))
-                        alpha *= scaleB;
-                }
-
-                auto resultD = multiply<Accumulator>(alpha, value);
-
-                if(problem.useScaleAlphaVec())
-                {
-                    int pos = 0;
-                    if(problem.getParams().factorDim())
-                        pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
-                    else
-                        pos = int(dNum % problem.d().sizes()[0]);
-                    Accumulator scaleAlphaVec = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleAlphaVec, pos, aConjugate);
-                    resultD *= scaleAlphaVec;
-                }
-
-                if(beta != zero)
-                {
-                    Accumulator cValue = multiply<Accumulator>(beta, cPtr[cIndex]);
-                    if(problem.useScaleCD())
-                    {
-                        Accumulator scaleC = GetValue<Accumulator>(
-                            problem.betaType(), inputs.scaleC, 0, aConjugate);
-                        cValue *= scaleC;
-                    }
-
-                    resultD += cValue;
-                }
-
-                // bias
-                if(problem.useBias() && inputs.bias && !problem.useGradient())
-                {
-                    auto biasIndex = problem.bias().index(biasCoord);
-                    int  pos       = 0;
-                    if(problem.getParams().factorDim())
-                        pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1])
-                              + biasIndex;
-                    else
-                        pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
-                    Accumulator bias = GetValue<Accumulator>(
-                        problem.bias().dataType(), inputs.bias, pos, aConjugate);
-                    resultD += bias;
-                }
-                // E
-                if(problem.useE() && !problem.useGradient())
-                {
-                    auto eIndex
-                        = problem.tensors()[ContractionProblemGemm::TENSOR::E].index(dCoord);
-                    SetValue<Accumulator>(
-                        problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType(),
-                        resultD,
-                        inputs.e,
-                        eIndex);
-                }
-                // Activation adds here
-                std::vector<Accumulator> actArgs;
-                for(int i = 0; i < inputs.activationArgs.size(); i++)
-                    actArgs.push_back(constVariantCast<Accumulator>(inputs.activationArgs[i]));
-                if(problem.useGradient() && problem.activationType() != ActivationType::None
-                   && problem.getParams().activationEnum() != ActivationType::None)
-                {
-                    Accumulator dataE = static_cast<Accumulator>(0);
-                    if(problem.useE())
-                    {
-                        auto eIndex
-                            = problem.tensors()[ContractionProblemGemm::TENSOR::E].index(dCoord);
-                        dataE = GetValue<Accumulator>(
-                            problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType(),
-                            inputs.e,
-                            eIndex,
-                            aConjugate);
-                    }
-                    dataE = Activation(problem.activationType(),
-                                       dataE,
-                                       problem.getParams().activationEnum(),
-                                       actArgs);
-                    resultD *= dataE;
-                }
-                else
-                {
-                    resultD = Activation(problem.activationType(),
-                                         resultD,
-                                         problem.getParams().activationEnum(),
-                                         actArgs);
-                }
-
-                omp_set_num_threads(MAX_OMP_THREADS);
-#pragma omp critical
-                {
-                    if constexpr(notCmplxAmaxD)
-                    {
-                        if(problem.outputAmaxD())
-                        {
-                            Accumulator absResultD = (resultD > zero) ? resultD : resultD * negOne;
-                            if(absResultD > amaxD)
-                                amaxD = absResultD;
-                        }
-                    }
-                }
-
-                if(problem.useScaleCD())
-                {
-                    Accumulator scaleD
-                        = GetValue<Accumulator>(problem.betaType(), inputs.scaleD, 0, aConjugate);
-                    resultD *= scaleD;
-                }
-                if(problem.useBias() && problem.useGradient()
-                   && (problem.biasSrc() == ContractionProblemGemm::D))
-                {
-                    ws[dIndex] = resultD;
-                }
-                dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
+                performEndOfKMath<Inputs, Accumulator>(inputs,
+                                                       problem,
+                                                       aConjugate,
+                                                       dNum,
+                                                       value,
+                                                       cPtr,
+                                                       cIndex,
+                                                       biasCoord,
+                                                       dIndex,
+                                                       ws,
+                                                       amaxD,
+                                                       dCoord,
+                                                       dPtr,
+                                                       scaleABscalar,
+                                                       scaleABvector);
             }
 
             if(problem.outputAmaxD())
@@ -1168,6 +1475,28 @@ namespace TensileLite
                 }
                 free(ws);
             }
+        }
+
+        template <typename Inputs, typename Accumulator, typename MathOpAccum>
+        void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
+            ContractionProblemGemm const& problem,
+            ContractionInputs const&      inputs,
+            size_t                        elementsToValidate)
+        {
+
+            // We'll use chrono to record the total time in this function:
+            auto start = std::chrono::high_resolution_clock::now();
+            if(solveCPUFastInF32(problem, inputs, elementsToValidate))
+            {
+                auto end = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double, std::milli> duration = end - start;
+                std::cout << "ReferenceSolution fast path took " << duration.count() << " ms\n";
+                return;
+            }
+            solveCPULegacy<Inputs, Accumulator, MathOpAccum>(problem, inputs, elementsToValidate);
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> duration = end - start;
+            std::cout << "ReferenceSolution legacy path took " << duration.count() << " ms\n";
         }
 
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
@@ -1756,6 +2085,7 @@ namespace TensileLite
                       ProblemInputs const*      inputs,
                       size_t                    elementsToValidate)
         {
+
             if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
             {
                 if(auto refInput = dynamic_cast<ContractionGroupedInputs const*>(inputs))
