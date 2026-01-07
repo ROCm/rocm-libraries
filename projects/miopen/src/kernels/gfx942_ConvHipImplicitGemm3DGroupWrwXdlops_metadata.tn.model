@@ -195,15 +195,15 @@
                 "DeviceBatchedGemmXdlUniversal<MNKPadding, CRR>": 1
             },
             "012_BlkGemmPipelineScheduler": {
-                "BlkGemmPipelineScheduler:Interwave": 0,
-                "BlkGemmPipelineScheduler:Intrawave": 1
+                "BlkGemmPipelineScheduler: Interwave": 0,
+                "BlkGemmPipelineScheduler: Intrawave": 1
             },
             "013_BlkGemmPipelineVersion": {
-                "BlkGemmPipelineVersion:v1": 0,
-                "BlkGemmPipelineVersion:v2": 1,
-                "BlkGemmPipelineVersion:v3": 2,
-                "BlkGemmPipelineVersion:v4": 3,
-                "BlkGemmPipelineVersion:v5": 4
+                "BlkGemmPipelineVersion: v1": 0,
+                "BlkGemmPipelineVersion: v2": 1,
+                "BlkGemmPipelineVersion: v3": 2,
+                "BlkGemmPipelineVersion: v4": 3,
+                "BlkGemmPipelineVersion: v5": 4
             },
             "016_ConvBackwardWeightSpecialization": {
                 "Default": 0,
@@ -243,15 +243,15 @@
                 "1": "DeviceBatchedGemmXdlUniversal<MNKPadding, CRR>"
             },
             "012_BlkGemmPipelineScheduler": {
-                "0": "BlkGemmPipelineScheduler:Interwave",
-                "1": "BlkGemmPipelineScheduler:Intrawave"
+                "0": "BlkGemmPipelineScheduler: Interwave",
+                "1": "BlkGemmPipelineScheduler: Intrawave"
             },
             "013_BlkGemmPipelineVersion": {
-                "0": "BlkGemmPipelineVersion:v1",
-                "1": "BlkGemmPipelineVersion:v2",
-                "2": "BlkGemmPipelineVersion:v3",
-                "3": "BlkGemmPipelineVersion:v4",
-                "4": "BlkGemmPipelineVersion:v5"
+                "0": "BlkGemmPipelineVersion: v1",
+                "1": "BlkGemmPipelineVersion: v2",
+                "2": "BlkGemmPipelineVersion: v3",
+                "3": "BlkGemmPipelineVersion: v4",
+                "4": "BlkGemmPipelineVersion: v5"
             },
             "016_ConvBackwardWeightSpecialization": {
                 "0": "Default",
