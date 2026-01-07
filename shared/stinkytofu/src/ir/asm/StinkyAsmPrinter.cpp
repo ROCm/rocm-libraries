@@ -111,11 +111,47 @@ namespace stinkytofu
         os << "(";
         if(!inst.getSrcRegs().empty())
         {
+            // Check if instruction has VOP3 modifiers
+            const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
+
             for(size_t i = 0; i < inst.getSrcRegs().size(); ++i)
             {
                 if(i > 0)
                     os << ", ";
+
+                bool needsNeg = false;
+                bool needsAbs = false;
+
+                // Check VOP3 modifiers for this source operand
+                if(vop3Mod)
+                {
+                    switch(i)
+                    {
+                    case 0:
+                        needsNeg = vop3Mod->neg_src0;
+                        needsAbs = vop3Mod->abs_src0;
+                        break;
+                    case 1:
+                        needsNeg = vop3Mod->neg_src1;
+                        needsAbs = vop3Mod->abs_src1;
+                        break;
+                    case 2:
+                        needsNeg = vop3Mod->neg_src2;
+                        needsAbs = vop3Mod->abs_src2;
+                        break;
+                    }
+                }
+
+                // Print modifiers
+                if(needsNeg)
+                    os << "-";
+                if(needsAbs)
+                    os << "abs(";
+
                 regPrinter.print(inst.getSrcRegs()[i]);
+
+                if(needsAbs)
+                    os << ")";
             }
         }
         os << ")";

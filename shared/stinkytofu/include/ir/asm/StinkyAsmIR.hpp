@@ -618,6 +618,10 @@ namespace stinkytofu
                     cloned->modifiers.push_back(
                         std::make_unique<DPPModifiers>(*static_cast<DPPModifiers*>(mod.get())));
                     break;
+                case Modifier::Type::VOP3:
+                    cloned->modifiers.push_back(
+                        std::make_unique<VOP3Modifiers>(*static_cast<VOP3Modifiers*>(mod.get())));
+                    break;
                 case Modifier::Type::VOP3P:
                     cloned->modifiers.push_back(
                         std::make_unique<VOP3PModifiers>(*static_cast<VOP3PModifiers*>(mod.get())));

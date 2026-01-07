@@ -99,14 +99,70 @@ namespace stinkytofu
             firstOperand = false;
         }
 
-        // Emit source registers
-        for(const auto& src : inst.getSrcRegs())
+        // Check if instruction has VOP3 modifiers
+        const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
+
+        // Emit source registers with VOP3 modifiers if present
+        const auto& srcRegs = inst.getSrcRegs();
+        for(size_t i = 0; i < srcRegs.size(); ++i)
         {
             if(!firstOperand)
             {
                 os << ", ";
             }
-            emitRegister(os, src);
+
+            bool needsNeg = false;
+            bool needsAbs = false;
+
+            // Check VOP3 modifiers for this source operand
+            if(vop3Mod)
+            {
+                switch(i)
+                {
+                case 0:
+                    needsNeg = vop3Mod->neg_src0;
+                    needsAbs = vop3Mod->abs_src0;
+                    break;
+                case 1:
+                    needsNeg = vop3Mod->neg_src1;
+                    needsAbs = vop3Mod->abs_src1;
+                    break;
+                case 2:
+                    needsNeg = vop3Mod->neg_src2;
+                    needsAbs = vop3Mod->abs_src2;
+                    break;
+                }
+            }
+
+            // Emit modifiers according to LLVM syntax rules
+            // Negation comes first, then absolute value
+            if(needsNeg && needsAbs)
+            {
+                // Both neg and abs: -abs(v10) or neg(abs(v10))
+                os << "-abs(";
+                emitRegister(os, srcRegs[i]);
+                os << ")";
+            }
+            else if(needsNeg)
+            {
+                // Only negation: -v10 or neg(v10)
+                // Use short form "-" before register (LLVM syntax allows this)
+                os << "-";
+                emitRegister(os, srcRegs[i]);
+            }
+            else if(needsAbs)
+            {
+                // Only absolute value: abs(v10) or |v10|
+                os << "abs(";
+                emitRegister(os, srcRegs[i]);
+                os << ")";
+            }
+            else
+            {
+                // No modifiers
+                emitRegister(os, srcRegs[i]);
+            }
+
             firstOperand = false;
         }
 
