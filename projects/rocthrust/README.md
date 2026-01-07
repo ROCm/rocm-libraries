@@ -193,9 +193,11 @@ accelerate testing when multiple GPUs of the same family are in a system. It can
 product families from one invocation without having to use the `HIP_VISIBLE_DEVICES` environment
 variable. CTest Resource Allocation requires a resource spec file.
 
-> Using `RESOURCE_GROUPS` and `RESOURCE_SPEC_FILE` with CMake and CTest, respectively for versions
-> prior to 3.18 omits the feature silently. Therefore, you must ensure that the `cmake` and `ctest` you
-> invoke are sufficiently recent.
+```important
+Using `RESOURCE_GROUPS` and `--resource-spec-file` with CMake and CTest, respectively for versions
+prior to 3.16 omits the feature silently. Therefore, you must ensure that the `cmake` and `ctest` you
+invoke are sufficiently recent.
+```
 
 #### Auto resource spec generation
 
@@ -206,7 +208,7 @@ An executable named `generate_resource_spec` will be built when you run `cmake -
 cd projects/rocthrust; cd build
 
 # Invoke the executable with a name for the output json file
-./test/generate_resource_spec resources.json
+./generate_resource_spec resources.json
 
 # Run tests in parallel with specified number of jobs
 ctest --resource-spec-file ./resources.json --parallel <number-of-jobs>

@@ -15,7 +15,7 @@ When you build rocThrust with the ``-DBUILD_TESTS=ON`` option, an executable nam
 
 .. code:: shell
 
-    ./test/generate_resource_spec resources.json
+    ./generate_resource_spec resources.json
 
 will generate a resource specification file named ``resources.json``. This file describes the GPUs available on your system. In addition, CMake also defines the ``RESOURCE_GROUPS`` property for each test that refers to the default GPU resource ``gpus`` in ``resources.json``. Then when your run ``ctest`` with specified number of jobs:
 
@@ -30,4 +30,4 @@ Alternatively, you can configure your tests using the ``AMDGPU_TEST_TARGETS`` CM
 
 .. note::
 
-    This feature requires CMake 3.18 or later.
+    CTest resource allocation requires CMake 3.16 or later.
