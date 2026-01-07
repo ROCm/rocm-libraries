@@ -40,6 +40,8 @@
 #include <ostream>
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
     #include <cuda_bf16.h>
 #else
     #include <rocprim/type_traits.hpp>
@@ -51,6 +53,33 @@
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 
+struct bfloat16_t;
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
+
+using hip_bfloat16 = bfloat16_t;
+namespace cuda
+{
+namespace std
+{
+
+template<>
+struct is_floating_point<bfloat16_t> : true_type
+{};
+
+template<>
+class numeric_limits<bfloat16_t>
+{
+public:
+    static constexpr bool is_specialized = true;
+};
+
+} // namespace std
+} // namespace cuda
+
+#endif // __HIP_PLATFORM_NVIDIA__
 
 /******************************************************************************
  * bfloat16_t
