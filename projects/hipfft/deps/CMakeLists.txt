@@ -43,7 +43,6 @@ endif()
 # The superbuild does not build anything itself; all compiling is done in external projects
 project( hipfft-dependencies NONE )
 
-option( BUILD_BOOST "Download and build boost library" ON )
 option( BUILD_GTEST "Download and build googletest library" ON )
 # option( BUILD_VERBOSE "Print helpful build debug information" OFF )
 
@@ -68,13 +67,6 @@ if( BUILD_GTEST )
   set( gtest_custom_target COMMAND cd ${GTEST_BINARY_ROOT}$<SEMICOLON> ${CMAKE_COMMAND} --build . --target install )
 endif( )
 
-if( BUILD_BOOST )
-  include( external-boost )
-
-  list( APPEND hipfft_dependencies boost )
-  set( boost_custom_target COMMAND cd ${BOOST_BINARY_ROOT}$<SEMICOLON> ${Boost.Command} install )
-endif( )
-
 # POLICY CMP0037 - "Target names should not be reserved and should match a validity pattern"
 # Familiar target names like 'install' should be OK at the super-build level
 if( POLICY CMP0037 )
@@ -82,7 +74,6 @@ if( POLICY CMP0037 )
 endif( )
 
 add_custom_target( install
-  ${boost_custom_target}
   ${gtest_custom_target}
   DEPENDS ${hipfft_dependencies}
 )

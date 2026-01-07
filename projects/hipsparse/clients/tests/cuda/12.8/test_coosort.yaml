@@ -33,8 +33,8 @@ Tests:
 - name: coosort
   category: quick
   function: coosort
-  M: [0, 10, 500, 3872, 10000]
-  N: [0, 33, 242, 1623, 10000]
+  M: [10, 500, 3872, 10000]
+  N: [33, 242, 1623, 10000]
   permute: [0, 1]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]

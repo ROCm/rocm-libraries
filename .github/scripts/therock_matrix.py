@@ -54,7 +54,12 @@ project_map = {
                 "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
                 "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
                 "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
-            ]
+            ],
+            "windows": [
+                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+            ],
         },
         "project_to_test": ["miopen", "miopen_plugin"],
     },
@@ -70,7 +75,12 @@ project_map = {
                 "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
                 "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
                 "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
-            ]
+            ],
+            "windows": [
+                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+            ],
         },
         "project_to_test": ["hipdnn", "miopen_plugin"],
     },
