@@ -35,10 +35,11 @@ TEST(CPU_FilesystemChecker_NONE, DefaultCheckerWorks)
     // This will use the real implementation
     // We can't predict the result, but it shouldn't crash
     miopen::fs::path test_path = "/tmp";
-    bool result                = checker.IsNetworkedFilesystem(test_path);
+    auto result                = checker.IsNetworkedFilesystem(test_path);
 
-    // Just verify it returns a boolean (true or false)
-    EXPECT_TRUE(result == true || result == false);
+    // Verify at compile-time that it returns a boolean type
+    static_assert(std::is_same<decltype(result), bool>::value,
+                  "IsNetworkedFilesystem must return bool");
 }
 
 TEST(CPU_FilesystemChecker_NONE, MockCheckerCanBeInjected)
@@ -56,7 +57,6 @@ TEST(CPU_FilesystemChecker_NONE, MockCheckerCanBeInjected)
 
     // Verify the mock returned the expected value
     EXPECT_TRUE(result);
-    // GMock automatically verifies the expectation was met
 }
 
 TEST(CPU_FilesystemChecker_NONE, MockCheckerReturnsNonNetworked)
@@ -74,7 +74,6 @@ TEST(CPU_FilesystemChecker_NONE, MockCheckerReturnsNonNetworked)
 
     // Verify the mock returned the expected value
     EXPECT_FALSE(result);
-    // GMock automatically verifies the expectation was met
 }
 
 TEST(CPU_FilesystemChecker_NONE, DefaultCheckerRestoredAfterTest)
@@ -94,8 +93,9 @@ TEST(CPU_FilesystemChecker_NONE, DefaultCheckerRestoredAfterTest)
     // After guard goes out of scope, default checker should be restored
     // We can't predict the result, but it should work without crashing
     miopen::fs::path test_path = "/tmp";
-    bool result                = miopen::GetFilesystemChecker().IsNetworkedFilesystem(test_path);
-    EXPECT_TRUE(result == true || result == false);
+    auto result                = miopen::GetFilesystemChecker().IsNetworkedFilesystem(test_path);
+    static_assert(std::is_same<decltype(result), bool>::value,
+                  "IsNetworkedFilesystem must return bool");
 }
 
 TEST(CPU_FilesystemChecker_NONE, MultiplePathsCanBeChecked)
@@ -114,6 +114,4 @@ TEST(CPU_FilesystemChecker_NONE, MultiplePathsCanBeChecked)
     EXPECT_TRUE(checker.IsNetworkedFilesystem("/path1"));
     EXPECT_FALSE(checker.IsNetworkedFilesystem("/path2"));
     EXPECT_TRUE(checker.IsNetworkedFilesystem("/path3"));
-
-    // GMock automatically verifies all three expectations were met
 }
