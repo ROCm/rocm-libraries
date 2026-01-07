@@ -55,11 +55,19 @@ void free_ptr_use(void* ptr, bool call_free)
 {
     std::lock_guard<std::mutex> lock(mem_mutex);
     auto it = mem_allocated.find(ptr);
+
     if(ptr && it != mem_allocated.end())
     {
         mem_used -= it->second;
         mem_allocated.erase(it);
     }
+    else if(ptr && call_free)
+    {
+        rocblas_cerr << "Warning: Freeing untracked pointer " << ptr
+                     << " - untracked memory released (potential double-free or memory corruption)"
+                     << std::endl;
+    }
+    
     if(call_free)
         free(ptr);
 }
