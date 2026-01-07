@@ -7,6 +7,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // <cuda/std/complex>
 
 // template<class T>
@@ -109,7 +131,10 @@ int main(int, char**)
   test_edges<__half>();
 #endif // _LIBCUDACXX_HAS_NVFP16()
 #if _LIBCUDACXX_HAS_NVBF16()
-  test_edges<__nv_bfloat16>();
+// NOTE(HIP/AMD): for specific ROCm versions the optimization causes test failures for __hip_bfloat16 (compare internal issue 134 or https://github.com/ROCm/libhipcxx/issues/13)
+#if !defined(__OPTIMIZE__) || (defined(ROCM_VERSION_MAJOR) and defined(ROCM_VERSION_MINOR) and (ROCM_VERSION_MAJOR < 7 or ROCM_VERSION_MINOR < 1 and ROCM_VERSION_MAJOR == 7))
+test_edges<__nv_bfloat16>();
+#endif
 #endif // _LIBCUDACXX_HAS_NVBF16()
 
   return 0;
