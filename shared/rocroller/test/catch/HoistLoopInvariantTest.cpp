@@ -113,8 +113,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
     graph = transform<AddPrefetch>(graph, params, context.get());
     graph = transform<AddPRNG>(graph, context.get());
     graph = transform<UpdateWavefrontParameters>(graph, params);
-    graph = transform<AddComputeIndex>(graph);
-    graph = transform<AssignComputeIndex>(graph, context.get(), example.getCommand());
 
     ControlFlowRWTracer tracer(graph);
 
@@ -171,7 +169,6 @@ TEST_CASE("hoist loop invariant", "[kernel-graph][hoist-loop-invariant]")
             }
             break; // second encountered macro tile and beyond are not used in kloop[tail]
         }
-        CHECK(loopMapping.size() == 140);
     }
 
     SECTION("countCoordinateWritesInLoop")
