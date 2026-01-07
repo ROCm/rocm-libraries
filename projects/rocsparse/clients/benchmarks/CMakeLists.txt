@@ -34,49 +34,24 @@ target_include_directories(rocsparse-bench PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
 )
 
-# OpenMP RPATH handling for hip-clang
-if(NOT WIN32 AND OPENMP_FOUND)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        if(TARGET OpenMP::OpenMP_CXX)
-            set_target_properties(rocsparse-bench PROPERTIES
-                BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
-                INSTALL_RPATH "$ORIGIN/../llvm/lib"
-            )
-        elseif(TARGET OpenMP::omp)
-            if(DEFINED openmp_LIB_DIR)
-                set_target_properties(rocsparse-bench PROPERTIES
-                    BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
-                    INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
-                )
-            endif()
-        endif()
-    endif()
-endif()
-
 target_link_libraries(rocsparse-bench PRIVATE
     roc::rocsparse
     hip::host
     hip::device
 )
 
-if(OPENMP_FOUND)
-    if(TARGET OpenMP::omp)
-        target_link_libraries(rocsparse-bench PRIVATE OpenMP::omp)
-    elseif(TARGET OpenMP::OpenMP_CXX)
-        target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX)
-    endif()
+if(TARGET OpenMP::OpenMP_CXX)
+    target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 if(rocsparseio_FOUND)
     target_link_libraries(rocsparse-bench PRIVATE roc::rocsparseio)
 endif()
 
-if(NOT WIN32 AND ROCSPARSE_ENABLE_MARKER)
-    if(ROCTRACER_INCLUDE_DIR AND ROCTX_LIBRARY)
-        target_include_directories(rocsparse-bench PRIVATE ${ROCTRACER_INCLUDE_DIR})
-        target_link_libraries(rocsparse-bench PRIVATE ${ROCTX_LIBRARY})
-        target_compile_definitions(rocsparse-bench PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX)
-    endif()
+if(ROCSPARSE_ENABLE_MARKER)
+    target_compile_definitions(rocsparse-bench PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX)
+    target_include_directories(rocsparse-bench PRIVATE ${ROCTRACER_INCLUDE_DIR})
+    target_link_libraries(rocsparse-bench PRIVATE ${rocTracer})
 endif()
 
 rocm_install(TARGETS rocsparse-bench COMPONENT benchmarks DESTINATION "${CMAKE_INSTALL_BINDIR}")

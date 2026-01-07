@@ -89,46 +89,10 @@ if(ROCSPARSE_ENABLE_ROCBLAS AND rocblas_FOUND)
     target_link_libraries(rocsparse PRIVATE roc::rocblas)
 endif()
 
-# rocTracer/rocTX marker support
-if(NOT WIN32 AND ROCSPARSE_BUILD_SHARED_LIBS AND ROCSPARSE_ENABLE_MARKER)
-    set(ROCTX_PATH "" CACHE STRING "Path to the roctx library")
-
-    find_path(ROCTRACER_INCLUDE_DIR
-        NAMES roctracer/roctx.h
-        HINTS
-            ${ROCTX_PATH}
-            ${ROCTX_PATH}/include
-            /opt/rocm/include
-            ${ROCTX_PATH}/../include
-        DOC "Path to the roctracer include directory"
-    )
-
-    find_library(ROCTX_LIBRARY
-        NAMES roctx64
-        HINTS
-            ${ROCTX_PATH}
-            ${ROCTX_PATH}/lib
-            ${ROCTX_PATH}/lib64
-        PATHS
-            /opt/rocm/lib
-    )
-
-    if(ROCTRACER_INCLUDE_DIR AND ROCTX_LIBRARY)
-        message(STATUS "Found roctracer: ${ROCTRACER_INCLUDE_DIR}")
-        message(STATUS "Found roctx library: ${ROCTX_LIBRARY}")
-        target_include_directories(rocsparse PRIVATE ${ROCTRACER_INCLUDE_DIR})
-        target_link_libraries(rocsparse PRIVATE ${ROCTX_LIBRARY})
-        target_compile_definitions(rocsparse PRIVATE ROCSPARSE_BUILT_WITH_ROCTX)
-        message(STATUS "ROCTX tracing support enabled")
-    else()
-        message(WARNING "ROCTX tracing disabled - library or headers not found")
-        if(NOT ROCTRACER_INCLUDE_DIR)
-            message(WARNING "Header 'roctracer/roctx.h' not found")
-        endif()
-        if(NOT ROCTX_LIBRARY)
-            message(WARNING "Library 'roctx64' not found")
-        endif()
-    endif()
+if(ROCSPARSE_ENABLE_MARKER)
+    target_compile_definitions(rocsparse PRIVATE ROCSPARSE_BUILT_WITH_ROCTX)
+    target_include_directories(rocsparse PRIVATE ${ROCTRACER_INCLUDE_DIR})
+    target_link_libraries(rocsparse PRIVATE ${rocTracer})
 endif()
 
 # Target properties

@@ -65,8 +65,9 @@ option(ROCSPARSE_ENABLE_MEMSTAT "Build with memory statistics enabled" OFF)
 option(ROCSPARSE_ENABLE_ILP64 "Build with rocsparse_int equal to int64_t" OFF)
 option(ROCSPARSE_ENABLE_COMPRESSED_DBG "Enable compressed debug symbols" ON)
 option(ROCSPARSE_ENABLE_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
-option(ROCSPARSE_ENABLE_MARKER "Enable rocTracer marker support" ON)
+cmake_dependent_option(ROCSPARSE_ENABLE_MARKER "Enable rocTracer marker support" ON "NOT WIN32" OFF)
 option(ROCSPARSE_ENABLE_OFFLOAD_COMPRESS "Enable offload compression during compilation" ON)
+option(ROCSPARSE_ENABLE_OPENMP "Enable OpenMP support" ON)
 
 if(NOT ROCSPARSE_ENABLE_FORTRAN)
     option(ROCSPARSE_ENABLE_FORTRAN "Build rocSPARSE clients requiring Fortran capabilities" ON)
@@ -142,11 +143,22 @@ if(ROCSPARSE_ENABLE_ROCBLAS)
     endif()
 endif()
 
-if(ROCSPARSE_ENABLE_CLIENT)
-    find_package(OpenMP QUIET)
-    if(NOT OPENMP_FOUND)
-        message(WARNING "OpenMP not found. Clients may have reduced performance.")
-    endif()
+if(ROCSPARSE_ENABLE_OPENMP)
+    find_package(OpenMP REQUIRED)
+endif()
+
+# rocTracer/roctx marker support
+if(ROCSPARSE_ENABLE_MARKER)
+    find_library(rocTracer roctx64 REQUIRED)
+    get_filename_component(ROCTRACER_LIB_DIR ${rocTracer} DIRECTORY)
+    get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
+
+    find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h"
+        HINTS ${ROCTRACER_ROOT_DIR}
+        PATH_SUFFIXES include
+        REQUIRED)
+else()
+    set(rocTracer)
 endif()
 
 if(ROCSPARSE_BUILD_SHARED_LIBS)
@@ -290,6 +302,10 @@ endif()
 
 # Add rocm-core dependency
 rocm_package_add_dependencies(DEPENDS "rocm-core" COMPONENT runtime)
+
+if(ROCSPARSE_ENABLE_MARKER)
+    rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0" COMPONENT runtime)
+endif()
 
 # Static library dependencies for HIP
 rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
