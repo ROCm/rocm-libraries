@@ -27,6 +27,21 @@
 #include "rocsparse_matrix_statistics.hpp"
 #include "testing_spmv_dispatch_traits.hpp"
 
+// Helper to check if type is low-precision (bf16 or f16)
+template <typename T>
+inline constexpr bool is_low_precision_v
+    = std::is_same<T, rocsparse_bfloat16>{} || std::is_same<T, _Float16>{};
+
+// Set all entries in an array to 1.0f for numerical stability with low-precision types
+template <typename T>
+inline void set_array_to_ones(T* data, size_t size)
+{
+    for(size_t i = 0; i < size; ++i)
+    {
+        data[i] = static_cast<T>(1.0f);
+    }
+}
+
 template <rocsparse_format FORMAT,
           typename I,
           typename J,
@@ -143,13 +158,10 @@ public:
                 arg, arg.unit_check ? to_int : false, full_rank);
             traits::sparse_initialization(matrix_factory, hA, M, N, base);
 
-            // For bf16 precision, set all matrix values to 1.0 for numerical stability
-            if constexpr(std::is_same<A, rocsparse_bfloat16>{})
+            // For bf16/f16 precision, set all matrix values to 1.0 for numerical stability
+            if constexpr(is_low_precision_v<A>)
             {
-                for(size_t i = 0; i < hA.val.size(); ++i)
-                {
-                    hA.val[i] = static_cast<A>(1.0f);
-                }
+                set_array_to_ones(hA.val.data(), hA.val.size());
             }
         }
 
@@ -162,13 +174,10 @@ public:
         device_sparse_matrix<A> dA(hA);
 
         host_dense_matrix<X> hx((trans == rocsparse_operation_none) ? N : M, 1);
-        // For bf16 precision, set all vector values to 1.0 for numerical stability
-        if constexpr(std::is_same<X, rocsparse_bfloat16>{})
+        // For bf16/f16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(is_low_precision_v<X>)
         {
-            for(size_t i = 0; i < static_cast<size_t>(hx.m * hx.n); ++i)
-            {
-                hx[i] = static_cast<X>(1.0f);
-            }
+            set_array_to_ones(hx.data(), static_cast<size_t>(hx.m * hx.n));
         }
         else
         {
@@ -177,13 +186,10 @@ public:
         device_dense_matrix<X> dx(hx);
 
         host_dense_matrix<Y> hy((trans == rocsparse_operation_none) ? M : N, 1);
-        // For bf16 precision, set all vector values to 1.0 for numerical stability
-        if constexpr(std::is_same<Y, rocsparse_bfloat16>{})
+        // For bf16/f16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(is_low_precision_v<Y>)
         {
-            for(size_t i = 0; i < static_cast<size_t>(hy.m * hy.n); ++i)
-            {
-                hy[i] = static_cast<Y>(1.0f);
-            }
+            set_array_to_ones(hy.data(), static_cast<size_t>(hy.m * hy.n));
         }
         else
         {
@@ -379,13 +385,10 @@ public:
                 arg, arg.unit_check ? to_int : false, full_rank);
             traits::sparse_initialization(matrix_factory, hA, M, N, base);
 
-            // For bf16 precision, set all matrix values to 1.0 for numerical stability
-            if constexpr(std::is_same<A, rocsparse_bfloat16>{})
+            // For bf16/f16 precision, set all matrix values to 1.0 for numerical stability
+            if constexpr(is_low_precision_v<A>)
             {
-                for(size_t i = 0; i < hA.val.size(); ++i)
-                {
-                    hA.val[i] = static_cast<A>(1.0f);
-                }
+                set_array_to_ones(hA.val.data(), hA.val.size());
             }
         }
 
@@ -398,13 +401,10 @@ public:
         device_sparse_matrix<A> dA(hA);
 
         host_dense_matrix<X> hx((trans == rocsparse_operation_none) ? N : M, 1);
-        // For bf16 precision, set all vector values to 1.0 for numerical stability
-        if constexpr(std::is_same<X, rocsparse_bfloat16>{})
+        // For bf16/f16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(is_low_precision_v<X>)
         {
-            for(size_t i = 0; i < static_cast<size_t>(hx.m * hx.n); ++i)
-            {
-                hx[i] = static_cast<X>(1.0f);
-            }
+            set_array_to_ones(hx.data(), static_cast<size_t>(hx.m * hx.n));
         }
         else
         {
@@ -413,13 +413,10 @@ public:
         device_dense_matrix<X> dx(hx);
 
         host_dense_matrix<Y> hy((trans == rocsparse_operation_none) ? M : N, 1);
-        // For bf16 precision, set all vector values to 1.0 for numerical stability
-        if constexpr(std::is_same<Y, rocsparse_bfloat16>{})
+        // For bf16/f16 precision, set all vector values to 1.0 for numerical stability
+        if constexpr(is_low_precision_v<Y>)
         {
-            for(size_t i = 0; i < static_cast<size_t>(hy.m * hy.n); ++i)
-            {
-                hy[i] = static_cast<Y>(1.0f);
-            }
+            set_array_to_ones(hy.data(), static_cast<size_t>(hy.m * hy.n));
         }
         else
         {
