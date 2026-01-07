@@ -34,14 +34,13 @@ namespace rocRoller::KernelGraph
 {
     namespace OrderMultiplyNodesDetail
     {
-        template <typename T>
-        std::unordered_map<int, std::vector<int>> getGroupedNodes(KernelGraph const& graph)
+        std::unordered_map<int, std::vector<int>> getGroupedNodes(KernelGraph const&       graph,
+                                                                  std::predicate<int> auto pred)
         {
-            auto multiplyNodes = graph.control.getNodes().filter(
-                [&graph](int idx) { return graph.control.get<T>(idx).has_value(); });
+            auto theNodes = graph.control.getNodes().filter(pred);
 
             std::unordered_map<int, std::vector<int>> rv;
-            for(auto node : multiplyNodes)
+            for(auto node : theNodes)
             {
                 auto parent = bodyParents(node, graph).take(1).only();
                 AssertFatal(parent.has_value(), "Node has no body parent", ShowValue(node));
@@ -49,6 +48,14 @@ namespace rocRoller::KernelGraph
                 rv[*parent].push_back(node);
             }
             return rv;
+        }
+
+        template <typename T>
+        std::unordered_map<int, std::vector<int>> getGroupedNodes(KernelGraph const& graph)
+        {
+            auto pred = [&graph](int idx) { return graph.control.get<T>(idx).has_value(); };
+
+            return getGroupedNodes(graph, pred);
         }
 
         std::unordered_map<int, std::vector<int>> getGroupedMultiplyNodes(KernelGraph const& graph)
@@ -499,10 +506,28 @@ namespace rocRoller::KernelGraph
                     return graph.control.get<ControlGraph::Multiply>(idx).has_value();
                 };
 
-                return graph.control.getOutputNodeIndices<ControlGraph::Sequence>(exchange)
-                    .filter(isMultiply)
-                    .only()
-                    .value();
+                auto multiplies
+                    = graph.control.getOutputNodeIndices<ControlGraph::Sequence>(exchange).filter(
+                        isMultiply);
+
+                auto iter = multiplies.begin();
+                AssertFatal(iter != multiplies.end(), "No Multiply nodes attached to ", exchange);
+
+                auto rv = *iter;
+
+                ++iter;
+
+                for(; iter != multiplies.end(); ++iter)
+                {
+                    auto candidate = *iter;
+
+                    if(candidate != rv
+                       && graph.control.compareNodes(UpdateCache, rv, candidate)
+                              == ControlGraph::NodeOrdering::RightFirst)
+                        rv = candidate;
+                }
+
+                return rv;
             }
 
             bool operator()(int a, int b) const
@@ -686,8 +711,30 @@ namespace rocRoller::KernelGraph
         auto rv = original;
 
         {
+            auto exchangeWithConnectedMultiply = [&rv](int node) {
+                if(!rv.control.get<rocRoller::KernelGraph::ControlGraph::Exchange>(node)
+                        .has_value())
+                    return false;
+
+                auto isMultiply = [&rv](int idx) -> bool {
+                    return rv.control.get<rocRoller::KernelGraph::ControlGraph::Multiply>(idx)
+                        .has_value();
+                };
+
+                auto hasOutputMultiplies
+                    = rv.control
+                          .getOutputNodeIndices<rocRoller::KernelGraph::ControlGraph::Sequence>(
+                              node)
+                          .filter(isMultiply)
+                          .take(1)
+                          .only()
+                          .has_value();
+
+                return hasOutputMultiplies;
+            };
+
             auto groupedExchangeNodes
-                = OrderMultiplyNodesDetail::getGroupedNodes<ControlGraph::Exchange>(rv);
+                = OrderMultiplyNodesDetail::getGroupedNodes(rv, exchangeWithConnectedMultiply);
             for(auto& [parent, nodes] : groupedExchangeNodes)
             {
                 OrderMultiplyNodesDetail::ExchangeOrder comp{rv};
