@@ -1610,7 +1610,11 @@ def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple
     instructions are non-decreasing. This rule is true for all groups of instructions,
     not just the 'GRIncA' instructions.
     """
+    # TODO: Move this validation into each instructions's validation to allow for custom ordering.
     for k in scheduleInfo.optSchedule.keys():
+        if k.startswith("Pack"):
+            # Packs have their own validation or ordering.
+            continue
         seq = schedule_get(k, code_path, scheduleInfo)
         for i in range(1, len(seq)):
             if seq[i] < seq[i - 1]:
