@@ -28,6 +28,7 @@ supported_distro( )
   esac
 }
 
+
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
 check_exit_code( )
 {
@@ -48,6 +49,21 @@ elevate_if_not_root( )
     $@
     check_exit_code "$?"
   fi
+}
+
+# Variant that captures exit code without exiting - useful for special error handling
+elevate_if_not_root_capture_exit( )
+{
+  local uid=$(id -u)
+  local exit_code=0
+
+  if (( ${uid} )); then
+    sudo $@ || exit_code=$?
+  else
+    $@ || exit_code=$?
+  fi
+
+  return ${exit_code}
 }
 
 # Take an array of packages as input, and install those packages with 'apt' if they are not already installed
@@ -78,7 +94,15 @@ install_zypper_packages( )
 {
     package_dependencies="$@"
     printf "\033[32mInstalling following packages from distro package manager: \033[33m${package_dependencies}\033[32m \033[0m\n"
-    elevate_if_not_root zypper install -y ${package_dependencies}
+
+    local exit_code=0
+    elevate_if_not_root_capture_exit zypper -n install -y ${package_dependencies} || exit_code=$?
+
+    # Exit code 106 means some repos failed to refresh, but packages may still be available
+    # Only fail if it's a different error
+    if (( ${exit_code} != 0 && ${exit_code} != 106 )); then
+        exit ${exit_code}
+    fi
 }
 
 install_msgpack_from_source( )
@@ -118,7 +142,7 @@ install_packages( )
                                       "python3" "python3-yaml" "python3-venv" "python3*-pip" )
   local library_dependencies_centos_rhel=( "epel-release"
                                       "make" "rpm-build"
-                                      "python34" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
   local library_dependencies_centos_8=( "epel-release"
                                       "make" "rpm-build"
@@ -126,17 +150,21 @@ install_packages( )
                                       "gcc-c++" )
   local library_dependencies_rhel_8=( "epel-release"
                                       "make" "rpm-build"
-                                      "python36" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
   local library_dependencies_rhel_9=( "epel-release" "openssl-devel"
                                       "make" "rpm-build"
-                                      "python39" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
+                                      "gcc-c++" )
+  local library_dependencies_rhel_10=( "epel-release" "openssl-devel"
+                                      "make" "rpm-build"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
   local library_dependencies_fedora=( "make" "rpm-build"
-                                      "python34" "python3*-PyYAML" "python3-virtualenv"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" "libcxx-devel" )
-  local library_dependencies_sles=(   "make" "python3-PyYAML" "python3-virtualenv"
-                                      "gcc-c++" "rpm-build" )
+  local library_dependencies_sles=(   "make" "gcc-c++" "rpm-build"
+                                      "python3" "python3-PyYAML" "python3-virtualenv" "python3-pip" )
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
     library_dependencies_ubuntu+=("libmsgpack-dev")
@@ -158,6 +186,7 @@ install_packages( )
       library_dependencies_centos_8+=("wget" "openssl-devel")
       library_dependencies_rhel_8+=("wget" "openssl-devel")
       library_dependencies_rhel_9+=("wget" "openssl-devel")
+      library_dependencies_rhel_10+=("wget" "openssl-devel")
       library_dependencies_fedora+=("wget")
       library_dependencies_sles+=("wget" "libopenssl-devel")
     fi
@@ -170,6 +199,7 @@ install_packages( )
     library_dependencies_centos_8+=( "gcc-gfortran" "libgomp" )
     library_dependencies_rhel_8+=( "gcc-gfortran" "libgomp" )
     library_dependencies_rhel_9+=( "gcc-gfortran" "libgomp" )
+    library_dependencies_rhel_10+=( "gcc-gfortran" "libgomp" )
     library_dependencies_fedora+=( "gcc-gfortran" "libgomp" )
     library_dependencies_sles+=( "gcc-fortran" "libgomp1" )
 
@@ -180,6 +210,7 @@ install_packages( )
       library_dependencies_centos_8+=("wget")
       library_dependencies_rhel_8+=("wget")
       library_dependencies_rhel_9+=("wget")
+      library_dependencies_rhel_10+=("wget")
       library_dependencies_fedora+=("wget")
       library_dependencies_sles+=("wget")
     fi
@@ -203,7 +234,9 @@ install_packages( )
       ;;
 
     rhel)
-      if (( "${VERSION_ID%%.*}" >= "9" )); then
+      if (( "${VERSION_ID%%.*}" >= "10" )); then
+        install_yum_packages "${library_dependencies_rhel_10[@]}"
+      elif (( "${VERSION_ID%%.*}" >= "9" )); then
         install_yum_packages "${library_dependencies_rhel_9[@]}"
       elif (( "${VERSION_ID%%.*}" >= "8" )); then
         install_yum_packages "${library_dependencies_rhel_8[@]}"

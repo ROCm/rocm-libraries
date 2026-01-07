@@ -365,12 +365,12 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  * All arrays may be re-used or freed immediately after the function returns.
  *
  * @param[out] brick: brick structure
- * @param[in] field_lower: array of length dim specifying the lower index (inclusive) for the brick in the
- * field's index space.
- * @param[in] field_upper: array of length dim specifying the upper index (exclusive) for the brick in the
- * field's index space.
- * @param[in] brick_stride: array of length dim specifying the brick's stride in memory
- * @param[in] dim_with_batch length of the arrays; this must match the dimension of
+ * @param[in] field_lower: array of length `dim_with_batch` specifying the lower index
+ * (inclusive) for the brick in the field's index space.
+ * @param[in] field_upper: array of length `dim_with_batch` specifying the upper index
+ * (exclusive) for the brick in the field's index space.
+ * @param[in] brick_stride: array of length `dim_with_batch` specifying the brick's stride in memory
+ * @param[in] dim_with_batch: length of the arrays; this must match the dimension of
  * the FFT plus one for the batch dimension.
  * @param[in] deviceID: HIP device ID for the device on which the brick's data is resident.
  *
@@ -582,10 +582,6 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  @details This function specifies a user-defined callback function
  *  that is run to store output to global memory at the end of the
  *  transform.  Callbacks are an experimental feature in rocFFT.
- *
- *  Callback function pointers/data are given as arrays, with one
- *  function/data pointer per device executing this plan.  Currently,
- *  plans can only use one device.
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the output field of the plan.

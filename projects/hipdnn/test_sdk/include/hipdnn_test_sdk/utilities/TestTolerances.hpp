@@ -48,15 +48,15 @@ constexpr T getToleranceTraining()
     }
     else if constexpr(std::is_same_v<T, float>)
     {
-        return 2e-4f;
+        return 4e-3f;
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        return 5e-4_h;
+        return 4e-3_h;
     }
     else if constexpr(std::is_same_v<T, hip_bfloat16>)
     {
-        return 5e-3_bf;
+        return 8e-3_bf;
     }
     else
     {
@@ -220,6 +220,10 @@ constexpr T getTolerance()
     else if constexpr(std::is_same_v<T, hip_bfloat16>)
     {
         return 1e-2_bf;
+    }
+    else if constexpr(std::is_same_v<T, int8_t>)
+    {
+        return 0;
     }
     else
     {

@@ -5,6 +5,34 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.23
 
+### Added
+
+* hipFFTW plan creation functions for advanced and general plans:
+
+  * fftw_plan_many_dft
+  * fftwf_plan_many_dft
+  * fftw_plan_many_dft_r2c
+  * fftwf_plan_many_dft_r2c
+  * fftw_plan_many_dft_c2r
+  * fftwf_plan_many_dft_c2r
+  * fftw_plan_guru_dft
+  * fftwf_plan_guru_dft
+  * fftw_plan_guru_dft_r2c
+  * fftwf_plan_guru_dft_r2c
+  * fftw_plan_guru_dft_c2r
+  * fftwf_plan_guru_dft_c2r
+  * fftw_plan_guru64_dft
+  * fftwf_plan_guru64_dft
+  * fftw_plan_guru64_dft_r2c
+  * fftwf_plan_guru64_dft_r2c
+  * fftw_plan_guru64_dft_c2r
+  * fftwf_plan_guru64_dft_c2r
+
+### Changed
+
+* Moved library to C++20 standard.
+* Removed Boost as a dependency for clients and samples.
+
 ### Resolved issues
 
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
@@ -31,6 +59,7 @@ Documentation for hipFFT is available at
 * Improved test coverage of user-specified work areas.
 * Improved test coverage of default stride calculation.
 * **[Experimental]** Introduced the hipFFTW library, interfacing rocFFT on AMD platforms using the same symbols as FFTW3 (with partial support).
+* Support for the gfx1152 and gfx1153 architectures
 
 ## hipFFT 1.0.20 for ROCm 7.0.0
 

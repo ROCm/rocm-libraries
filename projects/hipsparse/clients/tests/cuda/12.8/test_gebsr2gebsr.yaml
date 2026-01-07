@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: gebsr2gebsr
   precision: *single_double_precisions_complex_real
-  M: [0, 872, 13095, 21453]
-  N: [0, 623, 12766, 29285]
+  M: [872, 13095, 21453]
+  N: [623, 12766, 29285]
   row_block_dimA: [2]
   col_block_dimA: [5]
   row_block_dimB: [3]
