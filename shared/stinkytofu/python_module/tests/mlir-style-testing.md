@@ -37,12 +37,12 @@ from stinkytofu import StinkyAsmIR, vgpr
 def test_instruction_pattern():
     st = StinkyAsmIR([9, 4, 2])
     module = st.createIRList("test")
-    
+
     module.add(st.VAddU32(vgpr(0), vgpr(1), vgpr(2), "add"))
     module.add(st.VMulF32(vgpr(3), vgpr(0), vgpr(4), "mul"))
-    
+
     asm = module.emitAssembly(emit_comments=True)
-    
+
     # Verify instruction sequence
     checker = FileCheck(asm)
     checker.check("v_add_u32")      # CHECK: v_add_u32
@@ -59,7 +59,7 @@ def test_instruction_pattern():
    ```python
    # Good
    checker.check_regex(r'v_add_u32\s+v0,\s+v1,\s+v2')
-   
+
    # Less specific (but sometimes useful)
    checker.check("v_add_u32")
    ```
@@ -117,7 +117,7 @@ class TestAssemblyValidity:
         """Verify MFMA instruction can be assembled."""
         st = StinkyAsmIR([9, 4, 2])
         module = st.createIRList("test")
-        
+
         module.add(st.createMFMA(
             instType="f32",
             accType="f32",
@@ -130,9 +130,9 @@ class TestAssemblyValidity:
             acc2=acc(0, 4),
             comment=""
         ))
-        
+
         asm = module.emitAssembly()
-        
+
         # Verify it assembles
         assert assemble_with_llvm_mc(asm)
 ```
@@ -166,13 +166,13 @@ def test_basic_kernel_regression():
     """Compare against saved golden output."""
     st = StinkyAsmIR([9, 4, 2])
     module = st.createIRList("kernel")
-    
+
     # Build kernel
     module.add(st.VAddU32(vgpr(0), vgpr(1), vgpr(2), ""))
     module.add(st.VMulF32(vgpr(3), vgpr(0), vgpr(4), ""))
-    
+
     asm = module.emitAssembly()
-    
+
     # Compare against golden file
     golden_path = Path("golden/basic_kernel.s")
     if golden_path.exists():
@@ -210,19 +210,19 @@ def test_valu_instruction_format():
     """Verify VALU instruction format."""
     st = StinkyAsmIR([9, 4, 2])
     module = st.createIRList("test")
-    
+
     module.add(st.VAddU32(vgpr(10), vgpr(20), vgpr(30), "test"))
     asm = module.emitAssembly(emit_comments=True)
-    
+
     # Extract and verify instruction
     checker = FileCheck(asm)
     match = checker.check_regex(r'v_add_u32\s+(v\d+),\s+(v\d+),\s+(v\d+)')
-    
+
     # Verify register numbers
     assert match.group(1) == "v10"
     assert match.group(2) == "v20"
     assert match.group(3) == "v30"
-    
+
     # Verify comment
     checker.reset()
     checker.check("test")
@@ -249,7 +249,7 @@ def test_instruction_architecture_support(arch, arch_name, supported):
     """Test instruction across architectures."""
     st = StinkyAsmIR(arch)
     module = st.createIRList(f"test_{arch_name}")
-    
+
     if supported:
         # Should work
         module.add(st.VAddU32(vgpr(0), vgpr(1), vgpr(2), ""))
@@ -274,15 +274,15 @@ def test_composite_lowering():
     """Test composite instruction lowering."""
     st = StinkyAsmIR([9, 4, 2])
     module = st.createIRList("test")
-    
+
     # VAddPKF32 might lower to 1 or 2 instructions
     insts = st.VAddPKF32(vgpr(0), vgpr(1), vgpr(2), "packed add")
     module.add(insts)
-    
+
     asm = module.emitAssembly(emit_comments=True)
-    
+
     checker = FileCheck(asm)
-    
+
     # Either has packed instruction or two regular adds
     try:
         checker.check("v_pk_add_f32")
@@ -310,7 +310,7 @@ def test_mfma_instruction_format():
     """Test MFMA instruction format."""
     st = StinkyAsmIR([9, 4, 2])
     module = st.createIRList("test")
-    
+
     module.add(st.createMFMA(
         instType="bf16",
         accType="f32",
@@ -323,20 +323,20 @@ def test_mfma_instruction_format():
         acc2=acc(0, 4),
         comment="mfma"
     ))
-    
+
     asm = module.emitAssembly(emit_comments=True)
-    
+
     checker = FileCheck(asm)
-    
+
     # CHECK: v_mfma_{{bf16|f32}}_16x16x16
     checker.check_regex(r'v_mfma_\w+_16x16x16')
-    
+
     # CHECK-SAME: a[0:3], v[0:3], v[4:7], a[0:3]
     checker.check_same("a[0:3]")
     checker.check_same("v[0:3]")
     checker.check_same("v[4:7]")
     checker.check_same("a[0:3]")
-    
+
     # CHECK: mfma
     checker.check("mfma")
 ```
@@ -354,7 +354,7 @@ def test_invalid_mfma_dimensions():
     """Test MFMA with invalid dimensions."""
     st = StinkyAsmIR([9, 4, 2])
     module = st.createIRList("test")
-    
+
     with pytest.raises(RuntimeError, match="Invalid MFMA dimensions"):
         module.add(st.createMFMA(
             instType="f32",
@@ -376,7 +376,7 @@ def test_invalid_mfma_dimensions():
 
 ```bash
 cd /data0/yangwen/rocm-libraries/shared/stinkytofu
-PYTHONPATH=build/python_module:$PYTHONPATH python3 -m pytest python_module/tests/ -v
+PYTHONPATH=build/lib:$PYTHONPATH python3 -m pytest python_module/tests/ -v
 ```
 
 ### Run FileCheck Tests Only
@@ -461,28 +461,28 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v2
-    
+
     - name: Install dependencies
       run: |
         apt-get update
         apt-get install -y llvm-15 python3-pytest
-        
+
     - name: Build StinkyTofu
       run: |
         mkdir build && cd build
         cmake .. -DSTINKYTOFU_BUILD_PYTHON=ON
         make -j
-        
+
     - name: Run tests
       run: |
         cd shared/stinkytofu
-        PYTHONPATH=build/python_module:$PYTHONPATH \
+        PYTHONPATH=build/lib:$PYTHONPATH \
           python3 -m pytest python_module/tests/ -v \
           --cov=stinkytofu --cov-report=xml
-        
+
     - name: Upload coverage
       uses: codecov/codecov-action@v2
 ```

@@ -19,12 +19,12 @@ This directory contains the testing framework for StinkyTofu's Python module, in
 ## Quick Start
 
 ```bash
-# Assume you have build stinkytofu_python in shared/stinkytofu/build
+# Assume you have built stinkytofu_python in shared/stinkytofu/build
 # See: python_module/README.md
 
 # Run all tests
 cd /data0/yangwen/rocm-libraries/shared/stinkytofu
-PYTHONPATH=build/python_module:$PYTHONPATH python3 -m pytest python_module/tests/ -v
+PYTHONPATH=build/lib:$PYTHONPATH python3 -m pytest python_module/tests/ -v
 
 # Run main test suite (all comprehensive tests)
 pytest python_module/tests/test_assembly_validation.py -v
@@ -82,30 +82,30 @@ checker.check_not("invalid")
 
 ```
 tests/
-├── test_assembly_validation.py  # Main comprehensive test suite (MLIR-style)
-│   ├── TestFileCheckPatterns    # FileCheck pattern matching tests (8 tests)
-│   ├── TestBasicInstructions    # Basic VALU/scalar instructions (6 tests)
-│   ├── TestBasicMFMA            # MFMA instruction tests (4 tests)
-│   ├── TestMFMAWithBlocks       # Multi-block MFMA tests (2 tests)
-│   ├── TestWMMA                 # WMMA (RDNA) tests (1 test)
-│   ├── TestSparseMFMA           # Sparse MFMA tests (3 tests)
-│   ├── TestMFMAKernel           # Complete kernel tests (2 tests)
-│   ├── TestMFMAErrorHandling    # Error handling tests (2 tests)
-│   ├── TestGfx1250ScalarInstructions    # gfx1250 scalar tests (4 tests)
-│   ├── TestGfx1250VectorInstructions    # gfx1250 vector tests (2 tests)
-│   ├── TestGfx1250InstructionsOnOlderArchitectures  # gfx1250 error tests (2 tests)
-│   ├── TestGfx1250AllInstructions       # gfx1250 integration tests (2 tests)
-│   ├── TestAssemblyValidity     # llvm-mc validation (2 tests, skipped)
-│   ├── TestInstructionExtraction # Parsing utilities (4 tests)
-│   ├── TestRegressionGoldenOutputs # Regression tests (2 tests)
-│   └── Parametrized tests       # Architecture/instruction variants (11 tests)
-├── test_filecheck.py            # FileCheck utility implementation
-├── mlir-style-testing.md        # Detailed methodology guide
-├── testing.md                   # General testing guide
-├── pytest.ini                   # Pytest configuration
-├── requirements.txt             # Test dependencies
-├── conftest.py                  # Shared fixtures
-└── README.md                    # This file
++-- test_assembly_validation.py  # Main comprehensive test suite (MLIR-style)
+|   +-- TestFileCheckPatterns    # FileCheck pattern matching tests (8 tests)
+|   +-- TestBasicInstructions    # Basic VALU/scalar instructions (6 tests)
+|   +-- TestBasicMFMA            # MFMA instruction tests (4 tests)
+|   +-- TestMFMAWithBlocks       # Multi-block MFMA tests (2 tests)
+|   +-- TestWMMA                 # WMMA (RDNA) tests (1 test)
+|   +-- TestSparseMFMA           # Sparse MFMA tests (3 tests)
+|   +-- TestMFMAKernel           # Complete kernel tests (2 tests)
+|   +-- TestMFMAErrorHandling    # Error handling tests (2 tests)
+|   +-- TestGfx1250ScalarInstructions    # gfx1250 scalar tests (4 tests)
+|   +-- TestGfx1250VectorInstructions    # gfx1250 vector tests (2 tests)
+|   +-- TestGfx1250InstructionsOnOlderArchitectures  # gfx1250 error tests (2 tests)
+|   +-- TestGfx1250AllInstructions       # gfx1250 integration tests (2 tests)
+|   +-- TestAssemblyValidity     # llvm-mc validation (2 tests, skipped)
+|   +-- TestInstructionExtraction # Parsing utilities (4 tests)
+|   +-- TestRegressionGoldenOutputs # Regression tests (2 tests)
+|   +-- Parametrized tests       # Architecture/instruction variants (11 tests)
++-- test_filecheck.py            # FileCheck utility implementation
++-- mlir-style-testing.md        # Detailed methodology guide
++-- testing.md                   # General testing guide
++-- pytest.ini                   # Pytest configuration
++-- requirements.txt             # Test dependencies
++-- conftest.py                  # Shared fixtures
++-- README.md                    # This file
 
 Total: 95 tests in one comprehensive file
 - 54 original tests (basic, MFMA, gfx1250)
