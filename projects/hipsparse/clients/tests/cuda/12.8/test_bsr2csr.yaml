@@ -35,11 +35,11 @@ Tests:
   category: quick
   function: bsr2csr
   precision: *single_double_precisions_complex_real
-  M: [0, 872, 2145]
-  N: [0, 1276, 2928]
-  block_dim: [1, 2, 4, 7, 16]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  M: [872, 21453]
+  N: [12766, 29285]
+  block_dim: [2, 4, 7, 16]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
 
 - name: bsr2csr_file

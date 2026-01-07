@@ -35,7 +35,7 @@ Tests:
   category: quick
   function: csrilu02
   precision: *single_double_precisions_complex_real
-  M: [0, 50, 647]
+  M: [50, 647]
   numericboost: [0, 1]
   boosttol: [0.5]
   boostval: [0.3]

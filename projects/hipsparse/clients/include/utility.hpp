@@ -228,6 +228,24 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 }
 #endif
 
+// CHECK_GENERATE_MATRIX_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+#else
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
+    do                                                                                             \
+    {                                                                                              \
+        auto error = ERROR;                                                                        \
+        if(error != true)                                                                          \
+        {                                                                                          \
+            fprintf(                                                                               \
+                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
+    } while(0)
+#endif
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
+
 // CHECK_HIP_ERROR
 #ifdef GOOGLE_TEST
 #define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
@@ -1245,6 +1263,11 @@ bool generate_csr_matrix(const std::string    filename,
             {
                 return true;
             }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
+            }
         }
         else if(extension == "mtx")
         {
@@ -1278,6 +1301,11 @@ bool generate_csr_matrix(const std::string    filename,
 
                     return true;
                 }
+            }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
             }
         }
     }

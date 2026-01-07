@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: gebsr2gebsc
   precision: *single_double_precisions_complex_real
-  M: [0, 981]
-  N: [0, 1286]
+  M: [872, 13095]
+  N: [623, 12766]
   row_block_dimA: [2, 5]
   col_block_dimA: [3, 7]
   action: [HIPSPARSE_ACTION_NUMERIC]

@@ -262,6 +262,310 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForTwoNodeFusionU
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+// ============================================================================
+// Single-Node Backward Tests - Happy & Unhappy Paths
+// ============================================================================
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForValidSingleNodeBackward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+
+    EXPECT_TRUE(applicable);
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidIoDataType)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+        {150528, 50176, 224, 1},
+        {1, 3, 224, 224},
+        true,
+        hipdnn_data_sdk::data_objects::DataType::UINT8); // Invalid IO data type
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidScaleBiasDataType)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+        {150528, 50176, 224, 1},
+        {1, 3, 224, 224},
+        true,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF); // Invalid scale/bias type
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidStatDataType)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+        {150528, 50176, 224, 1},
+        {1, 3, 224, 224},
+        true,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF); // Invalid mean/variance type
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidLayout)
+{
+    // Create backward graph with 3D tensors (invalid)
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    std::vector<int64_t> strides3D = {42, 14, 1};
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> derivedStrides = {3, 1, 1};
+    std::vector<int64_t> derivedDims = {1, 3, 1};
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides3D, &dims3D));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "dy", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides3D, &dims3D));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 3, "dx", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides3D, &dims3D));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "scale",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        5,
+        "dscale",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "dbias",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    auto bnBwdAttr = hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
+        builder,
+        2,
+        1,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        4,
+        flatbuffers::Offset<flatbuffers::Vector<int64_t>>(),
+        3,
+        5,
+        6);
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "bn_bwd",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+        bnBwdAttr.Union());
+    nodes.push_back(node);
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInsufficientSpatialDims)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+        {3, 1, 1, 1}, {1, 3, 1, 1}); // Batch * spatial = 1 (invalid for training)
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// Validator Error Propagation Tests - Inference
+// ============================================================================
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForInvalidLayoutInference)
+{
+    // Create an inference graph with 3D tensors (invalid layout)
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    std::vector<int64_t> strides3D = {42, 14, 1}; // 3D instead of 4D/5D
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> derivedStrides = {3, 1, 1};
+    std::vector<int64_t> derivedDims = {1, 3, 1};
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides3D, &dims3D));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides3D, &dims3D));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "scale",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "bias",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        5,
+        "mean",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "inv_variance",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    auto bnormAttributes = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder, 1, 5, 6, 3, 4, 2);
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "bn",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        bnormAttributes.Union());
+    nodes.push_back(node);
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// Validator Error Propagation Tests - Backward
+// ============================================================================
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForNonPackedTensorBackward)
+{
+    // Create a backward graph with non-packed tensors
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    std::vector<int64_t> nonPackedStrides = {1000, 300, 14, 1}; // Non-packed
+    std::vector<int64_t> dims = {1, 3, 14, 14};
+    std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
+    std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &nonPackedStrides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "dy",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &nonPackedStrides,
+        &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "dx",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &nonPackedStrides,
+        &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "scale",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        5,
+        "dscale",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "dbias",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    auto bnBwdAttr = hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributes(
+        builder,
+        2,
+        1,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        4,
+        flatbuffers::Offset<flatbuffers::Vector<int64_t>>(),
+        3,
+        5,
+        6);
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "bn_bwd",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+        bnBwdAttr.Union());
+    nodes.push_back(node);
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeUnsupportedActivation)
 {
     // Fusion graph with unsupported activation (e.g., SIGMOID_BWD instead of RELU_BWD)
