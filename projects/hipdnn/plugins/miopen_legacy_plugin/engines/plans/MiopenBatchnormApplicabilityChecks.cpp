@@ -148,17 +148,11 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
         return;
     }
 
-    // Degenerate tensors (all dims=1) are layout-agnostic
-    auto isDegenerate = [](const BatchnormTensorDescriptor& tensor) {
-        return std::all_of(
-            tensor.dims.begin(), tensor.dims.end(), [](int64_t d) { return d == 1; });
-    };
-
-    // Use first non-degenerate tensor as layout reference (degenerate stride order is ambiguous)
+    // Use first tensor with meaningful layout as reference
     int64_t referenceIndex = -1;
     for(size_t i = 0; i < tensors.size(); ++i)
     {
-        if(isDegenerate(tensors[i]))
+        if(hipdnn_data_sdk::utilities::isLayoutAgnostic(tensors[i].dims))
         {
             continue;
         }
