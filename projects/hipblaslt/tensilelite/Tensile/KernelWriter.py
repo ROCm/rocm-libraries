@@ -3039,6 +3039,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "0prefetch wait for local write"))
         module.add(self._syncThreads(kernel))
 
+        usePLRPackCMS = (kernel["UsePLRPack"] and kernel["UseCustomMainLoopSchedule"])
         # in some cases need an extra copy of the LDS read with appropriate double buffer offsets
         for plrIdx in range(0, self.states.numItersPLR):
           pack[plrIdx] = Module()
@@ -3048,7 +3049,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch a")
                 localReadCodeA, packCodeA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadA, iui*self.states.numReadsIterCoalescedA, espi, tensorParametersA)
                 module.add(localReadCodeA)
-                pack[plrIdx].add(packCodeA)
+                # CMS only needs 1st PLRPack code insertion in preLoop
+                if iui == 0 or not usePLRPackCMS:
+                  pack[plrIdx].add(packCodeA)
               if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
                 if iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]:
                   module.addComment1("local read prefetch metadata")
@@ -3059,7 +3062,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.addComment1("local read prefetch b")
                 localReadCodeB, packCodeB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, espi, tensorParametersB)
                 module.add(localReadCodeB)
-                pack[plrIdx].add(packCodeB)
+                if iui == 0 or not usePLRPackCMS:  
+                  pack[plrIdx].add(packCodeB)
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]):
                 module.addComment1("local read inc a")
                 module.add(self.localReadInc(kernel, iui, tensorParametersA))
