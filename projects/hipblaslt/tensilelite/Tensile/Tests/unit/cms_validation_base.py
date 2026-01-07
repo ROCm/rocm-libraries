@@ -54,7 +54,14 @@ class CMSValidationTestBase(unittest.TestCase):
         """Initialize kernel and compute number of VMFMAs."""
         self.kernel = create_base_kernel()
         if kernel_updates:
-            self.kernel.update(kernel_updates)
+            # Handle nested ProblemType updates
+            if "ProblemType" in kernel_updates:
+                self.kernel["ProblemType"].update(kernel_updates["ProblemType"])
+                # Create a copy without ProblemType for top-level update
+                remaining_updates = {k: v for k, v in kernel_updates.items() if k != "ProblemType"}
+                self.kernel.update(remaining_updates)
+            else:
+                self.kernel.update(kernel_updates)
         
         self.num_vmfma = self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
         self.num_vmfma *= self.kernel["DepthU"] // self.kernel["MatrixInstruction"][2]
@@ -69,7 +76,7 @@ class CMSValidationTestBase(unittest.TestCase):
         nglshift: int,
         nllshift: int,
         codePathIdx: int,
-        expected_message: Optional[str] = None,
+        expected_message: Optional[str],
         nllZeroDscnt: bool = False,
         mfmaReorder: list[int] = None,
         snopCode: list[Any] = None,

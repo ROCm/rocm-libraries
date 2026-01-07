@@ -313,14 +313,29 @@ class ValidatorInstruction(ABC):
     @abstractmethod
     def validate(self) -> Optional[str]:
         ...
+    
+    @abstractmethod
+    def done_idx(self) -> Union[int, float]:
+        """
+        MFMA Index after which this instruction is done for the purpose of scheduling other instructions
+        which rely on something about it.
+        E.g. The done_idx of a LocalRead/GlobalRead is the index of the SWaitCnt that waits on them.
+        """
+        ...
 
 @dataclass
 class LocalRead(ValidatorInstruction):
     name: str
     num_vmfma: int
     issued_at: Union[int, float]
+    # The index in the list of Local Read instructions provided by a CMS schedule.
+    # Needed to properly calculate must_start_after for Packs.
+    issue_index: int
     needed_by: Union[int, float] = float('inf')
     guaranteed_by: Union[int, float] = float('inf')
+
+    def done_idx(self) -> Union[int, float]:
+        return self.guaranteed_by
 
     def validate(self) -> Optional[str]:
         # For when local reads are not being guaranteed by a particular pass.
@@ -355,6 +370,72 @@ class LocalRead(ValidatorInstruction):
         return message
 
 @dataclass
+class MFMA(ValidatorInstruction):
+    issued_at: Union[int, float]
+    name: str = "MFMA"
+
+    def done_idx(self) -> Union[int, float]:
+        return self.issued_at
+
+    def validate(self) -> Optional[str]:
+        return None
+
+@dataclass
+class Pack(ValidatorInstruction):
+    name: str
+    num_vmfma: int
+    issued_at: Union[int, float]
+    # The index in the list of Pack instructions provided by a CMS schedule.
+    # Needed to properly calculate needed_by and must_start_after.
+    issue_index: int
+    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(float('inf')))
+    must_start_after: ValidatorInstruction = field(default_factory=lambda: MFMA(float('-inf')))
+
+    # TF32 middle-16 pair constraint fields
+    # Regular TF32 case involves 24 Pack instructions per 8 VGPR in 4 logical groups: [first 4], [middle 16], [last 4]
+    # The middle-16 packs are issued in pairs: [produce result in temp VGPR, consume result from temp VGPR].
+    # All instances of the middle-16 packs used the SAME temp VGPR, thus we cannot schedule another middle-16 pack between
+    # the producer and consumer packs in any given pair.
+    pair_consumer: Optional['Pack'] = None  # The pack that should be the next one scheduled 
+    next_scheduled_middle_16: Optional['Pack'] = None  # Next middle-16 pack scheduled after this one
+
+    def done_idx(self) -> Union[int, float]:
+        return self.issued_at
+
+    def validate(self) -> str | None:
+        issued_at = floor(self.issued_at) % self.num_vmfma
+
+        if (
+            (self.must_start_after.done_idx() < self.issued_at < self.needed_by.done_idx()) 
+            and (self.pair_consumer is self.next_scheduled_middle_16)
+        ):
+            return None
+        
+        # Issued too early
+        if self.issued_at < self.must_start_after.done_idx():
+            # NOTE: Don't have to check equality case, since only 1 instruction can be issued at any point in time.
+            must_start_after_at = floor(self.must_start_after.done_idx()) % self.num_vmfma
+            must_start_after_issued_at = floor(self.must_start_after.issued_at) % self.num_vmfma
+            return f"{self.name} @ idx={issued_at} issued too early, must be issued after idx={must_start_after_at} (because of {self.must_start_after.name} issued @ idx={must_start_after_issued_at})."
+        
+        # Issued too late
+        if self.issued_at > self.needed_by.issued_at:
+            needed_by_at = floor(self.needed_by.issued_at) % self.num_vmfma
+            return f"{self.name} @ idx={issued_at} issued too late, must be issued before {self.needed_by.name} @ idx={needed_by_at}."
+        
+        # TF32 pair constraint validation
+        if self.pair_consumer:
+            assert self.next_scheduled_middle_16, "Pair leader must have a next_middle_16_in_schedule."
+
+            if not (self.next_scheduled_middle_16 is self.pair_consumer):
+                next_issued_at = floor(self.next_scheduled_middle_16.issued_at) % self.num_vmfma
+                pair_issued_at = floor(self.pair_consumer.issued_at) % self.num_vmfma
+                return f"{self.name} @ idx={issued_at} has wrong interleaving. Should have been followed by {self.pair_consumer.name} @ idx={pair_issued_at} but was followed by {self.next_scheduled_middle_16.name} @ idx={next_issued_at}."
+
+        return f"{self.name} at index {issued_at} is not valid."
+
+
+@dataclass
 class GlobalRead(ValidatorInstruction):
     name: str
     num_vmfma: int
@@ -363,6 +444,9 @@ class GlobalRead(ValidatorInstruction):
     needed_by: float = float('inf')
     guaranteed_by: Union[int, float] = float('inf')
     barriered_at: list[Union[int, float]] = field(default_factory=list)
+
+    def done_idx(self) -> Union[int, float]:
+        return self.guaranteed_by
 
     def validate(self) -> Optional[str]:
         if self.issued_at < self.guaranteed_by < self.needed_by:
@@ -417,6 +501,9 @@ class SWait(ValidatorInstruction):
     comment: str
     name: str = "SWaitCnt"
 
+    def done_idx(self) -> Union[int, float]:
+        return self.issued_at
+
     def _is_valid(self) -> bool:
         return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at >= -1
 
@@ -430,6 +517,9 @@ class Barrier(ValidatorInstruction):
     issued_at: Union[int, float]
     comment: str
     name: str = "SBarrier"
+
+    def done_idx(self) -> Union[int, float]:
+        return self.issued_at
 
     def validate(self) -> Optional[str]:
         return f"Barrier at index {floor(self.issued_at)} is not valid. Must be >= -1." if self.issued_at < -1 else None
@@ -527,13 +617,14 @@ class Timeline:
                     else:
                         raise ValueError(f"Unexpected sync instruction type: {type(sync)}")
                     
-                    self._insert(idx_vmfma, sync_instruction)
+                    self._insert(idx_vmfma, sync_instruction, kernel)
             elif name.startswith("LRA") or name.startswith("LRB"):
                 for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
 
-                    local_read = LocalRead(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma)
-                    self._insert(idx_vmfma, local_read)
+                    # TODO: For ForceUnrollSubIter, need to account for register reuse and the fact that the LR0/LR1/LR3s must start after a certain point in the iteration.
+                    local_read = LocalRead(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma, issue_index=idx_LR)
+                    self._insert(idx_vmfma, local_read, kernel)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
                 assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
@@ -546,7 +637,14 @@ class Timeline:
                         continue
 
                     global_read = GlobalRead(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma, swap_global_read_order=swap_global_read_order)
-                    self._insert(idx_vmfma, global_read)
+                    self._insert(idx_vmfma, global_read, kernel)
+            elif name.startswith("PackA") or name.startswith("PackB"):
+                packs = schedule_get(name, code_path, schedule_info)
+
+                for idx_pack, idx_vmfma in enumerate(packs):
+                    assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
+                    pack = Pack(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma, issue_index=idx_pack)
+                    self._insert(idx_vmfma, pack, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
     
@@ -570,14 +668,14 @@ class Timeline:
                         divisor *= 2
                     instruction.issued_at += i_instruction / divisor
     
-    def _insert(self, vmfma_index: int, instruction: ValidatorInstruction) -> None:
+    def _insert(self, vmfma_index: int, instruction: ValidatorInstruction, kernel: 'Solution') -> None:
         """
         Add an instruction to the timeline at a given VMFMA index.
         Adds it to all relevant loops.
         Internal method used during initialization - does not re-linearize.
         """
         for loop in self.loops:
-            if self._should_add(instruction, loop):
+            if self._should_add(instruction, loop, kernel):
                 _instruction = deepcopy(instruction)
 
                 adjust = self.num_vmfma * self.loops.index(loop)
@@ -593,7 +691,7 @@ class Timeline:
 
                 self._instructions_at_index[loop][vmfma_index+1].append(_instruction)
 
-    def _should_add(self, instruction: ValidatorInstruction, loop: str) -> bool:
+    def _should_add(self, instruction: ValidatorInstruction, loop: str, kernel: 'Solution') -> bool:
         """
         Determine if an instruction should be added to a given loop.
         """
@@ -606,7 +704,13 @@ class Timeline:
             if loop == NO_LOCAL_LOAD_LOOP:
                 return instruction.name == "LRA0" or instruction.name == "LRB0"
             return True
-        else:  # TODO: Handle Pack commands in NLL and NGL
+        elif isinstance(instruction, Pack):
+            if kernel.get("UsePLRPack", False):
+                # Packs1/3s correspond to the LR1/3s of this iteration.
+                if loop == NO_LOCAL_LOAD_LOOP:
+                    return instruction.name == "PackA0" or instruction.name == "PackB0"
+            return True
+        else:
             return True
    
     def __len__(self):
@@ -794,6 +898,267 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
             _, LR_target = target[0]
             for _, gr in grs:
                 gr.needed_by = LR_target.issued_at
+
+def _hook_up_packs_bf16(packs: list[Pack], local_reads: list[LocalRead], needed_by_offset: int, n_tiles_a: int) -> None:
+    """
+    For BF16/Half: each Pack uses the result of 2 consecutive LRs.
+    Pack ordering follows the v_perm loop in LocalRead.py:
+        for vectorIdx in range(0, 2):        # V0, V1
+            for elementIdx in range(0, num_element_pairs):
+                pack uses D[elementIdx*2] and D[elementIdx*2+1]
+    
+    So element_idx = pack_position % num_element_pairs
+    And LR indices are: elementIdx*2 and elementIdx*2+1
+    """
+    num_element_pairs = len(local_reads) // 2
+    
+    # Re-order local_reads by their index in the list of Local Read instructions, rather than by the mfma index they were issued at.
+    # It is this order that's needed to properly calculate must_start_after for Packs.
+    local_reads.sort(key=lambda lr: lr.issue_index)
+
+    # Calculate must_start_after
+    for pack in packs:
+        # Determine which element pair this pack uses
+        element_idx = pack.issue_index % num_element_pairs
+        lr_idx_0 = element_idx * 2
+        lr_idx_1 = element_idx * 2 + 1                    
+        pack_to_lrs = [local_reads[lr_idx_0], local_reads[lr_idx_1]]
+
+        # Max is most restrictive since `guaranteed_by` is a lower bound on issued_at.
+        latest_lr = max(pack_to_lrs, key=lambda lr: lr.done_idx())
+        if latest_lr.guaranteed_by > pack.must_start_after.done_idx():
+            pack.must_start_after = latest_lr
+    
+    # Calculate needed_by for the packs
+    is_pack_B = packs[0].name.startswith("PackB")
+    for pack in packs:
+        delta = pack.issue_index // 4
+        if is_pack_B:
+            delta *= n_tiles_a
+        pack.needed_by = MFMA(issued_at=needed_by_offset + delta)
+
+def _hoop_up_packs_f32x(packs: list[Pack], all_middle_16_packs: list[Pack], local_reads: list[LocalRead], needed_by_offset: int, n_tiles_a: int) -> None:
+    """
+    For TF32 emulation, data is loaded as fp32 and converted into pairs of bf16 values.
+    Each fp32 value is converted into a bf16 approximation and an error term.
+
+    Conversion happens in groups of 8 VGPRs (32*8 = 256 bytes).
+    Input is 8 VGPRs, each holding one fp32 value.
+    Output is 8 VGPRs, all holding packed bf16 values.
+    The first 4 output registers hold the bf16 approximations (packed in pairs).
+    The second 4 output registers hold the error terms (packed in pairs).
+
+    Pack instructions in order (24 instructions total):
+    - 4 `v_cvt_pk_bf16_f32` to calculate and pack the bf16 approximations.
+    - 8 pairs of (`v_cvt_f32_bf16`, `v_sub_f32`) to calculate the error terms.
+    - 4 `v_cvt_pk_bf16_f32` to pack the error terms into final registers.
+    """
+    # Sort by index in the list of pack instructions rather than by the mfma_index they are placed at.
+    # This is necessary to handle inter-pack dependencies.
+    packs = sorted(packs, key=lambda x: x.issue_index)
+
+    assert len(packs) % 24 == 0, "Each Pack must be a multiple of 24 instructions in TF32 emulation mode."
+    n_pack_groups = len(packs) // 24
+
+    assert len(local_reads) % n_pack_groups == 0, "Case not supported: Different number of LRs for each Pack group."
+    n_lrs_per_group = len(local_reads) // n_pack_groups
+
+    # NOTE: Assuming that all LRs are of the same width.
+    vgprs_per_local_read = 8 // n_lrs_per_group
+
+    n_tiles_a_quarter = n_tiles_a // 4
+
+    is_pack_B = packs[0].name.startswith("PackB")
+
+    # Partial Pack->Pack dependency graph within a group of 24.
+    # Key: pack index (0-23), Value: list of pack indices it depends on.
+    # Empty list means it has no dependencies on other packs.
+    # NOTE: This is only a partial graph. It does not account for use of the temporary register by the middle 16 packs.
+    #       That interaction is handled seperately at the end of this function.
+    pack_dependencies: dict[int, list[int]] = {
+        # First 4 packs (v_cvt_pk_bf16_f32) depend on local reads only, and are not included
+        0: [], 1: [], 2: [], 3: [],
+        # Middle 16 packs (v_cvt_f32_bf16 + v_sub_f32 pairs) - error term calculation
+         4: [0],  5: [ 4],  6: [0],  7: [ 6],
+         8: [1],  9: [ 8], 10: [1], 11: [10],
+        12: [2], 13: [12], 14: [2], 15: [14],
+        16: [3], 17: [16], 18: [3], 19: [18],
+        # Final 4 packs (v_cvt_pk_bf16_f32) - pack error terms
+        20: [17, 19],
+        21: [13, 15, 20],
+        22: [ 9, 11, 21],
+        23: [ 5,  7, 22],
+    }
+
+    for group_idx in range(n_pack_groups):
+        start = group_idx * n_lrs_per_group
+        end = start + n_lrs_per_group
+        local_reads_for_group = local_reads[start:end]
+
+        start = group_idx * 24
+        end = start + 24
+        pack_group = packs[start:end]
+
+        # Set must_start_after
+        for leader_idx, pack in enumerate(pack_group):
+            if leader_idx < 4:
+                # First 4 packs depend only on local reads.
+                first_lr = (leader_idx * 2) // vgprs_per_local_read
+                last_lr = (leader_idx * 2 + 1) // vgprs_per_local_read
+                pack_lrs = local_reads_for_group[first_lr:last_lr + 1]
+                latest_lr = max(pack_lrs, key=lambda lr: lr.done_idx())
+                if latest_lr.guaranteed_by > pack.must_start_after.done_idx():
+                    pack.must_start_after = latest_lr
+            else:
+                # Packs 4-23 depend on other packs (via pack_dependencies).
+                dependencies = pack_dependencies[leader_idx]
+                latest_dep = max((pack_group[d] for d in dependencies), key=lambda p: p.done_idx())
+                if latest_dep.done_idx() > pack.must_start_after.done_idx():
+                    pack.must_start_after = latest_dep
+            # Set needed_by, but only for the first and last 4 packs
+            # The middle 16 packs are depended on by the last 4 packs and are handled implicitly.
+            if 4 <= leader_idx < 20:
+                continue
+
+            needed_by = needed_by_offset
+            # 1. Find fp32 mfma (column-major indexing within each quarter)
+            fp32_delta = (leader_idx % 20) // 4
+            if is_pack_B:
+                fp32_delta *= n_tiles_a_quarter
+            needed_by += 3 * fp32_delta  # 3 bf16 mfmas per fp32 mfma
+
+            # 2. Adjust into bf16 approximation
+            bf16_delta = 0
+            if leader_idx < 4:  # bf16 approximations terms
+                # A_bf16 & B_bf16 are used in mfma 1/3
+                pass
+            elif leader_idx >= 20:  # error terms
+                # A_error is used in mfma 2/3
+                # B_error is used in mfma 3/3
+                bf16_delta = 2 if is_pack_B else 1
+            needed_by += bf16_delta
+            
+            pack.needed_by = MFMA(issued_at=needed_by)
+
+    # For the middle-16 packs, hook up the consumer Pack to the producer Pack to handle temporary register re-use.
+    # Hook up the consumer Pack 
+    # Set up pair constraints for middle-16 packs (indices 4-19) to 
+    # The middle 16 packs are scheduled sequentially in pairs, and no other middle-16 pack
+    # (even from other groups) can be scheduled between a pair.
+    for i, pack in enumerate(packs):
+        idx_in_group = pack.issue_index % 24
+        if 4 <= idx_in_group < 20 and idx_in_group % 2 == 0:
+            pack.pair_consumer = packs[i + 1]
+    
+    # Hook up the producer Pack in each pair to the middle-16 Pack scheduled immediately after it.
+    # Only modify the packs that were passed in, rather than all packs in all_middle_16_packs.
+    for pack in packs:
+        if not (4 <= (pack.issue_index % 24) < 20):  # Not a middle-16 pack
+            continue
+        if pack.issue_index % 2 != 0:  # Not a producer
+            continue
+        pack.next_scheduled_middle_16 = all_middle_16_packs[all_middle_16_packs.index(pack) + 1]
+
+def _get_lrs_for_pack(timeline: Timeline, use_plr_pack: bool, pack_name: str, loop: str) -> list[LocalRead]:
+    """
+    For a given Pack instruction, get all the LocalRead instructions it depends on.
+    If use_plr_pack==True:
+        - All Pack instructions load data from LRs issued in this iteration (including Pack0).
+    
+    If use_plr_pack==False:
+        - The Pack1/3 instructions pack data loaded by LRs issued in the previous iteration.
+          - If it's the first loop for Pack1/3, we don't have LRs to hook up to.
+          - The same insturctions will be handled in the next loop.
+        - The Pack0 instructions pack data loaded by LRs issued in the current iteration.
+
+    Args:
+        timeline: The Timeline object to get the LRs from.
+        use_plr_pack: Whether to the UserPLRPack flag is set.
+        pack_name: The name of the pack to get the LRs for.
+        loop: The name of the loop to get the LRs for.
+
+    Returns:
+        A list of LocalRead objects.
+    """
+    pack_1_or_3 = not pack_name.endswith("0")
+    if pack_1_or_3 and loop == timeline.loops[0]:
+        return []
+
+    lr_names = pack_name.replace("Pack", "LR")
+    if use_plr_pack:
+        return [lr for _,lr in timeline.get_instructions(lr_names, loop)]
+
+    i_loop = timeline.loops.index(loop)
+    loop_to_use = timeline.loops[i_loop - 1] if pack_1_or_3 else loop
+    local_reads = timeline.get_instructions(lr_names, loop_to_use)
+    return [lr for _,lr in local_reads]
+
+def hook_up_packs(timeline: Timeline, kernel: 'Solution') -> None:
+    """
+    Set the needed_by and must_start_after fields of Packs based on the LR(s) they depend on.
+    """
+    def calculate_needed_by_offset(pack_name: str, use_plr_pack: bool, force_unroll_sub_iter: bool, i_loop: int, num_vmfma: int) -> int:
+        """
+        Calculate the needed_by offset for a given Pack instruction.
+        """
+        pack_0 = pack_name.endswith("0")
+        needed_by_offset = num_vmfma * i_loop
+        if force_unroll_sub_iter:
+            if pack_0:
+                if pack_name.startswith("PackA"):
+                    # Needed for 2nd quarter
+                    needed_by_offset += num_vmfma // 4
+                else:
+                    # Needed for 3rd quarter
+                    needed_by_offset += 3 * (num_vmfma // 4)
+            else:  # Pack3
+                # Both A and B are needed for 1st quarter, the flag impacts whether it's this iteration's or next iteration's 1st quartert.
+                if use_plr_pack:
+                    needed_by_offset += num_vmfma
+        else:
+            if pack_0:
+                needed_by_offset += num_vmfma // 2
+            else:
+                if use_plr_pack:
+                    needed_by_offset += num_vmfma
+        return needed_by_offset
+
+    is_tf32_emulation = kernel.get("UseF32XEmulation", False)
+    is_4x4mfma_tf32 = kernel.get("UseMFMAF32XEmulation", False)
+
+    use_plr_pack = kernel.get("UsePLRPack", False)
+    for i_loop, loop in enumerate(timeline.loops):
+        packs_by_name: dict[str, list[Pack]] = {}
+        for pack_name in timeline.get_instruction_names():
+            if not pack_name.startswith("Pack"):
+                continue
+            packs_and_indices = timeline.get_instructions(pack_name, loop)
+            if not packs_and_indices:
+                continue
+            packs_by_name[pack_name] = [pack for _, pack in packs_and_indices]
+        
+        if is_tf32_emulation and not is_4x4mfma_tf32:
+            all_middle_16_packs = []
+            for packs in packs_by_name.values():
+                for pack in packs:
+                    if 4 <= (pack.issue_index % 24) < 20:
+                        all_middle_16_packs.append(pack)
+            all_middle_16_packs.sort(key=lambda p: p.issued_at)
+
+        for pack_name, packs in packs_by_name.items():
+            local_reads = _get_lrs_for_pack(timeline, use_plr_pack, pack_name, loop)
+            if not local_reads:
+                continue
+
+            needed_by_offset = calculate_needed_by_offset(pack_name, use_plr_pack, kernel.get("ForceUnrollSubIter", False), i_loop, timeline.num_vmfma)
+
+            if is_tf32_emulation:
+                if is_4x4mfma_tf32:
+                    raise NotImplementedError("TF32 emulation mode with MFMA F32X emulation is not supported.")
+                else:
+                    _hoop_up_packs_f32x(packs, all_middle_16_packs, local_reads, needed_by_offset, n_tiles_a=kernel["MIWaveTileA"])
+            else:
+                _hook_up_packs_bf16(packs, local_reads, needed_by_offset, n_tiles_a=kernel["MIWaveTileA"])
 
 
 def validate_timeline(timeline: Timeline) -> Optional[str]:
@@ -1172,6 +1537,38 @@ def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
         return False, message
     return True, ""
 
+
+def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+    """
+    Ensure that the Packs start and end at the correct indices.
+    """
+    assert not schedule_info.mfmaReorder, "MFMA reorder is not supported for pack validation."
+
+    if context["kernel"].get("UseMFMAF32XEmulation", False):
+        printWarning("Pack validation is not supported for MFMA F32X emulation mode.")
+        return True, ""
+
+    relevant_names = ["SYNC"]
+    for num in [0, 1, 3]:
+        relevant_names.append(f"PackA{num}")
+        relevant_names.append(f"PackB{num}")
+        relevant_names.append(f"LRA{num}")
+        relevant_names.append(f"LRB{num}")
+    kernel = context["kernel"]
+    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
+    
+    apply_swaits(timeline)
+    apply_barriers(timeline)
+    set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
+    hook_up_packs(timeline, kernel)
+
+    message = validate_timeline(timeline)
+
+    if message:
+        return False, message
+    return True, ""
+
+
 def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
     Verify that the number of instructions in the schedule is correct for a single code path.
@@ -1256,6 +1653,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         verify_correct_number_of_instructions,
         verify_ascending_order,
         verify_lrs_finished_before_vmfma,
+        verify_packs_start_and_end_at_correct_indices,
         verify_global_reads_not_too_early,
         verify_grs_finish_before_lrs,
         verify_scc_overlap,
