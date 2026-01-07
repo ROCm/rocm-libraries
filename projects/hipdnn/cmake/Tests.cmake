@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     return()
 endif()
 
@@ -146,16 +146,27 @@ endfunction() # _append_test_to_check_target_internal
 
 # Generic internal function to finalize DIY check targets
 function(_finalize_check_target_internal TARGET_NAME COMMAND_VAR DEPENDS_VAR)
-    add_custom_target(
-        ${TARGET_NAME}
-        COMMAND ${${COMMAND_VAR}}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        DEPENDS ${${DEPENDS_VAR}}
-        VERBATIM
-        COMMENT "Running ${TARGET_NAME}"
-        USES_TERMINAL
-    )
-    message(VERBOSE "Created ${TARGET_NAME} target")
+    # Only create target if there are commands to run
+    if(NOT "${${COMMAND_VAR}}" STREQUAL "")
+        add_custom_target(
+            ${TARGET_NAME}
+            COMMAND ${${COMMAND_VAR}}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            DEPENDS ${${DEPENDS_VAR}}
+            VERBATIM
+            COMMENT "Running ${TARGET_NAME}"
+            USES_TERMINAL
+        )
+        message(VERBOSE "Created ${TARGET_NAME} target")
+    else()
+        # Create a no-op target when there are no tests
+        add_custom_target(
+            ${TARGET_NAME}
+            COMMAND ${CMAKE_COMMAND} -E echo "No tests registered for ${TARGET_NAME}"
+            COMMENT "No tests available for ${TARGET_NAME}"
+        )
+        message(VERBOSE "Created empty ${TARGET_NAME} target (no tests registered)")
+    endif()
 endfunction() # _finalize_check_target_internal
 
 # Internal function to finalize the DIY unclassified check-old target
