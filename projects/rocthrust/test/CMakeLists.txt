@@ -352,10 +352,10 @@ add_executable(generate_resource_spec ${CMAKE_SOURCE_DIR}/test/generate_resource
 set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(generate_resource_spec PRIVATE hip::host)
 
-# Install the executable.
+# Install the executable as PROGRAMS (rather than TARGETS)
+# since we want to put it in the correct DESTINATION.
 rocm_install(
-    FILES $<TARGET_FILE:generate_resource_spec>
+    PROGRAMS $<TARGET_FILE:generate_resource_spec>
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
-    PERMISSIONS OWNER_EXECUTE GROUP_EXECUTE WORLD_EXECUTE
     COMPONENT tests
 )
