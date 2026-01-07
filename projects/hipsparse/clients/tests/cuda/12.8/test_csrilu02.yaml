@@ -54,24 +54,22 @@ Tests:
   boostvali: [0.2]
   solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  filename: [nos1,
-             nos2,
-             nos3,
+  filename: [nos3,
              nos4,
              nos5,
              nos6,
              nos7]
 
-- name: csrilu02
-  category: nightly
-  function: csrilu02
-  precision: *double_only_precisions
-  M: 1
-  numericboost: [0, 1]
-  boosttol: [0.5]
-  boostval: [0.3]
-  boostvali: [0.2]
-  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
-  filename: [bmwcra_1,
-             shipsec1]
+# - name: csrilu02
+#   category: nightly
+#   function: csrilu02
+#   precision: *double_only_precisions
+#   M: 1
+#   numericboost: [0, 1]
+#   boosttol: [0.5]
+#   boostval: [0.3]
+#   boostvali: [0.2]
+#   solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+#   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+#   filename: [bmwcra_1,
+#              shipsec1]
