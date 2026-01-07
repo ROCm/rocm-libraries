@@ -631,8 +631,8 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             // prefetch stages
 
             // Vmem -> Vgpr 0
-            Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
-            Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
+            Base::template GlobalPrefetch<ADataType, BDataType>(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
+            Base::template GlobalPrefetch<ADataType, BDataType>(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
             // Vmem -> Vgpr 0 (Q matrix)
             // Scale and cast tile before writing to LDS (if IsCastBeforeLDS)
@@ -649,8 +649,8 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             BLocalPrefill(b_copy_lds_window, b_block_tile, bdq_block_tile, b_element_func);
 
             // Vmem -> Vgpr 1
-            Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
-            Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
+            Base::template GlobalPrefetch<ADataType, BDataType>(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
+            Base::template GlobalPrefetch<ADataType, BDataType>(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
             // If we scale and cast before writing to LDS,
             // we need to read another tile of Q matrix from Vmem, then scale and cast tile
@@ -681,8 +681,8 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                     BLocalPrefill(b_copy_lds_window, b_block_tile, bdq_block_tile, b_element_func);
 
                     // Vmem -> Vgpr
-                    Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
-                    Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
+                    Base::template GlobalPrefetch<ADataType, BDataType>(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
+                    Base::template GlobalPrefetch<ADataType, BDataType>(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
                     // Vmem -> Vgpr (Q matrix)
                     // Scale and cast tile before writing to LDS (if IsCastBeforeLDS)

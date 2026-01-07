@@ -205,7 +205,7 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
             }
             else
             {
-                Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
+                Base::template GlobalPrefetch<ADataType, OverrideBDataType>(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
             }
         }
 
@@ -315,10 +315,10 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
                                   : make_array(0, KPerBlockBQ);
 
             // DRAM prefetch (global read 0)
-            Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
+            Base::template GlobalPrefetch<ADataType, OverrideBDataType>(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
             // B tile gets converted to A datatype during loading
             BGlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
-            Base::GlobalPrefetch(
+            Base::template GlobalPrefetch<ADataType, OverrideBDataType>(
                 bq_block_tile[currIdx], bq_copy_dram_window, bq_dram_tile_window_step);
 
             tile_elementwise_inout([](auto& c) { c = 0; }, c_block_tile);
@@ -348,7 +348,7 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
                 Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
             }
 
-            Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
+            Base::template GlobalPrefetch<ADataType, OverrideBDataType>(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
             // B tile gets converted to A datatype during loading
             BGlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
@@ -392,10 +392,10 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
                         Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
                     }
 
-                    Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
+                    Base::template GlobalPrefetch<ADataType, OverrideBDataType>(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
                     // B tile gets converted to A datatype during loading
                     BGlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
-                    Base::GlobalPrefetch(bq_block_tile[(currIdx + 1) % 2],
+                    Base::template GlobalPrefetch<ADataType, OverrideBDataType>(bq_block_tile[(currIdx + 1) % 2],
                                          bq_copy_dram_window,
                                          bq_dram_tile_window_step);
 
@@ -421,7 +421,7 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
             }
             else
             {
-                Base::GlobalPrefetch(bq_block_tile[(currIdx + 1) % 2],
+                Base::template GlobalPrefetch<ADataType, OverrideBDataType>(bq_block_tile[(currIdx + 1) % 2],
                                      bq_copy_dram_window,
                                      bq_dram_tile_window_step);
                 block_gemm(
