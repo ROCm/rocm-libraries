@@ -209,7 +209,11 @@ Client dependencies: BLAS library
 The rocBLAS test and benchmark clients require a host reference BLAS library. When building
 clients with ``-dc`` flags, ``install.sh`` automatically builds AOCL 5.2 (AMD Optimizing CPU Libraries)
 from source with ILP64 support. The build searches for BLAS libraries in this order:
-AOCL 5.x (built or pre-installed) → AOCL 4.x BLIS → bundled BLIS → system BLAS.
+
+1. AOCL 5.x (built or pre-installed)
+2. AOCL 4.x BLIS
+3. Bundled BLIS
+4. System BLAS
 
 To skip the automatic AOCL build and use an alternative, add ``--skip-aocl`` to the install command.
 To clean and rebuild all dependencies, use ``--clean-deps``. You can also set ``AOCL_ROOT``
@@ -218,8 +222,8 @@ to specify a custom AOCL location, or manually install AOCL from
 
 .. note::
 
-   If using a BLAS library without ILP64 support, some stress tests may fail.
-   Exclude them with ``--gtest_filter=-*stress*``.
+   If using a BLAS library without ILP64 support, some stress tests might fail.
+   To exclude these tests, use the ``--gtest_filter=-*stress*`` option.
 
 Building the library dependencies and library
 ---------------------------------------------
