@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,16 +39,15 @@ class DuplicateEliminationPassTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // Initialize kernel info for GFX94X (gfx942)
-        kernelInfo.arch          = {9, 4, 2};
-        kernelInfo.WavefrontSize = 64;
-        kernelInfo.NumWaves      = 2;
-        kernelInfo.TileA0        = 16;
-        kernelInfo.TileB0        = 16;
-        kernelInfo.TileM0        = 16;
-        kernelInfo.NumGRA        = 4;
-        kernelInfo.NumGRB        = 4;
-        kernelInfo.NumGRM        = 4;
+        // Initialize GEMM config for GFX94X (gfx942)
+        gemmConfig.arch     = {9, 4, 2};
+        gemmConfig.NumWaves = 2;
+        gemmConfig.TileA0   = 16;
+        gemmConfig.TileB0   = 16;
+        gemmConfig.TileM0   = 16;
+        gemmConfig.NumGRA   = 4;
+        gemmConfig.NumGRB   = 4;
+        gemmConfig.NumGRM   = 4;
     }
 
     // Parse IR and return a non-owning pointer
@@ -95,7 +94,7 @@ protected:
         return count;
     }
 
-    StinkyKernelInfo kernelInfo;
+    GemmTileConfig gemmConfig;
 };
 
 // Test 1: Eliminate simple duplicate
@@ -114,7 +113,7 @@ TEST_F(DuplicateEliminationPassTest, EliminateSimpleDuplicate)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -145,7 +144,7 @@ TEST_F(DuplicateEliminationPassTest, MultipleDuplicates)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -172,7 +171,7 @@ TEST_F(DuplicateEliminationPassTest, DontEliminateWithModifiedOperand)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -198,7 +197,7 @@ TEST_F(DuplicateEliminationPassTest, DifferentOperands)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -224,7 +223,7 @@ TEST_F(DuplicateEliminationPassTest, DifferentOpcodes)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -253,7 +252,7 @@ TEST_F(DuplicateEliminationPassTest, DuplicateWithConstants)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -281,7 +280,7 @@ TEST_F(DuplicateEliminationPassTest, CombinationWithDCE)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     // First eliminate duplicates
     auto dupElimPass = createDuplicateEliminationPass();
@@ -294,7 +293,7 @@ TEST_F(DuplicateEliminationPassTest, CombinationWithDCE)
     std::string result = getFunctionIR(*func);
 
     // After duplicate elimination: second v0 reuses first computation
-    // After DCE: first v0 is overwritten by second v0 → removed
+    // After DCE: first v0 is overwritten by second v0 -> removed
     EXPECT_EQ(countOccurrences(result, "v_mul_f32"), 1);
     EXPECT_EQ(countOccurrences(result, "v_add_f32"), 1);
     EXPECT_EQ(countOccurrences(result, "v_fma_f32"), 1);
@@ -311,7 +310,7 @@ TEST_F(DuplicateEliminationPassTest, EmptyIR)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -336,7 +335,7 @@ TEST_F(DuplicateEliminationPassTest, NoDuplicates)
     std::string before = getFunctionIR(*func);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -366,7 +365,7 @@ TEST_F(DuplicateEliminationPassTest, DuplicateFMA)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -395,7 +394,7 @@ TEST_F(DuplicateEliminationPassTest, ThreeWayDuplicate)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);
@@ -424,7 +423,7 @@ TEST_F(DuplicateEliminationPassTest, InterleavedDuplicates)
     ASSERT_NE(func, nullptr);
 
     PassContext passCtx;
-    passCtx.addKernelInfo(kernelInfo);
+    passCtx.setGemmTileConfig(gemmConfig);
 
     auto dupElimPass = createDuplicateEliminationPass();
     dupElimPass->run(*func, passCtx);

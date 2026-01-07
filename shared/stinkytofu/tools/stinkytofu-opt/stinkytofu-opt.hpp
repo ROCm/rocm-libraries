@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,15 +58,15 @@ std::unique_ptr<stinkytofu::PassManagerDebugConfig> getPassManagerDebugConfig()
 }
 
 /**
- * Get default StinkyOptInfo configuration.
+ * Get default PassFeatureConfig configuration.
  */
-stinkytofu::StinkyOptInfo getStinkyOptInfo()
+stinkytofu::PassFeatureConfig getPassFeatureConfig()
 {
-    stinkytofu::StinkyOptInfo optInfo;
-    optInfo.unrollGemmMovableBarrier = true;
-    optInfo.unrollGemm               = true;
-    optInfo.distributeGlobalRead     = true;
-    return optInfo;
+    stinkytofu::PassFeatureConfig config;
+    config.barrierConfig.unrollMovableBarrier = true;
+    config.loopConfig.unrollGemm              = true;
+    config.dagFeatures.distributeGlobalRead   = true;
+    return config;
 }
 
 /**

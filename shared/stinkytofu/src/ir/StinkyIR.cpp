@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,6 +66,11 @@ namespace stinkytofu
     StinkyIR::~StinkyIR()                              = default;
     StinkyIR::StinkyIR(StinkyIR&&) noexcept            = default;
     StinkyIR& StinkyIR::operator=(StinkyIR&&) noexcept = default;
+
+    std::array<int, 3> StinkyIR::getArch() const
+    {
+        return pImpl->arch;
+    }
 
     // ============================================================================
     // Division Functions

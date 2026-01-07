@@ -265,6 +265,11 @@ namespace stinkytofu
         dbgCfg = std::move(cfg);
     }
 
+    void PassManager::setGemmTileConfig(const GemmTileConfig& config)
+    {
+        passCtx.setGemmTileConfig(config);
+    }
+
     void PassManager::setKernelConfig(std::array<int, 3> arch,
                                       uint32_t           ta0,
                                       uint32_t           tb0,
@@ -287,9 +292,40 @@ namespace stinkytofu
         passCtx.setGemmTileConfig(config);
     }
 
-    void PassManager::setOptConfig(const StinkyOptInfo& opt)
+    void PassManager::setPassFeatureConfig(const PassFeatureConfig& config)
     {
-        passCtx.setOptInfo(opt);
+        passCtx.setPassFeatureConfig(config);
+    }
+
+    void PassManager::setFunction(Function& externalFunc)
+    {
+        // Transfer BasicBlocks from external Function to PassContext's internal Function
+        Function& internalFunc = passCtx.getFunction();
+
+        // Clear any existing BasicBlocks in internal Function
+        internalFunc.deleteAllBasicBlocks();
+
+        // Copy function name
+        internalFunc.setName(externalFunc.getName());
+
+        // Transfer BasicBlocks by moving them from external to internal
+        // We need to detach from external and attach to internal
+        while(!externalFunc.getBasicBlocks().empty())
+        {
+            BasicBlock* bb = &externalFunc.getBasicBlocks().front();
+            externalFunc.getBasicBlocks().remove(bb);
+            bb->setParent(&internalFunc);
+            internalFunc.getBasicBlocks().push_back(bb);
+        }
+
+        // Transfer entry block pointer
+        if(externalFunc.getEntryBlock())
+        {
+            internalFunc.setEntryBlock(externalFunc.getEntryBlock());
+        }
+
+        // Copy GEMM configuration if available
+        internalFunc.setGemmTileConfig(externalFunc.getGemmTileConfig());
     }
 
     //----------------------------------------------------------------------

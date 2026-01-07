@@ -67,25 +67,6 @@ namespace rocisa
                                                     bool                    stinkytofuDump = false,
                                                     stinkytofu::BasicBlockFilter bbFilter
                                                     = stinkytofu::BasicBlockFilterBuilder::all()) {
-                        // Create PassContext (automatically creates an empty Function)
-                        stinkytofu::PassContext ctx;
-
-                        // Configure kernel info in PassContext
-                        // Note: WavefrontSize is automatically computed from arch by setGemmTileConfig
-                        stinkytofu::GemmTileConfig gemmConfig;
-                        gemmConfig.arch     = kernelInfo.isaVersion;
-                        gemmConfig.TileA0   = option.TileA0;
-                        gemmConfig.TileB0   = option.TileB0;
-                        gemmConfig.TileM0   = option.TileM0;
-                        gemmConfig.NumGRA   = option.NumGRA;
-                        gemmConfig.NumGRB   = option.NumGRB;
-                        gemmConfig.NumGRM   = option.NumGRM;
-                        gemmConfig.NumWaves = option.numWaves;
-                        ctx.setGemmTileConfig(gemmConfig);
-
-                        // Configure basic block filter
-                        ctx.setBasicBlockFilter(bbFilter);
-
                         // Create pipeline configuration with full scheduling and optimization
                         auto config = stinkytofu::PipelineConfig::fromProfile(
                             stinkytofu::PipelineProfile::FullPipeline, stinkytofu::OptLevel::O3);
@@ -145,7 +126,7 @@ namespace rocisa
                         // Phase 4: StinkyUnrollWaitCntPass
 
                         // Run the pipeline with the Function from PassContext
-                        stinkytofu::OptimizationPipeline::run(ctx.getFunction(), config, ctx);
+                        stinkytofu::OptimizationPipeline::run(config, bbFilter);
                     };
                     // Convert the module to stinkytofu instructions
                     if(module->name == "loopWithPrefetch")

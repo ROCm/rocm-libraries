@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "ir/asm/OptimizationPipeline.hpp"
+#include "ErrorHandling.hpp"
 #include "ir/asm/DeadCodeEliminationPass.hpp"
 #include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/DuplicateEliminationPass.hpp"
@@ -92,9 +93,8 @@ namespace stinkytofu
         return fromProfile(PipelineProfile::FullPipeline, level);
     }
 
-    void OptimizationPipeline::runOptimizationPasses(Function&             func,
-                                                     const PipelineConfig& config,
-                                                     PassContext&          ctx)
+    void OptimizationPipeline::runOptimizationPasses(PassManager&          passManager,
+                                                     const PipelineConfig& config)
     {
         if(config.verbose)
         {
@@ -115,58 +115,93 @@ namespace stinkytofu
             {
                 if(config.verbose)
                     std::cout << "    - PeepholeOptimization" << std::endl;
-                auto pass = createPeepholeOptimizationPass();
-                pass->run(func, ctx);
+                passManager.addPass(createPeepholeOptimizationPass());
             }
 
             if(config.enableDuplicateElim)
             {
                 if(config.verbose)
                     std::cout << "    - DuplicateElimination" << std::endl;
-                auto pass = createDuplicateEliminationPass();
-                pass->run(func, ctx);
+                passManager.addPass(createDuplicateEliminationPass());
             }
 
             if(config.enableDCE)
             {
                 if(config.verbose)
                     std::cout << "    - DeadCodeElimination" << std::endl;
-                auto pass = createDeadCodeEliminationPass();
-                pass->run(func, ctx);
+                passManager.addPass(createDeadCodeEliminationPass());
             }
         }
     }
 
-    void OptimizationPipeline::run(Function& func, const PipelineConfig& config, PassContext& ctx)
+    void OptimizationPipeline::run(Function& func, const PipelineConfig& config)
     {
-        // ========== Apply Configuration to PassContext ==========
+        // Create PassManager with its own internal PassContext
+        PassManager passManager;
+
+        // Transfer Function to PassManager's internal PassContext
+        passManager.setFunction(func);
+
+        // Run the pipeline
+        runPipelineInternal(passManager, config);
+
+        // Transfer results back
+        Function& internalFunc = passManager.getPassContext().getFunction();
+        func.deleteAllBasicBlocks();
+
+        while(!internalFunc.getBasicBlocks().empty())
+        {
+            BasicBlock* bb = &internalFunc.getBasicBlocks().front();
+            internalFunc.getBasicBlocks().remove(bb);
+            bb->setParent(&func);
+            func.getBasicBlocks().push_back(bb);
+        }
+
+        if(internalFunc.getEntryBlock())
+        {
+            func.setEntryBlock(internalFunc.getEntryBlock());
+        }
+    }
+
+    void OptimizationPipeline::run(const PipelineConfig&        config,
+                                   stinkytofu::BasicBlockFilter bbFilter)
+    {
+        // Create PassManager with its own internal PassContext (empty Function)
+        PassManager passManager;
+
+        // Run the pipeline (custom passes will populate the Function)
+        runPipelineInternal(passManager, config);
+    }
+
+    void OptimizationPipeline::runPipelineInternal(PassManager&          passManager,
+                                                   const PipelineConfig& config)
+    {
+        // This is the shared implementation used by both run() overloads
+
+        // ========== Apply Configuration to PassManager ==========
         // Apply GEMM tile configuration if provided, or set default arch
         // Note: WavefrontSize is automatically computed from arch by setGemmTileConfig
         if(config.gemmTileConfig)
         {
-            ctx.setGemmTileConfig(*config.gemmTileConfig);
+            passManager.setGemmTileConfig(*config.gemmTileConfig);
         }
         else
         {
-            // Set default architecture (gfx942) for passes that need it
-            // This is needed for non-GEMM optimizations that still use arch-specific patterns
-            GemmTileConfig defaultConfig;
-            defaultConfig.arch     = {9, 4, 2}; // gfx942
-            defaultConfig.TileA0   = 0;
-            defaultConfig.TileB0   = 0;
-            defaultConfig.TileM0   = 0;
-            defaultConfig.NumGRA   = 0;
-            defaultConfig.NumGRB   = 0;
-            defaultConfig.NumGRM   = 0;
-            defaultConfig.NumWaves = 1;
-            ctx.setGemmTileConfig(defaultConfig);
+            STINKY_UNREACHABLE("GEMM tile configuration not provided");
         }
 
         // Apply pass feature configuration directly (already in correct format)
-        ctx.setPassFeatureConfig(config.passFeatureConfig);
+        passManager.setPassFeatureConfig(config.passFeatureConfig);
 
         // Apply basic block filter
-        ctx.setBasicBlockFilter(config.basicBlockFilter);
+        passManager.setBasicBlockFilter(config.basicBlockFilter);
+
+        // Apply debug configuration if provided
+        // Note: config.debugConfig is mutable even though config is const
+        if(config.debugConfig)
+        {
+            passManager.setDebugConfig(std::move(const_cast<PipelineConfig&>(config).debugConfig));
+        }
 
         if(config.verbose)
         {
@@ -177,14 +212,6 @@ namespace stinkytofu
                                                                               : "Custom")
                       << std::endl;
         }
-
-        // ========== Initialize Use-Def Chains ==========
-        // Build use-def chains once at the start of the pipeline.
-        // All passes can then use inst->sources and inst->users directly without rebuilding.
-        //
-        // TODO: Remove this once all IR generation uses automatic builder setters
-        // (setSrcRegs/setDestRegs) which maintain use-def chains incrementally.
-        buildUseDefChain(func);
 
         // ========== Phase 0: Custom Passes (Before) ==========
         if(!config.beforeAnalysisPasses.empty() || !config.beforePasses.empty())
@@ -198,19 +225,19 @@ namespace stinkytofu
                 if(config.verbose)
                     std::cout << "  - [Analysis] " << config.beforeAnalysisPasses[i]->getName()
                               << std::endl;
-                ctx.getAnalysisManager().registerAnalysisPass(
-                    std::move(config.beforeAnalysisPasses[i]));
+                passManager.registerAnalysisPass(std::move(config.beforeAnalysisPasses[i]));
             }
             config.beforeAnalysisPasses.clear();
 
-            // Then run transformation passes
+            // Then add transformation passes
             for(size_t i = 0; i < config.beforePasses.size(); ++i)
             {
                 if(config.verbose)
                     std::cout << "  - [Transform] " << config.beforePasses[i]->getName()
                               << std::endl;
-                config.beforePasses[i]->run(func, ctx);
+                passManager.addPass(std::move(config.beforePasses[i]));
             }
+            config.beforePasses.clear();
         }
 
         // ========== Phase 1: CFG Building ==========
@@ -219,8 +246,7 @@ namespace stinkytofu
         {
             if(config.verbose)
                 std::cout << "\nPhase 1: Building Control Flow Graph" << std::endl;
-            auto pass = createCFGBuilderPass();
-            pass->run(func, ctx);
+            passManager.addPass(createCFGBuilderPass());
         }
 
         // ========== Phase 2: Optimization ==========
@@ -230,7 +256,7 @@ namespace stinkytofu
         {
             if(config.verbose)
                 std::cout << "\nPhase 2: Optimization (Pre-Scheduling)" << std::endl;
-            runOptimizationPasses(func, config, ctx);
+            runOptimizationPasses(passManager, config);
         }
 
         // ========== Phase 3: Instruction Scheduling ==========
@@ -243,24 +269,21 @@ namespace stinkytofu
             {
                 if(config.verbose)
                     std::cout << "  - ScheduleFirstLRs" << std::endl;
-                auto pass = createScheduleFirstLRsPass();
-                pass->run(func, ctx);
+                passManager.addPass(createScheduleFirstLRsPass());
             }
 
             if(config.enableDAGScheduler)
             {
                 if(config.verbose)
                     std::cout << "  - DAGScheduler" << std::endl;
-                auto pass = createStinkyDAGSchedulerPass();
-                pass->run(func, ctx);
+                passManager.addPass(createStinkyDAGSchedulerPass());
             }
 
             if(config.enableScheduleLastLRs)
             {
                 if(config.verbose)
                     std::cout << "  - ScheduleLastLRs" << std::endl;
-                auto pass = createScheduleLastLRsPass();
-                pass->run(func, ctx);
+                passManager.addPass(createScheduleLastLRsPass());
             }
         }
 
@@ -300,7 +323,7 @@ namespace stinkytofu
 
             if(waitCntPass)
             {
-                waitCntPass->run(func, ctx);
+                passManager.addPass(std::move(waitCntPass));
             }
         }
 
@@ -316,20 +339,23 @@ namespace stinkytofu
                 if(config.verbose)
                     std::cout << "  - [Analysis] " << config.afterAnalysisPasses[i]->getName()
                               << std::endl;
-                ctx.getAnalysisManager().registerAnalysisPass(
-                    std::move(config.afterAnalysisPasses[i]));
+                passManager.registerAnalysisPass(std::move(config.afterAnalysisPasses[i]));
             }
             config.afterAnalysisPasses.clear();
 
-            // Then run transformation passes
+            // Then add transformation passes
             for(size_t i = 0; i < config.afterPasses.size(); ++i)
             {
                 if(config.verbose)
                     std::cout << "  - [Transform] " << config.afterPasses[i]->getName()
                               << std::endl;
-                config.afterPasses[i]->run(func, ctx);
+                passManager.addPass(std::move(config.afterPasses[i]));
             }
+            config.afterPasses.clear();
         }
+
+        // ========== Run All Passes ==========
+        passManager.run();
 
         if(config.verbose)
         {
