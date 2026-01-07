@@ -24,6 +24,7 @@
 
 #include "test_utils_data_generation.hpp"
 #include "test_utils_half.hpp"
+#include <hipcub/thread/thread_operators.hpp>
 #include <hipcub/warp/warp_exchange.hpp>
 
 #include <type_traits>

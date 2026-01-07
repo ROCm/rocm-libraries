@@ -28,6 +28,7 @@
 
 // hipcub API
 #include <hipcub/device/device_segmented_reduce.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
 template<class Input,
          class Output,

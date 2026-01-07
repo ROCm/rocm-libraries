@@ -24,6 +24,7 @@
 
 // hipcub API
 #include <hipcub/device/device_select.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
 #include "single_index_iterator.hpp"
 #include "test_utils_bfloat16.hpp"

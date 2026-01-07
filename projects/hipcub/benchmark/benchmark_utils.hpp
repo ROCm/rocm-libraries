@@ -36,6 +36,7 @@
 #endif
 
 #include <hipcub/tuple.hpp>
+#include <hipcub/util_type.hpp>
 
 #ifndef HIPCUB_CUB_API
     #define HIPCUB_WARP_THREADS_MACRO warpSize
