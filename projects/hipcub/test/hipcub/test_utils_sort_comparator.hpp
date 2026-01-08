@@ -72,7 +72,9 @@ Key to_bits(const Key key)
 template<class Key>
 constexpr bool is_extended_fp
     = std::is_same_v<Key, __half> || std::is_same_v<Key, hip_bfloat16>
-      || std::is_same_v<Key, native_half> || std::is_same_v<Key, native_bfloat16>;
+      || std::is_same_v<Key, native_half> || std::is_same_v<Key, native_bfloat16>
+      || std::is_same_v<Key, test_utils::bfloat16>;
+
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
