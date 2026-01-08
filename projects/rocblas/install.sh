@@ -926,7 +926,6 @@ if [[ "${rmake_invoked}" == false ]]; then
   # Filter out install.sh-only flags from args passed to rmake.py
   filtered_args=$(filter_rmake_args "${input_args}")
 
-
   python3 ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
   check_exit_code "$?"
 
