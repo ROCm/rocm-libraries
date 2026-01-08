@@ -479,7 +479,33 @@ NB_MODULE(stinkytofu, m)
         .def_rw("offset", &DSModifiers::offset, "Offset for single-offset instructions")
         .def_rw("offset0", &DSModifiers::offset0, "First offset for dual-offset instructions")
         .def_rw("offset1", &DSModifiers::offset1, "Second offset for dual-offset instructions")
-        .def_rw("gds", &DSModifiers::gds, "Global Data Share flag");
+        .def_rw("gds", &DSModifiers::gds, "Global Data Share flag")
+        .def("__str__",
+             [](const DSModifiers& m) {
+                 std::string s;
+                 if(m.na == 1)
+                     s += " offset:" + std::to_string(m.offset);
+                 else if(m.na == 2)
+                     s += " offset0:" + std::to_string(m.offset0)
+                          + " offset1:" + std::to_string(m.offset1);
+                 if(m.gds)
+                     s += " gds";
+                 return s.empty() ? std::string("DSModifiers()") : "DSModifiers(" + s + ")";
+             })
+        .def("__deepcopy__", [](const DSModifiers& self, nb::dict&) { return DSModifiers(self); })
+        .def("__getstate__",
+             [](const DSModifiers& self) {
+                 return std::make_tuple(self.na, self.offset, self.offset0, self.offset1, self.gds);
+             })
+        .def("__setstate__", [](DSModifiers& self, nb::tuple t) {
+            if(t.size() != 5)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) DSModifiers(nb::cast<int>(t[0]),
+                                   nb::cast<int>(t[1]),
+                                   nb::cast<int>(t[2]),
+                                   nb::cast<int>(t[3]),
+                                   (bool)nb::cast<int>(t[4]));
+        });
 
     nb::class_<MUBUFModifiers>(m, "MUBUFModifiers")
         .def(nb::init<bool, int, bool, bool, bool, bool, bool>(),
@@ -521,7 +547,41 @@ NB_MODULE(stinkytofu, m)
             "isStore",
             [](const MUBUFModifiers& m) { return (bool)m.isStore; },
             [](MUBUFModifiers& m, bool v) { m.isStore = v; },
-            "Is store operation flag");
+            "Is store operation flag")
+        .def("__str__",
+             [](const MUBUFModifiers& m) {
+                 std::string s;
+                 if(m.offen)
+                     s += " offen offset:" + std::to_string(m.offset12);
+                 if(m.glc)
+                     s += " glc";
+                 if(m.slc)
+                     s += " slc";
+                 if(m.nt)
+                     s += " nt";
+                 if(m.lds)
+                     s += " lds";
+                 return s.empty() ? std::string("MUBUFModifiers()") : "MUBUFModifiers(" + s + ")";
+             })
+        .def("__deepcopy__",
+             [](const MUBUFModifiers& self, nb::dict&) { return MUBUFModifiers(self); })
+        .def(
+            "__getstate__",
+            [](const MUBUFModifiers& self) {
+                return std::make_tuple(
+                    self.offen, self.offset12, self.glc, self.slc, self.nt, self.lds, self.isStore);
+            })
+        .def("__setstate__", [](MUBUFModifiers& self, nb::tuple t) {
+            if(t.size() != 7)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) MUBUFModifiers((bool)nb::cast<int>(t[0]),
+                                      nb::cast<int>(t[1]),
+                                      (bool)nb::cast<int>(t[2]),
+                                      (bool)nb::cast<int>(t[3]),
+                                      (bool)nb::cast<int>(t[4]),
+                                      (bool)nb::cast<int>(t[5]),
+                                      (bool)nb::cast<int>(t[6]));
+        });
 
     nb::class_<FLATModifiers>(m, "FLATModifiers")
         .def(nb::init<int, bool, bool, bool, bool>(),
@@ -551,7 +611,35 @@ NB_MODULE(stinkytofu, m)
             "isStore",
             [](const FLATModifiers& m) { return (bool)m.isStore; },
             [](FLATModifiers& m, bool v) { m.isStore = v; },
-            "Is store operation flag");
+            "Is store operation flag")
+        .def("__str__",
+             [](const FLATModifiers& m) {
+                 std::string s;
+                 if(m.offset12)
+                     s += " offset:" + std::to_string(m.offset12);
+                 if(m.glc)
+                     s += " glc";
+                 if(m.slc)
+                     s += " slc";
+                 if(m.lds)
+                     s += " lds";
+                 return s.empty() ? std::string("FLATModifiers()") : "FLATModifiers(" + s + ")";
+             })
+        .def("__deepcopy__",
+             [](const FLATModifiers& self, nb::dict&) { return FLATModifiers(self); })
+        .def("__getstate__",
+             [](const FLATModifiers& self) {
+                 return std::make_tuple(self.offset12, self.glc, self.slc, self.lds, self.isStore);
+             })
+        .def("__setstate__", [](FLATModifiers& self, nb::tuple t) {
+            if(t.size() != 5)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) FLATModifiers(nb::cast<int>(t[0]),
+                                     (bool)nb::cast<int>(t[1]),
+                                     (bool)nb::cast<int>(t[2]),
+                                     (bool)nb::cast<int>(t[3]),
+                                     (bool)nb::cast<int>(t[4]));
+        });
 
     nb::class_<SMEMModifiers>(m, "SMEMModifiers")
         .def(nb::init<bool, bool, int>(),
@@ -569,11 +657,79 @@ NB_MODULE(stinkytofu, m)
             [](const SMEMModifiers& m) { return (bool)m.nv; },
             [](SMEMModifiers& m, bool v) { m.nv = v; },
             "Non-volatile flag")
-        .def_rw("offset", &SMEMModifiers::offset, "Offset");
+        .def_rw("offset", &SMEMModifiers::offset, "Offset")
+        .def("__str__",
+             [](const SMEMModifiers& m) {
+                 std::string s;
+                 if(m.glc)
+                     s += " glc";
+                 if(m.nv)
+                     s += " nv";
+                 if(m.offset)
+                     s += " offset:" + std::to_string(m.offset);
+                 return s.empty() ? std::string("SMEMModifiers()") : "SMEMModifiers(" + s + ")";
+             })
+        .def("__deepcopy__",
+             [](const SMEMModifiers& self, nb::dict&) { return SMEMModifiers(self); })
+        .def("__getstate__",
+             [](const SMEMModifiers& self) {
+                 return std::make_tuple(self.glc, self.nv, self.offset);
+             })
+        .def("__setstate__", [](SMEMModifiers& self, nb::tuple t) {
+            if(t.size() != 3)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) SMEMModifiers(
+                (bool)nb::cast<int>(t[0]), (bool)nb::cast<int>(t[1]), nb::cast<int>(t[2]));
+        });
 
     nb::class_<GLOBALModifiers>(m, "GLOBALModifiers")
         .def(nb::init<int>(), nb::arg("offset") = 0, "GLOBAL memory instruction modifiers")
-        .def_rw("offset", &GLOBALModifiers::offset, "Offset");
+        .def_rw("offset", &GLOBALModifiers::offset, "Offset")
+        .def("__str__",
+             [](const GLOBALModifiers& m) {
+                 if(m.offset)
+                     return "GLOBALModifiers(offset:" + std::to_string(m.offset) + ")";
+                 return std::string("GLOBALModifiers()");
+             })
+        .def("__deepcopy__",
+             [](const GLOBALModifiers& self, nb::dict&) { return GLOBALModifiers(self); })
+        .def("__getstate__",
+             [](const GLOBALModifiers& self) { return std::make_tuple(self.offset); })
+        .def("__setstate__", [](GLOBALModifiers& self, nb::tuple t) {
+            if(t.size() != 1)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) GLOBALModifiers(nb::cast<int>(t[0]));
+        });
+
+    nb::class_<EXEC>(m, "EXEC")
+        .def(nb::init<bool>(), nb::arg("setHi") = false, "EXEC register modifier")
+        .def_rw("setHi", &EXEC::setHi, "Set high 32 bits (EXEC_HI)")
+        .def("__str__",
+             [](const EXEC& m) {
+                 return m.setHi ? std::string("EXEC(setHi=true)") : std::string("EXEC()");
+             })
+        .def("__deepcopy__", [](const EXEC& self, nb::dict&) { return EXEC(self); })
+        .def("__getstate__", [](const EXEC& self) { return std::make_tuple(self.setHi); })
+        .def("__setstate__", [](EXEC& self, nb::tuple t) {
+            if(t.size() != 1)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) EXEC((bool)nb::cast<int>(t[0]));
+        });
+
+    nb::class_<VCC>(m, "VCC")
+        .def(nb::init<bool>(), nb::arg("setHi") = false, "VCC register modifier")
+        .def_rw("setHi", &VCC::setHi, "Set high 32 bits (VCC_HI)")
+        .def("__str__",
+             [](const VCC& m) {
+                 return m.setHi ? std::string("VCC(setHi=true)") : std::string("VCC()");
+             })
+        .def("__deepcopy__", [](const VCC& self, nb::dict&) { return VCC(self); })
+        .def("__getstate__", [](const VCC& self) { return std::make_tuple(self.setHi); })
+        .def("__setstate__", [](VCC& self, nb::tuple t) {
+            if(t.size() != 1)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) VCC((bool)nb::cast<int>(t[0]));
+        });
 
     // SDWA (Sub-DWord Addressing) Modifiers
     nb::enum_<SDWAModifiers::SelectBit>(m, "SDWASelectBit")
@@ -605,7 +761,29 @@ NB_MODULE(stinkytofu, m)
         .def_rw("dst_sel", &SDWAModifiers::dst_sel, "Destination select")
         .def_rw("dst_unused", &SDWAModifiers::dst_unused, "Destination unused bits handling")
         .def_rw("src0_sel", &SDWAModifiers::src0_sel, "Source 0 select")
-        .def_rw("src1_sel", &SDWAModifiers::src1_sel, "Source 1 select");
+        .def_rw("src1_sel", &SDWAModifiers::src1_sel, "Source 1 select")
+        .def("__str__",
+             [](const SDWAModifiers& m) {
+                 return "SDWAModifiers(dst_sel=" + std::to_string(static_cast<int>(m.dst_sel))
+                        + ", dst_unused=" + std::to_string(static_cast<int>(m.dst_unused))
+                        + ", src0_sel=" + std::to_string(static_cast<int>(m.src0_sel))
+                        + ", src1_sel=" + std::to_string(static_cast<int>(m.src1_sel)) + ")";
+             })
+        .def("__deepcopy__",
+             [](const SDWAModifiers& self, nb::dict&) { return SDWAModifiers(self); })
+        .def("__getstate__",
+             [](const SDWAModifiers& self) {
+                 return std::make_tuple(
+                     self.dst_sel, self.dst_unused, self.src0_sel, self.src1_sel);
+             })
+        .def("__setstate__", [](SDWAModifiers& self, nb::tuple t) {
+            if(t.size() != 4)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) SDWAModifiers(nb::cast<SDWAModifiers::SelectBit>(t[0]),
+                                     nb::cast<SDWAModifiers::UnusedBit>(t[1]),
+                                     nb::cast<SDWAModifiers::SelectBit>(t[2]),
+                                     nb::cast<SDWAModifiers::SelectBit>(t[3]));
+        });
 
     nb::class_<DPPModifiers>(m, "DPPModifiers")
         .def(nb::init<int, int, int>(),
@@ -615,7 +793,28 @@ NB_MODULE(stinkytofu, m)
              "DPP (Data Parallel Primitives) instruction modifiers")
         .def_rw("row_shr", &DPPModifiers::row_shr, "Row shift right")
         .def_rw("row_bcast", &DPPModifiers::row_bcast, "Row broadcast")
-        .def_rw("bound_ctrl", &DPPModifiers::bound_ctrl, "Boundary control");
+        .def_rw("bound_ctrl", &DPPModifiers::bound_ctrl, "Boundary control")
+        .def("__str__",
+             [](const DPPModifiers& m) {
+                 std::string s;
+                 if(m.row_shr >= 0)
+                     s += " row_shr:" + std::to_string(m.row_shr);
+                 if(m.row_bcast >= 0)
+                     s += " row_bcast:" + std::to_string(m.row_bcast);
+                 if(m.bound_ctrl >= 0)
+                     s += " bound_ctrl:" + std::to_string(m.bound_ctrl);
+                 return s.empty() ? std::string("DPPModifiers()") : "DPPModifiers(" + s + ")";
+             })
+        .def("__deepcopy__", [](const DPPModifiers& self, nb::dict&) { return DPPModifiers(self); })
+        .def("__getstate__",
+             [](const DPPModifiers& self) {
+                 return std::make_tuple(self.row_shr, self.row_bcast, self.bound_ctrl);
+             })
+        .def("__setstate__", [](DPPModifiers& self, nb::tuple t) {
+            if(t.size() != 3)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) DPPModifiers(nb::cast<int>(t[0]), nb::cast<int>(t[1]), nb::cast<int>(t[2]));
+        });
 
     nb::class_<VOP3Modifiers>(m, "VOP3Modifiers")
         .def(nb::init<bool, bool, bool, bool, bool, bool, bool, int>(),
@@ -635,7 +834,53 @@ NB_MODULE(stinkytofu, m)
         .def_rw("abs_src1", &VOP3Modifiers::abs_src1, "Absolute value of source operand 1")
         .def_rw("abs_src2", &VOP3Modifiers::abs_src2, "Absolute value of source operand 2")
         .def_rw("clamp", &VOP3Modifiers::clamp, "Clamp result to [0.0, 1.0]")
-        .def_rw("omod", &VOP3Modifiers::omod, "Output modifier: 0=*1, 1=*2, 2=*4, 3=*0.5");
+        .def_rw("omod", &VOP3Modifiers::omod, "Output modifier: 0=*1, 1=*2, 2=*4, 3=*0.5")
+        .def("__str__",
+             [](const VOP3Modifiers& m) {
+                 std::string s;
+                 if(m.neg_src0)
+                     s += " neg_src0";
+                 if(m.neg_src1)
+                     s += " neg_src1";
+                 if(m.neg_src2)
+                     s += " neg_src2";
+                 if(m.abs_src0)
+                     s += " abs_src0";
+                 if(m.abs_src1)
+                     s += " abs_src1";
+                 if(m.abs_src2)
+                     s += " abs_src2";
+                 if(m.clamp)
+                     s += " clamp";
+                 if(m.omod)
+                     s += " omod:" + std::to_string(m.omod);
+                 return s.empty() ? std::string("VOP3Modifiers()") : "VOP3Modifiers(" + s + ")";
+             })
+        .def("__deepcopy__",
+             [](const VOP3Modifiers& self, nb::dict&) { return VOP3Modifiers(self); })
+        .def("__getstate__",
+             [](const VOP3Modifiers& self) {
+                 return std::make_tuple(self.neg_src0,
+                                        self.neg_src1,
+                                        self.neg_src2,
+                                        self.abs_src0,
+                                        self.abs_src1,
+                                        self.abs_src2,
+                                        self.clamp,
+                                        self.omod);
+             })
+        .def("__setstate__", [](VOP3Modifiers& self, nb::tuple t) {
+            if(t.size() != 8)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) VOP3Modifiers((bool)nb::cast<int>(t[0]),
+                                     (bool)nb::cast<int>(t[1]),
+                                     (bool)nb::cast<int>(t[2]),
+                                     (bool)nb::cast<int>(t[3]),
+                                     (bool)nb::cast<int>(t[4]),
+                                     (bool)nb::cast<int>(t[5]),
+                                     (bool)nb::cast<int>(t[6]),
+                                     nb::cast<int>(t[7]));
+        });
 
     nb::class_<VOP3PModifiers>(m, "VOP3PModifiers")
         .def(nb::init<const std::vector<int>&, const std::vector<int>&, const std::vector<int>&>(),
@@ -645,7 +890,49 @@ NB_MODULE(stinkytofu, m)
              "VOP3P (Vector Operation 3 Packed) instruction modifiers")
         .def_rw("op_sel", &VOP3PModifiers::op_sel, "Operand select")
         .def_rw("op_sel_hi", &VOP3PModifiers::op_sel_hi, "Operand select high")
-        .def_rw("byte_sel", &VOP3PModifiers::byte_sel, "Byte select");
+        .def_rw("byte_sel", &VOP3PModifiers::byte_sel, "Byte select")
+        .def("__str__",
+             [](const VOP3PModifiers& m) {
+                 std::string s = "VOP3PModifiers(";
+                 s += "op_sel=[";
+                 for(size_t i = 0; i < m.op_sel.size(); ++i)
+                 {
+                     if(i > 0)
+                         s += ",";
+                     s += std::to_string(m.op_sel[i]);
+                 }
+                 s += "]";
+                 s += ", op_sel_hi=[";
+                 for(size_t i = 0; i < m.op_sel_hi.size(); ++i)
+                 {
+                     if(i > 0)
+                         s += ",";
+                     s += std::to_string(m.op_sel_hi[i]);
+                 }
+                 s += "]";
+                 s += ", byte_sel=[";
+                 for(size_t i = 0; i < m.byte_sel.size(); ++i)
+                 {
+                     if(i > 0)
+                         s += ",";
+                     s += std::to_string(m.byte_sel[i]);
+                 }
+                 s += "]";
+                 return s + ")";
+             })
+        .def("__deepcopy__",
+             [](const VOP3PModifiers& self, nb::dict&) { return VOP3PModifiers(self); })
+        .def("__getstate__",
+             [](const VOP3PModifiers& self) {
+                 return std::make_tuple(self.op_sel, self.op_sel_hi, self.byte_sel);
+             })
+        .def("__setstate__", [](VOP3PModifiers& self, nb::tuple t) {
+            if(t.size() != 3)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) VOP3PModifiers(nb::cast<std::vector<int>>(t[0]),
+                                      nb::cast<std::vector<int>>(t[1]),
+                                      nb::cast<std::vector<int>>(t[2]));
+        });
 
     // HighBitSel enum for True16 modifiers
     nb::enum_<HighBitSel>(m, "HighBitSel")
@@ -658,7 +945,21 @@ NB_MODULE(stinkytofu, m)
              nb::arg("high_bit") = HighBitSel::NONE,
              "True16 instruction modifiers for selecting high or low 16 bits")
         .def(nb::init<int>(), nb::arg("high_bit_int"), "True16 modifier from integer")
-        .def_rw("high_bit", &True16Modifiers::high_bit, "High/low bit selection");
+        .def_rw("high_bit", &True16Modifiers::high_bit, "High/low bit selection")
+        .def("__str__",
+             [](const True16Modifiers& m) {
+                 return "True16Modifiers(high_bit=" + std::to_string(static_cast<int>(m.high_bit))
+                        + ")";
+             })
+        .def("__deepcopy__",
+             [](const True16Modifiers& self, nb::dict&) { return True16Modifiers(self); })
+        .def("__getstate__",
+             [](const True16Modifiers& self) { return std::make_tuple(self.high_bit); })
+        .def("__setstate__", [](True16Modifiers& self, nb::tuple t) {
+            if(t.size() != 1)
+                throw std::runtime_error("Invalid state tuple size");
+            new(&self) True16Modifiers(nb::cast<HighBitSel>(t[0]));
+        });
 
     // ========================================================================
     // Bind StinkyInstruction (exposing rocisa-compatible API)
