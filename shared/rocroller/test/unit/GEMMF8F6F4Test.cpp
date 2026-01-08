@@ -642,6 +642,11 @@ namespace GEMMTests
         auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
         const auto expectedLoadPath = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
+        if((typeAB == DataType::FP6 || typeAB == DataType::BF6)
+           && (loadPathA == SolutionParams::LoadPath::BufferToLDS
+               || loadPathB == SolutionParams::LoadPath::BufferToLDS))
+            GTEST_SKIP() << "Direct2LDS not yet supported for FP6/BF6" << std::endl;
+
         // TODO: enable the test when not run of registers and fix Direct2LDS for BufferToLDS
         if((mode == rocRoller::StreamKMode::TwoTile
             || mode == rocRoller::StreamKMode::TwoTileDPFirst)
