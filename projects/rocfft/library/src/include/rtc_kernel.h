@@ -212,6 +212,12 @@ protected:
         dim3 blockDim;
     };
 
+    static std::shared_future<std::unique_ptr<RTCKernel>>
+        runtime_compile(const RTCGenerator& generator,
+                        const std::string&  gpu_arch,
+                        std::string&        kernel_name,
+                        bool                enable_callbacks = false);
+
     // Keep track of modules that have been requested, so that if two
     // identical kernel requests come at the same time, we only
     // create one module.  Modules are per-device so that needs to be
