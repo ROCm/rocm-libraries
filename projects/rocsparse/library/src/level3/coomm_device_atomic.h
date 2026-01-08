@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,8 +58,8 @@ namespace rocsparse
         const int     lid = tid & (WF_SIZE - 1);
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int dense_C_size
-            = static_cast<int>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
+        const int64_t dense_C_size
+            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
 
         const I row = (gid < nnz) ? rocsparse::nontemporal_load(coo_row_ind + gid) - idx_base : 0;
         const I col = (gid < nnz) ? rocsparse::nontemporal_load(coo_col_ind + gid) - idx_base : 0;
@@ -189,8 +189,8 @@ namespace rocsparse
         const int64_t gid = BLOCKSIZE * hipBlockIdx_x + tid;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int dense_C_size
-            = static_cast<int>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
+        const int64_t dense_C_size
+            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
 
         __shared__ I shared_row[(BLOCKSIZE / WF_SIZE) * WF_SIZE];
         __shared__ T shared_val[(BLOCKSIZE / WF_SIZE) * WF_SIZE];
@@ -360,8 +360,8 @@ namespace rocsparse
         }
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int dense_C_size
-            = static_cast<int>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
+        const int64_t dense_C_size
+            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
 
         const I row = coo_row_ind[gid] - idx_base;
         const I col = coo_col_ind[gid] - idx_base;
@@ -373,14 +373,14 @@ namespace rocsparse
         if(order_C == rocsparse_order_column)
         {
             rocsparse::atomic_add(dense_C,
-                                  static_cast<int>(hipBlockIdx_y * ldc + col),
+                                  static_cast<int64_t>(hipBlockIdx_y * ldc + col),
                                   dense_C_size,
                                   static_cast<C>(alpha * (val * bval)));
         }
         else
         {
             rocsparse::atomic_add(dense_C,
-                                  static_cast<int>(col * ldc + hipBlockIdx_y),
+                                  static_cast<int64_t>(col * ldc + hipBlockIdx_y),
                                   dense_C_size,
                                   static_cast<C>(alpha * (val * bval)));
         }

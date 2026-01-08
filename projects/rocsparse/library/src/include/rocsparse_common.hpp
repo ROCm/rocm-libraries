@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -762,13 +762,13 @@ namespace rocsparse
     }
 
     template <typename T1, typename T2>
-    __device__ __forceinline__ T1 atomic_add(T1* base_ptr, int idx, int size, T2 val)
+    __device__ __forceinline__ T1 atomic_add(T1* base_ptr, int64_t idx, int64_t size, T2 val)
     {
         return atomic_add(base_ptr + idx, static_cast<T1>(val));
     }
 
     template <typename T1, typename T2>
-    __device__ __forceinline__ T1 atomic_add_check(T1* base_ptr, int idx, int size, T2 val)
+    __device__ __forceinline__ T1 atomic_add_check(T1* base_ptr, int64_t idx, int64_t size, T2 val)
     {
         return atomic_add_check(base_ptr + idx, static_cast<T1>(val));
     }
@@ -797,7 +797,7 @@ namespace rocsparse
         return tmp;
     }
 
-    __device__ half atomic_add_by_CAS(half* base_ptr, int idx, half val, int size)
+    __device__ half atomic_add_by_CAS(half* base_ptr, int64_t idx, half val, int64_t size)
     {
         // Check bounds
         if(idx >= 0 && idx < size)
@@ -880,7 +880,8 @@ namespace rocsparse
     }
 
     template <typename T>
-    __device__ __forceinline__ _Float16 atomic_add(_Float16* base_ptr, int idx, int size, T val)
+    __device__ __forceinline__ _Float16
+        atomic_add(_Float16* base_ptr, int64_t idx, int64_t size, T val)
     {
         return atomic_add_by_CAS(
             reinterpret_cast<half*>(base_ptr), idx, static_cast<half>(val), size);
@@ -888,7 +889,7 @@ namespace rocsparse
 
     template <typename T>
     __device__ __forceinline__ _Float16
-        atomic_add_check(_Float16* base_ptr, int idx, int size, T val)
+        atomic_add_check(_Float16* base_ptr, int64_t idx, int64_t size, T val)
     {
         if(val != static_cast<_Float16>(0))
             return atomic_add_by_CAS(
@@ -903,9 +904,9 @@ namespace rocsparse
     static __device__ unsigned int g_bf16_lock = 0;
 
     __device__ rocsparse_bfloat16 atomic_add_by_CAS(rocsparse_bfloat16* base_ptr,
-                                                    int                 idx,
+                                                    int64_t             idx,
                                                     rocsparse_bfloat16  val,
-                                                    int                 size)
+                                                    int64_t             size)
     {
         // Check bounds
         if(idx >= 0 && idx < size)
@@ -994,7 +995,7 @@ namespace rocsparse
 
     template <typename T>
     __device__ __forceinline__ rocsparse_bfloat16
-        atomic_add(rocsparse_bfloat16* base_ptr, int idx, int size, T val)
+        atomic_add(rocsparse_bfloat16* base_ptr, int64_t idx, int64_t size, T val)
     {
         rocsparse_bfloat16 result
             = atomic_add_by_CAS(reinterpret_cast<rocsparse_bfloat16*>(base_ptr),
@@ -1008,7 +1009,7 @@ namespace rocsparse
 
     template <typename T>
     __device__ __forceinline__ rocsparse_bfloat16
-        atomic_add_check(rocsparse_bfloat16* base_ptr, int idx, int size, T val)
+        atomic_add_check(rocsparse_bfloat16* base_ptr, int64_t idx, int64_t size, T val)
     {
         if(val != static_cast<T>(0))
         {

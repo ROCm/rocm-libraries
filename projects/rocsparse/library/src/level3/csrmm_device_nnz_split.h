@@ -464,8 +464,8 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int dense_C_size
-            = static_cast<int>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size
+            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
 
         J row = 0;
         J col = 0;
@@ -593,8 +593,8 @@ namespace rocsparse
         const int wid = tid / WF_SIZE;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int dense_C_size
-            = static_cast<int>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size
+            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
 
         __shared__ J shared_row[(BLOCKSIZE / WF_SIZE) * WF_SIZE];
         __shared__ T shared_val[(BLOCKSIZE / WF_SIZE) * WF_SIZE];

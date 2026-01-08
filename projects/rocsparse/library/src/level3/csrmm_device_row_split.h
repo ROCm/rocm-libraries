@@ -864,8 +864,8 @@ namespace rocsparse
         }
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int dense_C_size
-            = static_cast<int>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size
+            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
 
         const J       cid  = lid + hipBlockIdx_y * WF_SIZE;
         const int64_t colB = cid * ldb;
@@ -954,8 +954,8 @@ namespace rocsparse
         }
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int dense_C_size
-            = static_cast<int>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size
+            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
 
         __shared__ T shared_B[BLOCKSIZE / WF_SIZE][WF_SIZE];
 
