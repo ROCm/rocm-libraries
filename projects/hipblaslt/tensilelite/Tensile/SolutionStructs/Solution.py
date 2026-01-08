@@ -376,6 +376,10 @@ class Solution(collections.abc.Mapping):
     state["NonDTLTailLoopA"] = False
     state["NonDTLTailLoopB"] = False
 
+    # Initialize DTLA, DTLB for tailLoopOpt/NonDTLTailLoop and initial calcLdsBlockSizePerPad() call
+    state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
+    state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+
     bpeA = state["ProblemType"]["DataTypeA"].numBytes()
     bpeB = state["ProblemType"]["DataTypeB"].numBytes()
     aemA = state["AssertSummationElementMultiple"] if not state["ProblemType"]["TLUA"] else state["AssertFree0ElementMultiple"]
@@ -388,11 +392,11 @@ class Solution(collections.abc.Mapping):
     # TLU + ShiftPtr case, we can use wider global read for TailLoop. Enable Tailloop opt for DTL
     # (ShiftPtr is default and not set to state["EdgeType"] yet here)
     if ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
-      if (not state["ProblemType"]["TLUA"]) and state["DirectToLds"] and not state["DirectToVgprA"]:
+      if (not state["ProblemType"]["TLUA"]) and state["DirectToLdsA"] and not state["DirectToVgprA"]:
         state["NonDTLTailLoopA"] = True
         state["tailLoopOptA"] = False
     if ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
-      if (not state["ProblemType"]["TLUB"]) and state["DirectToLds"] and not state["DirectToVgprB"]:
+      if (not state["ProblemType"]["TLUB"]) and state["DirectToLdsB"] and not state["DirectToVgprB"]:
         state["NonDTLTailLoopB"] = True
         state["tailLoopOptB"] = False
 
@@ -1206,9 +1210,6 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     # Init vars early since there are early-exit return statements below
-    # Initialize DTLA, DTLB for initial calcLdsBlockSizePerPad() call
-    state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
-    state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
     # tentative init for UseGeneralizedNLCOneA/B
     # set True for DTL 
     state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
