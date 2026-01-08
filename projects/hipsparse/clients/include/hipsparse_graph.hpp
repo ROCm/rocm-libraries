@@ -41,7 +41,7 @@
 #define GRAPH_TEST 0
 #endif
 
-#if GRAPH_TEST && !defined(CUDART_VERSION)
+#if GRAPH_TEST
 #define BEGIN_GRAPH_CAPTURE() handle.hipsparseStreamBeginCapture()
 #define END_GRAPH_CAPTURE() handle.hipsparseStreamEndCapture()
 #else
@@ -84,7 +84,7 @@ namespace testing
     *    level 1 SPARSE
     * ===========================================================================
     */
-
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     TESTING_COMPUTE_TEMPLATE(axpyi)
     //TESTING_COMPUTE_TEMPLATE(doti)
     //TESTING_COMPUTE_TEMPLATE(dotci)
@@ -92,6 +92,7 @@ namespace testing
     TESTING_COMPUTE_TEMPLATE(gthrz)
     TESTING_COMPUTE_TEMPLATE(roti)
     TESTING_COMPUTE_TEMPLATE(sctr)
+#endif
 
     /*
     * ===========================================================================
@@ -100,17 +101,28 @@ namespace testing
     */
 
     TESTING_TEMPLATE(Axpby)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     TESTING_TEMPLATE(Gather)
     TESTING_TEMPLATE(Scatter)
+#endif
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
     TESTING_TEMPLATE(Rot)
+#endif
+#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     TESTING_TEMPLATE(SpVV_bufferSize)
     TESTING_TEMPLATE(SpVV)
+#endif
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     TESTING_TEMPLATE(SpMM_bufferSize)
     TESTING_TEMPLATE(SpMM_preprocess)
     TESTING_TEMPLATE(SpMM)
+#endif
+#if(!defined(CUDART_VERSION))
     TESTING_TEMPLATE(SDDMM)
     TESTING_TEMPLATE(SDDMM_bufferSize)
     TESTING_TEMPLATE(SDDMM_preprocess)
+#endif
 }
 
 #endif
