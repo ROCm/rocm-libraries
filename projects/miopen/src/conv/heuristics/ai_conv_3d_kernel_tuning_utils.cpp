@@ -128,6 +128,66 @@ GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::stri
     return features;
 }
 
+// Helper: Process Explicit_Xdl kernel parameters to match implicit GEMM format
+MIOPEN_INTERNALS_EXPORT
+std::vector<std::string> ProcessExplicitXdlParams(const std::vector<std::string>& params)
+{
+    if(params.empty())
+        return {};
+
+    std::vector<std::string> processed;
+    processed.push_back(params[0]); // Keep first element unchanged
+
+    for(size_t i = 1; i < params.size(); ++i)
+    {
+        const auto& param = params[i];
+
+        // Special handling for BlkGemmPipelineScheduler and BlkGemmPipelineVersion
+        // Keep the full "Label: Value" format for these
+        if(param.find("BlkGemmPipelineScheduler:") != std::string::npos ||
+           param.find("BlkGemmPipelineVersion:") != std::string::npos)
+        {
+            processed.push_back(param);
+            continue;
+        }
+
+        // For all other parameters: remove label (everything before and including ':')
+        std::string value = param;
+        auto colon_pos    = param.find(':');
+        if(colon_pos != std::string::npos)
+        {
+            value = param.substr(colon_pos + 1);
+            // Trim leading whitespace
+            value.erase(0, value.find_first_not_of(" \t"));
+        }
+
+        // Split on 'x' if present
+        auto x_pos = value.find('x');
+        if(x_pos != std::string::npos)
+        {
+            // Split and add each component
+            size_t start = 0;
+            while(start < value.length())
+            {
+                auto next_x = value.find('x', start);
+                if(next_x == std::string::npos)
+                {
+                    processed.push_back(value.substr(start));
+                    break;
+                }
+                processed.push_back(value.substr(start, next_x - start));
+                start = next_x + 1;
+            }
+        }
+        else
+        {
+            processed.push_back(value);
+        }
+    }
+
+    return processed;
+}
+
 // Helper: Tokenize kernel string
 MIOPEN_INTERNALS_EXPORT
 std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
@@ -252,6 +312,15 @@ void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
     for(std::size_t i = 0; i < valid_kernels.size(); ++i)
     {
         auto tokens = GetKernelAsTokens(valid_kernels[i]);
+
+        // Special processing for Explicit_Xdl kernels to match format of implicit GEMM kernels (and
+        // thus the format expected by the heuristics)
+        if(!tokens.empty() &&
+           tokens[0].find("DeviceGroupedConvBwdWeight_Explicit_Xdl") != std::string::npos)
+        {
+            tokens = ProcessExplicitXdlParams(tokens);
+        }
+
         indexes.push_back(i);
         kernels.push_back(tokens);
     }

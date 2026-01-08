@@ -455,6 +455,96 @@ TEST_F(GPU_Conv3DKernelTuning_FP32, GenerateSplitK_Test)
     ASSERT_EQ(split_ks, expected);
 }
 
+TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_Test)
+{
+    // Test case matching the Python preprocessing logic
+    std::vector<std::string> input = {"DeviceGroupedConvBwdWeight_Explicit_Xdl",
+                                      "DeviceBatchedGemmXdlUniversal<Default,CRR>",
+                                      "BlkSize:256",
+                                      "BlkTile:256x256x32",
+                                      "WaveTile:32x32",
+                                      "WaveMap:4x4",
+                                      "VmemReadVec:8x8",
+                                      "BlkGemmPipelineScheduler:Intrawave",
+                                      "BlkGemmPipelineVersion:v4",
+                                      "BlkGemmPipelinePrefetchStages:3",
+                                      "1"};
+
+    auto result = ProcessExplicitXdlParams(input);
+
+    // Expected output after processing:
+    // 1. First element unchanged
+    // 2. Remove parameter names (e.g., "BlkSize:256" -> "256")
+    // 3. Split on 'x' (e.g., "256x256x32" -> ["256", "256", "32"])
+    std::vector<std::string> expected = {
+        "DeviceGroupedConvBwdWeight_Explicit_Xdl",    // 0: unchanged
+        "DeviceBatchedGemmXdlUniversal<Default,CRR>", // 1: unchanged (no colon)
+        "256",                                        // 2: BlkSize value
+        "256",
+        "256",
+        "32", // 3-5: BlkTile split
+        "32",
+        "32", // 6-7: WaveTile split
+        "4",
+        "4", // 8-9: WaveMap split
+        "8",
+        "8",                                  // 10-11: VmemReadVec split
+        "BlkGemmPipelineScheduler:Intrawave", // 12: BlkGemmPipelineScheduler value
+        "BlkGemmPipelineVersion:v4",          // 13: BlkGemmPipelineVersion value
+        "3",                                  // 14: BlkGemmPipelinePrefetchStages value
+        "1"                                   // 15: split_k value
+    };
+
+    ASSERT_EQ(result.size(), expected.size())
+        << "Expected " << expected.size() << " parameters, got " << result.size();
+
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        EXPECT_EQ(result[i], expected[i]) << "Mismatch at index " << i << ": expected '"
+                                          << expected[i] << "', got '" << result[i] << "'";
+    }
+}
+
+TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_EmptyInput_Test)
+{
+    std::vector<std::string> empty_input;
+    auto result = ProcessExplicitXdlParams(empty_input);
+    ASSERT_TRUE(result.empty());
+}
+
+TEST_F(GPU_Conv3DKernelTuning_FP32, FillHeuristicKernels_WithExplicitXdl_Test)
+{
+    // Test that FillHeuristicKernels applies ProcessExplicitXdlParams for Explicit_Xdl kernels
+    std::vector<std::string> valid_kernels = {
+        "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<Default,CRR>,"
+        "BlkSize:256,BlkTile:256x256x32,WaveTile:32x32,WaveMap:4x4,VmemReadVec:8x8,"
+        "BlkGemmPipelineScheduler:Intrawave,BlkGemmPipelineVersion:v4,"
+        "BlkGemmPipelinePrefetchStages:3,1>",
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>"};
+
+    std::vector<int> indexes;
+    std::vector<std::vector<std::string>> kernels;
+
+    FillHeuristicKernels(valid_kernels, indexes, kernels);
+
+    ASSERT_EQ(kernels.size(), 2u);
+
+    // First kernel should be processed by ProcessExplicitXdlParams
+    // Should have 16 parameters (0-15) after processing
+    EXPECT_EQ(kernels[0].size(), 16u)
+        << "Explicit_Xdl kernel should have 16 parameters after processing";
+    EXPECT_EQ(kernels[0][0], "DeviceGroupedConvBwdWeight_Explicit_Xdl");
+    EXPECT_EQ(kernels[0][2], "256"); // BlkSize value
+    EXPECT_EQ(kernels[0][3], "256"); // First part of BlkTile
+    EXPECT_EQ(kernels[0][4], "256"); // Second part of BlkTile
+    EXPECT_EQ(kernels[0][5], "32");  // Third part of BlkTile
+
+    // Second kernel should NOT be processed (regular kernel)
+    // Should have its normal parameter count
+    EXPECT_GT(kernels[1].size(), 0u);
+    EXPECT_EQ(kernels[1][0], "DeviceGroupedConvBwdWeight_Xdl_CShuffle");
+}
+
 // ------------------- AI Model Tests (Architecture-Dependent) -------------------
 
 class GPU_Conv3DKernelTuningAI_FP32 : public GPU_Conv3DKernelTuning_Base

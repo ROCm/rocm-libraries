@@ -538,9 +538,10 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
 
                             if(!found_ws)
                             {
-                                MIOPEN_LOG_WE("No encoding found in metadata for value '"
-                                              << param_value
-                                              << "' of output parameter: " << param_name);
+                                MIOPEN_LOG_WE(
+                                    "Kernel: "
+                                    << kernel_name << " - No encoding found in metadata for value '"
+                                    << param_value << "' of output parameter: " << param_name);
                                 MIOPEN_LOG_WE("setting it to the NaN value");
                                 value = missing_value_encoding;
                             }
