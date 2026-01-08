@@ -6,13 +6,13 @@
 
 #include <tuple>
 
-#include "hipdnn_sdk/plugin/PluginException.hpp"
+#include "hipdnn_plugin_sdk/PluginException.hpp"
 #include <hip/hip_runtime.h>
 
 #include "EnginePluginApiImpl.hpp"
 #include "PluginApiImpl.hpp"
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 const char* const PLUGIN_NAME = "EnginePlugin1";
 const char* const PLUGIN_VERSION = "1.0";

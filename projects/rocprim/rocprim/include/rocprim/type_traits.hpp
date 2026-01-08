@@ -433,7 +433,7 @@ struct float_bit_mask
 
 /// \par Definability
 /// * **Undefinable**: For all types.
-/// \par Overview This triat is auto matically generated.
+/// \par Overview This trait is automatically generated.
 /// \par How to use
 /// \parblock
 /// \code{.cpp}

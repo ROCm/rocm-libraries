@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -434,7 +434,8 @@ namespace rocRoller
             transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
             transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         }
-        transforms.push_back(std::make_shared<KernelGraph::AssignComputeIndex>(m_context));
+        transforms.push_back(
+            std::make_shared<KernelGraph::AssignComputeIndex>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());

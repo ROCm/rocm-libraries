@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1893,6 +1893,7 @@ namespace rocRoller
                         graph, connections, userTag, tileTag, sdims, {1, 1}, m_params, m_context);
                     break;
                 case MemoryType::WAVE:
+                case MemoryType::WAVE_FROM_GLOBAL:
                     loadMacroTile_WAVE(graph,
                                        connections,
                                        userTag,
@@ -1981,7 +1982,8 @@ namespace rocRoller
                 auto iMacX = graph.coordinates.addElement(tile.tileIndex(0));
                 auto iMacY = graph.coordinates.addElement(tile.tileIndex(1));
 
-                if(tile.memoryType == MemoryType::WAVE)
+                if(tile.memoryType == MemoryType::WAVE
+                   || tile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
                 {
                     auto              varType     = getVariableType(graph, loadTag);
                     std::vector<uint> jammedTiles = wavetilesPerWavefront;

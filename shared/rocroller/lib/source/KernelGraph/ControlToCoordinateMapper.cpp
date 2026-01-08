@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -264,6 +264,8 @@ namespace rocRoller::KernelGraph
                 return "STRIDE";
             case ComputeIndexArgument::BUFFER:
                 return "BUFFER";
+            case ComputeIndexArgument::BASEADDRESS:
+                return "BASEADDRESS";
             default:
                 return "Invalid";
             }

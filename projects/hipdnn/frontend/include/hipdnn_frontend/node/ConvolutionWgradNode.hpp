@@ -4,12 +4,12 @@
 
 #include "Node.hpp"
 #include <algorithm>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <numeric>
 
 namespace hipdnn_frontend::graph
@@ -48,7 +48,6 @@ public:
         auto& xDims = x->get_dim();
         auto& dyDims = dy->get_dim();
         auto& dwDims = dw->get_dim();
-        auto& dwStrides = dw->get_stride();
 
         auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
         auto& prePadding = attributes.get_pre_padding();
@@ -72,22 +71,12 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ConvolutionWgradNode missing dilation for pre-validation");
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: x tensor dimensions and strides must be set and positive");
-
         // dy implicitly checked here too since they must be equal
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor must have at least 3 dimensions (N, C, spatial)");
-
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: dy tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(dyDims.size(),
                             xDims.size(),
@@ -132,11 +121,6 @@ public:
                 "ConvolutionWgradNode: dw tensor output channels must be divisible by "
                 "the number of groups");
 
-            HIPDNN_RETURN_IF_FALSE(
-                dw->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionWgradNode: dw tensor dimensions must be set and positive");
-
             // Verifies that spatial dimensions are compatible
             for(size_t i = 0; i < spatialDims; ++i)
             {
@@ -169,14 +153,6 @@ public:
                         + ") does not match expected dimension (" + std::to_string(expectedDyDim)
                         + ") given x dimensions, kernel size, padding, stride, and dilation");
             }
-        }
-
-        if(!dwStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(dw->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionWgradNode: dw tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         HIPDNN_RETURN_IF_NE(
@@ -362,10 +338,10 @@ public:
                 "ConvolutionWgradNode: Stride dimension mismatch between x and dw tensors");
 
             // Extract stride order from x tensor and apply to dw tensor
-            auto strideOrder = hipdnn_sdk::utilities::extractStrideOrder(xStrides);
+            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
 
             // Generate dw strides using the extracted stride order and dw dimensions
-            auto dwStrides = hipdnn_sdk::utilities::generateStrides(dwDimsFinal, strideOrder);
+            auto dwStrides = hipdnn_data_sdk::utilities::generateStrides(dwDimsFinal, strideOrder);
 
             dw->set_stride(dwStrides);
         }
@@ -373,14 +349,14 @@ public:
         return {};
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

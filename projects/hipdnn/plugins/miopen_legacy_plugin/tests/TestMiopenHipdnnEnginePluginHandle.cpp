@@ -85,5 +85,5 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, MultipleBuffers)
 
 TEST_F(TestMiopenHipdnnEnginePluginHandle, ThrowsWithNoMiopenHandle)
 {
-    EXPECT_THROW(_handle->setStream(nullptr), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(_handle->setStream(nullptr), hipdnn_plugin_sdk::HipdnnPluginException);
 }

@@ -485,6 +485,7 @@ namespace rocsparse
     template <typename I, typename J, typename A, typename X, typename Y, typename Z, typename T>
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_adaptive_kernel(bool conj,
+                                J    m,
                                 I    nnz,
                                 const I* __restrict__ row_blocks,
                                 uint32_t* __restrict__ wg_flags,
@@ -509,6 +510,7 @@ namespace rocsparse
             rocsparse::
                 csrmvn_adaptive_device<BLOCK_SIZE, BLOCK_MULTIPLIER, ROWS_FOR_VECTOR, WG_SIZE>(
                     conj,
+                    m,
                     nnz,
                     row_blocks,
                     wg_flags,
@@ -531,6 +533,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_symm_adaptive_kernel(bool conj,
                                      I    nnz,
+                                     J    m,
                                      I    max_rows,
                                      const I* __restrict__ row_blocks,
                                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -549,6 +552,7 @@ namespace rocsparse
         {
             rocsparse::csrmvn_symm_adaptive_device<BLOCK_SIZE, WG_SIZE>(conj,
                                                                         nnz,
+                                                                        m,
                                                                         max_rows,
                                                                         row_blocks,
                                                                         alpha,
@@ -567,6 +571,7 @@ template <typename I, typename J, typename A, typename X, typename Y, typename T
 ROCSPARSE_KERNEL(WG_SIZE)
 void csrmvn_symm_large_adaptive_kernel(bool conj,
                                        I    nnz,
+                                       J    m,
                                        const I* __restrict__ row_blocks,
                                        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                        const I* __restrict__ csr_row_ptr,
@@ -582,8 +587,18 @@ void csrmvn_symm_large_adaptive_kernel(bool conj,
     ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
     if(alpha != 0 || beta != 1)
     {
-        rocsparse::csrmvn_symm_large_adaptive_device<BLOCK_SIZE, WG_SIZE>(
-            conj, nnz, row_blocks, alpha, csr_row_ptr, csr_col_ind, csr_val, x, beta, y, idx_base);
+        rocsparse::csrmvn_symm_large_adaptive_device<BLOCK_SIZE, WG_SIZE>(conj,
+                                                                          nnz,
+                                                                          m,
+                                                                          row_blocks,
+                                                                          alpha,
+                                                                          csr_row_ptr,
+                                                                          csr_col_ind,
+                                                                          csr_val,
+                                                                          x,
+                                                                          beta,
+                                                                          y,
+                                                                          idx_base);
     }
 }
 
@@ -710,6 +725,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
             0,
             stream,
             conj,
+            m,
             nnz,
             static_cast<I*>(info->adaptive.row_blocks),
             info->adaptive.wg_flags,
@@ -777,6 +793,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                 stream,
                 conj,
                 nnz,
+                m,
                 max_rows,
                 static_cast<I*>(info->adaptive.row_blocks),
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
@@ -799,6 +816,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                 stream,
                 conj,
                 nnz,
+                m,
                 static_cast<I*>(info->adaptive.row_blocks),
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 csr_row_ptr,
@@ -939,9 +957,15 @@ INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,

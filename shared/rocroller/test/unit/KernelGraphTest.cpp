@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1352,7 +1352,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 48);
+            EXPECT_EQ(deallocatedDims.size(), 55);
         }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
@@ -1380,7 +1380,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 290);
+            EXPECT_EQ(deallocatedDims.size(), 297);
         }
     }
 

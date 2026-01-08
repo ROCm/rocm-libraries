@@ -5,7 +5,7 @@
 .. _data-type-support:
 
 ******************************************
-Data type support
+rocPRIM data type support
 ******************************************
 
 The following table shows the supported input and output datatypes.

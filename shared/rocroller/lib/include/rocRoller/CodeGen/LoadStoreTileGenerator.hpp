@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2023-2025 AMD ROCm(TM) Software
+ * Copyright 2023-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -107,18 +107,6 @@ namespace rocRoller
              */
             Generator<Instruction> genStoreLDSTile(int                               tag,
                                                    ControlGraph::StoreLDSTile const& store,
-                                                   CoordinateGraph::Transformer      coords);
-
-            /**
-             * @brief Generate instructions needed to calculate offset and stride information
-             *
-             * @param tag The tag of the node in the control graph
-             * @param load The node in the control graph
-             * @param coords Known coordinates
-             * @return Generator<Instruction>
-             */
-            Generator<Instruction> genComputeIndex(int                               tag,
-                                                   ControlGraph::ComputeIndex const& ci,
                                                    CoordinateGraph::Transformer      coords);
 
             /**

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2025 AMD ROCm(TM) Software
+ * Copyright 2019-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -240,6 +240,10 @@ namespace rocRoller
             return "WAVE_Direct2LDS";
         case MemoryType::WAVE_SWIZZLE:
             return "WAVE_SWIZZLE";
+        case MemoryType::WAVE_FROM_GLOBAL:
+            return "WAVE_FROM_GLOBAL";
+        case MemoryType::WAVE_LDS_FROM_GLOBAL:
+            return "WAVE_LDS_FROM_GLOBAL";
         case MemoryType::Literal:
             return "Literal";
         case MemoryType::None:

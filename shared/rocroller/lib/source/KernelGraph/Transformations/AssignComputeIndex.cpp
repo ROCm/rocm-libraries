@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,9 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/CodeGen/Buffer.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
@@ -128,7 +130,8 @@ namespace rocRoller
                 for(OpsAndTilesType& elem : opsAndTiles)
                 {
                     auto memType = std::get<1>(elem).second.memoryType;
-                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE)
+                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE
+                       || memType == MemoryType::WAVE_FROM_GLOBAL)
                     {
                         return elem;
                     }
@@ -161,7 +164,8 @@ namespace rocRoller
                 elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
             }
             else if(macTile.memoryType == MemoryType::WAVE
-                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE)
+                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE
+                    || macTile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
             {
                 auto [vgprBlockNumberTag, vgprBlockNumber]
                     = graph.getDimension<VGPRBlockNumber>(opTag, 0);
@@ -226,9 +230,11 @@ namespace rocRoller
                            ComputeIndex const& ci,
                            const int           target,
                            const int           offset,
+                           const int           baseAddress,
                            const bool          maybeLDS,
                            const bool          isTransposed,
                            const ContextPtr    context,
+                           const CommandPtr    command,
                            Transformer&        coords)
         {
             auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
@@ -271,6 +277,24 @@ namespace rocRoller
             if(ci.isStorePartOfGlobalToLDS)
             {
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
+            }
+
+            if(baseAddress > 0)
+            {
+                namespace CG = KernelGraph::CoordinateGraph;
+                auto userTag = only(graph.coordinates.getNeighbours<Graph::Direction::Downstream>(
+                                        baseAddress))
+                                   .value();
+                AssertFatal(
+                    userTag > 0,
+                    fmt::format("Could not find User connected to BaseAddress({})", baseAddress));
+                auto user = graph.coordinates.getNode<CG::User>(userTag);
+
+                AssertFatal(
+                    command, "Expected command pointer but got nullptr", ShowValue(command));
+
+                auto userAsCmdArg = findArgumentByName(command, user.argumentName);
+                expr              = expr + convert(ci.offsetType, userAsCmdArg->expression());
             }
 
             auto assignNode         = Assign{offsetRegisterType, convert(ci.offsetType, expr)};
@@ -405,9 +429,67 @@ namespace rocRoller
             return assignTag;
         }
 
+        int makeBuffer(KernelGraph&        graph,
+                       ComputeIndex const& ci,
+                       const int           target,
+                       const int           buffer,
+                       const ContextPtr    context,
+                       const CommandPtr    command)
+        {
+            // Check if target has a User coordinate
+            auto user = graph.coordinates.get<User>(target);
+            if(!user)
+                return -1;
+
+            AssertFatal(user->size, "Invalid User dimension: missing size.", ShowValue(target));
+
+            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+
+                Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
+
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
+
+            auto bufferVarType = VariableType{DataType::None, PointerType::Buffer};
+            auto bufferRegType = Register::Type::Scalar;
+
+            // Create a buffer descriptor expression
+            Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
+            auto                      arg        = findArgumentByName(command, user->argumentName);
+            AssertFatal(arg,
+                        "Argument for buffer descriptor base pointer not found.",
+                        ShowValue(user->argumentName));
+            Expression::ExpressionPtr basePointer = arg->expression();
+
+            if(user->offset)
+                basePointer = basePointer + user->offset;
+
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
+            bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                      BufferDescriptor::GetDefaultOptions(context));
+            // TODO: Handle sizes larger than 32 bits
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
+
+            auto assignNode         = Assign{bufferRegType, bufferExpr};
+            assignNode.variableType = bufferVarType;
+            auto assignTag          = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, buffer, NaryArgument::DEST);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeBuffer: assign {} expression {} to buffer {}",
+                assignTag,
+                toString(assignNode.expression),
+                buffer);
+
+            return assignTag;
+        }
+
         KernelGraph AssignComputeIndex::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddComputeIndex");
+            TIMER(t, "KernelGraph::AssignComputeIndex");
             auto kgraph = original;
 
             auto isComputeIndexPredicate
@@ -418,7 +500,7 @@ namespace rocRoller
                 = kgraph.control.findNodes(*kgraph.control.roots().begin(), isComputeIndexPredicate)
                       .to<std::vector>();
 
-            std::vector<std::tuple<int, int, int>> ciAndAssign;
+            std::vector<std::tuple<int, int, int, int>> ciAndAssign;
 
             // commit changes
             for(const auto& tag : candidates)
@@ -435,6 +517,8 @@ namespace rocRoller
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
                 auto buffer = kgraph.mapper.get(
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
+                auto baseAddress = kgraph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASEADDRESS});
 
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::commit: computeindex {} base {} offset {} stride {}, target {} "
@@ -525,12 +609,20 @@ namespace rocRoller
                     xform.setCoordinate(increment, L(0u));
                 }
 
-                auto assignStrideTag = -1, assignBaseTag = -1;
+                auto assignStrideTag = -1, assignBaseTag = -1, assignBufferTag = -1;
 
                 if(base < 0 && offset > 0)
                 {
-                    assignBaseTag = makeAssignBase(
-                        kgraph, ci, target, offset, maybeLDS, isTransposed, m_context, xform);
+                    assignBaseTag = makeAssignBase(kgraph,
+                                                   ci,
+                                                   target,
+                                                   offset,
+                                                   baseAddress,
+                                                   maybeLDS,
+                                                   isTransposed,
+                                                   m_context,
+                                                   m_command,
+                                                   xform);
                 }
 
                 if(stride > 0)
@@ -546,19 +638,34 @@ namespace rocRoller
                                                        xform);
                 }
 
-                if(assignStrideTag != -1 || assignBaseTag != -1)
+                if(buffer > 0)
                 {
-                    ciAndAssign.push_back({tag, assignBaseTag, assignStrideTag});
+                    assignBufferTag = makeBuffer(kgraph, ci, target, buffer, m_context, m_command);
+                }
+
+                if(assignStrideTag != -1 || assignBaseTag != -1 || assignBufferTag != -1)
+                {
+                    ciAndAssign.push_back({tag, assignBaseTag, assignStrideTag, assignBufferTag});
                 }
             }
 
             for(auto const& tags : ciAndAssign)
             {
-                auto [ciTag, assignBaseTag, assignStrideTag] = tags;
+                auto [ciTag, assignBaseTag, assignStrideTag, assignBufferTag] = tags;
+                if(assignBufferTag != -1)
+                    insertAfter(kgraph, ciTag, assignBufferTag, assignBufferTag);
                 if(assignStrideTag != -1)
                     insertAfter(kgraph, ciTag, assignStrideTag, assignStrideTag);
                 if(assignBaseTag != -1)
                     insertAfter(kgraph, ciTag, assignBaseTag, assignBaseTag);
+            }
+
+            // Replace all ComputeIndex nodes with NOP nodes
+            for(const auto& tag : candidates)
+            {
+                auto nopTag = kgraph.control.addElement(NOP());
+                replaceWith(kgraph, tag, nopTag, false);
+                purgeNodes(kgraph, std::vector<int>{tag});
             }
 
             return kgraph;

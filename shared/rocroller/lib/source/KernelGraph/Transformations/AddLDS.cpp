@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -140,7 +140,8 @@ namespace rocRoller
             for(auto tag : graph.coordinates.getNodes<MacroTile>())
             {
                 auto tile = *graph.coordinates.get<MacroTile>(tag);
-                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS)
+                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS
+                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL)
                 {
                     retval.combine(false, concatenate("Tile has LDS memory type: ", tag));
                 }
@@ -158,8 +159,9 @@ namespace rocRoller
             auto [userTag, user] = k.getDimension<User>(opTag);
             auto [tileTag, tile] = k.getDimension<MacroTile>(opTag);
 
-            if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
-                 || tile.memoryType == MemoryType::WAVE_Direct2LDS))
+            if(not(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
+                   || tile.memoryType == MemoryType::WAVE_Direct2LDS
+                   || tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL))
                 return;
 
             rocRoller::Log::getLogger()->debug(
@@ -222,6 +224,8 @@ namespace rocRoller
                     tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::LDS)
                     tile.memoryType = MemoryType::VGPR;
+                if(tile.memoryType == MemoryType::WAVE_LDS_FROM_GLOBAL)
+                    tile.memoryType = MemoryType::WAVE_FROM_GLOBAL;
                 k.coordinates.setElement(tileTag, tile);
 
                 if(!isLoad)
@@ -239,8 +243,9 @@ namespace rocRoller
 
                 k.mapper.purge(opTag);
                 k.mapper.connect<User>(opTag, userTag);
+                k.mapper.connect<User>(storeLDSOp, userTag);
                 k.mapper.connect<LDS>(storeLDSOp, ldsTag);
-                k.mapper.connect<User>(loadLDSOp, userTag); // For F6 Padding
+                k.mapper.connect<User>(loadLDSOp, userTag);
                 k.mapper.connect<LDS>(loadLDSOp, ldsTag);
 
                 if(isLoad)

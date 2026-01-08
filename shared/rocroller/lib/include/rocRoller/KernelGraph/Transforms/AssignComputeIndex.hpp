@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,8 +43,9 @@ namespace rocRoller
         class AssignComputeIndex : public GraphTransform
         {
         public:
-            AssignComputeIndex(ContextPtr context)
+            AssignComputeIndex(ContextPtr context, CommandPtr command)
                 : m_context(context)
+                , m_command(command)
             {
             }
 
@@ -57,6 +58,7 @@ namespace rocRoller
 
         private:
             ContextPtr m_context;
+            CommandPtr m_command;
         };
     }
 }

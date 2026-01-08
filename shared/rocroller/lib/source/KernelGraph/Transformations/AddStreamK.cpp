@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -597,6 +597,11 @@ namespace rocRoller
 
             graph.mapper.connect<User>(loadFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(loadFlagTag, flagRegister);
+
+            // TODO: See if the ControlFlowRWTracer can discover this dependency without this explicit connection.
+            // This is currently needed for InlineIncrements to work correctly.
+            graph.mapper.connect<ForLoop>(loadFlagTag, forReceiveTileLoopCoord);
+
             graph.coordinates.addElement(PassThrough(), {flagsScratchTag}, {nextWorkgroupTag});
 
             auto doWhileTag = graph.control.addElement(
@@ -646,6 +651,10 @@ namespace rocRoller
             auto resetFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
             graph.mapper.connect<User>(resetFlagTag, resetFlagsScratchTag);
             graph.mapper.connect<VGPR>(resetFlagTag, flagRegister);
+
+            // TODO: See if the ControlFlowRWTracer can discover this dependency without this explicit connection.
+            // This is currently needed for InlineIncrements to work correctly.
+            graph.mapper.connect<ForLoop>(resetFlagTag, forReceiveTileLoopCoord);
 
             // Create workitem coordinate and expression for wave 0 check
             // Only workitem 0 (wave 0) should write to the flag
