@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,7 @@
 #include <hip/hiprtc.h>
 #include <mutex>
 #include <optional>
-#include <thread>
+#include <semaphore>
 
 namespace fs = std::filesystem;
 
@@ -51,38 +51,42 @@ static std::mutex compile_lock;
 // Limit concurrent subprocesses based on available CPU cores.
 // This prevents oversubscription when running under job managers
 // (SLURM, mpiexec) that pin processes to specific CPU sets.
-static std::atomic<unsigned int> active_subprocesses{0};
-static unsigned int              max_subprocesses = 0;
+// Using counting_semaphore for efficient event-driven synchronization.
+static std::counting_semaphore<>* subprocess_semaphore = nullptr;
+static std::once_flag             semaphore_init_flag;
 
-// Get max subprocess count (cached, initialized on first use)
+// Get max subprocess count and initialize semaphore
 static unsigned int get_max_subprocesses()
 {
-    if(max_subprocesses == 0)
-    {
-        max_subprocesses = rocfft_concurrency();
+    unsigned int max_subprocesses = rocfft_concurrency();
 
-        // allow override via environment variable for testing/debugging
-        auto env_limit = rocfft_getenv("ROCFFT_RTC_MAX_SUBPROCESSES");
-        if(!env_limit.empty())
+    // allow override via environment variable for testing/debugging
+    auto env_limit = rocfft_getenv("ROCFFT_RTC_MAX_SUBPROCESSES");
+    if(!env_limit.empty())
+    {
+        try
         {
-            try
-            {
-                unsigned int user_limit = std::stoul(env_limit);
-                if(user_limit > 0)
-                    max_subprocesses = user_limit;
-            }
-            catch(...)
-            {
-                // use default
-            }
+            unsigned int user_limit = std::stoul(env_limit);
+            if(user_limit > 0)
+                max_subprocesses = user_limit;
         }
+        catch(...)
+        {
+            // use default
+        }
+    }
+
+    // initialize semaphore once with the determined count
+    std::call_once(semaphore_init_flag, [max_subprocesses]() {
+        subprocess_semaphore = new std::counting_semaphore<>(max_subprocesses);
 
         if(LOG_RTC_ENABLED())
         {
             (*LogSingleton::GetInstance().GetRTCOS())
                 << "// Max concurrent RTC subprocesses: " << max_subprocesses << std::endl;
         }
-    }
+    });
+
     return max_subprocesses;
 }
 
@@ -516,22 +520,21 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
     {
         try
         {
-            // wait if too many subprocesses are active
-            unsigned int max_procs = get_max_subprocesses();
-            while(active_subprocesses >= max_procs)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
+            // initialize semaphore and acquire slot (blocks if limit reached)
+            get_max_subprocesses();
+            subprocess_semaphore->acquire();
 
-            ++active_subprocesses;
             compile_begin = std::chrono::steady_clock::now();
             code          = compile_subprocess(kernel_src, gpu_arch);
-            --active_subprocesses;
+
+            // release slot for next subprocess
+            subprocess_semaphore->release();
             break;
         }
         catch(std::exception&)
         {
-            --active_subprocesses;
+            // release slot on error
+            subprocess_semaphore->release();
             // if subprocess had a problem, ignore it and
             // fall through to forced-in-process compile
         }
@@ -571,20 +574,19 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
             {
                 try
                 {
-                    // wait if too many subprocesses are active
-                    while(active_subprocesses >= max_procs)
-                    {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    }
+                    // acquire semaphore slot (blocks if limit reached)
+                    subprocess_semaphore->acquire();
 
-                    ++active_subprocesses;
                     compile_begin = std::chrono::steady_clock::now();
                     code          = compile_subprocess(kernel_src, gpu_arch);
-                    --active_subprocesses;
+
+                    // release slot for next subprocess
+                    subprocess_semaphore->release();
                 }
                 catch(std::exception&)
                 {
-                    --active_subprocesses;
+                    // release slot on error
+                    subprocess_semaphore->release();
                     // subprocess still didn't work, re-acquire lock
                     // and fall back to in-process if something went
                     // wrong
