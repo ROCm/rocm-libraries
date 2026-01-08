@@ -137,6 +137,7 @@ function(add_thrust_test TEST)
         add_test(${TEST} ${TEST_TARGET})
         set_tests_properties(${TEST}
             PROPERTIES
+                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS upstream
         )
     endif()
