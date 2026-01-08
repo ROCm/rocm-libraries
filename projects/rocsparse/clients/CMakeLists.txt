@@ -58,75 +58,28 @@ if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
         message(FATAL_ERROR "mtx2csr.exe failed to build, aborting.")
     endif()
 
-    # Create custom targets and commands for test data files
+    # Copy test data files to staging directory
     set(ROCSPARSE_CLIENTMATRICES "${PROJECT_SOURCE_DIR}/cmake/rocsparse_clientmatrices.cmake")
-    set(ROCSPARSE_CONVERT "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_mtx2csr")
 
-    add_custom_command(
-        OUTPUT "${ROCSPARSE_CONVERT}"
-        COMMAND ${CMAKE_COMMAND} -E copy
-                "${PROJECT_BINARY_DIR}/mtx2csr.exe" "${ROCSPARSE_CONVERT}"
-        DEPENDS "${PROJECT_BINARY_DIR}/mtx2csr.exe"
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
+    set(ROCSPARSE_CONVERT "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_mtx2csr")
+    file(COPY_FILE "${PROJECT_BINARY_DIR}/mtx2csr.exe" "${ROCSPARSE_CONVERT}")
 
     set(ROCSPARSE_COMMON "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_common.yaml")
-    add_custom_command(
-        OUTPUT "${ROCSPARSE_COMMON}"
-        COMMAND ${CMAKE_COMMAND} -E copy
-                include/rocsparse_common.yaml "${ROCSPARSE_COMMON}"
-        DEPENDS include/rocsparse_common.yaml
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
+    configure_file(include/rocsparse_common.yaml "${ROCSPARSE_COMMON}" COPYONLY)
 
     set(ROCSPARSE_TEMPLATE "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_template.yaml")
-    add_custom_command(
-        OUTPUT "${ROCSPARSE_TEMPLATE}"
-        COMMAND ${CMAKE_COMMAND} -E copy
-                include/rocsparse_template.yaml "${ROCSPARSE_TEMPLATE}"
-        DEPENDS include/rocsparse_template.yaml
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
+    configure_file(include/rocsparse_template.yaml "${ROCSPARSE_TEMPLATE}" COPYONLY)
 
     set(ROCSPARSE_SMOKE "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_smoke.yaml")
     set(ROCSPARSE_REGRESSION "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_regression.yaml")
     set(ROCSPARSE_EXTENDED "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_extended.yaml")
-
-    add_custom_command(
-        OUTPUT "${ROCSPARSE_SMOKE}" "${ROCSPARSE_REGRESSION}" "${ROCSPARSE_EXTENDED}"
-        COMMAND ${CMAKE_COMMAND} -E copy
-                include/rocsparse_smoke.yaml "${ROCSPARSE_SMOKE}"
-        COMMAND ${CMAKE_COMMAND} -E copy
-                include/rocsparse_regression.yaml "${ROCSPARSE_REGRESSION}"
-        COMMAND ${CMAKE_COMMAND} -E copy
-                include/rocsparse_extended.yaml "${ROCSPARSE_EXTENDED}"
-        DEPENDS
-            include/rocsparse_smoke.yaml
-            include/rocsparse_regression.yaml
-            include/rocsparse_extended.yaml
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
+    configure_file(include/rocsparse_smoke.yaml "${ROCSPARSE_SMOKE}" COPYONLY)
+    configure_file(include/rocsparse_regression.yaml "${ROCSPARSE_REGRESSION}" COPYONLY)
+    configure_file(include/rocsparse_extended.yaml "${ROCSPARSE_EXTENDED}" COPYONLY)
 
     set(ROCSPARSE_GENTEST "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_gentest.py")
-    add_custom_command(
-        OUTPUT "${ROCSPARSE_GENTEST}"
-        COMMAND ${CMAKE_COMMAND} -E copy
-                common/rocsparse_gentest.py "${ROCSPARSE_GENTEST}"
-        DEPENDS common/rocsparse_gentest.py
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
+    configure_file(common/rocsparse_gentest.py "${ROCSPARSE_GENTEST}" COPYONLY)
 
-    add_custom_target(
-        rocsparse-common
-        DEPENDS
-            "${ROCSPARSE_COMMON}"
-            "${ROCSPARSE_TEMPLATE}"
-            "${ROCSPARSE_SMOKE}"
-            "${ROCSPARSE_GENTEST}"
-            "${ROCSPARSE_CONVERT}"
-    )
-
-    # Install test support files
     rocm_install(
         FILES "${ROCSPARSE_COMMON}" "${ROCSPARSE_TEMPLATE}" "${ROCSPARSE_SMOKE}"
         COMPONENT clients-common
