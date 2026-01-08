@@ -16,6 +16,23 @@ ROCBLAS_SRC_PATH=`dirname "$(readlink -m $0)"`
 
 /bin/ln -fs ../../.githooks/pre-commit "$(dirname "$0")/.git/hooks/"
 
+# Distribution-agnostic version comparison function
+# Returns: 0 if $1 < $2, 1 otherwise
+# Usage: version_lt "3.24.0" "3.26.0" && echo "older"
+version_lt() {
+    local ver1=$1
+    local ver2=$2
+    
+    # Handle empty versions
+    [ -z "$ver1" ] && return 0
+    [ -z "$ver2" ] && return 1
+    
+    # Use sort -V (version sort) to compare
+    # If ver1 appears first when sorted, it's less than ver2
+    [ "$ver1" = "$ver2" ] && return 1
+    [ "$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | head -n1)" = "$ver1" ]
+}
+
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
 # true is a system command that completes successfully, function returns success
 # prereq: ${ID} must be defined before calling
@@ -408,7 +425,7 @@ install_packages( )
   fi
 
   # wget and openssl are needed for cmake
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
+  if version_lt "$CMAKE_VERSION" "$CMAKE_MIN_VERSION"; then
     if $update_cmake == true; then
       library_dependencies_ubuntu+=("wget" "libssl-dev")
       library_dependencies_centos_rhel+=("wget" "openssl-devel")
@@ -784,7 +801,7 @@ determine_cmake_requirements( )
     cmake_target_version="${CMAKE_MIN_VERSION}"
 
     # Check if system CMake meets rocBLAS minimum (3.24.4)
-    if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION 2>/dev/null || [[ "$CMAKE_VERSION" < "$CMAKE_MIN_VERSION" ]]); then
+    if version_lt "$CMAKE_VERSION" "$CMAKE_MIN_VERSION"; then
         printf "\033[33mSystem CMake ${CMAKE_VERSION:-none} < ${CMAKE_MIN_VERSION} - will auto-install\033[0m\n"
         need_cmake_install=true
         cmake_target_version="${CMAKE_MIN_VERSION}"
@@ -792,7 +809,7 @@ determine_cmake_requirements( )
 
     # Check if we need higher version for AOCL (3.26.0)
     if [[ "${will_build_aocl}" == true ]]; then
-        if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_AOCL_MIN 2>/dev/null || [[ "$CMAKE_VERSION" < "$CMAKE_AOCL_MIN" ]]); then
+        if version_lt "$CMAKE_VERSION" "$CMAKE_AOCL_MIN"; then
             printf "\033[33mAOCL 5.2 build requires CMake >= ${CMAKE_AOCL_MIN} - will auto-install\033[0m\n"
             need_cmake_install=true
             cmake_target_version="${CMAKE_AOCL_MIN}"
