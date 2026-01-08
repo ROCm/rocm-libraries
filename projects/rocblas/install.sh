@@ -289,7 +289,12 @@ build_aocl_5_2( )
     pushd .
     mkdir -p ${build_dir}/deps
     cd ${build_dir}/deps
-    git clone --quiet --depth 1 --branch AOCL-5.2 https://github.com/amd/aocl.git 2>&1 | grep -v "detached HEAD" || true
+    git clone --quiet --depth 1 --branch AOCL-5.2 https://github.com/amd/aocl.git 2>&1 | grep -v "detached HEAD"
+    if [[ ! -d aocl ]]; then
+        printf "\033[31mFailed to clone AOCL 5.2 into %s/deps/aocl\033[0m\n" "${build_dir}"
+        popd
+        return 1
+    fi
     cd aocl
     CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON  -DENABLE_ILP64=ON  -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
     elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
