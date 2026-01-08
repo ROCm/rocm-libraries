@@ -15,12 +15,22 @@
 name: Trigger Azure CI
 
 on:
-  pull_request_target:
+  pull_request:
     types:
       - opened
       - synchronize
       - reopened
       - ready_for_review
+    paths-ignore:  # Do not trigger full tests on documentation-only changes
+      - '**.txt'
+      - '**.md'
+      - '**.rtf'
+      - '**.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - 'docs/**'
+      - 'projects/*/docs/**'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
