@@ -179,10 +179,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       set(BLAS_LIBRARY)
       set(BLIS_INCLUDE_DIR)
       
-      # Try AOCL 5.x unified library (libaocl.so) first
+      # Try AOCL 5.x unified library (libaocl.a preferred) first
       if(NOT BLAS_LIBRARY)
         # Check build dependencies
-        foreach(ext IN ITEMS so a)
+        foreach(ext IN ITEMS a so)
           if(EXISTS "${BUILD_DIR}/deps/aocl/install_package/lib/libaocl.${ext}")
             set(BLAS_LIBRARY "${BUILD_DIR}/deps/aocl/install_package/lib/libaocl.${ext}")
             set(BLIS_INCLUDE_DIR "${BUILD_DIR}/deps/aocl/install_package/include")
@@ -199,7 +199,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
         list(REVERSE AOCL5_DIRS)
         foreach(dir IN LISTS AOCL5_DIRS)
           foreach(libdir IN ITEMS lib lib64)
-            foreach(ext IN ITEMS so a)
+            foreach(ext IN ITEMS a so)
               if(EXISTS "${dir}/${libdir}/libaocl.${ext}")
                 set(BLAS_LIBRARY "${dir}/${libdir}/libaocl.${ext}")
                 if(EXISTS "${dir}/include_ILP64")
