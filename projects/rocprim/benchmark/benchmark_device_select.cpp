@@ -73,13 +73,13 @@
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(KEY_TYPE, VALUE_TYPE)
 
 #define BENCHMARK_TYPES_TUNING(KEY_TYPE)               \
-    BENCHMARK_SELECT_FLAG_TYPE(KEY_TYPE, int8_t)         \
+    BENCHMARK_SELECT_FLAG_TYPE(KEY_TYPE, int8_t)       \
     BENCHMARK_SELECT_PREDICATE_TYPE(KEY_TYPE)          \
     BENCHMARK_UNIQUE_TYPE(KEY_TYPE)                    \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, rocprim::int128_t) \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int64_t)           \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, int32_t)               \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, int16_t)             \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int32_t)           \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int16_t)           \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int8_t)
 
 int main(int argc, char* argv[])

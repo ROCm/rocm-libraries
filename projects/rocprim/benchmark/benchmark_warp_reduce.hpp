@@ -51,7 +51,8 @@ void warp_reduce_kernel(const T* d_input, T* d_output)
         auto value = d_input[i];
 
         using wreduce_t = rocprim::warp_reduce<T, VirtualWaveSize, AllReduce>;
-        __shared__ typename wreduce_t::storage_type storage;
+        __shared__
+        typename wreduce_t::storage_type storage;
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
@@ -74,7 +75,8 @@ void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
         auto flag  = d_flags[i];
 
         using wreduce_t = rocprim::warp_reduce<T, VirtualWaveSize>;
-        __shared__ typename wreduce_t::storage_type storage;
+        __shared__
+        typename wreduce_t::storage_type storage;
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
         {
@@ -112,9 +114,9 @@ template<bool         AllReduce,
          unsigned int Trials,
          typename T,
          typename Flag>
-inline auto
-    execute_warp_reduce_kernel(T* input, T* output, Flag* flags, size_t items, hipStream_t stream)
-        -> typename std::enable_if<Segmented>::type
+inline auto execute_warp_reduce_kernel(
+    T* input, T* output, Flag* flags, size_t items, hipStream_t stream) ->
+    typename std::enable_if<Segmented>::type
 {
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, VirtualWaveSize, Trials>),

@@ -70,8 +70,10 @@ struct histogram
 
         using bhistogram_t
             = rocprim::block_histogram<T, BlockSize, ItemsPerThread, BinSize, algorithm>;
-        __shared__ T histogram[BinSize];
-        __shared__ typename bhistogram_t::storage_type storage;
+        __shared__
+        T                                   histogram[BinSize];
+        __shared__
+        typename bhistogram_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)

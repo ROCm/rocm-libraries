@@ -68,7 +68,8 @@ struct subtract_left
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < trials; ++trial)
@@ -108,7 +109,8 @@ struct subtract_left_partial
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         unsigned int tile_size = tile_sizes[blockIdx.x];
 
@@ -163,7 +165,8 @@ struct subtract_right
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < trials; ++trial)
@@ -207,7 +210,8 @@ struct subtract_right_partial
         rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
-        __shared__ typename adjacent_diff_t::storage_type storage;
+        __shared__
+        typename adjacent_diff_t::storage_type storage;
 
         unsigned int tile_size = tile_sizes[blockIdx.x];
         // Try to evenly distribute the length of tile_sizes between all the trials

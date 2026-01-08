@@ -43,21 +43,21 @@
     CREATE_BENCHMARK(Benchmark, T, BS, 8)    \
     CREATE_BENCHMARK(Benchmark, T, BS, 12)
 
-#define BENCHMARK_ATOMIC()                                      \
-    BENCHMARK_TYPE(histogram_atomic_t, int32_t, 256)                \
-    BENCHMARK_TYPE(histogram_atomic_t, int32_t, 320)                \
-    BENCHMARK_TYPE(histogram_atomic_t, int32_t, 512)                \
-                                                                \
+#define BENCHMARK_ATOMIC()                            \
+    BENCHMARK_TYPE(histogram_atomic_t, int32_t, 256)  \
+    BENCHMARK_TYPE(histogram_atomic_t, int32_t, 320)  \
+    BENCHMARK_TYPE(histogram_atomic_t, int32_t, 512)  \
+                                                      \
     BENCHMARK_TYPE(histogram_atomic_t, uint64_t, 256) \
     BENCHMARK_TYPE(histogram_atomic_t, uint64_t, 320)
 
 #define BENCHMARK_SORT()                                         \
-    BENCHMARK_TYPE(histogram_sort_t, int32_t, 256)                   \
-    BENCHMARK_TYPE(histogram_sort_t, int32_t, 320)                   \
-    BENCHMARK_TYPE(histogram_sort_t, int32_t, 512)                   \
+    BENCHMARK_TYPE(histogram_sort_t, int32_t, 256)               \
+    BENCHMARK_TYPE(histogram_sort_t, int32_t, 320)               \
+    BENCHMARK_TYPE(histogram_sort_t, int32_t, 512)               \
                                                                  \
-    BENCHMARK_TYPE(histogram_sort_t, uint64_t, 256)    \
-    BENCHMARK_TYPE(histogram_sort_t, uint64_t, 320)    \
+    BENCHMARK_TYPE(histogram_sort_t, uint64_t, 256)              \
+    BENCHMARK_TYPE(histogram_sort_t, uint64_t, 320)              \
                                                                  \
     BENCHMARK_TYPE_128(histogram_sort_t, rocprim::int128_t, 256) \
     BENCHMARK_TYPE_128(histogram_sort_t, rocprim::uint128_t, 256)

@@ -34,9 +34,9 @@
 #define CREATE_BENCHMARK_TYPE_TUNING(KeyType)      \
     CREATE_BENCHMARK(KeyType, rocprim::empty_type) \
     CREATE_BENCHMARK(KeyType, rocprim::int128_t)   \
-    CREATE_BENCHMARK(KeyType, int64_t)           \
-    CREATE_BENCHMARK(KeyType, int32_t)                 \
-    CREATE_BENCHMARK(KeyType, int16_t)               \
+    CREATE_BENCHMARK(KeyType, int64_t)             \
+    CREATE_BENCHMARK(KeyType, int32_t)             \
+    CREATE_BENCHMARK(KeyType, int16_t)             \
     CREATE_BENCHMARK(KeyType, int8_t)
 
 int main(int argc, char* argv[])

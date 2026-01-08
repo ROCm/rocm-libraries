@@ -66,7 +66,8 @@ struct inclusive_scan
         }
 
         using bscan_t = rocprim::block_scan<T, BlockSize, algorithm>;
-        __shared__ typename bscan_t::storage_type storage;
+        __shared__
+        typename bscan_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
@@ -100,7 +101,8 @@ struct exclusive_scan
         }
 
         using bscan_t = rocprim::block_scan<T, BlockSize, algorithm>;
-        __shared__ typename bscan_t::storage_type storage;
+        __shared__
+        typename bscan_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)

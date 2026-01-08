@@ -76,9 +76,10 @@ auto warp_exchange_device_fn(T* d_output, unsigned int trials)
     }
 
     using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
-    constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = threadIdx.x / LogicalWarpSize;
-    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
+    constexpr unsigned int                    warps_in_block = BlockSize / LogicalWarpSize;
+    const unsigned int                        warp_id        = threadIdx.x / LogicalWarpSize;
+    ROCPRIM_SHARED_MEMORY
+    typename warp_exchange_type::storage_type storage[warps_in_block];
 
     ROCPRIM_NO_UNROLL
     for(unsigned int i = 0; i < trials; ++i)
@@ -123,7 +124,8 @@ auto warp_exchange_device_fn(T* d_output, unsigned int trials)
     }
 
     using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
-    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
+    ROCPRIM_SHARED_MEMORY
+    typename warp_exchange_type::storage_type storage[warps_in_block];
 
     ROCPRIM_NO_UNROLL
     for(unsigned int i = 0; i < trials; ++i)

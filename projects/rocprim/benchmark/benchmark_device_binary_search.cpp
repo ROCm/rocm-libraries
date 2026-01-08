@@ -64,8 +64,8 @@
 #define BENCHMARK_TYPES_TUNING(VALUE_TYPE)               \
     BENCHMARK_TYPE_TUNING(VALUE_TYPE, rocprim::int128_t) \
     BENCHMARK_TYPE_TUNING(VALUE_TYPE, int64_t)           \
-    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int32_t)               \
-    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int16_t)             \
+    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int32_t)           \
+    BENCHMARK_TYPE_TUNING(VALUE_TYPE, int16_t)           \
     BENCHMARK_TYPE_TUNING(VALUE_TYPE, int8_t)
 
 int main(int argc, char* argv[])

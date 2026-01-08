@@ -66,7 +66,8 @@ struct reduce
         }
 
         using breduce_t = rocprim::block_reduce<T, BlockSize, algorithm>;
-        __shared__ typename breduce_t::storage_type storage;
+        __shared__
+        typename breduce_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)

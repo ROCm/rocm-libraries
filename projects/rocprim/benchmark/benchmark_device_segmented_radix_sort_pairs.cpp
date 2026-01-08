@@ -82,8 +82,8 @@ void add_benchmarks(primbench::executor& executor, size_t bytes)
 #define BENCHMARK_TYPES_TUNING(KEY_TYPE)               \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, rocprim::int128_t) \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int64_t)           \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, int32_t)               \
-    BENCHMARK_TYPE_TUNING(KEY_TYPE, int16_t)             \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int32_t)           \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int16_t)           \
     BENCHMARK_TYPE_TUNING(KEY_TYPE, int8_t)
 
 int main(int argc, char* argv[])

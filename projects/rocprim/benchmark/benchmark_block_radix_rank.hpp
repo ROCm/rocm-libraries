@@ -65,9 +65,10 @@ void rank_kernel(const T* keys_input, unsigned int* ranks_output)
     ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; ++trial)
     {
-        ROCPRIM_SHARED_MEMORY typename rank_type::storage_type storage;
-        unsigned int                                           begin_bit = 0;
-        const unsigned int                                     end_bit   = sizeof(T) * 8;
+        ROCPRIM_SHARED_MEMORY
+        typename rank_type::storage_type storage;
+        unsigned int                     begin_bit = 0;
+        const unsigned int               end_bit   = sizeof(T) * 8;
 
         while(begin_bit < end_bit)
         {
