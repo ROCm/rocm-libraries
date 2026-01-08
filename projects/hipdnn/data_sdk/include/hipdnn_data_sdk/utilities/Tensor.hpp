@@ -66,8 +66,6 @@ public:
     using reference = std::conditional_t<IsConst, const void*, void*>;
 
     using TensorType = std::conditional_t<IsConst, const ITensor&, ITensor&>;
-    using TensorPointerType = std::conditional_t<IsConst, ITensor const*, ITensor*>;
-
     using IndexType = std::variant<LinearIndex, CompositeIndex>;
 
 public:
@@ -76,14 +74,14 @@ public:
     template <bool C = IsConst, std::enable_if_t<!C, int> = 0>
     ITensorIterator(ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
-        , _index(makeIndex(&_tensor, isEnd))
+        , _index(makeIndex(_tensor, isEnd))
     {
     }
 
     template <bool C = IsConst, std::enable_if_t<C, int> = 0>
     ITensorIterator(const ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
-        , _index(makeIndex(&_tensor, isEnd))
+        , _index(makeIndex(_tensor, isEnd))
     {
     }
 
@@ -137,14 +135,14 @@ public:
 
     struct LinearIndex
     {
-        LinearIndex(TensorPointerType tensor, bool isEnd)
+        LinearIndex(TensorType tensor, bool isEnd)
             : index(0)
             , tensor(tensor)
 
         {
-            if(isEnd && !tensor->dims().empty())
+            if(isEnd && !tensor.dims().empty())
             {
-                index = static_cast<decltype(index)>(tensor->elementCount());
+                index = static_cast<decltype(index)>(tensor.elementCount());
             }
         }
 
@@ -163,7 +161,7 @@ public:
 
         bool operator==(const LinearIndex& other) const
         {
-            return index == other.index && tensor == other.tensor;
+            return index == other.index && &tensor == &other.tensor;
         }
 
         bool operator!=(const LinearIndex& other) const
@@ -173,7 +171,7 @@ public:
 
         bool isOutOfBounds() const
         {
-            return index == static_cast<decltype(index)>(tensor->elementCount());
+            return index == static_cast<decltype(index)>(tensor.elementCount());
         }
 
         int64_t getValue() const
@@ -182,24 +180,24 @@ public:
         }
 
         int64_t index;
-        TensorPointerType tensor;
+        TensorType tensor;
     };
 
     struct CompositeIndex
     {
-        CompositeIndex(TensorPointerType tensor, bool isEnd)
-            : indices(tensor->dims().size(), 0)
+        CompositeIndex(TensorType tensor, bool isEnd)
+            : indices(tensor.dims().size(), 0)
             , tensor(tensor)
         {
-            if(isEnd && !tensor->dims().empty())
+            if(isEnd && !tensor.dims().empty())
             {
-                indices[0] = tensor->dims()[0];
+                indices[0] = tensor.dims()[0];
             }
         }
 
         CompositeIndex& operator++()
         {
-            const auto& dims = tensor->dims();
+            const auto& dims = tensor.dims();
             for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
             {
                 auto dimIdx = static_cast<size_t>(dim);
@@ -225,7 +223,7 @@ public:
 
         bool operator==(const CompositeIndex& other) const
         {
-            return indices == other.indices && tensor == other.tensor;
+            return indices == other.indices && &tensor == &other.tensor;
         }
 
         bool operator!=(const CompositeIndex& other) const
@@ -235,17 +233,17 @@ public:
 
         bool isOutOfBounds() const
         {
-            const auto& dims = tensor->dims();
+            const auto& dims = tensor.dims();
             return dims.empty() || indices[0] == dims[0];
         }
 
         int64_t getValue() const
         {
-            return tensor->getIndex(indices);
+            return tensor.getIndex(indices);
         }
 
         std::vector<int64_t> indices;
-        TensorPointerType tensor;
+        TensorType tensor;
     };
 
 private:
@@ -257,9 +255,9 @@ private:
         }
     }
 
-    IndexType makeIndex(TensorPointerType tensor, bool isEnd)
+    IndexType makeIndex(TensorType tensor, bool isEnd)
     {
-        if(tensor->isPacked())
+        if(tensor.isPacked())
         {
             return LinearIndex(tensor, isEnd);
         }
