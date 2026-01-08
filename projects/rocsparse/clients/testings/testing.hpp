@@ -32,6 +32,7 @@
 #include "rocsparse_matrix_factory.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_reproducibility_test_save.hpp"
+#include "rocsparse_traits.hpp"
 #include "rocsparse_vector_utils.hpp"
 #include "utility.hpp"
 

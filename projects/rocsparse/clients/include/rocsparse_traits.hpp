@@ -71,14 +71,4 @@ struct is_low_precision<_Float16> : std::true_type
 template <typename T>
 constexpr bool is_low_precision_v = is_low_precision<T>::value;
 
-// Set all entries in an array to 1.0f for numerical stability with low-precision types
-template <typename T>
-inline void set_array_to_ones(T* data, size_t size)
-{
-    for(size_t i = 0; i < size; ++i)
-    {
-        data[i] = static_cast<T>(1.0f);
-    }
-}
-
 #endif // ROCSPARSE_TRAITS_HPP

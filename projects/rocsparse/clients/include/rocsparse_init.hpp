@@ -577,4 +577,15 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                         J                    u,
                                         J                    uu);
 
+/* ==================================================================================== */
+/*! \brief Set all entries in an array to 1.0 for numerical stability with low-precision types */
+template <typename T>
+inline void set_array_to_ones(T* data, int64_t size)
+{
+    for(int64_t i = 0; i < size; ++i)
+    {
+        data[i] = static_cast<T>(1.0);
+    }
+}
+
 #endif // ROCSPARSE_INIT_HPP

@@ -501,22 +501,20 @@ namespace rocsparse
                     {
                         for(unsigned int p = 0; p < LOOPS; p++)
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                static_cast<int64_t>((colB + p * WF_SIZE) * ldc + current_row),
-                                dense_C_size,
-                                static_cast<C>(alpha * sum[p]));
+                            rocsparse::atomic_add(dense_C,
+                                                  colB + p * WF_SIZE * ldc + current_row,
+                                                  dense_C_size,
+                                                  static_cast<C>(alpha * sum[p]));
                         }
                     }
                     else
                     {
                         for(unsigned int p = 0; p < LOOPS; p++)
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                static_cast<int64_t>(current_row * ldc + colB + p * WF_SIZE),
-                                dense_C_size,
-                                static_cast<C>(alpha * sum[p]));
+                            rocsparse::atomic_add(dense_C,
+                                                  current_row * ldc + colB + p * WF_SIZE,
+                                                  dense_C_size,
+                                                  static_cast<C>(alpha * sum[p]));
                         }
                     }
 
@@ -539,22 +537,20 @@ namespace rocsparse
             {
                 for(unsigned int p = 0; p < LOOPS; p++)
                 {
-                    rocsparse::atomic_add(
-                        dense_C,
-                        static_cast<int64_t>((colB + p * WF_SIZE) * ldc + current_row),
-                        dense_C_size,
-                        static_cast<C>(alpha * sum[p]));
+                    rocsparse::atomic_add(dense_C,
+                                          colB + p * WF_SIZE * ldc + current_row,
+                                          dense_C_size,
+                                          static_cast<C>(alpha * sum[p]));
                 }
             }
             else
             {
                 for(unsigned int p = 0; p < LOOPS; p++)
                 {
-                    rocsparse::atomic_add(
-                        dense_C,
-                        static_cast<int64_t>(current_row * ldc + colB + p * WF_SIZE),
-                        dense_C_size,
-                        static_cast<C>(alpha * sum[p]));
+                    rocsparse::atomic_add(dense_C,
+                                          current_row * ldc + colB + p * WF_SIZE,
+                                          dense_C_size,
+                                          static_cast<C>(alpha * sum[p]));
                 }
             }
         }
@@ -634,14 +630,14 @@ namespace rocsparse
                         if(order_C == rocsparse_order_column)
                         {
                             rocsparse::atomic_add(dense_C,
-                                                  static_cast<int64_t>(colB * ldc + current_row),
+                                                  colB * ldc + current_row,
                                                   dense_C_size,
                                                   static_cast<C>(alpha * sum));
                         }
                         else
                         {
                             rocsparse::atomic_add(dense_C,
-                                                  static_cast<int64_t>(current_row * ldc + colB),
+                                                  current_row * ldc + colB,
                                                   dense_C_size,
                                                   static_cast<C>(alpha * sum));
                         }
@@ -692,19 +688,17 @@ namespace rocsparse
                     {
                         if(order_C == rocsparse_order_column)
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                static_cast<int64_t>((l + swid) * ldc + current_row),
-                                dense_C_size,
-                                static_cast<C>(alpha * sum));
+                            rocsparse::atomic_add(dense_C,
+                                                  l + swid * ldc + current_row,
+                                                  dense_C_size,
+                                                  static_cast<C>(alpha * sum));
                         }
                         else
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                static_cast<int64_t>(current_row * ldc + (l + swid)),
-                                dense_C_size,
-                                static_cast<C>(alpha * sum));
+                            rocsparse::atomic_add(dense_C,
+                                                  current_row * ldc + (l + swid),
+                                                  dense_C_size,
+                                                  static_cast<C>(alpha * sum));
                         }
                     }
                 }
@@ -718,19 +712,17 @@ namespace rocsparse
                     {
                         if(order_C == rocsparse_order_column)
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                static_cast<int64_t>((l + swid) * ldc + current_row),
-                                dense_C_size,
-                                static_cast<C>(alpha * sum));
+                            rocsparse::atomic_add(dense_C,
+                                                  l + swid * ldc + current_row,
+                                                  dense_C_size,
+                                                  static_cast<C>(alpha * sum));
                         }
                         else
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                static_cast<int64_t>(current_row * ldc + (l + swid)),
-                                dense_C_size,
-                                static_cast<C>(alpha * sum));
+                            rocsparse::atomic_add(dense_C,
+                                                  current_row * ldc + (l + swid),
+                                                  dense_C_size,
+                                                  static_cast<C>(alpha * sum));
                         }
                     }
                 }

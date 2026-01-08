@@ -21,11 +21,9 @@
 *
 * ************************************************************************ */
 
-#include "rocsparse_traits.hpp"
 #include "testing.hpp"
 
 #include <tuple>
-#include <type_traits>
 
 template <typename I, typename J, typename A, typename B, typename C, typename T>
 void testing_spmm_csr_bad_arg(const Arguments& arg)
