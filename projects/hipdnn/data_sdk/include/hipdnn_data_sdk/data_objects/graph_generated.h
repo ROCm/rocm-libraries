@@ -21,6 +21,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "convolution_fwd_attributes_generated.h"
 #include "convolution_wrw_attributes_generated.h"
 #include "data_types_generated.h"
+#include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "tensor_attributes_generated.h"
 
@@ -50,11 +51,12 @@ enum class NodeAttributes : uint8_t {
   ConvolutionBwdAttributes = 6,
   ConvolutionWrwAttributes = 7,
   BatchnormInferenceAttributesVarianceExt = 8,
+  MatmulAttributes = 9,
   MIN = NONE,
-  MAX = BatchnormInferenceAttributesVarianceExt
+  MAX = MatmulAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[9] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[10] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -64,13 +66,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[9] {
     NodeAttributes::ConvolutionFwdAttributes,
     NodeAttributes::ConvolutionBwdAttributes,
     NodeAttributes::ConvolutionWrwAttributes,
-    NodeAttributes::BatchnormInferenceAttributesVarianceExt
+    NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+    NodeAttributes::MatmulAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[10] = {
+  static const char * const names[11] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -80,13 +83,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "ConvolutionBwdAttributes",
     "ConvolutionWrwAttributes",
     "BatchnormInferenceAttributesVarianceExt",
+    "MatmulAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::BatchnormInferenceAttributesVarianceExt)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::MatmulAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -127,6 +131,10 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::BatchnormI
   static const NodeAttributes enum_value = NodeAttributes::BatchnormInferenceAttributesVarianceExt;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::MatmulAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -161,6 +169,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::Convo
 
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT> {
   static const NodeAttributes enum_value = NodeAttributes::BatchnormInferenceAttributesVarianceExt;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::MatmulAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -257,6 +269,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::BatchnormInferenceAttributesVarianceExt ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT *>(value) : nullptr;
   }
+  hipdnn_data_sdk::data_objects::MatmulAttributesT *AsMatmulAttributes() {
+    return type == NodeAttributes::MatmulAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::MatmulAttributesT *AsMatmulAttributes() const {
+    return type == NodeAttributes::MatmulAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -297,6 +317,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::BatchnormInferenceAttributesVarianceExt: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT *>(rhs.value));
+    }
+    case NodeAttributes::MatmulAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -370,6 +394,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt *attributes_as_BatchnormInferenceAttributesVarianceExt() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt ? static_cast<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt *>(attributes()) : nullptr;
   }
+  const hipdnn_data_sdk::data_objects::MatmulAttributes *attributes_as_MatmulAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes ? static_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -418,6 +445,10 @@ template<> inline const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes 
 
 template<> inline const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt *Node::attributes_as<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>() const {
   return attributes_as_BatchnormInferenceAttributesVarianceExt();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::MatmulAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::MatmulAttributes>() const {
+  return attributes_as_MatmulAttributes();
 }
 
 struct NodeBuilder {
@@ -796,6 +827,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::MatmulAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -847,6 +882,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::MatmulAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -886,6 +925,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT *>(value);
       return CreateBatchnormInferenceAttributesVarianceExt(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::MatmulAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value);
+      return CreateMatmulAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -922,6 +965,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::BatchnormInferenceAttributesVarianceExt: {
       value = new hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT(*reinterpret_cast<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT *>(u.value));
+      break;
+    }
+    case NodeAttributes::MatmulAttributes: {
+      value = new hipdnn_data_sdk::data_objects::MatmulAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::MatmulAttributesT *>(u.value));
       break;
     }
     default:
@@ -968,6 +1015,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::BatchnormInferenceAttributesVarianceExt: {
       auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::MatmulAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value);
       delete ptr;
       break;
     }

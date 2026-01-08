@@ -9,6 +9,9 @@ coverage:
       hipBLAS:
         flags: [hipBLAS]
         target: 80%
+      hipBLASLt:
+        flags: [hipBLASLt]
+        target: 80%
       hipCUB:
         flags: [hipCUB]
         target: 80%
