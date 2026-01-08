@@ -3288,6 +3288,58 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+
+@RegisterSchedule(
+    tile_config=TileConfig(160, 128, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        print("Using CMS!!!!!!!!!!!!")
+        kernel["MfmaInitCVgprs"] = True
+        kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = True
+        numMfma = 120
+        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+        # return None, False 
+        optSchedule = {
+        'SYNC': [[-1, 4, 26, 26, 59, 96, 96]], # 7
+        'PackA0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]], # 120
+        'PackB0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]], # 96
+        'LRA0': [[0, 1, 4, 5, 6, 7, 8, 9, 10, 11]], # 10
+        'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]], # 9
+        'LRB0': [[2, 3, 12, 13, 14, 15, 16, 17]], # 8
+        'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], # 9
+        'GRA': [[26, 26, 30, 30, 34, 34, 38, 38, 42, 42, 46, 46, 50, 50, 54, 54, 58, 58, 62, 62]], # 20
+        'LRSA': [[58]], # 1
+        'LRSB': [[58]], # 1
+        'GRB': [[66, 66, 70, 70, 74, 74, 78, 78, 82, 82, 86, 86, 90, 90, 94, 94]], # 16
+        'LWSA': [[94]], # 1
+        'LWSB': [[94]], # 1
+        'LRA3': [[97, 98, 101, 102, 103, 104, 105, 106, 107, 108]], # 10
+        'LRB3': [[99, 100, 109, 110, 111, 112, 113, 114]], # 8
+        'PackA3': [[95, 95, 95, 95, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 97, 97, 97, 97, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 99, 99, 99, 99, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 101, 101, 101, 101, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103, 103]], # 120
+        'PackB3': [[95, 95, 95, 95, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 97, 97, 97, 97, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 99, 99, 99, 99, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 101, 101, 101, 101, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102]], # 96
+        'LCC': [[119, 119]], # 2
+    }
+        snopCode = []
+        syncCode = [
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=6 newLW=0 newLR=6 for iteration == 0"),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SWaitCnt(dscnt=-1, vlcnt=18, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        
+        opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+        return True, opt1
+
+
 @RegisterSchedule(
     tile_config=TileConfig(128, 128, 32, 2, 0, True, 0, 0),
     dtype_predicate=isTF32,
