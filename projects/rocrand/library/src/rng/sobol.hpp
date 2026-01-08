@@ -169,10 +169,11 @@ struct generate_sobol_host
         __shared__
             Constant shared_vectors[vector_size];
 #else
-                // NVCC won't accept extern __shared__ Constant shared_bytes[];
-                // Thereby we must resort to aliasing.
-                extern __shared__ unsigned char shared_bytes[];
-                auto* shared_vectors = reinterpret_cast<Constant*>(&shared_bytes[0]);
+            // NVCC won't accept extern __shared__ Constant shared_bytes[];
+            // Thereby we must resort to aliasing.
+            extern __shared__
+            unsigned char shared_bytes[];
+            auto*         shared_vectors = reinterpret_cast<Constant*>(&shared_bytes[0]);
 #endif
             if(thread_idx.x < vector_size)
             {
