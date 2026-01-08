@@ -1788,8 +1788,7 @@ struct PerformanceConfigConvBinWinogradRxS : PerfConfigBase<PerformanceConfigCon
 };
 
 template <int Winodata, int Winofilter>
-struct MIOPEN_INTERNALS_EXPORT ConvBinWinoRxS final
-    : ConvTunableSolver<PerformanceConfigConvBinWinogradRxS>
+struct ConvBinWinoRxS final : ConvTunableSolver<PerformanceConfigConvBinWinogradRxS>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId(); }
 
@@ -1827,16 +1826,11 @@ private:
 };
 
 // Suppress misleading clang warnings
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wweak-template-vtables"
-#endif
+#ifndef CONV_BIN_WINO_RXS_CPP
 
 extern template struct ConvBinWinoRxS<2, 3>;
 extern template struct ConvBinWinoRxS<3, 2>;
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
 #endif
 
 struct MIOPEN_INTERNALS_EXPORT ConvBinWinogradRxSf2x3g1 final : ConvSolver
@@ -1855,7 +1849,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvBinWinogradRxSf2x3g1 final : ConvSolver
 };
 
 template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
-struct MIOPEN_INTERNALS_EXPORT ConvMPBidirectWinograd final : ConvSolver
+struct ConvMPBidirectWinograd final : ConvSolver
 {
     const std::string& SolverDbId() const override
     {
@@ -2015,7 +2009,7 @@ extern template struct ConvMPBidirectWinograd_xdlops<6, 3>;
 #endif
 
 template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
-struct MIOPEN_INTERNALS_EXPORT ConvWinograd3x3MultipassWrW final : ConvSolver
+struct ConvWinograd3x3MultipassWrW final : ConvSolver
 {
     const std::string& SolverDbId() const override
     {
@@ -2379,8 +2373,7 @@ struct PerformanceConfigConvOclBwdWrw2
 };
 
 template <int N_BATCH_LOOPS>
-struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW2 final
-    : ConvTunableSolver<PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>>
+struct ConvOclBwdWrW2 final : ConvTunableSolver<PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>>
 {
     const std::string& SolverDbId() const override
     {
@@ -2414,10 +2407,7 @@ protected:
 };
 
 // To suppress misleading clang warnings
-#if defined(__clang__) && defined(CONV_OCL_DIR2D_BWDWRW_2_CPP)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wweak-template-vtables"
-#endif
+#ifndef CONV_OCL_DIR2D_BWDWRW_2_CPP
 
 extern template struct PerformanceConfigConvOclBwdWrw2<1>;
 extern template struct PerformanceConfigConvOclBwdWrw2<2>;
@@ -2431,8 +2421,6 @@ extern template struct ConvOclBwdWrW2<4>;
 extern template struct ConvOclBwdWrW2<8>;
 extern template struct ConvOclBwdWrW2<16>;
 
-#if defined(__clang__) && defined(CONV_OCL_DIR2D_BWDWRW_2_CPP)
-#pragma clang diagnostic pop
 #endif
 
 /// A separate solver from ConvOclBwdWrW2 to disable auto-tuning for certain configs.
