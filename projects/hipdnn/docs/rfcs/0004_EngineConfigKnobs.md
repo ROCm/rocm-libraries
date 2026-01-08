@@ -153,7 +153,7 @@ table EnumValue {
 }
 
 // Knob metadata for discovery
-table KnobInfo {
+table Knob {
     knob_id: int64;               // Hashed from knob_id_str
     knob_id_str: string;          // Unique identifier (namespaced by plugin)
     display_name: string;         // Human-readable name
@@ -209,7 +209,7 @@ include "knob_value.fbs";
 
 table EngineDetails {
     engine_id: int64;
-    supported_knobs: [KnobInfo];  // NEW: Knobs this engine supports
+    supported_knobs: [Knob];  // NEW: Knobs this engine supports
 }
 
 // data_sdk/schemas/engine_config.fbs
@@ -217,14 +217,14 @@ namespace hipdnn_data_sdk.data_objects;
 
 include "knob_value.fbs";
 
-table Knob {
+table KnobSetting {
     knob_id: int64;
     value: KnobValue;
 }
 
 table EngineConfig {
     engine_id: int64;
-    knobs: [Knob];  // NEW: User-specified knob values
+    knobs: [KnobSetting];  // NEW: User-specified knob values
 }
 ```
 
@@ -350,7 +350,7 @@ public:
     );
 
     // Serialize to EngineDetails flatbuffer
-    std::vector<uint8_t> serializeKnobInfo() const;
+    std::vector<uint8_t> serializeKnob() const;
 
     // Validate knob settings
     bool validateKnobSettings(
@@ -466,13 +466,12 @@ enum class KnobValueType {
 // Knob information class - describes available knobs for an engine
 class Knob {
 public:
-    Knob(const int64_t knobId,
-             const std::string& knobIdStr,
-             const std::string& displayName,
-             const std::string& description);
+    Knob(const std::string& knobIdStr, // knob_id hashed from this string internally
+         const std::string& displayName,
+         const std::string& description);
 
     // Accessors
-    int64_t getKnobId() const;
+    int64_t getKnobId() const; // A hash id of Knob ID String
     const std::string& getKnobIdStr() const;
     const std::string& getDisplayName() const;
     const std::string& getDescription() const;
@@ -506,15 +505,15 @@ public:
     std::optional<EnumConstraints> getEnumConstraints() const;
 
     // Convert to Knob with default value
-    Knob toDefaultKnob() const;
+    KnobSetting toDefaultKnob() const;
 
     // flatbuffer pack and unpack methods
     pack()
     unpack()
 
-    // Helper: Convert Knob vector to KnobSettings vector with defaults
-    static std::vector<Knob> knobToDefaultKnobSettings(
-        const std::vector<KnobInfo>& knobInfos);
+    // Helper: Convert Knob vector to KnobSettings map with defaults
+    static std::unordered_map<int64_t, KnobSetting> knobToDefaultKnobSettings(
+        const std::vector<Knob>& knobs);
 
     // Helper, to hash the string ID to the int ID
     static int64_t make_knob_id(const std::string& strID);
@@ -531,7 +530,7 @@ public:
 
     // Accessors
     int64_t getKnobId() const;
-    KnobInfo::ValueType getValueType() const;
+    Knob::ValueType getValueType() const;
 
     // Get value (type-specific)
     std::optional<int64_t> getIntValue() const;
@@ -555,11 +554,11 @@ public:
     error_t Graph::create_execution_plan(int64_t engineId,
                                          std::unordered_map<KnobType_t, int64_t> const &knobs) const;
     error_t Graph::get_knobs_for_engine(int64_t engineId,
-                                        std::vector<Knob> &knobinfos) const;
+                                        std::vector<Knob> &knobs) const;
 
     // New methods
     error_t Graph::create_execution_plan(int64_t engineId,
-                                         std::vector<KnobSetting> const &user_knobs) const;
+                                         std::unordered_map<int64_t, KnobSetting> const &user_knobs) const;
 
 };
 
@@ -584,20 +583,8 @@ auto defaultKnobSettings = Graph::knobToDefaultKnobSettings(knobs);
 graph.create_execution_plan_ext(MIOPEN_ENGINE, defaultKnobSettings);
 
 // Option 2: Customize specific knobs
-std::vector<Knob> customKnobSettings;
-for(const auto& info : knobInfos)
-{
-    if(info.getKnobIdStr() == "miopen.conv.tile_size")
-    {
-        // Override tile size
-        customKnobSettings.emplace_back(info.getKnobId(), 32);
-    }
-    else
-    {
-        // Use default for other knobs
-        customKnobSettings.push_back(info.toDefaultKnob());
-    }
-}
+std::unordered_map<int64_t, KnobSettings> customKnobSettings;
+customKnobSettings.insert(Knob::make_knob_id("miopen.conv.tile_size"), 32);
 graph.create_execution_plan_ext(MIOPEN_ENGINE, customKnobSettings);
 ```
 
@@ -738,7 +725,7 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 1. **Flatbuffer Schema Design**
    - Create `knob_value.fbs` with union types for KnobValue and KnobConstraints
    - Update `engine_config.fbs` to include KnobSetting array
-   - Update `engine_details.fbs` to include KnobInfo array
+   - Update `engine_details.fbs` to include Knob array
    - Generate C++ code from schemas using flatc
    - Write unit tests for schema serialization/deserialization
    - Verify union type handling and constraint validation
@@ -755,33 +742,33 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 
 ### Phase 2: Frontend API
 
-5. **KnobInfo Class Implementation**
-   - Implement `KnobInfo` class wrapping flatbuffer KnobInfo
+5. **Knob Class Implementation**
+   - Implement `Knob` class wrapping flatbuffer Knob
    - Add accessors for knob metadata (ID, display name, description)
    - Implement type-specific default value getters
    - Implement type-specific constraint getters
-   - Add `toDefaultKnob()` converter method
-   - Write unit tests for KnobInfo class
+   - Add `toDefaultKnobSettings()` converter method
+   - Write unit tests for Knob class
 
-6. **Knob Class Implementation**
-   - Implement `Knob` class with type-safe constructors
+6. **KnobSettings Class Implementation**
+   - Implement `KnobSettings` class with type-safe constructors
    - Add type-specific value getters
    - Implement serialization/deserialization methods
-   - Add validation against KnobInfo constraints
+   - Add validation against Knob constraints
    - Write unit tests for Knob class
 
 7. **Graph Extension Methods**
    - Implement `Graph::get_knobs_for_engine_ext(int64_t engineId)`
      - Query backend for engine details
-     - Deserialize KnobInfo array from flatbuffer
-     - Return vector of KnobInfo objects
-   - Implement `Graph::create_execution_plan_ext(int64_t engineId, const std::vector<Knob>&)`
-     - Serialize Knob vector to flatbuffer
+     - Deserialize Knob array from flatbuffer
+     - Return vector of Knob objects
+   - Implement `Graph::create_execution_plan_ext(int64_t engineId, const std::unordered_map<int64_t, KnobSettings>&)`
+     - Serialize KnobSettings vector to flatbuffer
      - Create EngineConfig with knob settings
      - Validate knobs during finalization
      - Create and return ExecutionPlan
    - Implement the int64 versions of the base methods
-   - Implement `Graph::knobInfoToDefaultKnobs()` static helper
+   - Implement `Graph::knobToDefaultKnobSettings()` static helper
    - Write frontend integration tests
 
 8. **Documentation**
@@ -824,7 +811,7 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
      - `registerFloatKnob()`
      - `registerBoolKnob()`
      - `registerEnumKnob()`
-   - Add `serializeKnobInfo()` to generate EngineDetails flatbuffer
+   - Add `serializeKnob()` to generate EngineDetails flatbuffer
    - Implement `validateKnobSettings()` against registered constraints
    - Add helper methods for knob lookup and type checking
    - Write comprehensive unit tests for all knob types
