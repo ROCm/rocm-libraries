@@ -172,8 +172,7 @@ namespace rocsparse
         const int bid = blockIdx.x;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
         const coordinate_t<uint32_t> start_coord = coord0[bid];
         const coordinate_t<uint32_t> end_coord   = coord1[bid];
@@ -420,8 +419,7 @@ namespace rocsparse
         const int bid = (BLOCKSIZE / WF_SIZE) * blockIdx.x + wid;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
         const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
@@ -622,8 +620,7 @@ namespace rocsparse
         const int bid = (BLOCKSIZE / WF_SIZE) * blockIdx.x + wid;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
         const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
@@ -834,8 +831,7 @@ namespace rocsparse
         const int bid = (BLOCKSIZE / WF_SIZE) * blockIdx.x + wid;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
         const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;

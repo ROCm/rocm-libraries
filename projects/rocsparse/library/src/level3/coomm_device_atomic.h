@@ -58,8 +58,7 @@ namespace rocsparse
         const int     lid = tid & (WF_SIZE - 1);
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc);
 
         const I row = (gid < nnz) ? rocsparse::nontemporal_load(coo_row_ind + gid) - idx_base : 0;
         const I col = (gid < nnz) ? rocsparse::nontemporal_load(coo_col_ind + gid) - idx_base : 0;
@@ -190,8 +189,7 @@ namespace rocsparse
         const int64_t gid = BLOCKSIZE * hipBlockIdx_x + tid;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc);
 
         __shared__ I shared_row[(BLOCKSIZE / WF_SIZE) * WF_SIZE];
         __shared__ T shared_val[(BLOCKSIZE / WF_SIZE) * WF_SIZE];
@@ -361,8 +359,7 @@ namespace rocsparse
         }
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc);
 
         const I row = coo_row_ind[gid] - idx_base;
         const I col = coo_col_ind[gid] - idx_base;

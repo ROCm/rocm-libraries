@@ -61,8 +61,7 @@ namespace rocsparse
         const int batch = hipBlockIdx_z;
 
         // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size
-            = static_cast<int64_t>((order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc));
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc);
 
         // Shared memory to hold row indices and values for segmented reduction
         __shared__ I shared_row[WF_SIZE];
