@@ -15,10 +15,10 @@ rocBLAS is the AMD ROCm Basic Linear Algebra Subprograms (BLAS) library, impleme
 - Precision prefixes: s=float, d=double, c=complex float, z=complex double, h=half, bf16=bfloat16
 
 ### File Headers
-Always include the MIT license header:
+Always include the MIT license header, replacing the end year with the current year:
 ```cpp
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-[CURRENT YEAR] Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
