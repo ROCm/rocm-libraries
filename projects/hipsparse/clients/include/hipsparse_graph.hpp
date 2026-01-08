@@ -41,7 +41,7 @@
 #define GRAPH_TEST 0
 #endif
 
-#if GRAPH_TEST
+#if GRAPH_TEST && !defined(CUDART_VERSION)
 #define BEGIN_GRAPH_CAPTURE() handle.hipsparseStreamBeginCapture()
 #define END_GRAPH_CAPTURE() handle.hipsparseStreamEndCapture()
 #else
