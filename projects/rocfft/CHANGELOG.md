@@ -5,12 +5,20 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.37
 
+### Changed
+
+* Moved library to C++20 standard.
+* Removed Boost as a dependency for clients and samples.
+
+### Resolved issues
+
 * Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
 * Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
 * Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
 * Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides with small lengths on the two fastest dimensions.
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
 * Fixed incorrect results on some strided real-complex FFTs on gfx90a.
+* Fixed incorrect results on some even-length real FFTs that have odd-length strides on higher dimensions.
 
 ## rocFFT 1.0.36 for ROCm 7.2.0
 

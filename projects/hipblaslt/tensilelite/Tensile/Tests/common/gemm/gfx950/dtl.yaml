@@ -55,7 +55,7 @@ BenchmarkProblems:
         - TransposeLDS: [1]
         - StaggerU: [0]
         - StreamK: [0]
-        - DirectToLds: [1]
+        - DirectToLds: [1,2,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -82,7 +82,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - TailloopInNll: [0, 1]
         - StreamK: [0,3]
-        - DirectToLds: [0, 1]
+        - DirectToLds: [0, 1, 2, 3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -128,7 +128,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - TailloopInNll: [0, 1]
         - StreamK: [0,3]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -190,7 +190,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -263,7 +263,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -310,7 +310,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 3]
         - AssertFree0ElementMultiple: [1, 4]
         - AssertFree1ElementMultiple: [1, 4]
       BenchmarkJoinParameters:
@@ -356,7 +356,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [16]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]
@@ -424,7 +424,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 3]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -486,7 +486,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -538,7 +538,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [16]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 3]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]
@@ -604,7 +604,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -656,7 +656,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 3]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]
@@ -691,7 +691,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2]
         - AssertSummationElementMultiple: [1]
         - LdsPadA: [8]
         - LdsPadB: [8]
@@ -718,7 +718,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [2]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 3]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - 1LDSBuffer: [-1]
@@ -768,7 +768,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [-1, 0, 8]
         - LdsPadB: [-1, 0, 8]
@@ -798,7 +798,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - AssertSummationElementMultiple: [1]
         - AssertFree0ElementMultiple: [2]
         - LdsPadA: [0]
@@ -829,7 +829,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - AssertSummationElementMultiple: [1]
         - LdsPadA: [8]
         - LdsPadB: [8]
@@ -878,7 +878,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [-1, 0, 8]
         - LdsPadB: [-1, 0, 8]
@@ -933,7 +933,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - LdsPadA: [8]
         - LdsPadB: [8]
         - 1LDSBuffer: [-1]
@@ -960,7 +960,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - LdsPadA: [8]
         - LdsPadB: [8]
         - 1LDSBuffer: [-1]
@@ -1009,7 +1009,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - DirectToVgprA: [0,1]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
@@ -1041,7 +1041,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]
@@ -1095,7 +1095,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - AssertSummationElementMultiple: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
@@ -1140,7 +1140,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [2]
         - ClusterLocalRead: [0]#[0,1]
-        - DirectToLds: [1]
+        - DirectToLds: [1, 2, 3]
         - StreamK: [3]
         - LdsPadA: [0] #[-1]
         - LdsPadB: [8] #[-1]

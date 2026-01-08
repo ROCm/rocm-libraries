@@ -96,40 +96,41 @@ constexpr unsigned int merge_sort_block_size(const unsigned int item_scale)
 
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
 template<class Key, class Value>
-struct merge_sort_block_sort_config_base
+constexpr merge_sort_block_sort_config_params merge_sort_block_sort_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
-    static constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
-                                             * merge_sort_items_per_thread(item_scale) * item_scale
-                                         <= max_smem_per_block;
+    constexpr unsigned int item_scale   = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
+                                      * merge_sort_items_per_thread(item_scale) * item_scale
+                                  <= max_smem_per_block;
     // multiply by 2 to ensure block_sort's items_per_block >= block_merge's items_per_block
-    static constexpr unsigned int block_size
-        = use_fallback ? merge_sort_block_size(item_scale) * 2 : 256;
-    static constexpr unsigned int items_per_thread
+    constexpr unsigned int block_size = use_fallback ? merge_sort_block_size(item_scale) * 2 : 256;
+    constexpr unsigned int items_per_thread
         = use_fallback ? merge_sort_items_per_thread(item_scale) : 1;
-    using type                                     = merge_sort_block_sort_config<block_size,
-                                              items_per_thread,
-                                              block_sort_algorithm::stable_merge_sort>;
+
+    return merge_sort_block_sort_config_params{
+        {block_size, items_per_thread}
+    };
 };
 
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
 // No radix_sort_block_sort_params and radix_sort_block_sort_config exist since the only
 // configuration member is a kernel_config.
 template<class Key, class Value>
-struct radix_sort_block_sort_config_base
+constexpr kernel_config_params radix_sort_block_sort_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
 
     // multiply by 2 to ensure block_sort's items_per_block >= block_merge's items_per_block
-    static constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 2;
-    static constexpr unsigned int items_per_thread
+    constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 2;
+    constexpr unsigned int items_per_thread
         = rocprim::min(4u, merge_sort_items_per_thread(item_scale));
-    using type = kernel_config<block_size, items_per_thread>;
 
     // The items per block should be a power of two, as this is a requirement for the
     // radix sort merge sort.
     static_assert(is_power_of_two(block_size * items_per_thread),
                   "Sorted items per block should be a power of two.");
+
+    return kernel_config_params{block_size, items_per_thread};
 };
 
 /// \brief Default values are provided by \p merge_sort_block_merge_config_base.
@@ -159,23 +160,21 @@ struct merge_sort_block_merge_config : rocprim::detail::merge_sort_block_merge_c
 };
 
 template<class Key, class Value>
-struct merge_sort_block_merge_config_base
+constexpr merge_sort_block_merge_config_params merge_sort_block_merge_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
-    static constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
-                                             * merge_sort_items_per_thread(item_scale) * item_scale
-                                         <= max_smem_per_block;
-    static constexpr unsigned int block_size
-        = use_fallback ? merge_sort_block_size(item_scale) : 128;
-    static constexpr unsigned int items_per_thread
+    constexpr unsigned int item_scale   = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
+                                      * merge_sort_items_per_thread(item_scale) * item_scale
+                                  <= max_smem_per_block;
+    constexpr unsigned int block_size = use_fallback ? merge_sort_block_size(item_scale) : 128;
+    constexpr unsigned int items_per_thread
         = use_fallback ? merge_sort_items_per_thread(item_scale) : 1;
-    using type                                     = merge_sort_block_merge_config<block_size,
-                                               1,
-                                               (1 << 17) + 70000,
-                                               128,
-                                               block_size,
-                                               items_per_thread>;
-};
+    return merge_sort_block_merge_config_params{
+        {block_size, 1, (1 << 17) + 70000},
+        {128, 1},
+        {block_size, items_per_thread}
+    };
+}
 
 /// \brief Default values are provided by \p radix_sort_onesweep_config_base.
 struct radix_sort_onesweep_config_params
@@ -224,21 +223,19 @@ struct radix_sort_onesweep_config : detail::radix_sort_onesweep_config_params
 namespace detail
 {
 
-struct reduce_config_tag
-{};
-
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
 template<class Key, class Value>
-struct radix_sort_onesweep_config_base
+constexpr radix_sort_onesweep_config_params radix_sort_onesweep_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 4;
 
-    static constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 4;
-    using type                               = radix_sort_onesweep_config<
-        kernel_config<256, 12>,
-        kernel_config<block_size, ::rocprim::max(1u, 65000u / block_size / item_scale)>,
-        4>;
-};
+    return radix_sort_onesweep_config_params{
+        kernel_config_params{256, 12},
+        kernel_config_params{block_size, ::rocprim::max(1u, 65000u / block_size / item_scale)},
+        4
+    };
+}
 
 struct reduce_config_params
 {
@@ -261,8 +258,6 @@ template<unsigned int                      BlockSize      = 256,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct reduce_config : rocprim::detail::reduce_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::reduce_config_tag;
     constexpr reduce_config()
         : rocprim::detail::reduce_config_params{
             {BlockSize, ItemsPerThread, SizeLimit},
@@ -274,18 +269,17 @@ namespace detail
 {
 
 template<class Value>
-struct default_reduce_config_base
+constexpr reduce_config_params reduce_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = reduce_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                               ::rocprim::max(1u, 16u / item_scale),
-                               ::rocprim::block_reduce_algorithm::using_warp_reduce>;
+    return reduce_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        ::rocprim::block_reduce_algorithm::using_warp_reduce
+    };
 };
-
-struct scan_config_tag
-{};
 
 /// \brief Provides the kernel parameters for exclusive_scan and inclusive_scan based
 ///        on autotuned configurations or user-provided configurations.
@@ -315,8 +309,6 @@ template<unsigned int                    BlockSize,
          unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct scan_config : ::rocprim::detail::scan_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::scan_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     // Requirement dictated by init_lookback_scan_state_kernel.
     static_assert(BlockSize <= ROCPRIM_DEFAULT_MAX_BLOCK_SIZE,
@@ -348,20 +340,19 @@ struct scan_config : ::rocprim::detail::scan_config_params
 namespace detail
 {
 
-struct scan_by_key_config_tag
-{};
-
 template<class Value>
-struct default_scan_config_base
+constexpr scan_config_params scan_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = scan_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                             ::rocprim::max(1u, 16u / item_scale),
-                             ::rocprim::block_load_method::block_load_transpose,
-                             ::rocprim::block_store_method::block_store_transpose,
-                             ::rocprim::block_scan_algorithm::using_warp_scan>;
+    return scan_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        ::rocprim::block_load_method::block_load_transpose,
+        ::rocprim::block_store_method::block_store_transpose,
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    };
 };
 
 /// \brief Provides the kernel parameters for exclusive_scan_by_key and inclusive_scan_by_key based
@@ -392,8 +383,6 @@ template<unsigned int                    BlockSize,
          unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct scan_by_key_config : ::rocprim::detail::scan_by_key_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::scan_by_key_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     // Requirement dictated by init_lookback_scan_state_kernel.
     static_assert(BlockSize <= ROCPRIM_DEFAULT_MAX_BLOCK_SIZE,
@@ -426,66 +415,63 @@ namespace detail
 {
 
 template<class Key, class Value>
-struct default_scan_by_key_config_base
+constexpr scan_by_key_config_params scan_by_key_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-        sizeof(Key) + sizeof(Value), 2 * sizeof(int));
+    constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key) + sizeof(Value),
+                                                       2 * sizeof(int));
 
-    using type = scan_by_key_config<
-        limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-        ::rocprim::max(1u, 16u / item_scale),
+    return scan_by_key_config_params{
+        {limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_store_method::block_store_transpose,
-        ::rocprim::block_scan_algorithm::using_warp_scan>;
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    };
 };
-
-struct transform_config_tag
-{};
 
 struct transform_config_params
 {
-    kernel_config_params kernel_config{};
-    cache_load_modifier  load_type;
+    kernel_config_params kernel_config = {0, 0};
+    cache_load_modifier  load_type     = load_default;
 };
 
 } // namespace detail
 
 namespace detail
 {
-struct segmented_radix_sort_config_tag
-{};
 
 struct warp_sort_config_params
 {
     /// \brief Allow the partitioning of batches by size for processing via size-optimized kernels.
     bool partitioning_allowed = false;
     /// \brief The number of threads in the logical warp in the small segment processing kernel.
-    unsigned int logical_warp_size_small = 0;
+    unsigned int logical_warp_size_small = 1;
     /// \brief The number of items processed by a thread in the small segment processing kernel.
-    unsigned int items_per_thread_small = 0;
+    unsigned int items_per_thread_small = 1;
     /// \brief The number of threads per block in the small segment processing kernel.
-    unsigned int block_size_small = 0;
+    unsigned int block_size_small = 1;
     /// \brief If the number of segments is at least \p partitioning_threshold, then the segments are partitioned into
     /// small and large segment groups, and each group is handled by a different, specialized kernel.
     unsigned int partitioning_threshold = 0;
     /// \brief The number of threads in the logical warp in the medium segment processing kernel.
-    unsigned int logical_warp_size_medium = 0;
+    unsigned int logical_warp_size_medium = 1;
     /// \brief The number of items processed by a thread in the medium segment processing kernel.
-    unsigned int items_per_thread_medium = 0;
+    unsigned int items_per_thread_medium = 1;
     /// \brief The number of threads per block in the medium segment processing kernel.
-    unsigned int block_size_medium = 0;
+    unsigned int block_size_medium = 1;
 };
 
 struct segmented_radix_sort_config_params
 {
-    /// \brief Kernel start parameters.
-    kernel_config_params kernel_config{};
     /// \brief Number of bits in iterations.
     unsigned int radix_bits = 0;
-    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
-    bool enable_unpartitioned_warp_sort = true;
+    /// \brief Kernel start parameters.
+    kernel_config_params kernel_config{};
     /// \brief Warp sort config params
     warp_sort_config_params warp_sort_config{};
+    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
+    bool enable_unpartitioned_warp_sort = true;
 };
 
 } // namespace detail
@@ -585,8 +571,6 @@ template<unsigned int RadixBits,
          bool EnableUnpartitionedWarpSort = true>
 struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::segmented_radix_sort_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
     /// \brief Number of bits in iterations.
@@ -608,17 +592,17 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
 
     constexpr segmented_radix_sort_config()
         : detail::segmented_radix_sort_config_params{
-            SortConfig(),
             RadixBits,
-            EnableUnpartitionedWarpSort,
+            SortConfig(),
             {warp_sort_config::partitioning_allowed,
-              warp_sort_config::logical_warp_size_small,
-              warp_sort_config::items_per_thread_small,
-              warp_sort_config::block_size_small,
-              warp_sort_config::partitioning_threshold,
-              warp_sort_config::logical_warp_size_medium,
-              warp_sort_config::items_per_thread_medium,
-              warp_sort_config::block_size_medium}
+                warp_sort_config::logical_warp_size_small,
+                warp_sort_config::items_per_thread_small,
+                warp_sort_config::block_size_small,
+                warp_sort_config::partitioning_threshold,
+                warp_sort_config::logical_warp_size_medium,
+                warp_sort_config::items_per_thread_medium,
+                warp_sort_config::block_size_medium},
+            EnableUnpartitionedWarpSort
     }
     {}
 #endif
@@ -627,18 +611,17 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
 namespace detail
 {
 /// \brief Default segmented_radix_sort kernel configurations, such that the maximum shared memory is not exceeded.
-///
-/// \tparam RadixBits Bits used during the sorting.
-/// \tparam ItemsPerThread Items per thread when type Key has size 1.
-template<unsigned int RadixBits>
-struct default_segmented_radix_sort_config_base
+template<class Key, class Value>
+constexpr segmented_radix_sort_config_params segmented_radix_sort_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-        sizeof(unsigned int) + sizeof(unsigned int), sizeof(int));
-    using type = segmented_radix_sort_config<RadixBits,
-                                             kernel_config<128, 17u>,
-                                             WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
-                                             true>;
+    constexpr unsigned int radix_bits = 6;
+
+    return segmented_radix_sort_config_params{
+        radix_bits,
+        kernel_config_params{128, 17u},
+        warp_sort_config_params{true, 32, 4, 256, 3000, 32, 4, 256},
+        true
+    };
 };
 
 } // namespace detail
@@ -654,8 +637,6 @@ template<unsigned int        BlockSize,
          cache_load_modifier LoadType  = load_default>
 struct transform_config : public detail::transform_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::transform_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
     /// \brief Number of threads in a block.
@@ -689,8 +670,6 @@ template<unsigned int        BlockSize,
          cache_load_modifier LoadType  = load_default>
 struct transform_pointer_config : public detail::transform_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::transform_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
     /// \brief Number of threads in a block.
@@ -718,29 +697,26 @@ namespace detail
 {
 
 template<class Value>
-struct default_transform_pointer_config_base
+constexpr transform_config_params transform_pointer_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(uint128_t), sizeof(Value));
 
-    using type = transform_config<256, item_scale>;
-};
+    return transform_config_params{
+        {256, item_scale}
+    };
+}
 
 template<class Value>
-struct default_transform_config_base
+constexpr transform_config_params transform_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
-};
-
-struct binary_search_config_tag : public transform_config_tag
-{};
-struct upper_bound_config_tag : public transform_config_tag
-{};
-struct lower_bound_config_tag : public transform_config_tag
-{};
+    return transform_config_params{
+        {256, ::rocprim::max(1u, 16u / item_scale)}
+    };
+}
 
 } // namespace detail
 
@@ -752,10 +728,7 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct binary_search_config : transform_config<BlockSize, ItemsPerThread, SizeLimit, load_default>
-{
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::binary_search_config_tag;
-};
+{};
 
 /// \brief Configuration for the device-level upper bound operation.
 /// \tparam BlockSize Number of threads in a block.
@@ -765,10 +738,7 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct upper_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit, load_default>
-{
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::upper_bound_config_tag;
-};
+{};
 
 /// \brief Configuration for the device-level lower bound operation.
 /// \tparam BlockSize Number of threads in a block.
@@ -778,23 +748,18 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct lower_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit, load_default>
-{
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::lower_bound_config_tag;
-};
+{};
 
 namespace detail
 {
 
-struct histogram_config_tag
-{};
-
 template<class Value, class Output>
-struct default_binary_search_config_base
-    : binary_search_config<
-          limit_block_size<256U, sizeof(Value) + sizeof(Output), ROCPRIM_WARP_SIZE_64>::value,
-          1>
-{};
+constexpr transform_config_params binary_search_config_params_base()
+{
+    return transform_config_params{
+        {limit_block_size<256U, sizeof(Value) + sizeof(Output), ROCPRIM_WARP_SIZE_64>::value, 1}
+    };
+}
 
 /// \brief Provides the kernel parameters for histogram_even, multi_histogram_even,
 ///        histogram_range, and multi_histogram_range based on autotuned configurations or
@@ -807,7 +772,7 @@ struct histogram_config_params
     unsigned int shared_impl_max_bins   = 0;
     unsigned int shared_impl_histograms = 0;
 
-    kernel_config_params histogram_global_config = {0, 0};
+    kernel_config_params histogram_global_config = histogram_config;
 };
 
 } // namespace detail
@@ -830,8 +795,6 @@ template<class HistogramConfig,
          class HistogramGlobalConfig       = HistogramConfig>
 struct histogram_config : detail::histogram_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::histogram_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     using histogram = HistogramConfig;
 
@@ -852,23 +815,21 @@ namespace detail
 {
 
 template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct default_histogram_config_base
+constexpr histogram_config_params histogram_config_params_base()
 {
-    static constexpr unsigned int item_scale
-        = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
+    constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
 
-    using type
-        = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
+    constexpr kernel_config_params kernel_params
+        = {256, ::rocprim::max(8u / Channels / item_scale, 1u)};
+
+    return histogram_config_params{kernel_params, 1024, 2048, 3, kernel_params};
 };
-
-struct adjacent_difference_config_tag
-{};
 
 struct adjacent_difference_config_params
 {
-    kernel_config_params          kernel_config;
-    ::rocprim::block_load_method  block_load_method;
-    ::rocprim::block_store_method block_store_method;
+    kernel_config_params          kernel_config{};
+    ::rocprim::block_load_method  block_load_method  = block_load_method::block_load_transpose;
+    ::rocprim::block_store_method block_store_method = block_store_method::block_store_transpose;
 };
 } // namespace detail
 
@@ -886,8 +847,6 @@ template<unsigned int       BlockSize,
          unsigned int       SizeLimit        = ROCPRIM_GRID_SIZE_LIMIT>
 struct adjacent_difference_config : public detail::adjacent_difference_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::adjacent_difference_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     static constexpr ::rocprim::block_load_method  block_load_method  = BlockLoadMethod;
     static constexpr ::rocprim::block_store_method block_store_method = BlockStoreMethod;
@@ -907,16 +866,17 @@ namespace detail
 {
 
 template<class Value>
-struct default_adjacent_difference_config_base
+constexpr adjacent_difference_config_params adjacent_difference_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = adjacent_difference_config<
-        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-        ::rocprim::max(1u, 16u / item_scale),
+    return adjacent_difference_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
         ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_store_method::block_store_transpose>;
+        ::rocprim::block_store_method::block_store_transpose
+    };
 };
 
 } // namespace detail
@@ -924,25 +884,22 @@ struct default_adjacent_difference_config_base
 namespace detail
 {
 
-struct batch_memcpy_config_tag
-{};
-
 struct batch_memcpy_config_params
 {
     /// \brief Kernel config for thread- and warp-level copy
-    kernel_config_params non_blev_batch_memcpy_kernel_config;
+    kernel_config_params non_blev_batch_memcpy_kernel_config{};
 
     /// \brief Number of bytes per thread for thread-level copy
-    unsigned int tlev_items_per_thread;
+    unsigned int tlev_items_per_thread = 0;
 
     /// \brief Kernel config for block-level copy
-    kernel_config_params blev_batch_memcpy_kernel_config;
+    kernel_config_params blev_batch_memcpy_kernel_config{};
 
     /// \brief Minimum size to use warp-level copy instead of thread-level
-    unsigned int wlev_size_threshold;
+    unsigned int wlev_size_threshold = 0;
 
     /// \brief Minimum size to use block-level copy instead of warp-level
-    unsigned int blev_size_threshold;
+    unsigned int blev_size_threshold = 0;
 };
 } // namespace detail
 
@@ -963,8 +920,6 @@ template<unsigned int NonBlevBlockSize,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct batch_memcpy_config : public detail::batch_memcpy_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::batch_memcpy_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     static constexpr unsigned int non_blev_block_size       = NonBlevBlockSize;
     static constexpr unsigned int non_blev_items_per_thread = NonBlevItemsPerThread;
@@ -989,19 +944,20 @@ namespace detail
 {
 
 template<class Value>
-struct default_batch_memcpy_config_base
+constexpr batch_memcpy_config_params batch_memcpy_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type
-        = batch_memcpy_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 16u / item_scale),
-                              ::rocprim::max(1u, 16u / item_scale),
-                              limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 16u / item_scale),
-                              128,
-                              1024>;
+    return batch_memcpy_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        ::rocprim::max(1u, 16u / item_scale),
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        128,
+        1024
+    };
 };
 
 } // namespace detail
@@ -1040,11 +996,11 @@ namespace detail
 
 struct partition_config_params
 {
-    kernel_config_params kernel_config;
-    block_load_method    key_block_load_method;
-    block_load_method    value_block_load_method;
-    block_load_method    flag_block_load_method;
-    block_scan_algorithm block_scan_method;
+    kernel_config_params kernel_config         = {0, 0};
+    block_load_method    key_block_load_method = ::rocprim::block_load_method::block_load_transpose;
+    block_load_method value_block_load_method  = ::rocprim::block_load_method::block_load_transpose;
+    block_load_method flag_block_load_method   = ::rocprim::block_load_method::block_load_transpose;
+    block_scan_algorithm block_scan_method     = ::rocprim::block_scan_algorithm::using_warp_scan;
 };
 
 } // namespace detail
@@ -1101,35 +1057,33 @@ struct select_config : public detail::partition_config_params
 namespace detail
 {
 
-template<typename Key, bool IsThreeway, int ItemScaleBase = 13>
-struct default_partition_config_base
+template<typename Key, bool IsThreeway = false>
+constexpr partition_config_params partition_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr int          ItemScaleBase = 13;
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
     using offset_t = std::conditional_t<IsThreeway, uint2, unsigned int>;
 
     // Additional shared memory is required by the lookback scan state.
-    static constexpr unsigned int shared_mem_offset = sizeof(
+    constexpr unsigned int shared_mem_offset = sizeof(
         typename offset_lookback_scan_prefix_op<offset_t,
                                                 lookback_scan_state<offset_t>>::storage_type);
 
-    using type = select_config<
-        fallback_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
-        ::rocprim::max(1u, ItemScaleBase / item_scale),
-        ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_scan_algorithm::using_warp_scan>;
+    return partition_config_params{
+        {fallback_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
+         ::rocprim::max(1u, ItemScaleBase / item_scale)}
+    };
 };
 
 struct reduce_by_key_config_params
 {
     kernel_config_params kernel_config;
-    unsigned int         tiles_per_block;
     block_load_method    load_keys_method;
     block_load_method    load_values_method;
     block_scan_algorithm scan_algorithm;
+    unsigned int         tiles_per_block = 1;
 };
 
 } // namespace detail
@@ -1178,10 +1132,10 @@ struct reduce_by_key_config : public detail::reduce_by_key_config_params
     constexpr reduce_by_key_config()
         : detail::reduce_by_key_config_params{
             {BlockSize, ItemsPerThread, SizeLimit},
-            TilesPerBlock,
             LoadKeysMethod,
             LoadValuesMethod,
-            ScanAlgorithm
+            ScanAlgorithm,
+            TilesPerBlock
     } {};
 #endif
 };
@@ -1190,32 +1144,36 @@ namespace detail
 {
 
 template<class Key, class Value>
-struct default_reduce_by_key_config_base
+constexpr reduce_by_key_config_params reduce_by_key_config_params_base()
 {
-    using small_config = reduce_by_key_config<256,
-                                              15,
-                                              block_load_method::block_load_transpose,
-                                              block_load_method::block_load_transpose,
-                                              block_scan_algorithm::using_warp_scan,
-                                              sizeof(Value) < 16 ? 1 : 2>;
+    constexpr auto small_config = reduce_by_key_config_params{
+        {256, 15},
+        block_load_method::block_load_transpose,
+        block_load_method::block_load_transpose,
+        block_scan_algorithm::using_warp_scan,
+        sizeof(Value) < 16 ? 1 : 2,
+    };
 
-    static constexpr unsigned int size_memory_per_item = std::max(sizeof(Key), sizeof(Value));
-    static constexpr unsigned int item_scale
+    if constexpr(std::max(sizeof(Key), sizeof(Value)) <= 16)
+    {
+        return small_config;
+    }
+
+    constexpr unsigned int size_memory_per_item = std::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int item_scale
         = static_cast<unsigned int>(ceiling_div(size_memory_per_item, 2 * sizeof(int)));
-    static constexpr unsigned int items_per_thread = std::max(1u, 15u / item_scale);
+    constexpr unsigned int items_per_thread = std::max(1u, 15u / item_scale);
 
-    using large_config
-        = reduce_by_key_config<limit_block_size<256U,
-                                                items_per_thread * size_memory_per_item,
-                                                ROCPRIM_WARP_SIZE_64>::value,
-                               items_per_thread,
-                               block_load_method::block_load_transpose,
-                               block_load_method::block_load_transpose,
-                               block_scan_algorithm::using_warp_scan,
-                               2>;
+    constexpr auto large_config = reduce_by_key_config_params{
+        {limit_block_size<256U, items_per_thread * size_memory_per_item, ROCPRIM_WARP_SIZE_64>::
+ value, items_per_thread},
+        block_load_method::block_load_transpose,
+        block_load_method::block_load_transpose,
+        block_scan_algorithm::using_warp_scan,
+        2
+    };
 
-    using type = std::
-        conditional_t<std::max(sizeof(Key), sizeof(Value)) <= 16, small_config, large_config>;
+    return large_config;
 };
 
 } // namespace detail
@@ -1261,8 +1219,6 @@ struct nth_element_config : public detail::nth_element_config_params
 
 namespace detail
 {
-struct non_trivial_runs_config_tag
-{};
 
 struct non_trivial_runs_config_params
 {
@@ -1287,8 +1243,6 @@ template<unsigned int                 BlockSize,
          = ::rocprim::block_scan_algorithm::reduce_then_scan>
 struct non_trivial_runs_config : public detail::non_trivial_runs_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::non_trivial_runs_config_tag;
 #ifndef DOXYGEN_DOCUMENTATION_BUILD
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
@@ -1311,35 +1265,41 @@ namespace detail
 {
 
 template<typename InputT, int ItemScaleBase = 32>
-struct default_non_trivial_runs_config_base
+constexpr non_trivial_runs_config_params non_trivial_runs_config_params_base()
 {
-    static constexpr unsigned int items_per_thread = 16;
-    using small_config                             = non_trivial_runs_config<256U,
-                                                 items_per_thread,
-                                                 block_load_method::block_load_vectorize,
-                                                 block_scan_algorithm::reduce_then_scan>;
+    constexpr unsigned int items_per_thread = 16;
+    constexpr auto         small_config     = non_trivial_runs_config_params{
+                    {256U, items_per_thread},
+        block_load_method::block_load_vectorize,
+        block_scan_algorithm::reduce_then_scan
+    };
+
+    if constexpr(sizeof(InputT) < 8)
+    {
+        return small_config;
+    }
 
     using OffsetCountPairT = ::rocprim::tuple<unsigned int, unsigned int>;
 
-    static constexpr unsigned int size_memory_per_item
+    constexpr unsigned int size_memory_per_item
         = std::max(sizeof(InputT), sizeof(OffsetCountPairT));
 
     // Additional shared memory is required by the lookback scan state.
-    static constexpr unsigned int shared_mem_offset
+    constexpr unsigned int shared_mem_offset
         = sizeof(typename offset_lookback_scan_prefix_op<
                  OffsetCountPairT,
                  lookback_scan_state<OffsetCountPairT>>::storage_type);
 
-    using big_config
-        = non_trivial_runs_config<detail::limit_block_size<64U,
-                                                           items_per_thread * size_memory_per_item,
-                                                           ROCPRIM_WARP_SIZE_64,
-                                                           shared_mem_offset>::value,
-                                  items_per_thread,
-                                  block_load_method::block_load_warp_transpose,
-                                  block_scan_algorithm::reduce_then_scan>;
+    constexpr auto big_config = non_trivial_runs_config_params{
+        {detail::limit_block_size<64U,
+         items_per_thread * size_memory_per_item,
+         ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
+         items_per_thread},
+        block_load_method::block_load_warp_transpose,
+        block_scan_algorithm::reduce_then_scan
+    };
 
-    using type = std::conditional_t<sizeof(InputT) < 8, small_config, big_config>;
+    return big_config;
 };
 
 struct find_first_of_config_params
@@ -1347,12 +1307,9 @@ struct find_first_of_config_params
     kernel_config_params kernel_config{};
 };
 
-struct adjacent_find_config_tag
-{};
-
 struct adjacent_find_config_params
 {
-    kernel_config_params kernel_config;
+    kernel_config_params kernel_config{};
 };
 
 } // namespace detail
@@ -1380,8 +1337,6 @@ struct find_first_of_config : public detail::find_first_of_config_params
 template<unsigned int BlockSize, unsigned int ItemsPerThread>
 struct adjacent_find_config : public detail::adjacent_find_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
-    using tag = detail::adjacent_find_config_tag;
 #ifndef DOXYGEN_DOCUMENTATION_BUILD
     constexpr adjacent_find_config()
         : detail::adjacent_find_config_params{
@@ -1395,23 +1350,26 @@ namespace detail
 {
 
 template<class Value>
-struct default_find_first_of_config_base
+constexpr find_first_of_config_params find_first_of_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = find_first_of_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+    return find_first_of_config_params{
+        {256, ::rocprim::max(1u, 16u / item_scale)}
+    };
 };
 
 template<typename InputT>
-struct default_adjacent_find_config_base
+constexpr adjacent_find_config_params adjacent_find_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(InputT), sizeof(int));
 
-    using type
-        = adjacent_find_config<limit_block_size<1024U, sizeof(InputT), ROCPRIM_WARP_SIZE_64>::value,
-                               ::rocprim::max(1u, 16u / item_scale)>;
+    return adjacent_find_config_params{
+        {limit_block_size<1024U, sizeof(InputT), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)}
+    };
 };
 
 } // namespace detail
@@ -1473,15 +1431,16 @@ struct search_n_config : public detail::search_n_config_params
 namespace detail
 {
 template<class InputType>
-struct default_search_n_config_base
+constexpr search_n_config_params search_n_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(InputType), sizeof(int));
 
-    using type
-        = search_n_config<limit_block_size<256u, sizeof(InputType), ROCPRIM_WARP_SIZE_64>::value,
-                          ::rocprim::max(1u, 10u / item_scale),
-                          8>;
+    return search_n_config_params{
+        {limit_block_size<256u, sizeof(InputType), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 10u / item_scale)},
+        8
+    };
 };
 
 } // namespace detail
@@ -1523,30 +1482,45 @@ namespace detail
 {
 
 template<class Key, class Value>
-struct default_merge_config_base
+constexpr merge_config_params merge_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-        ::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+    if constexpr(std::is_same_v<Value, empty_type>)
+    {
+        constexpr unsigned int item_scale
+            = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
-    using type = merge_config<fallback_block_size<256u,
-                                                  rocprim::max(sizeof(Key), sizeof(Value)),
-                                                  ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 10u / item_scale)>;
-};
+        if constexpr(sizeof(Key) <= 2)
+            return merge_config_params{
+                {256, 11}
+            };
+        else if constexpr(sizeof(Key) <= 4)
+            return merge_config_params{
+                {256, 10}
+            };
+        else if constexpr(sizeof(Key) <= 8)
+            return merge_config_params{
+                {256, 7}
+            };
+        else
+            return merge_config_params{
+                {fallback_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
+                 ::rocprim::max(1u, 10u / item_scale)}
+            };
+    }
+    else
+    {
+        constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
+            ::rocprim::max(sizeof(Key), sizeof(Value)),
+            sizeof(int));
 
-template<class Key>
-struct default_merge_config_base<Key, empty_type>
-{
-    static constexpr unsigned int item_scale
-        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
-
-    using type = select_type<
-        select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-        select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-        select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-        merge_config<fallback_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                     ::rocprim::max(1u, 10u / item_scale)>>;
-};
+        return merge_config_params{
+            {fallback_block_size<256u,
+             ::rocprim::max(sizeof(Key), sizeof(Value)),
+             ROCPRIM_WARP_SIZE_64>::value,
+             ::rocprim::max(1u, 10u / item_scale)}
+        };
+    }
+}
 
 } // namespace detail
 
