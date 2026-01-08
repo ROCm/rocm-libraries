@@ -416,21 +416,12 @@ namespace rocRoller
         {
             auto [required, path]
                 = findRequiredCoordinates(userTag, Graph::Direction::Downstream, graph);
-            auto macroTileNumbers = filterCoordinates<MacroTileNumber>(required, graph);
-            for(auto mtnTag : macroTileNumbers)
+            auto tileNumbers = filterCoordinates<MacroTileNumber>(required, graph);
+            for(auto tileNumberTag : tileNumbers)
             {
-                auto edgePredicate = [&](auto edge) {
-                    return rocRoller::KernelGraph::CoordinateGraph::isEdge<Tile>(edge)
-                           || rocRoller::KernelGraph::CoordinateGraph::isEdge<PassThrough>(edge);
-                };
-                for(auto input : graph.coordinates.getInputNodeIndices(mtnTag, edgePredicate))
-                {
-                    auto maybeSubDimension = graph.coordinates.get<SubDimension>(input);
-                    if(!maybeSubDimension)
-                        continue;
-                    if(maybeSubDimension->dim == sdim)
-                        return mtnTag;
-                }
+                auto tileNumber = graph.coordinates.get<MacroTileNumber>(tileNumberTag).value();
+                if(tileNumber.dim == sdim)
+                    return tileNumberTag;
             }
             return -1;
         }
