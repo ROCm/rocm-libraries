@@ -284,10 +284,10 @@ bool testNormalityViaSkewnessKurtosis(const std::vector<double>& data,
     }
     
     // Check if skewness is within tolerance of 0
-    bool skewness_ok = std::abs(skewness) <= skewness_tolerance;
+    bool skewness_ok = std::abs(skewness) <= std::abs(skewness_tolerance);
     
     // Check if excess kurtosis is within tolerance of 0
-    bool kurtosis_ok = std::abs(excess_kurtosis) <= excess_kurtosis_tolerance;
+    bool kurtosis_ok = std::abs(excess_kurtosis) <= std::abs(excess_kurtosis_tolerance);
     
     return skewness_ok && kurtosis_ok;
 }
@@ -935,8 +935,9 @@ public:
 
         auto data = dgen.getReferenceDouble();
 
-        EXPECT_LE(std::abs(getMean(data) - mean), 0.15);
-        EXPECT_LE(std::abs(getStdDev(data) - std_dev), 0.15);
+        // Verify mean and standard deviation are approximately 0 and 1 respectively
+        EXPECT_LE(std::abs(getMean(data) - mean), 0.1);
+        EXPECT_LE(std::abs(getStdDev(data) - std_dev), 0.1);
 
         // Use skewness and kurtosis to verify normal distribution
         const auto total_bits = getDataSignBits<DataType>() + getDataExponentBits<DataType>() 
@@ -981,14 +982,12 @@ public:
                                                                        actual_skewness,
                                                                        actual_excess_kurtosis);
         
-        std::cout << "Normality test for " << total_bits << "-bit type:\n";
-        std::cout << "  Skewness: " << actual_skewness 
-                  << " (tolerance: ±" << skewness_tolerance << ")\n";
-        std::cout << "  Excess Kurtosis: " << actual_excess_kurtosis 
-                  << " (tolerance: ±" << excess_kurtosis_tolerance << ")\n";
-        std::cout << "  Result: " << (normality_result ? "PASS" : "FAIL") << "\n";
-
-        EXPECT_TRUE(normality_result);
+        EXPECT_TRUE(normality_result) 
+            << "Normality test for " << total_bits << "-bit type:\n"
+            << "  Skewness: " << actual_skewness 
+            << " (tolerance: ±" << skewness_tolerance << ")\n"
+            << "  Excess Kurtosis: " << actual_excess_kurtosis 
+            << " (tolerance: ±" << excess_kurtosis_tolerance << ")";
     }
 };
 
