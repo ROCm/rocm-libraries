@@ -287,24 +287,15 @@ void BatchNormForwardInference(const Handle& handle,
         // variance don't require and epsilon paramter. If epsilonOpt doesn't have a value then
         // treat the estimatedVariance parameter as inverse variance rather than variance.
         const bool useInverseVariance = !epsilonOpt.has_value();
-
-        const auto problem = useInverseVariance ? batchnorm::ProblemDescription{bn_mode,
-                                                                                xDesc,
-                                                                                yDesc,
-                                                                                scaleDesc,
-                                                                                biasDesc,
-                                                                                estMeanDesc,
-                                                                                estVarianceDesc,
-                                                                                activDesc}
-                                                : batchnorm::ProblemDescription{bn_mode,
-                                                                                xDesc,
-                                                                                yDesc,
-                                                                                scaleDesc,
-                                                                                biasDesc,
-                                                                                estMeanDesc,
-                                                                                estVarianceDesc,
-                                                                                epsilonOpt.value(),
-                                                                                activDesc};
+        const auto problem            = batchnorm::ProblemDescription{bn_mode,
+                                                           xDesc,
+                                                           yDesc,
+                                                           scaleDesc,
+                                                           biasDesc,
+                                                           estMeanDesc,
+                                                           estVarianceDesc,
+                                                           epsilonOpt,
+                                                           activDesc};
 
         const auto invoke_params = [&]() {
             auto tmp              = batchnorm::InfInvokeParams{};
