@@ -125,12 +125,6 @@ ninja check
 ```bash
 # Build without plugins
 cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
-
-# Build without frontend
-cmake -GNinja -DHIPDNN_BUILD_FRONTEND=OFF ..
-
-# Build without backend
-cmake -GNinja -DHIPDNN_BUILD_BACKEND=OFF ..
 ```
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
