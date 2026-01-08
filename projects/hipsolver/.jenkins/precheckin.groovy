@@ -21,6 +21,7 @@ def runCI =
     prj.libraryDependencies.each { dep ->
         auxiliary.registerDependencyBranchParameter(dep)
     }
+    properties(auxiliary.addCommonProperties())
     prj.defaults.ccache = true
 
     // Define test architectures, optional rocm version argument is available
@@ -61,7 +62,6 @@ def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
     {
         jobName, nodeDetails->
         if (urlJobName == jobName) {
-            properties(auxiliary.addCommonProperties())
             runCI(nodeDetails, jobName, buildCommand, label)
         }
     }
