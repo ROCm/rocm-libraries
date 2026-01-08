@@ -416,54 +416,6 @@ namespace stinkytofu
         std::string comment;
     };
 
-    inline std::ostream& operator<<(std::ostream& os, const SWaitCntData& waitCntData)
-    {
-        os << "vlcnt=" << (int)waitCntData.vlcnt << ", vscnt=" << (int)waitCntData.vscnt
-           << ", dlcnt=" << (int)waitCntData.dlcnt << ", dscnt=" << (int)waitCntData.dscnt
-           << ", kmcnt=" << (int)waitCntData.kmcnt;
-        return os;
-    }
-
-    inline std::ostream& operator<<(std::ostream& os, const SWaitTensorCntData& waitTensorCntData)
-    {
-        os << "tlcnt=" << (int)waitTensorCntData.tlcnt;
-        return os;
-    }
-
-    inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluData)
-    {
-        auto typeToString = [](SDelayAluData::InstType type) -> const char* {
-            switch(type)
-            {
-            case SDelayAluData::InstType::VALU:
-                return "VALU";
-            case SDelayAluData::InstType::SALU:
-                return "SALU";
-            case SDelayAluData::InstType::TRANS:
-                return "TRANS";
-            case SDelayAluData::InstType::NO_DEP:
-                return "NO_DEP";
-            default:
-                return "UNKNOWN";
-            }
-        };
-
-        os << "instid0(" << typeToString(delayAluData.type);
-
-        // SALU always uses CYCLE_1, others use DEP_N
-        if(delayAluData.type == SDelayAluData::InstType::SALU)
-        {
-            os << "_CYCLE_1";
-        }
-        else if(delayAluData.type != SDelayAluData::InstType::NO_DEP)
-        {
-            os << "_DEP_" << (int)delayAluData.distance;
-        }
-
-        os << ")";
-        return os;
-    }
-
     // clang-format off
     // Helper template for type mapping
     template<typename T> constexpr Modifier::Type getModifierType();
