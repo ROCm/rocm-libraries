@@ -1,0 +1,53 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+target_sources(rocsparse PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgeam.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgeam_nnzb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_calc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_mult.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_mult_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_multadd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_multadd_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_nnz.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_scal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_bsrgemm_scal_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_impl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_nnz.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_nnz_impl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_numeric.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_numeric_impl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_symbolic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgeam_symbolic_impl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_calc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_info.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_mult.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_mult_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_mult_nnz.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_multadd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_multadd_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_multadd_nnz.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_nnz.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_nnz_calc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_numeric.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_numeric_calc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_numeric_mult.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_numeric_multadd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_numeric_scal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_scal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_scal_buffer_size.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_scal_nnz.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_symbolic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_symbolic_calc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_symbolic_mult.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_symbolic_multadd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_csrgemm_symbolic_scal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_spgeam.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_spgemm.cpp
+)
