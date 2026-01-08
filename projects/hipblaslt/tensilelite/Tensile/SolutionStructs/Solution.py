@@ -1199,9 +1199,13 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     # Init vars early since there are early-exit return statements below
-    # initialize DTLA, DTLB
+    # Initialize DTLA, DTLB for initial calcLdsBlockSizePerPad() call
     state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
     state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+    # tentative init for UseGeneralizedNLCOneA/B
+    # set True for DTL 
+    state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
+    state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
 
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
@@ -1780,15 +1784,22 @@ class Solution(collections.abc.Mapping):
           bpeA = state["ProblemType"]["DataTypeA"].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
           MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
-          LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
-          LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
+
+          if state["UseGeneralizedNLCOneA"]:
+            LdsBlockSizePerPadA = MinLdsBlockSizePerPadA
+          else:
+            LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
+            LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
 
         if state["DirectToLdsB"]:
           bpeB = state["ProblemType"]["DataTypeB"].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
           MinLdsBlockSizePerPadB = (state[f"GlobalReadVectorWidthB"] * bpeB) * state["WavefrontSize"]
-          LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
-          LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
+          if state["UseGeneralizedNLCOneB"]:
+            LdsBlockSizePerPadB = MinLdsBlockSizePerPadB
+          else:
+            LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
+            LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
 
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
 
@@ -2582,14 +2593,6 @@ class Solution(collections.abc.Mapping):
     if state["LdsBlockSizePerPadB"] == -1:
       auto_LdsBlockSizePerPadB_for_mix = 1
     state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
-
-    for tc in ["A", "B"]:
-      if state["UseGeneralizedNLCOne%s"%tc]:
-        bpe = state["ProblemType"]["DataType%s"%tc].numBytes()
-        MinLdsBlockSizePerPad = (state["GlobalReadVectorWidth%s"%tc] * bpe) * state["WavefrontSize"]
-        if state["LdsBlockSizePerPad%s"%tc] != MinLdsBlockSizePerPad:
-          reject(state, printRejectionReason, "UseGeneralizedNLCOne%s case, LdsBlockSizePerPad%s(%u) should be same as MinLdsBlockSizePerPad(%u)" \
-                 %(tc, tc, state["LdsBlockSizePerPad%s"%tc], MinLdsBlockSizePerPad))
 
     if state["LdsBlockSizePerPadMetadata"] == -1:
       state["LdsBlockSizePerPadMetadata"] = state["LdsBlockSizePerPadA"]
