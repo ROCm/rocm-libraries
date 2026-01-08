@@ -302,7 +302,7 @@ The filter matches against the specialization name. Other valid patterns include
 
 ## Noise
 
-Noise is the variance in throughput between runs. It is measured as the [coefficient of variation](https://en.wikipedia.org/wiki/Coefficient_of_variation), which is the standard deviation divided by the mean.
+Noise is the variance in throughput between runs. It is measured as the coefficient of variation, which is the standard deviation divided by the mean.
 
 primbench's primary goal is to minimize noise so that real performance improvements are easier to see. For example, if a benchmark has 10% noise, a 4% performance improvement can't be distinguished from noise.
 
