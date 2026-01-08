@@ -69,7 +69,7 @@ struct is_low_precision<_Float16> : std::true_type
 };
 
 template <typename T>
-inline constexpr bool is_low_precision_v = is_low_precision<T>::value;
+constexpr bool is_low_precision_v = is_low_precision<T>::value;
 
 // Set all entries in an array to 1.0f for numerical stability with low-precision types
 template <typename T>
