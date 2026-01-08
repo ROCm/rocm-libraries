@@ -261,9 +261,18 @@ rocm_install(
 )
 
 rocm_install(
-    DIRECTORY "${PROJECT_BINARY_DIR}/include/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    DIRECTORY "${PROJECT_SOURCE_DIR}/library/include/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocsparse"
     COMPONENT "devel"
+    FILES_MATCHING PATTERN "*.h"
+)
+
+# Install generated headers (rocsparse-version.h, rocsparse-export.h)
+rocm_install(
+    DIRECTORY "${PROJECT_BINARY_DIR}/include/rocsparse/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocsparse"
+    COMPONENT "devel"
+    FILES_MATCHING PATTERN "*.h"
 )
 
 rocm_export_targets(
