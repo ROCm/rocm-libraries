@@ -131,49 +131,49 @@ auto GetTestParams(miopenDataType_t datatype)
 
 } // namespace
 
-using GPU_UnitTestConvSolverConvDepthwiseFwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
-using CPU_UnitTestConvSolverConvDepthwiseFwdDevApplicability_FP16 =
+using GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16 = GPU_UnitTestConvSolverFwd_FP16;
+using CPU_UnitTestConvSolverConvDepthwiseFwd2DDevApplicability_FP16 =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
-using CPU_UnitTestConvSolverConvDepthwiseFwdeterministicApplicability_NONE =
+using CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
 
-TEST_P(GPU_UnitTestConvSolverConvDepthwiseFwd_FP16, ConvDepthwiseFwd)
+TEST_P(GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16, ConvDepthwiseFwd2D)
 {
-    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd{});
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd2D{});
 };
 
-TEST_P(CPU_UnitTestConvSolverConvDepthwiseFwdDevApplicability_FP16, ConvDepthwiseFwd)
+TEST_P(CPU_UnitTestConvSolverConvDepthwiseFwd2DDevApplicability_FP16, ConvDepthwiseFwd2D)
 {
-    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd{});
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd2D{});
 };
 
-TEST_P(CPU_UnitTestConvSolverConvDepthwiseFwdeterministicApplicability_NONE, ConvDepthwiseFwd)
+TEST_P(CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE, ConvDepthwiseFwd2D)
 {
-    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd{});
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd2D{});
 };
 
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverConvDepthwiseFwd_FP16,
+                         GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16,
                          testing::Combine(testing::Values(GetTestParams(miopenHalf)),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
 
 // Full tests
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_UnitTestConvSolverConvDepthwiseFwd_FP16,
+                         GPU_UnitTestConvSolverConvDepthwiseFwd2D_FP16,
                          testing::Combine(testing::Values(GetTestParams(miopenHalf)),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvFullTestCases(miopenHalf))));
 
 // Device applicability tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         CPU_UnitTestConvSolverConvDepthwiseFwdDevApplicability_FP16,
+                         CPU_UnitTestConvSolverConvDepthwiseFwd2DDevApplicability_FP16,
                          testing::Combine(testing::Values(GetTestParams(miopenHalf)),
                                           testing::Values(GetConvSmokeTestCases(miopenHalf)[0])));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    CPU_UnitTestConvSolverConvDepthwiseFwdeterministicApplicability_NONE,
+    CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE,
     testing::Combine(testing::Values(Gpu::None),
                      testing::Values(GetConvDeterministicTestCases(miopenHalf)[0])));

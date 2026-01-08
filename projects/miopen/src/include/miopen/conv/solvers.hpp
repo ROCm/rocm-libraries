@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -4928,17 +4928,17 @@ private:
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
-struct PerformanceConfigConvDepthwiseFwd : PerfConfigBaseCK<PerformanceConfigConvDepthwiseFwd>
+struct PerformanceConfigConvDepthwiseFwd2D : PerfConfigBaseCK<PerformanceConfigConvDepthwiseFwd2D>
 {
     int index;
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
-    PerformanceConfigConvDepthwiseFwd(int idx, std::string kernl_id)
+    PerformanceConfigConvDepthwiseFwd2D(int idx, std::string kernl_id)
         : index(idx), kernel_id(kernl_id)
     {
     }
-    PerformanceConfigConvDepthwiseFwd() : PerformanceConfigConvDepthwiseFwd(0, "") {}
-    PerformanceConfigConvDepthwiseFwd(bool) : PerformanceConfigConvDepthwiseFwd(0, "") {}
+    PerformanceConfigConvDepthwiseFwd2D() : PerformanceConfigConvDepthwiseFwd2D(0, "") {}
+    PerformanceConfigConvDepthwiseFwd2D(bool) : PerformanceConfigConvDepthwiseFwd2D(0, "") {}
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
@@ -4948,7 +4948,7 @@ struct PerformanceConfigConvDepthwiseFwd : PerfConfigBaseCK<PerformanceConfigCon
         return IsValid(problem);
     }
     MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
-    MIOPEN_INTERNALS_EXPORT bool operator==(const PerformanceConfigConvDepthwiseFwd& other) const;
+    MIOPEN_INTERNALS_EXPORT bool operator==(const PerformanceConfigConvDepthwiseFwd2D& other) const;
 
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -4959,18 +4959,18 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
 };
 
-struct ConvDepthwiseFwd final : ConvTunableSolver<PerformanceConfigConvDepthwiseFwd>
+struct ConvDepthwiseFwd2D final : ConvTunableSolver<PerformanceConfigConvDepthwiseFwd2D>
 {
-    ConvDepthwiseFwd();
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseFwd>(); }
+    ConvDepthwiseFwd2D();
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseFwd2D>(); }
 
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd GetDefaultPerformanceConfig(
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd2D GetDefaultPerformanceConfig(
         const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
     MIOPEN_INTERNALS_EXPORT bool
     IsValidPerformanceConfig(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
-                             const PerformanceConfigConvDepthwiseFwd&) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd
+                             const PerformanceConfigConvDepthwiseFwd2D&) const override;
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd2D
     Search(const ExecutionContext&,
            const miopen::conv::ProblemDescription&,
            const AnyInvokeParams& invoke_ctx) const override;
@@ -4994,7 +4994,7 @@ struct ConvDepthwiseFwd final : ConvTunableSolver<PerformanceConfigConvDepthwise
     MIOPEN_INTERNALS_EXPORT ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
-                const PerformanceConfigConvDepthwiseFwd&) const override;
+                const PerformanceConfigConvDepthwiseFwd2D&) const override;
 
     uint32_t GetSupportedSolutionCount(const ExecutionContext&,
                                        const miopen::conv::ProblemDescription&) const;

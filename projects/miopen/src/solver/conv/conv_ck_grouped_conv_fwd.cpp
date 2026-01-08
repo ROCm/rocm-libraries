@@ -227,7 +227,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             14, // SubTileH
                                             16, // SubTileW
                                             8,  // InScalarPerVector
-                                            8,
+                                            8,  // OutScalarPerVector
                                             RequirePadding>
 
                                         ,
@@ -369,7 +369,7 @@ struct CKArgs
 } // namespace
 
 template <typename DataType>
-void PerformanceConfigConvDepthwiseFwd::Init(const ProblemDescription& problem)
+void PerformanceConfigConvDepthwiseFwd2D::Init(const ProblemDescription& problem)
 {
     const auto& ck_args            = CKArgs{problem};
     constexpr uint32_t kernelCount = std::tuple_size_v<DeviceConvFwdFactory>;
@@ -386,14 +386,14 @@ void PerformanceConfigConvDepthwiseFwd::Init(const ProblemDescription& problem)
                                           << ", total kernel count:" << kernelCount);
 
     if(valid_kernels.empty())
-        MIOPEN_THROW("No ConvDeptwithFwd kernels found");
+        MIOPEN_THROW("No ConvDepthwiseFwd2D kernels found");
 
     index     = 0;
     kernel_id = valid_kernels[index];
 }
 #endif
 
-void PerformanceConfigConvDepthwiseFwd::HeuristicInit(
+void PerformanceConfigConvDepthwiseFwd2D::HeuristicInit(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem)
 {
@@ -402,20 +402,13 @@ void PerformanceConfigConvDepthwiseFwd::HeuristicInit(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
-    case miopenInt8: break;
     case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat:
-    case miopenBFloat16:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt64:
-    case miopenInt32:
-    case miopenDouble: break;
+    default: break;
     }
 #endif
 }
 
-bool PerformanceConfigConvDepthwiseFwd::SetNextValue(const ProblemDescription& problem)
+bool PerformanceConfigConvDepthwiseFwd2D::SetNextValue(const ProblemDescription& problem)
 {
     if(valid_kernels.empty())
     {
@@ -434,27 +427,27 @@ bool PerformanceConfigConvDepthwiseFwd::SetNextValue(const ProblemDescription& p
     return true;
 }
 
-bool PerformanceConfigConvDepthwiseFwd::IsValidValue() const
+bool PerformanceConfigConvDepthwiseFwd2D::IsValidValue() const
 {
     return index < valid_kernels.size();
 }
 
-bool PerformanceConfigConvDepthwiseFwd::IsValid(
+bool PerformanceConfigConvDepthwiseFwd2D::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
     return IsValidValue();
 }
 
-bool PerformanceConfigConvDepthwiseFwd::operator==(
-    const PerformanceConfigConvDepthwiseFwd& other) const
+bool PerformanceConfigConvDepthwiseFwd2D::operator==(
+    const PerformanceConfigConvDepthwiseFwd2D& other) const
 {
     return kernel_id == other.kernel_id;
 }
 
-ConvDepthwiseFwd::ConvDepthwiseFwd() {}
+ConvDepthwiseFwd2D::ConvDepthwiseFwd2D() {}
 
-bool ConvDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
-                                    const ProblemDescription& problem) const
+bool ConvDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
+                                      const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD))
@@ -492,8 +485,8 @@ bool ConvDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
 }
 
 uint32_t
-ConvDepthwiseFwd::GetSupportedSolutionCount([[maybe_unused]] const ExecutionContext& ctx,
-                                            const miopen::conv::ProblemDescription& problem) const
+ConvDepthwiseFwd2D::GetSupportedSolutionCount([[maybe_unused]] const ExecutionContext& ctx,
+                                              const miopen::conv::ProblemDescription& problem) const
 {
     uint32_t solutionCount = 0;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -513,34 +506,35 @@ ConvDepthwiseFwd::GetSupportedSolutionCount([[maybe_unused]] const ExecutionCont
     return solutionCount;
 }
 
-PerformanceConfigConvDepthwiseFwd
-ConvDepthwiseFwd::GetDefaultPerformanceConfig([[maybe_unused]] const ExecutionContext& ctx,
-                                              const miopen::conv::ProblemDescription& problem) const
+PerformanceConfigConvDepthwiseFwd2D ConvDepthwiseFwd2D::GetDefaultPerformanceConfig(
+    [[maybe_unused]] const ExecutionContext& ctx,
+    const miopen::conv::ProblemDescription& problem) const
 {
-    PerformanceConfigConvDepthwiseFwd pp;
+    PerformanceConfigConvDepthwiseFwd2D pp;
     pp.HeuristicInit(ctx, problem);
     return pp;
 }
 
-bool ConvDepthwiseFwd::IsValidPerformanceConfig(
+bool ConvDepthwiseFwd2D::IsValidPerformanceConfig(
     const ExecutionContext&,
     const miopen::conv::ProblemDescription& problem,
-    const PerformanceConfigConvDepthwiseFwd& config) const
+    const PerformanceConfigConvDepthwiseFwd2D& config) const
 {
     return config.IsValid((problem));
 }
 
-PerformanceConfigConvDepthwiseFwd
-ConvDepthwiseFwd::Search(const ExecutionContext& ctx,
-                         const miopen::conv::ProblemDescription& problem,
-                         const AnyInvokeParams& invoke_ctx) const
+PerformanceConfigConvDepthwiseFwd2D
+ConvDepthwiseFwd2D::Search(const ExecutionContext& ctx,
+                           const miopen::conv::ProblemDescription& problem,
+                           const AnyInvokeParams& invoke_ctx) const
 {
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-ConvSolution ConvDepthwiseFwd::GetSolution(const ExecutionContext&,
-                                           const miopen::conv::ProblemDescription& problem,
-                                           const PerformanceConfigConvDepthwiseFwd& config) const
+ConvSolution
+ConvDepthwiseFwd2D::GetSolution(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription& problem,
+                                const PerformanceConfigConvDepthwiseFwd2D& config) const
 {
     ConvSolution sol;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
