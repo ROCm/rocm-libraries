@@ -217,7 +217,7 @@ namespace rocsparse
                         {
                             rocsparse::atomic_add(
                                 dense_C,
-                                static_cast<int>(start_row + ldc * (colB + p * WF_SIZE)),
+                                static_cast<int64_t>(start_row + ldc * (colB + p * WF_SIZE)),
                                 dense_C_size,
                                 static_cast<C>(alpha * sum[p]));
                         }
@@ -265,7 +265,7 @@ namespace rocsparse
                         {
                             rocsparse::atomic_add(
                                 dense_C,
-                                static_cast<int>(start_row + ldc * (colB + p * WF_SIZE)),
+                                static_cast<int64_t>(start_row + ldc * (colB + p * WF_SIZE)),
                                 dense_C_size,
                                 static_cast<C>(alpha * sum[p]));
                         }
