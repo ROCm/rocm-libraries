@@ -323,23 +323,9 @@ Tests:
   category: pre_checkin
   function: spmv_coo_aos
   indextype: *i32_i64
-  precision: *float16_float16_float16_float32_axyt_precision
-  M: [7812]
-  N: [8923]
-  alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none]
-  baseA: *all_rocsparse_index_base
-  matrix: [rocsparse_matrix_random]
-  storage: [rocsparse_storage_mode_sorted]
-  spmv_alg: [rocsparse_spmv_alg_coo_atomic]
-
-- name: spmv_coo_aos
-  category: pre_checkin
-  function: spmv_coo_aos
-  indextype: *i32_i64
-  precision: *bfloat16_bfloat16_bfloat16_float32_axyt_precision
-  M: [7812]
-  N: [8923]
+  precision: [*float16_float16_float16_float32_axyt_precision, *bfloat16_bfloat16_bfloat16_float32_axyt_precision]
+  M: [34, 104, 343]
+  N: [57, 109, 458]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: *all_rocsparse_index_base

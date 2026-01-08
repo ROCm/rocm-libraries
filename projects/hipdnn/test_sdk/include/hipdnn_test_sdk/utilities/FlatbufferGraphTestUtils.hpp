@@ -1292,6 +1292,53 @@ inline flatbuffers::FlatBufferBuilder
                                             dataType);
 }
 
+inline flatbuffers::FlatBufferBuilder
+    createValidMatmulGraph(const std::vector<int64_t>& aDims = {4, 8},
+                           const std::vector<int64_t>& aStrides = {8, 1},
+                           const std::vector<int64_t>& bDims = {8, 5},
+                           const std::vector<int64_t>& bStrides = {5, 1},
+                           const std::vector<int64_t>& cDims = {4, 5},
+                           const std::vector<int64_t>& cStrides = {5, 1},
+                           hipdnn_data_sdk::data_objects::DataType dataType
+                           = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "A", dataType, &aStrides, &aDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "B", dataType, &bStrides, &bDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 3, "C", dataType, &cStrides, &cDims));
+
+    auto matmulAttributes = hipdnn_data_sdk::data_objects::CreateMatmulAttributes(builder,
+                                                                                  1, // A tensor uid
+                                                                                  2, // B tensor uid
+                                                                                  3 // C tensor uid
+    );
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "matmul",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
+        matmulAttributes.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;

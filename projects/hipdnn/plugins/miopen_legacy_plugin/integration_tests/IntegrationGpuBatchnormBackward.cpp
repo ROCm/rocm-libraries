@@ -83,11 +83,9 @@ protected:
         dyAttr.set_uid(BatchnormBwdTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
-        auto scaleAttr
-            = graph::makeTensorAttributes("scale",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
+        // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
+        auto scaleAttr = graph::makeTensorAttributes(
+            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         scaleAttr.set_uid(BatchnormBwdTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
@@ -95,19 +93,13 @@ protected:
 
         if(!CalcStats)
         {
-            auto meanAttr
-                = graph::makeTensorAttributes("mean",
-                                              intermediateDataType,
-                                              derivedDims,
-                                              generateStrides(derivedDims, layout.strideOrder));
+            auto meanAttr = graph::makeTensorAttributes(
+                "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
             meanAttr.set_uid(BatchnormBwdTensorIds::MEAN_UID);
             auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-            auto invVarianceAttr
-                = graph::makeTensorAttributes("inv_variance",
-                                              intermediateDataType,
-                                              derivedDims,
-                                              generateStrides(derivedDims, layout.strideOrder));
+            auto invVarianceAttr = graph::makeTensorAttributes(
+                "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
             invVarianceAttr.set_uid(BatchnormBwdTensorIds::INV_VARIANCE_UID);
             auto invVarianceTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
