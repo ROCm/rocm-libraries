@@ -31,6 +31,7 @@ set(TEST_LINK_LIBS
 set(UNIT_TEST_FILES
     unit/PassManagerTest.cpp
     unit/IRBuilderTest.cpp
+    unit/IRModuleTest.cpp
     unit/IntrusiveListTest.cpp
     unit/ConfigurableWaitCntPassTest.cpp
     unit/StinkyAsmEmitterTest.cpp

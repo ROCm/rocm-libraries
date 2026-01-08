@@ -68,6 +68,27 @@ namespace stinkytofu
             return inst;
         }
 
+        // Helper method with fallback opcode for architectural differences
+        // (e.g., ds_read_b64 on gfx942/950 vs ds_load_b64 on gfx1250)
+        StinkyInstruction*
+            createInstructionWithFallback(GFX primary, GFX fallback, const std::string& instrName)
+        {
+            const HwInstDesc* desc = getMCIDByUOp(primary, archID);
+            if(!desc)
+            {
+                desc = getMCIDByUOp(fallback, archID);
+            }
+            if(!desc)
+            {
+                STINKY_UNREACHABLE(
+                    ("Failed to get instruction descriptor for " + instrName).c_str());
+            }
+
+            // Create a standalone instruction
+            StinkyInstruction* inst = new StinkyInstruction(desc);
+            return inst;
+        }
+
         // Architecture capability queries
         bool hasSDWA() const
         {
@@ -112,6 +133,29 @@ namespace stinkytofu
             return result;
         }
 
+        // Unified helper with fallback opcode for architectural differences
+        inline std::vector<StinkyInstruction*>
+            createInstWithFallback(StinkyTofu::Impl*                  pImpl,
+                                   GFX                                primary,
+                                   GFX                                fallback,
+                                   const std::string&                 name,
+                                   const StinkyRegister&              dst,
+                                   const std::vector<StinkyRegister>& srcs,
+                                   const std::string&                 comment)
+        {
+            std::vector<StinkyInstruction*> result;
+            result.reserve(1);
+            StinkyInstruction* inst = pImpl->createInstructionWithFallback(primary, fallback, name);
+            inst->setDestRegs({dst});
+            inst->setSrcRegs(srcs);
+            if(!comment.empty())
+            {
+                inst->addModifier(CommentData(comment));
+            }
+            result.push_back(inst);
+            return result;
+        }
+
         // Helper for instructions with NO destination (e.g., comparisons)
         inline std::vector<StinkyInstruction*>
             createInstNoDst(StinkyTofu::Impl*                  pImpl,
@@ -123,6 +167,27 @@ namespace stinkytofu
             std::vector<StinkyInstruction*> result;
             result.reserve(1);
             StinkyInstruction* inst = pImpl->createInstruction(opcode, name);
+            inst->setSrcRegs(srcs);
+            if(!comment.empty())
+            {
+                inst->addModifier(CommentData(comment));
+            }
+            result.push_back(inst);
+            return result;
+        }
+
+        // Helper for instructions with NO destination, with fallback opcode
+        inline std::vector<StinkyInstruction*>
+            createInstNoDstWithFallback(StinkyTofu::Impl*                  pImpl,
+                                        GFX                                primary,
+                                        GFX                                fallback,
+                                        const std::string&                 name,
+                                        const std::vector<StinkyRegister>& srcs,
+                                        const std::string&                 comment)
+        {
+            std::vector<StinkyInstruction*> result;
+            result.reserve(1);
+            StinkyInstruction* inst = pImpl->createInstructionWithFallback(primary, fallback, name);
             inst->setSrcRegs(srcs);
             if(!comment.empty())
             {
@@ -273,6 +338,16 @@ namespace stinkytofu
         oss << stinkytofu::toString(pImpl->irList);
 
         return oss.str();
+    }
+
+    IRList& IRListModule::getIRList()
+    {
+        return pImpl->irList;
+    }
+
+    const IRList& IRListModule::getIRList() const
+    {
+        return pImpl->irList;
     }
 
     void IRListModule::remapVirtualRegisters(int vgprOffset, int sgprOffset)
@@ -2648,28 +2723,41 @@ namespace stinkytofu
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b32, "DS_LOAD_B32", dst, {addr}, comment);
+        // gfx942/950: ds_read_b32, gfx1250: ds_load_b32
+        return createInstWithFallback(
+            pImpl.get(), GFX::ds_read_b32, GFX::ds_load_b32, "DS_LOAD_B32", dst, {addr}, comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSLoadB64(const StinkyRegister& dst,
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b64, "DS_LOAD_B64", dst, {addr}, comment);
+        // gfx942/950: ds_read_b64, gfx1250: ds_load_b64
+        return createInstWithFallback(
+            pImpl.get(), GFX::ds_read_b64, GFX::ds_load_b64, "DS_LOAD_B64", dst, {addr}, comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSLoadB96(const StinkyRegister& dst,
                                                           const StinkyRegister& addr,
                                                           const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b96, "DS_LOAD_B96", dst, {addr}, comment);
+        // gfx942/950: ds_read_b96, gfx1250: ds_load_b96
+        return createInstWithFallback(
+            pImpl.get(), GFX::ds_read_b96, GFX::ds_load_b96, "DS_LOAD_B96", dst, {addr}, comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSLoadB128(const StinkyRegister& dst,
                                                            const StinkyRegister& addr,
                                                            const std::string&    comment)
     {
-        return createInst(pImpl.get(), GFX::ds_read_b128, "DS_LOAD_B128", dst, {addr}, comment);
+        // gfx942/950: ds_read_b128, gfx1250: ds_load_b128
+        return createInstWithFallback(pImpl.get(),
+                                      GFX::ds_read_b128,
+                                      GFX::ds_load_b128,
+                                      "DS_LOAD_B128",
+                                      dst,
+                                      {addr},
+                                      comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSLoadD16HIU8(const StinkyRegister& dst,
@@ -2757,32 +2845,52 @@ namespace stinkytofu
                                                            const StinkyRegister& src,
                                                            const std::string&    comment)
     {
-        return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b32, "DS_STORE_B32", {addr, src}, comment);
+        // gfx942/950: ds_write_b32, gfx1250: ds_store_b32
+        return createInstNoDstWithFallback(pImpl.get(),
+                                           GFX::ds_write_b32,
+                                           GFX::ds_store_b32,
+                                           "DS_STORE_B32",
+                                           {addr, src},
+                                           comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSStoreB64(const StinkyRegister& addr,
                                                            const StinkyRegister& src,
                                                            const std::string&    comment)
     {
-        return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b64, "DS_STORE_B64", {addr, src}, comment);
+        // gfx942/950: ds_write_b64, gfx1250: ds_store_b64
+        return createInstNoDstWithFallback(pImpl.get(),
+                                           GFX::ds_write_b64,
+                                           GFX::ds_store_b64,
+                                           "DS_STORE_B64",
+                                           {addr, src},
+                                           comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSStoreB96(const StinkyRegister& addr,
                                                            const StinkyRegister& src,
                                                            const std::string&    comment)
     {
-        return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b96, "DS_STORE_B96", {addr, src}, comment);
+        // gfx942/950: ds_write_b96, gfx1250: ds_store_b96
+        return createInstNoDstWithFallback(pImpl.get(),
+                                           GFX::ds_write_b96,
+                                           GFX::ds_store_b96,
+                                           "DS_STORE_B96",
+                                           {addr, src},
+                                           comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSStoreB128(const StinkyRegister& addr,
                                                             const StinkyRegister& src,
                                                             const std::string&    comment)
     {
-        return createInstNoDst(
-            pImpl.get(), GFX::ds_write_b128, "DS_STORE_B128", {addr, src}, comment);
+        // gfx942/950: ds_write_b128, gfx1250: ds_store_b128
+        return createInstNoDstWithFallback(pImpl.get(),
+                                           GFX::ds_write_b128,
+                                           GFX::ds_store_b128,
+                                           "DS_STORE_B128",
+                                           {addr, src},
+                                           comment);
     }
 
     std::vector<StinkyInstruction*> StinkyTofu::DSStoreD16HIB8(const StinkyRegister& addr,
@@ -2825,6 +2933,39 @@ namespace stinkytofu
     {
         return createInst(
             pImpl.get(), GFX::ds_bpermute_b32, "DS_BPERMUTE_B32", dst, {src}, comment);
+    }
+
+    // Tensor Memory Instructions
+
+    std::vector<StinkyInstruction*> StinkyTofu::TensorLoadToLds(const StinkyRegister& group0,
+                                                                const StinkyRegister& group1,
+                                                                const StinkyRegister* group2,
+                                                                const StinkyRegister* group3,
+                                                                const std::string&    comment)
+    {
+        // Validate that all provided groups are SGPRs (debug assertion)
+        assert(group0.reg.type == RegType::S && "TensorLoadToLds: group0 must be SGPR");
+        assert(group1.reg.type == RegType::S && "TensorLoadToLds: group1 must be SGPR");
+        assert((!group2 || group2->reg.type == RegType::S)
+               && "TensorLoadToLds: group2 must be SGPR");
+        assert((!group3 || group3->reg.type == RegType::S)
+               && "TensorLoadToLds: group3 must be SGPR");
+
+        // Build source operand list based on which groups are provided
+        std::vector<StinkyRegister> srcs;
+        srcs.push_back(group0);
+        srcs.push_back(group1);
+        if(group2)
+        {
+            srcs.push_back(*group2);
+        }
+        if(group3)
+        {
+            srcs.push_back(*group3);
+        }
+
+        return createInstNoDst(
+            pImpl.get(), GFX::tensor_load_to_lds, "TENSOR_LOAD_TO_LDS", srcs, comment);
     }
 
     // Buffer (MUBUF) Instructions

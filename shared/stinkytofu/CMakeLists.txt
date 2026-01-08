@@ -62,8 +62,12 @@ set(STINKYTOFU_SOURCE_FILES
     stinkytofu.cpp
     StinkyBuilder.cpp
     ir/StinkyIR.cpp
+    ir/IRModule.cpp
     ir/Operation.cpp
     ir/operations/Activation.cpp
+    ir/passes/PassManager.cpp
+    ir/passes/ToStinkyAsmPass.cpp
+    ir/passes/CompositeInstructionLoweringPass.cpp
     ir/asm/CFGBuilderPass.cpp
     ir/asm/PeepholeOptimizationPass.cpp
     ir/asm/DeadCodeEliminationPass.cpp
@@ -144,3 +148,26 @@ target_include_directories(stinkytofu
 # Make stinkytofu depend on the generated ISA definition files from tablegen
 # This ensures the build order is: gfxisa -> tablegen -> run tablegen -> stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
+
+##===----------------------------------------------------------------------===##
+# Install targets
+##===----------------------------------------------------------------------===##
+
+# Install the stinkytofu library
+install(TARGETS stinkytofu
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+
+# Install public header files
+install(DIRECTORY include/
+    DESTINATION include
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+
+# Install generated header files
+install(FILES
+    ${PROJECT_BINARY_DIR}/ir/StinkyInstructions_generated.hpp
+    DESTINATION include/ir
+)

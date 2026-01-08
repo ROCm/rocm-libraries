@@ -37,6 +37,7 @@ namespace stinkytofu
     class StinkyTofu;
     struct StinkyInstruction;
     struct StinkyRegister;
+    class IRInstruction;
 
     /**
      * @brief High-level IR builder for StinkyTofu

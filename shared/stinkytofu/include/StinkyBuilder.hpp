@@ -16,7 +16,11 @@ namespace stinkytofu
     struct MacroInstruction;
     enum class GfxArchID : unsigned int;
 
-    // Forward declare IRListModule
+    // Forward declarations for IR types
+    class IRBase;
+    template <typename T>
+    class IntrusiveList;
+    using IRList = IntrusiveList<IRBase>;
     class IRListModule;
 
     /**
@@ -1235,6 +1239,15 @@ namespace stinkytofu
                                                              const StinkyRegister& addr1,
                                                              const std::string&    comment = "");
 
+        // Tensor Memory Instructions
+        // Note: group2 and group3 are optional (pass nullptr to omit)
+        // All groups must be SGPRs (scalar registers)
+        std::vector<StinkyInstruction*> TensorLoadToLds(const StinkyRegister& group0,
+                                                        const StinkyRegister& group1,
+                                                        const StinkyRegister* group2  = nullptr,
+                                                        const StinkyRegister* group3  = nullptr,
+                                                        const std::string&    comment = "");
+
         // ========================================================================
         // Label Creation
         // ========================================================================
@@ -1969,47 +1982,63 @@ namespace stinkytofu
 
         /**
          * @brief Remap all virtual registers in this module (in-place)
-         * 
+         *
          * Walks through all instructions in the module and applies register offset
          * remapping to virtual registers. Modifies the instructions in-place.
-         * 
+         *
          * Use this when you want to modify the original module (single instantiation).
          * For multiple instantiations, use cloneAndRemap() instead.
-         * 
+         *
          * @param vgprOffset Offset to add to virtual VGPRs
          * @param sgprOffset Offset to add to virtual SGPRs
-         * 
+         *
          * Example:
          *   auto module = st.createIRList("kernel");
          *   module->add(generateTemplateWithVirtuals(st));
-         *   module->remapVirtualRegisters(10, 5);  // Virtual v0→v10, s0→s5
+         *   module->remapVirtualRegisters(10, 5);  // Virtual v0->v10, s0->s5
          */
         void remapVirtualRegisters(int vgprOffset, int sgprOffset);
 
         /**
+         * @brief Get the internal IR list for testing purposes
+         *
+         * This method exposes the internal IRList for advanced use cases like testing.
+         * Most users should use add() and emitAssembly() instead.
+         *
+         * @return Reference to the internal IRList
+         */
+        IRList& getIRList();
+
+        /**
+         * @brief Get the internal IR list for testing purposes (const version)
+         * @return Const reference to the internal IRList
+         */
+        const IRList& getIRList() const;
+
+        /**
          * @brief Clone this module and remap virtual registers in the clone
-         * 
+         *
          * Creates a deep copy of all instructions in this module, then applies
          * register offset remapping to the cloned instructions. The original
          * module remains unchanged.
-         * 
+         *
          * Use this when you want to instantiate the same template multiple times
          * with different register allocations (e.g., activation functions).
-         * 
+         *
          * @param vgprOffset Offset to add to virtual VGPRs in the clone
          * @param sgprOffset Offset to add to virtual SGPRs in the clone
          * @return New module with remapped registers
-         * 
+         *
          * Example:
          *   // Generate template once
          *   auto absTemplate = st.createIRList("abs_template");
          *   absTemplate->add(generateAbsWithVirtuals(st));
-         *   
+         *
          *   // Instantiate multiple times
          *   auto inst1 = absTemplate->cloneAndRemap(10, 0);  // v[10:12]
          *   auto inst2 = absTemplate->cloneAndRemap(20, 0);  // v[20:22]
          *   auto inst3 = absTemplate->cloneAndRemap(30, 0);  // v[30:32]
-         *   
+         *
          *   // Original template unchanged, can reuse
          */
         Expected<std::shared_ptr<IRListModule>> cloneAndRemap(int vgprOffset, int sgprOffset) const;
