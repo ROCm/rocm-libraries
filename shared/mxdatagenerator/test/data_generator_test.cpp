@@ -230,9 +230,9 @@ double getSkewness(const std::vector<double>& data)
         sum_cubed += z * z * z;
     }
     
-    // Sample skewness with bias correction
+    // Population Skewness
     const double n = static_cast<double>(data.size());
-    return (n / ((n - 1.0) * (n - 2.0))) * sum_cubed;
+    return sum_cubed / n;
 }
 
 // Calculate excess kurtosis (fourth standardized moment minus 3)
@@ -259,11 +259,9 @@ double getExcessKurtosis(const std::vector<double>& data)
         sum_quad += z * z * z * z;
     }
 
+    // Population Excess Kurtosis
     const double n = static_cast<double>(data.size());
-    const double term1 = n * (n + 1.0) / ((n - 1.0) * (n - 2.0) * (n - 3.0));
-    const double term2 = 3.0 * (n - 1.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0));
-    
-    return term1 * sum_quad - term2;
+    return sum_quad / n - 3.0;
 }
 
 
