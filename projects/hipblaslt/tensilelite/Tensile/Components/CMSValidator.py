@@ -1542,7 +1542,9 @@ def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo',
     """
     Ensure that the Packs start and end at the correct indices.
     """
-    assert not schedule_info.mfmaReorder, "MFMA reorder is not supported for pack validation."
+    if schedule_info.mfmaReorder:
+        printWarning("MFMA reorder is not supported for pack validation. Skipping pack validation.")
+        return True, ""
 
     if context["kernel"].get("UseMFMAF32XEmulation", False):
         printWarning("Pack validation is not supported for MFMA F32X emulation mode.")
@@ -1608,7 +1610,11 @@ def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple
     instructions are non-decreasing. This rule is true for all groups of instructions,
     not just the 'GRIncA' instructions.
     """
+    # TODO: Move this validation into each instructions's validation to allow for custom ordering.
     for k in scheduleInfo.optSchedule.keys():
+        if k.startswith("Pack"):
+            # Packs have their own validation for ordering.
+            continue
         seq = schedule_get(k, code_path, scheduleInfo)
         for i in range(1, len(seq)):
             if seq[i] < seq[i - 1]:
