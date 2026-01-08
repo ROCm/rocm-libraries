@@ -16,6 +16,7 @@ add_executable(
     hipdnn_test_sdk_tests
     main.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
+    utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
@@ -33,6 +34,7 @@ add_executable(
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferenceSignatureKey.cpp
+    utilities/cpu_graph_executor/TestBatchnormFwdInferenceWithVariancePlan.cpp
     utilities/cpu_graph_executor/TestBatchnormTrainPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormTrainSignatureKey.cpp
     utilities/cpu_graph_executor/TestConvolutionBwdPlan.cpp

@@ -221,8 +221,8 @@ if(HIPDNN_BUILD_PLUGINS)
 endif()
 
 if(NOT HIPDNN_SKIP_TESTS)
-    # keep this after all build folder have been added so they have a chance to register their tests
-    # using append_test_to_check_target
+    # Keep this after all build folders have been added so they have a chance to register their tests
+    # using add_*_test_target()
     finalize_test_targets()
 endif()
 
