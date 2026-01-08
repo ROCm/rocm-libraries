@@ -5,10 +5,10 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
@@ -16,8 +16,8 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_bn_common;
 
@@ -36,52 +36,36 @@ protected:
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormFwd+ActivTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        int64_t uid = 1;
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
-        xAttr.set_uid(uid++);
+            "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto meanAttr
-            = graph::makeTensorAttributes("mean",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
-        meanAttr.set_uid(uid++);
+        // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
+        auto meanAttr = graph::makeTensorAttributes(
+            "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-        auto invVarianceAttr
-            = graph::makeTensorAttributes("inv_variance",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
-        invVarianceAttr.set_uid(uid++);
+        auto invVarianceAttr = graph::makeTensorAttributes(
+            "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
 
-        auto scaleAttr
-            = graph::makeTensorAttributes("scale",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
-        scaleAttr.set_uid(uid++);
+        auto scaleAttr = graph::makeTensorAttributes(
+            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr
-            = graph::makeTensorAttributes("bias",
-                                          intermediateDataType,
-                                          derivedDims,
-                                          generateStrides(derivedDims, layout.strideOrder));
-        biasAttr.set_uid(uid++);
+        auto biasAttr = graph::makeTensorAttributes(
+            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         graph::BatchnormInferenceAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_inference");
 
         auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
                                                         meanTensorAttr,
@@ -89,10 +73,9 @@ protected:
                                                         scaleTensorAttr,
                                                         biasTensorAttr,
                                                         bnAttrs);
-        setTensorAttributeDetails(yTensorAttr, uid, dataType, testCase.dims, layout, false);
+        yTensorAttr->set_data_type(dataType);
 
         graph::PointwiseAttributes pointwiseAttrs;
-        pointwiseAttrs.set_name("activation");
         pointwiseAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activeCase.mode));
         if(activeCase.reluLowerClip.has_value())
         {
@@ -120,27 +103,10 @@ protected:
         }
 
         auto outTensorAttr = graphObj.pointwise(yTensorAttr, pointwiseAttrs);
-        setTensorAttributeDetails(outTensorAttr, uid, dataType, testCase.dims, layout, true);
+        outTensorAttr->set_output(true);
 
         this->registerValidator(outTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);
-    }
-
-    void setTensorAttributeDetails(std::shared_ptr<graph::TensorAttributes>& tensorAttr,
-                                   int64_t& uid,
-                                   hipdnn_frontend::DataType dataType,
-                                   const std::vector<int64_t>& dims,
-                                   const TensorLayout& layout,
-                                   bool isOutput)
-    {
-        tensorAttr->set_data_type(dataType);
-        tensorAttr->set_dim(dims);
-        tensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
-        tensorAttr->set_output(isOutput);
-        if(!tensorAttr->has_uid())
-        {
-            tensorAttr->set_uid(uid++);
-        }
     }
 };
 

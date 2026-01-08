@@ -25,6 +25,16 @@ We encourage you to open a GitHub issue to discuss your planned contribution bef
 
 All contributions must meet the following requirements before they can be merged:
 
+### Feature Proposals & RFCs
+
+- **RFC Process**: For large or complex feature changes, contributors must provide a Request for Comments (RFC) proposal ahead of development.
+  - This proposal should be discussed and iterated upon with maintainers prior to beginning feature work and implementation.
+  - RFCs should be submitted as a Markdown document added to `hipdnn/docs/rfcs` via a Pull Request (e.g., see [PR #3266](https://github.com/ROCm/rocm-libraries/pull/3266)).
+- **Phased Implementation**: We strongly encourage landing changes in multiple phases.
+- **Small PRs**: Please keep Pull Requests small and focused.
+  - This makes reviews easier to digest.
+  - It minimizes the potential for conflicts or large feature reverts if issues are discovered later.
+
 ### Code Quality Standards
 
 - **Code Formatting**: All code must follow the format specified by the `.clang-format` file
@@ -150,7 +160,7 @@ cmake -DBUILD_ADDRESS_SANITIZER=ON ..
 ninja check
 
 # Check code coverage (optional but recommended)
-cmake -DCODE_COVERAGE=ON ..
+cmake -DHIPDNN_ENABLE_COVERAGE=ON ..
 ninja code_coverage
 ```
 
@@ -177,6 +187,7 @@ When creating a pull request, ensure you can check all these boxes:
 
 - **Questions**: Open a GitHub issue with your question
 - **Discussion**: For design discussions or feature proposals, open an issue before starting work
+- **RFCs**: For large or complex features, submitting an RFC is a great way to get early feedback on your design
 - **Draft PRs**: Feel free to open a draft PR early to get feedback on your approach
 - **CI Pipelines**: In your PR, ask members of the hipDNN team to run CI on your branch
 - **Code Reviews**: Be responsive to code review feedback and make requested changes promptly

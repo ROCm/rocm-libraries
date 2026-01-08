@@ -15,7 +15,7 @@
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnStatus.h"
-#include <hipdnn_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 
 // NOLINTBEGIN
 #ifdef __cplusplus
@@ -244,6 +244,9 @@ HIPDNN_BACKEND_EXPORT const char* hipdnnGetErrorString(hipdnnStatus_t status);
  * message buffer, up to max_size bytes (including the null terminator).
  * Note the max size for an error message is HIPDNN_ERROR_STRING_MAX_LENGTH characters.
  *
+ * After retrieving the error message, this function clears the internal error state.
+ * Use hipdnnPeekLastErrorString_ext() if you need to retrieve the error without clearing it.
+ *
  * @param[out] message   Pointer to a character buffer where the error message will be copied.
  * @param[in]  maxSize   Maximum number of bytes to copy, including the null terminator.
  */
@@ -256,6 +259,22 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
  *
  **************************************************************************************************
  */
+
+/**
+ * @brief Retrieves the last error message for the calling thread without clearing it.
+ *
+ * This function copies the last error message associated with the calling thread into the provided
+ * message buffer, up to max_size bytes (including the null terminator).
+ * Note the max size for an error message is HIPDNN_ERROR_STRING_MAX_LENGTH characters.
+ *
+ * Unlike hipdnnGetLastErrorString(), this function does NOT clear the internal error state after
+ * retrieval. This preserves the pre-existing behavior for cases where the error needs to be
+ * queried multiple times.
+ *
+ * @param[out] message   Pointer to a character buffer where the error message will be copied.
+ * @param[in]  maxSize   Maximum number of bytes to copy, including the null terminator.
+ */
+HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t maxSize);
 
 /*!
  * @brief Creates and deserializes a graph into a backend descriptor.

@@ -31,8 +31,6 @@
 #include <miopen/filesystem.hpp>
 
 #include <boost/date_time/posix_time/posix_time_types.hpp>
-#include <boost/none.hpp>
-#include <boost/optional.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -41,6 +39,7 @@
 #include <fstream>
 #include <ios>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <vector>
@@ -84,11 +83,11 @@ static std::chrono::seconds GetLockTimeout() { return std::chrono::seconds{60}; 
 using exclusive_lock = std::unique_lock<LockFile>;
 using shared_lock    = std::shared_lock<LockFile>;
 
-boost::optional<DbRecord> PlainTextDb::FindRecord(const std::string& key)
+std::optional<DbRecord> PlainTextDb::FindRecord(const std::string& key)
 {
     if(DisableUserDbFileIO)
         return {};
-    const auto lock = exclusive_lock(lock_file, GetLockTimeout());
+    const auto lock = shared_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
     return FindRecordUnsafe(key, nullptr);
 }
@@ -135,8 +134,7 @@ bool PlainTextDb::Remove(const std::string& key, const std::string& id)
     return StoreRecordUnsafe(*record);
 }
 
-boost::optional<DbRecord> PlainTextDb::FindRecordUnsafe(const std::string& key,
-                                                        RecordPositions* pos)
+std::optional<DbRecord> PlainTextDb::FindRecordUnsafe(const std::string& key, RecordPositions* pos)
 {
     if(pos != nullptr)
     {
@@ -154,7 +152,7 @@ boost::optional<DbRecord> PlainTextDb::FindRecordUnsafe(const std::string& key,
                                    ? LoggingLevel::Warning
                                    : LoggingLevel::Info2;
         MIOPEN_LOG(log_level, "File is unreadable: " << filename);
-        return boost::none;
+        return {};
     }
 
     int n_line = 0;
@@ -212,7 +210,7 @@ boost::optional<DbRecord> PlainTextDb::FindRecordUnsafe(const std::string& key,
         return record;
     }
     // Record was not found
-    return boost::none;
+    return {};
 }
 
 static void Copy(std::istream& from, std::ostream& to, std::streamoff count)
@@ -263,8 +261,7 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
             return false;
         }
 
-        const auto temp_name = filename.string() + "." + sysinfo::GetSystemHostname() + "." +
-                               std::to_string(getpid()) + ".temp";
+        const auto temp_name = filename + ".temp";
         std::ofstream to(temp_name, std::ios::binary);
 
         if(!to)
@@ -279,21 +276,15 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
         Copy(from, to, pos->begin);
         record.WriteContents(to);
         from.seekg(pos->end);
-        if(from_size > pos->end)
-            Copy(from, to, from_size - pos->end);
+        Copy(from, to, from_size - pos->end);
 
         from.close();
         to.close();
 
-        // rename atomically deletes and replaces filename
+        fs::remove(filename);
         fs::rename(temp_name, filename);
         /// \todo What if rename fails? Thou shalt not loose the original file.
         fs::permissions(filename, FS_ENUM_PERMS_ALL);
-        while(fs::exists(temp_name))
-        {
-            MIOPEN_LOG_I2("Waiting for rename ");
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
     }
     return true;
 }

@@ -41,7 +41,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-hipsparseStatus_t testing_csrilusv(Arguments argus)
+void testing_csrilusv(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     hipsparseIndexBase_t idx_base = argus.baseA;
@@ -68,11 +68,8 @@ hipsparseStatus_t testing_csrilusv(Arguments argus)
     int m;
     int n;
     int nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // Allocate memory on device
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
@@ -160,13 +157,13 @@ hipsparseStatus_t testing_csrilusv(Arguments argus)
     if(hposition_1 != -1)
     {
         verify_hipsparse_status_zero_pivot(pivot_status_1, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     if(hposition_2 != -1)
     {
         verify_hipsparse_status_zero_pivot(pivot_status_2, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
 // Check csrilu0 factorization
@@ -346,13 +343,13 @@ hipsparseStatus_t testing_csrilusv(Arguments argus)
     if(hposition_1 != -1)
     {
         verify_hipsparse_status_zero_pivot(pivot_status_1, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     if(hposition_2 != -1)
     {
         verify_hipsparse_status_zero_pivot(pivot_status_2, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     // Copy output from device to CPU
@@ -434,13 +431,13 @@ hipsparseStatus_t testing_csrilusv(Arguments argus)
     if(hposition_1 != -1)
     {
         verify_hipsparse_status_zero_pivot(pivot_status_1, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     if(hposition_2 != -1)
     {
         verify_hipsparse_status_zero_pivot(pivot_status_2, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     // Copy output from device to CPU
@@ -454,8 +451,6 @@ hipsparseStatus_t testing_csrilusv(Arguments argus)
     unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
     unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRILUSOLVE_HPP
