@@ -186,8 +186,7 @@ struct RTCKernel
     int         deviceId = hipInvalidDeviceId;
 
 protected:
-    std::shared_future<hipModule_wrapper_t> module;
-    hipFunction_t                           kernel = nullptr;
+    hipFunction_t kernel = nullptr;
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     struct RTCGenerator
@@ -214,11 +213,8 @@ protected:
 
     // runtime compile a kernel, given a generator struct that
     // indicates how to generate code for it
-    static std::shared_future<std::unique_ptr<RTCKernel>>
-        runtime_compile(const RTCGenerator& generator,
-                        const std::string&  gpu_arch,
-                        std::string&        kernel_name,
-                        bool                enable_callbacks = false);
+    static std::shared_future<std::unique_ptr<RTCKernel>> runtime_compile(
+        const RTCGenerator& generator, const std::string& gpu_arch, std::string& kernel_name);
 
     // Keep track of modules that have been requested, so that if two
     // identical kernel requests come at the same time, we only

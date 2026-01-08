@@ -46,7 +46,6 @@ RTCKernel::RTCKernel(const std::string&                       kernel_name,
     : gridDim(gridDim)
     , blockDim(blockDim)
     , kernel_name(kernel_name)
-    , module(module)
 {
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     // if we're only compiling, no need to actually load the code objects
@@ -155,7 +154,7 @@ std::shared_future<std::unique_ptr<RTCKernel>>
 
     if(generator.valid())
     {
-        return runtime_compile(generator, gpu_arch, kernel_name, enable_callbacks);
+        return runtime_compile(generator, gpu_arch, kernel_name);
     }
     // a pre-compiled rtc-stockham-kernel goes here
     else if(generator.is_pre_compiled())
@@ -170,11 +169,8 @@ std::shared_future<std::unique_ptr<RTCKernel>>
     return p.get_future();
 }
 
-std::shared_future<std::unique_ptr<RTCKernel>>
-    RTCKernel::runtime_compile(const RTCKernel::RTCGenerator& generator,
-                               const std::string&             gpu_arch,
-                               std::string&                   kernel_name,
-                               bool                           enable_callbacks)
+std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
+    const RTCKernel::RTCGenerator& generator, const std::string& gpu_arch, std::string& kernel_name)
 {
     int deviceId = 0;
     if(hipGetDevice(&deviceId) != hipSuccess)
