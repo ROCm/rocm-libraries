@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -181,15 +181,15 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                       = typename TestFixture::key_type;
-    constexpr bool descending            = TestFixture::descending;
-    using decomposer_t                   = typename TestFixture::decomposer_t;
-    using config                         = typename TestFixture::config;
-    using size_in_type                   = unsigned int;
-    using size_out_type                  = unsigned int;
-    constexpr bool ordered               = TestFixture::ordered;
-    constexpr bool deterministic         = TestFixture::deterministic;
-    constexpr bool stable                = TestFixture::stable;
+    using key_type                                        = typename TestFixture::key_type;
+    constexpr bool descending                             = TestFixture::descending;
+    using decomposer_t                                    = typename TestFixture::decomposer_t;
+    using config                                          = typename TestFixture::config;
+    using size_in_type                                    = unsigned int;
+    using size_out_type                                   = unsigned int;
+    [[maybe_unused]] constexpr bool ordered               = TestFixture::ordered;
+    [[maybe_unused]] constexpr bool deterministic         = TestFixture::deterministic;
+    [[maybe_unused]] constexpr bool stable                = TestFixture::stable;
     const bool     debug_synchronous     = TestFixture::debug_synchronous;
     constexpr bool use_graphs            = TestFixture::use_graphs;
     constexpr bool use_indirect_iterator = TestFixture::use_indirect_iterator;
@@ -307,7 +307,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     }
 }
 
-TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
+TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -384,17 +384,18 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
 
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK((rocprim::topk_pairs<config, descending>(nullptr,
-                                                               temp_storage_size_bytes,
-                                                               keys_input_it,
-                                                               d_keys_output.get(),
-                                                               values_input_it,
-                                                               d_values_output.get(),
-                                                               size,
-                                                               k,
-                                                               decomposer,
-                                                               stream,
-                                                               debug_synchronous)));
+            HIP_CHECK((
+                rocprim::topk_pairs<config, descending, false, false, true>(nullptr,
+                                                                            temp_storage_size_bytes,
+                                                                            keys_input_it,
+                                                                            d_keys_output.get(),
+                                                                            values_input_it,
+                                                                            d_values_output.get(),
+                                                                            size,
+                                                                            k,
+                                                                            decomposer,
+                                                                            stream,
+                                                                            debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -416,17 +417,18 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
             }
 
             // Run
-            HIP_CHECK((rocprim::topk_pairs<config, descending>(d_temp_storage.get(),
-                                                               temp_storage_size_bytes,
-                                                               keys_input_it,
-                                                               d_keys_output.get(),
-                                                               values_input_it,
-                                                               d_values_output.get(),
-                                                               size,
-                                                               k,
-                                                               decomposer,
-                                                               stream,
-                                                               debug_synchronous)));
+            HIP_CHECK((
+                rocprim::topk_pairs<config, descending, false, false, true>(d_temp_storage.get(),
+                                                                            temp_storage_size_bytes,
+                                                                            keys_input_it,
+                                                                            d_keys_output.get(),
+                                                                            values_input_it,
+                                                                            d_values_output.get(),
+                                                                            size,
+                                                                            k,
+                                                                            decomposer,
+                                                                            stream,
+                                                                            debug_synchronous)));
 
             if(use_graphs)
             {
@@ -567,7 +569,14 @@ void topk_large_sizes_test(bool debug_synchronous)
 
         // Validate output
         const auto output = d_output.load()[0];
-        ASSERT_EQ(output, size_in_type{size - 1});
+        if constexpr(descending)
+        {
+            ASSERT_EQ(output, size_in_type{size - 1});
+        }
+        else
+        {
+            ASSERT_EQ(output, size_in_type{0});
+        }
 
         if(use_graphs)
         {
