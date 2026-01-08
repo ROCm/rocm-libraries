@@ -99,6 +99,11 @@ rocblas_syrk_ex
 
 .. doxygenfunction:: rocblas_syrk_ex
 
+rocblas_herk_ex
+============================================
+
+.. doxygenfunction:: rocblas_herk_ex
+
 rocblas_trsm_ex + batched, strided_batched
 ============================================
 

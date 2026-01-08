@@ -605,7 +605,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenT5LayerNorm.cpp
         kernels/MIOpenUpSample.cpp
         kernels/MIOpenUtilKernels4.cl
-        kernels/MIOpenUtilKernels5.cl
+        kernels/MIOpenUtilKernels5.cpp
         kernels/MIOpenVecAdd.cpp
         kernels/MIOpenVecAddOCL.cl
         kernels/MIOpenIm2d2Col.cpp

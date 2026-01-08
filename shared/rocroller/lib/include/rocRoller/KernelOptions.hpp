@@ -44,6 +44,10 @@ namespace rocRoller
     const std::string KLOOP   = "KLoop";
     const std::string RECEIVE = "ReceiveTileLoop";
 
+    const int XLOOP_UNROLL = 0;
+    const int YLOOP_UNROLL = 1;
+    const int KLOOP_UNROLL = 2;
+
     const std::string KLOOPTAIL = KLOOP + "Tail";
 
     const std::string SCRATCH = "SCRATCH";

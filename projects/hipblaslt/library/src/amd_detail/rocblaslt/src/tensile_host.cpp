@@ -122,10 +122,6 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          const void*            scaleAlphaVec,
                                                          ScalingFormat          scaleAType,
                                                          ScalingFormat          scaleBType,
-                                                         size_t                 scaleABlockRowSize,
-                                                         size_t                 scaleABlockColSize,
-                                                         size_t                 scaleBBlockRowSize,
-                                                         size_t                 scaleBBlockColSize,
                                                          hipDataType            bias_type,
                                                          hipDataType            aux_type,
                                                          rocblaslt_epilogue     epilogue,
@@ -189,10 +185,6 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , scaleAlphaVec(scaleAlphaVec)
     , scaleAType(scaleAType)
     , scaleBType(scaleBType)
-    , scaleABlockRowSize(scaleABlockRowSize)
-    , scaleABlockColSize(scaleABlockColSize)
-    , scaleBBlockRowSize(scaleBBlockRowSize)
-    , scaleBBlockColSize(scaleBBlockColSize)
     , bias_type(bias_type)
     , aux_type(aux_type)
     , epilogue(epilogue)
@@ -319,8 +311,8 @@ namespace
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
             return TensileLite::ActivationType::Clamp;
-	    case ROCBLASLT_EPILOGUE_SIGMOID:
-	        return TensileLite::ActivationType::Sigmoid;
+        case ROCBLASLT_EPILOGUE_SIGMOID:
+            return TensileLite::ActivationType::Sigmoid;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
         case ROCBLASLT_EPILOGUE_BGRADA:
@@ -708,7 +700,7 @@ namespace
                 : "",
             problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides().size()
                 ? std::to_string(
-                    problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[1])
+                      problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[1])
                 : "",
             "--stride_a",
             problem.a().strides()[2],
@@ -723,7 +715,7 @@ namespace
                 : "",
             problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides().size()
                 ? std::to_string(
-                    problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[2])
+                      problem.tensor(TensileLite::ContractionProblemGemm::TENSOR::E).strides()[2])
                 : "",
             "--alpha",
             ToString(inputs.alpha),
@@ -805,8 +797,8 @@ namespace
 
     inline void logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
                                               const TensileLite::ContractionInputs&      inputs,
-                                              const int&                                 solutionIndex,
-                                              bool                                       flush,
+                                              const int&     solutionIndex,
+                                              bool           flush,
                                               const int32_t& rotatingBufferSize,
                                               const int32_t& coldIterations,
                                               const int32_t& hotIterations,
@@ -890,7 +882,7 @@ namespace
                     "algo_method",
                     2,
                     "solution_index",
-                    solutionIndex,                                          
+                    solutionIndex,
                     "activation_type",
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
@@ -1153,8 +1145,8 @@ namespace
     inline void
         logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
                                       const TensileLite::ContractionGroupedInputs&      inputs,
-                                      const int&                                        solutionIndex,
-                                      bool                                              flush,
+                                      const int&     solutionIndex,
+                                      bool           flush,
                                       const int32_t& rotatingBufferSize,
                                       const int32_t& coldIterations,
                                       const int32_t& hotIterations,
@@ -1283,7 +1275,7 @@ namespace
             "algo_method",
             2,
             "solution_index",
-            solutionIndex,                                          
+            solutionIndex,
             "activation_type",
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
@@ -2097,7 +2089,7 @@ namespace
             return m_devicePropMap.at(deviceName);
         }
 #else
-        auto&                            get_device_property() const
+        auto& get_device_property() const
         {
             return m_deviceProp;
         }
@@ -2527,8 +2519,7 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 {
     return handle->useRocRoller == 1
            || (handle->useRocRoller == -1
-               && (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
-                   || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block));
+               && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
 }
 #endif
 
@@ -2646,7 +2637,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
            || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
         {
-            auto autoGsuVal = solution->calculateAutoGSU(data->problem, &(*hardware));
+            auto autoGsuVal  = solution->calculateAutoGSU(data->problem, &(*hardware));
             auto Granularity = solution->computeGranularities(
                 *hardware,
                 data->problem.c().sizes()[0],
@@ -4005,8 +3996,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
                     std::ostringstream msg;
-                    msg << "Match "
-                        << "[" << i << "]: " << solution->description();
+                    msg << "Match " << "[" << i << "]: " << solution->description();
                     solution->problemPredicate->debugEval(tensile_prob.gemms[i], msg);
                     msg << std::endl;
                     log_info(__func__, msg.str());
@@ -4049,6 +4039,22 @@ void setRestrictions(TensileLite::ContractionProblemGemm& tensile_prob,
     tensile_prob.setBetaRestriction(TensileLite::toScalarValueEnum(*beta));
 }
 
+// Centralized type dispatch: maps rocisa::DataType to a pointer tag.
+template <typename F>
+rocblaslt_status dispatchByComputeType(rocisa::DataType dt, F&& f)
+{
+    switch(dt)
+    {
+    case rocisa::DataType::Float:
+        return f(static_cast<float*>(nullptr));
+    case rocisa::DataType::Double:
+        return f(static_cast<double*>(nullptr));
+    // Extend as needed:
+    default:
+        return rocblaslt_status_not_implemented;
+    }
+}
+
 template <typename Tuning>
 rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                                      const rocblaslt::RocGemmType& gemmType,
@@ -4057,42 +4063,72 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                                      const Tuning*                 tuning,
                                      size_t&                       workspaceSizeInBytes)
 {
+    if(!gemmData)
+        return rocblaslt_status_invalid_pointer;
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
-        std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        if(data->problem.computeType() == rocisa::DataType::Float)
-        {
-            setRestrictions<float>(data->problem,
-                                   std::get_if<float>(&data->inputs.alpha),
-                                   std::get_if<float>(&data->inputs.beta));
-        }
-        else
-        {
-            return rocblaslt_status_not_implemented;
-        }
-        return isSolutionSupported(
-            handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+        auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+        if(!data)
+            return rocblaslt_status_invalid_pointer;
+
+        auto checkSupportForTypeTag = [&](auto tag) -> rocblaslt_status {
+            using T = std::remove_pointer_t<decltype(tag)>;
+
+            const T* a = std::get_if<T>(&data->inputs.alpha);
+            const T* b = std::get_if<T>(&data->inputs.beta);
+            if(!a || !b)
+                return rocblaslt_status_not_implemented;
+
+            setRestrictions<T>(data->problem, a, b);
+
+            return isSolutionSupported(
+                handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+        };
+
+        return dispatchByComputeType(data->problem.computeType(), checkSupportForTypeTag);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
-        std::shared_ptr<TensileDataGroupedGemm> data
-            = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
-        if(data->problem.gemms[0].computeType() == rocisa::DataType::Float)
+        auto data = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+        if(!data)
+            return rocblaslt_status_invalid_pointer;
+
+        if(data->problem.gemms.empty())
+            return rocblaslt_status_invalid_size;
+
+        const rocisa::DataType dt = data->problem.gemms[0].computeType();
+
+        // If mixed compute types are unsupported, enforce uniformity.
+        for(const auto& p : data->problem.gemms)
         {
-            for(int i = 0; i < data->problem.gemms.size(); i++)
+            if(p.computeType() != dt)
+                return rocblaslt_status_not_implemented;
+        }
+
+        auto checkGroupedSupportForTypeTag = [&](auto tag) -> rocblaslt_status {
+            using T = std::remove_pointer_t<decltype(tag)>;
+
+            if(data->problem.gemms.size() != data->inputs.grouped.size())
+                return rocblaslt_status_invalid_size;
+
+            for(size_t i = 0; i < data->problem.gemms.size(); ++i)
             {
-                auto& tensile_prob = data->problem.gemms[i];
-                setRestrictions<float>(tensile_prob,
-                                       std::get_if<float>(&data->inputs.grouped[i].alpha),
-                                       std::get_if<float>(&data->inputs.grouped[i].beta));
+                TensileLite::ContractionProblemGemm&  prob = data->problem.gemms[i];
+                const TensileLite::ContractionInputs& in   = data->inputs.grouped[i];
+
+                const T* a = std::get_if<T>(&in.alpha);
+                const T* b = std::get_if<T>(&in.beta);
+                if(!a || !b)
+                    return rocblaslt_status_not_implemented;
+
+                setRestrictions<T>(prob, a, b);
             }
-        }
-        else
-        {
-            return rocblaslt_status_not_implemented;
-        }
-        return isSolutionSupported(
-            handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+
+            return isSolutionSupported(
+                handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+        };
+
+        return dispatchByComputeType(dt, checkGroupedSupportForTypeTag);
     }
     return rocblaslt_status_not_implemented;
 }
