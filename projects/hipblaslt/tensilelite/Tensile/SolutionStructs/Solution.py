@@ -387,23 +387,23 @@ class Solution(collections.abc.Mapping):
     # TLU case, we check AF{0,1}EM instead of ASEM.
     # TLU + ShiftPtr case, we can use wider global read for TailLoop. Enable Tailloop opt for DTL
     # (ShiftPtr is default and not set to state["EdgeType"] yet here)
-    # if not (state["ProblemType"]["TLUA"] and state["EdgeType"] == "ShiftPtr") and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
-    if not (state["ProblemType"]["TLUA"]) and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
-      if state["DirectToLds"] and not state["DirectToVgprA"]:
+    if ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
+      if (not state["ProblemType"]["TLUA"]) and state["DirectToLds"] and not state["DirectToVgprA"]:
         state["NonDTLTailLoopA"] = True
-      if state["DirectToLds"] or state["DirectToVgprA"]:
         state["tailLoopOptA"] = False
-    # if not (state["ProblemType"]["TLUB"] and state["EdgeType"] == "ShiftPtr") and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
-    if not (state["ProblemType"]["TLUB"]) and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
-      if state["DirectToLds"] and not state["DirectToVgprB"]:
+    if ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
+      if (not state["ProblemType"]["TLUB"]) and state["DirectToLds"] and not state["DirectToVgprB"]:
         state["NonDTLTailLoopB"] = True
-      if state["DirectToLds"] or state["DirectToVgprB"]:
         state["tailLoopOptB"] = False
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
       state["tailLoopOptA"] = False
+      state["tailLoopOptB"] = False
+    if (not state["ProblemType"]["TLUA"]) and (state["DirectToVgprA"]):
+      state["tailLoopOptA"] = False
+    if (not state["ProblemType"]["TLUB"]) and (state["DirectToVgprB"]):
       state["tailLoopOptB"] = False
 
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
