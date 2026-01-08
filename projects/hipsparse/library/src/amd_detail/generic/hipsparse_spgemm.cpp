@@ -94,6 +94,47 @@ namespace hipsparse
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    static float convert_to_float(const void* value, hipDataType dataType)
+    {
+        if(dataType == HIP_R_16F)
+        {
+            // Convert from float16 to float32 using bit manipulation
+            uint16_t bits = *static_cast<const uint16_t*>(value);
+            uint32_t sign = (bits >> 15) & 0x1;
+            uint32_t exp  = (bits >> 10) & 0x1F;
+            uint32_t mant = bits & 0x3FF;
+            uint32_t f32_bits;
+            if(exp == 0)
+            {
+                // Zero or subnormal
+                f32_bits = sign << 31;
+            }
+            else if(exp == 0x1F)
+            {
+                // Inf or NaN
+                f32_bits = (sign << 31) | 0x7F800000 | (mant << 13);
+            }
+            else
+            {
+                // Normalized
+                f32_bits = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
+            }
+            float result;
+            memcpy(&result, &f32_bits, sizeof(float));
+            return result;
+        }
+        else if(dataType == HIP_R_16BF)
+        {
+            // Convert from bfloat16 to float32
+            uint16_t bits     = *static_cast<const uint16_t*>(value);
+            uint32_t f32_bits = static_cast<uint32_t>(bits) << 16;
+            float    result;
+            memcpy(&result, &f32_bits, sizeof(float));
+            return result;
+        }
+        return 0.0f;
+    }
+
     static hipsparseStatus_t getDataTypeSize(hipDataType dataType, size_t& size)
     {
         switch(dataType)
@@ -431,39 +472,9 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
     float       host_beta_f32  = 0.0f;
     const void* beta_for_axpby = beta;
 
-    if(computeType == HIP_R_16F)
+    if(computeType == HIP_R_16F || computeType == HIP_R_16BF)
     {
-        // Convert beta from float16 to float32 using bit manipulation
-        // (portable, doesn't require _Float16 type support)
-        uint16_t beta_bits = *static_cast<const uint16_t*>(beta);
-        uint32_t sign      = (beta_bits >> 15) & 0x1;
-        uint32_t exp       = (beta_bits >> 10) & 0x1F;
-        uint32_t mant      = beta_bits & 0x3FF;
-        uint32_t f32_bits;
-        if(exp == 0)
-        {
-            // Zero or subnormal
-            f32_bits = sign << 31;
-        }
-        else if(exp == 0x1F)
-        {
-            // Inf or NaN
-            f32_bits = (sign << 31) | 0x7F800000 | (mant << 13);
-        }
-        else
-        {
-            // Normalized
-            f32_bits = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
-        }
-        memcpy(&host_beta_f32, &f32_bits, sizeof(float));
-        beta_for_axpby = &host_beta_f32;
-    }
-    else if(computeType == HIP_R_16BF)
-    {
-        // Convert beta from bfloat16 to float32
-        uint16_t beta_bits     = *static_cast<const uint16_t*>(beta);
-        uint32_t beta_f32_bits = static_cast<uint32_t>(beta_bits) << 16;
-        memcpy(&host_beta_f32, &beta_f32_bits, sizeof(float));
+        host_beta_f32  = hipsparse::convert_to_float(beta, computeType);
         beta_for_axpby = &host_beta_f32;
     }
 
