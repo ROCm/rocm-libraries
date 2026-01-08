@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -34,8 +34,8 @@ namespace stinkytofu
 #define STINKYTOFU_ARCH(archName) void define##archName##Insts(GpuArch& registry);
 #include "Config/Archs.def"
 
-// declare all set##archName##RocisaSimpleMap functions
-#define STINKYTOFU_ARCH(archName) void set##archName##RocisaSimpleMap(GpuArch& registry);
+// declare all set##archName##LogicalToArchMap functions
+#define STINKYTOFU_ARCH(archName) void set##archName##LogicalToArchMap(GpuArch& registry);
 #include "Config/Archs.def"
 
 // declare all set##archName##ConversionMap functions
@@ -44,13 +44,13 @@ namespace stinkytofu
 
     void GpuArchManager::addArch(const std::string&            arch,
                                  std::function<void(GpuArch&)> defineInsts,
-                                 std::function<void(GpuArch&)> setRocisaSimpleMap,
+                                 std::function<void(GpuArch&)> setLogicalToArchMap,
                                  std::function<void(GpuArch&)> setRocisaConversionMap,
                                  const std::string&            hardwareDir)
     {
         instructionsByArch.push_back(std::make_unique<GpuArch>(arch));
         defineInsts(*instructionsByArch.back());
-        setRocisaSimpleMap(*instructionsByArch.back());
+        setLogicalToArchMap(*instructionsByArch.back());
         setRocisaConversionMap(*instructionsByArch.back());
         instructionsByArch.back()->loadHardwareDataFromYaml(hardwareDir + "/data/" + arch
                                                             + ".yaml");
@@ -105,11 +105,11 @@ namespace stinkytofu
 
     bool GpuArchManager::initAllArchs(GpuArchManager& manager, const std::string& hardwareDir)
     {
-#define STINKYTOFU_ARCH(archName)                   \
-    manager.addArch(#archName,                      \
-                    define##archName##Insts,        \
-                    set##archName##RocisaSimpleMap, \
-                    set##archName##ConversionMap,   \
+#define STINKYTOFU_ARCH(archName)                    \
+    manager.addArch(#archName,                       \
+                    define##archName##Insts,         \
+                    set##archName##LogicalToArchMap, \
+                    set##archName##ConversionMap,    \
                     hardwareDir);
 #include "Config/Archs.def"
 

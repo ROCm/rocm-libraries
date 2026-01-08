@@ -521,7 +521,7 @@ namespace stinkytofu
         DEF_T(VALU, "v_accvgpr_write_b32");
     }
 
-    void setGfx942RocisaSimpleMap(GpuArch& registry)
+    void setGfx942LogicalToArchMap(GpuArch& registry)
     {
         std::unordered_map<std::string, std::string> rocisaToHwInstMap = {
             /* branch.hpp */
@@ -821,7 +821,7 @@ namespace stinkytofu
             {"VPermB32", "v_perm_b32"},
         };
 
-        registry.setRocisaSimpleMap(std::move(rocisaToHwInstMap));
+        registry.setLogicalToArchMap(std::move(rocisaToHwInstMap));
     }
 
     void setGfx942ConversionMap(GpuArch& registry)

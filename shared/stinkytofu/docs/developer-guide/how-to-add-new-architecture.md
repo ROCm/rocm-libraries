@@ -61,9 +61,9 @@ namespace stinkytofu
         ...
     }
 
-    void setGfx1300RocisaSimpleMap(GpuArch& registry)
+    void setGfx1300LogicalToArchMap(GpuArch& registry)
     {
-        // Rocisa simple mapping for Gfx1300
+        // Logical-to-architecture instruction name mapping for Gfx1300
         ...
     }
 

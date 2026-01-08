@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -130,8 +130,8 @@ namespace stinkytofu
 
         GfxInstDef* getInst(const std::string& name);
 
-        // mapping from rocisa instruction name to hardware instruction name
-        std::unordered_map<std::string, std::string> rocisaSimpleMap;
+        // mapping from logical instruction name to architecture-specific instruction name
+        std::unordered_map<std::string, std::string> logicalToArchMap;
         std::unordered_map<std::string, std::string> rocisaConversionMap;
 
     public:
@@ -195,14 +195,14 @@ namespace stinkytofu
             return error;
         }
 
-        void setRocisaSimpleMap(const std::unordered_map<std::string, std::string>&& map)
+        void setLogicalToArchMap(const std::unordered_map<std::string, std::string>&& map)
         {
-            rocisaSimpleMap = std::move(map);
+            logicalToArchMap = std::move(map);
         }
 
-        const std::unordered_map<std::string, std::string>& getRocisaSimpleMap() const
+        const std::unordered_map<std::string, std::string>& getLogicalToArchMap() const
         {
-            return rocisaSimpleMap;
+            return logicalToArchMap;
         }
 
         void setRocisaConversionMap(const std::unordered_map<std::string, std::string>&& map)

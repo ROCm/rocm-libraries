@@ -61,19 +61,19 @@ For each architecture (e.g., `gfx942`, `gfx950`):
 
 ```
 hardware/
-├── CMakeLists.txt          # Builds gfxisa library
-├── data/
-│   ├── gfx942.yaml         # YAML config for specific cycle/latency data
-│   └── gfx950.yaml
-├── include/gfx/
-│   ├── GpuArchManager.hpp  # Architecture manager and common definitions
-│   ├── CommonInstsDSL.hpp  # Instruction type definitions (shared across architectures)
-│   └── InstDefDSL.hpp      # Instruction definition DSL
-└── src/gfx/
-    ├── GpuArchManager.cpp  # Architecture registration and management
-    ├── Gfx942.cpp          # gfx942 instruction definitions
-    ├── Gfx950.cpp          # gfx950 instruction definitions
-    └── InstDefDSL.cpp      # DSL implementation
++-- CMakeLists.txt          # Builds gfxisa library
++-- data/
+|   +-- gfx942.yaml         # YAML config for specific cycle/latency data
+|   +-- gfx950.yaml
++-- include/gfx/
+|   +-- GpuArchManager.hpp  # Architecture manager and common definitions
+|   +-- CommonInstsDSL.hpp  # Instruction type definitions (shared across architectures)
+|   +-- InstDefDSL.hpp      # Instruction definition DSL
++-- src/gfx/
+    +-- GpuArchManager.cpp  # Architecture registration and management
+    +-- Gfx942.cpp          # gfx942 instruction definitions
+    +-- Gfx950.cpp          # gfx950 instruction definitions
+    +-- InstDefDSL.cpp      # DSL implementation
 ```
 
 ## Instruction Definition DSL
@@ -156,10 +156,10 @@ void defineGfx942Insts(GpuArch& registry) {
    }
    ```
 
-4. **Add Rocisa-to-hardware instruction mappings:**
+4. **Add logical-to-architecture instruction mappings:**
    ```cpp
    // tools/tablegen/GenRocisaHwMapping.cpp
-   static Map getGfx1000RocisaSimpleMappings() {
+   static Map getGfx1000LogicalToArchMappings() {
        return {
            {"SAddI32", "s_add_i32"},
            {"DSReadB32", "ds_read_b32"},
@@ -178,7 +178,7 @@ void defineGfx942Insts(GpuArch& registry) {
        // ... existing architectures
        success &= genRocisaMappings(
            manager, "gfx1000", outdir,
-           getGfx1000RocisaSimpleMappings(),
+           getGfx1000LogicalToArchMappings(),
            getGfx1000Conversion());
        return success;
    }

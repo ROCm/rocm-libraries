@@ -634,7 +634,7 @@ namespace stinkytofu
             GEN_WMMA(registry, s, false);
     }
 
-    void setGfx1250RocisaSimpleMap(GpuArch& registry)
+    void setGfx1250LogicalToArchMap(GpuArch& registry)
     {
         // const std::unordered_map<std::type_index, Opcode>
         std::unordered_map<std::string, std::string> rocisaToHwInstMap = {
@@ -908,7 +908,7 @@ namespace stinkytofu
             {"VPermB32", "v_perm_b32"},
         };
 
-        registry.setRocisaSimpleMap(std::move(rocisaToHwInstMap));
+        registry.setLogicalToArchMap(std::move(rocisaToHwInstMap));
     }
 
     void setGfx1250ConversionMap(GpuArch& registry)
