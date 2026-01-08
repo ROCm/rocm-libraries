@@ -1784,7 +1784,6 @@ class Solution(collections.abc.Mapping):
           bpeA = state["ProblemType"]["DataTypeA"].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
           MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
-
           if state["UseGeneralizedNLCOneA"]:
             LdsBlockSizePerPadA = MinLdsBlockSizePerPadA
           else:
