@@ -83,13 +83,6 @@ ci: {
     def jobNameList = []
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
-    propertyList.each
-    {
-        jobName, property->
-        if (urlJobName == jobName)
-            properties(auxiliary.addCommonProperties(property))
-    }
-
     String hostBuildCommand = './install.sh -c --compiler=g++'
     setupCI(urlJobName, jobNameList, hostBuildCommand, runCI, 'g++')
 }
