@@ -502,7 +502,7 @@ namespace rocsparse
                         for(unsigned int p = 0; p < LOOPS; p++)
                         {
                             rocsparse::atomic_add(dense_C,
-                                                  colB + p * WF_SIZE * ldc + current_row,
+                                                  (colB + p * WF_SIZE) * ldc + current_row,
                                                   dense_C_size,
                                                   static_cast<C>(alpha * sum[p]));
                         }
@@ -538,7 +538,7 @@ namespace rocsparse
                 for(unsigned int p = 0; p < LOOPS; p++)
                 {
                     rocsparse::atomic_add(dense_C,
-                                          colB + p * WF_SIZE * ldc + current_row,
+                                          (colB + p * WF_SIZE) * ldc + current_row,
                                           dense_C_size,
                                           static_cast<C>(alpha * sum[p]));
                 }
@@ -689,7 +689,7 @@ namespace rocsparse
                         if(order_C == rocsparse_order_column)
                         {
                             rocsparse::atomic_add(dense_C,
-                                                  l + swid * ldc + current_row,
+                                                  (l + swid) * ldc + current_row,
                                                   dense_C_size,
                                                   static_cast<C>(alpha * sum));
                         }
@@ -713,7 +713,7 @@ namespace rocsparse
                         if(order_C == rocsparse_order_column)
                         {
                             rocsparse::atomic_add(dense_C,
-                                                  l + swid * ldc + current_row,
+                                                  (l + swid) * ldc + current_row,
                                                   dense_C_size,
                                                   static_cast<C>(alpha * sum));
                         }

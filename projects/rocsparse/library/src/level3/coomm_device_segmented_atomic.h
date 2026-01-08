@@ -159,11 +159,11 @@ namespace rocsparse
                     {
                         for(uint32_t p = 0; p < COLS; p++)
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                prevrow + (col_offset + p * ldc + batch_stride_C * batch),
-                                dense_C_size,
-                                static_cast<C>(shared_val[p][WF_SIZE - 1]));
+                            rocsparse::atomic_add(dense_C,
+                                                  prevrow + (col_offset + p) * ldc
+                                                      + batch_stride_C * batch,
+                                                  dense_C_size,
+                                                  static_cast<C>(shared_val[p][WF_SIZE - 1]));
                         }
                     }
                     else
@@ -224,11 +224,11 @@ namespace rocsparse
                     {
                         for(uint32_t p = 0; p < COLS; p++)
                         {
-                            rocsparse::atomic_add(
-                                dense_C,
-                                row + (col_offset + p * ldc + batch_stride_C * batch),
-                                dense_C_size,
-                                static_cast<C>(val[p]));
+                            rocsparse::atomic_add(dense_C,
+                                                  row + (col_offset + p) * ldc
+                                                      + batch_stride_C * batch,
+                                                  dense_C_size,
+                                                  static_cast<C>(val[p]));
                         }
                     }
                     else
@@ -254,7 +254,7 @@ namespace rocsparse
                 for(uint32_t p = 0; p < COLS; p++)
                 {
                     rocsparse::atomic_add(dense_C,
-                                          row + (col_offset + p * ldc + batch_stride_C * batch),
+                                          row + (col_offset + p) * ldc + batch_stride_C * batch,
                                           dense_C_size,
                                           static_cast<C>(val[p]));
                 }
