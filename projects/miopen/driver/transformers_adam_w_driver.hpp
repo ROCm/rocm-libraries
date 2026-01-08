@@ -78,7 +78,6 @@ public:
 
     int RunForwardGPU() override;
     int RunForwardCPU();
-    int RunForwardCPU_MT();
 
     int RunBackwardGPU() override;
 

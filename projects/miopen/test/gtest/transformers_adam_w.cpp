@@ -45,38 +45,6 @@ struct GPU_TransformersAmpAdamWTest_FP32 : TransformersAdamWTest<float, half_flo
 
 /////////////////////////////////////////////////////////
 
-struct GPU_TransformersAdamWTest_Updated_FP32 : TransformersAdamWTest<float, float>
-{
-};
-
-struct GPU_TransformersAdamWTest_Updated_FP16
-    : TransformersAdamWTest<half_float::half, half_float::half>
-{
-};
-
-struct GPU_TransformersAmpAdamWTest_Updated_FP32
-    : TransformersAdamWTest<float, half_float::half, true>
-{
-};
-
-/////////////////////////////////////////////////////////
-
-struct GPU_TransformersAdamWTest_Updated_Singlethread_FP32 : TransformersAdamWTest<float, float>
-{
-};
-
-struct GPU_TransformersAdamWTest_Updated_Singlethread_FP16
-    : TransformersAdamWTest<half_float::half, half_float::half>
-{
-};
-
-struct GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32
-    : TransformersAdamWTest<float, half_float::half, true>
-{
-};
-
-/////////////////////////////////////////////////////////
-
 } // namespace transformers_adam_w
 using namespace transformers_adam_w;
 
@@ -97,49 +65,6 @@ TEST_P(GPU_TransformersAdamWTest_FP16, TransformersAdamWFloat16Test)
 TEST_P(GPU_TransformersAmpAdamWTest_FP32, TransformersAmpAdamWTest)
 {
     RunTest();
-    Verify();
-};
-
-/////////////////////////////////////////////////////////
-
-TEST_P(GPU_TransformersAdamWTest_Updated_FP32, TransformersAdamWUpdatedFloatTest)
-{
-    RunUpdatedTest();
-    Verify();
-};
-
-TEST_P(GPU_TransformersAdamWTest_Updated_FP16, TransformersAdamWUpdatedFloat16Test)
-{
-    RunUpdatedTest();
-    Verify();
-};
-
-TEST_P(GPU_TransformersAmpAdamWTest_Updated_FP32, TransformersAmpAdamWUpdatedTest)
-{
-    RunUpdatedTest();
-    Verify();
-};
-
-/////////////////////////////////////////////////////////
-
-TEST_P(GPU_TransformersAdamWTest_Updated_Singlethread_FP32,
-       TransformersAdamWUpdatedSinglethreadFloatTest)
-{
-    RunUpdatedSinglethreadTest();
-    Verify();
-};
-
-TEST_P(GPU_TransformersAdamWTest_Updated_Singlethread_FP16,
-       TransformersAdamWUpdatedSinglethreadFloat16Test)
-{
-    RunUpdatedSinglethreadTest();
-    Verify();
-};
-
-TEST_P(GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32,
-       TransformersAmpAdamWUpdatedSinglethreadTest)
-{
-    RunUpdatedSinglethreadTest();
     Verify();
 };
 
@@ -179,31 +104,5 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAmpAdamWTest_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()),
-                         TestNameGenerator{});
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_TransformersAdamWTest_Updated_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_TransformersAdamWTest_Updated_FP16,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_TransformersAmpAdamWTest_Updated_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()),
-                         TestNameGenerator{});
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_TransformersAdamWTest_Updated_Singlethread_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_TransformersAdamWTest_Updated_Singlethread_FP16,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32,
                          testing::ValuesIn(TransformersAdamWTestConfigs()),
                          TestNameGenerator{});

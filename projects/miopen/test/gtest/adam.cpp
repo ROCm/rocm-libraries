@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,34 +47,6 @@ struct GPU_AmpAdam_FP32 : AdamTest<float, half_float::half>
 
 /////////////////////////////////////////////////////////
 
-struct GPU_Adam_Updated_FP32 : AdamTest<float, float>
-{
-};
-
-struct GPU_Adam_Updated_FP16 : AdamTest<half_float::half, half_float::half>
-{
-};
-
-struct GPU_AmpAdam_Updated_FP32 : AdamTest<float, half_float::half>
-{
-};
-
-/////////////////////////////////////////////////////////
-
-struct GPU_Adam_Updated_Singlethread_FP32 : AdamTest<float, float>
-{
-};
-
-struct GPU_Adam_Updated_Singlethread_FP16 : AdamTest<half_float::half, half_float::half>
-{
-};
-
-struct GPU_AmpAdam_Updated_Singlethread_FP32 : AdamTest<float, half_float::half>
-{
-};
-
-/////////////////////////////////////////////////////////
-
 } // namespace adam
 using namespace adam;
 
@@ -82,59 +54,19 @@ using namespace adam;
 
 TEST_P(GPU_Adam_FP32, AdamFloatTestFw)
 {
-    RunTest();
+    RunTest(true);
     Verify();
 };
 
 TEST_P(GPU_Adam_FP16, AdamFloat16TestFw)
 {
-    RunTest();
+    RunTest(true);
     Verify();
 };
 
 TEST_P(GPU_AmpAdam_FP32, AmpAdamTestFw)
 {
-    RunTest();
-    Verify();
-};
-
-/////////////////////////////////////////////////////////
-
-TEST_P(GPU_Adam_Updated_FP32, AdamUpdatedFloatTestFw)
-{
-    RunUpdatedTest();
-    Verify();
-};
-
-TEST_P(GPU_Adam_Updated_FP16, AdamUpdatedFloat16TestFw)
-{
-    RunUpdatedTest();
-    Verify();
-};
-
-TEST_P(GPU_AmpAdam_Updated_FP32, AmpAdamUpdatedTestFw)
-{
-    RunUpdatedTest();
-    Verify();
-};
-
-/////////////////////////////////////////////////////////
-
-TEST_P(GPU_Adam_Updated_Singlethread_FP32, AdamUpdatedSinglethreadFloatTestFw)
-{
-    RunUpdatedSingleThreadTest();
-    Verify();
-};
-
-TEST_P(GPU_Adam_Updated_Singlethread_FP16, AdamUpdatedSinglethreadFloat16TestFw)
-{
-    RunUpdatedSingleThreadTest();
-    Verify();
-};
-
-TEST_P(GPU_AmpAdam_Updated_Singlethread_FP32, AmpAdamUpdatedSinglethreadTestFw)
-{
-    RunUpdatedSingleThreadTest();
+    RunTest(true);
     Verify();
 };
 
@@ -156,7 +88,7 @@ struct TestNameGenerator
         std::string str(ss.str());
 
         // Name format only supports letters, numbers and underscores.
-        std::transform(str.begin(), str.end(), str.begin(), [](char c) {
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
             return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
         });
 
@@ -176,31 +108,5 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AmpAdam_FP32,
-                         testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator{});
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Adam_Updated_FP32,
-                         testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Adam_Updated_FP16,
-                         testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_AmpAdam_Updated_FP32,
-                         testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator{});
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Adam_Updated_Singlethread_FP32,
-                         testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Adam_Updated_Singlethread_FP16,
-                         testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_AmpAdam_Updated_Singlethread_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
                          TestNameGenerator{});

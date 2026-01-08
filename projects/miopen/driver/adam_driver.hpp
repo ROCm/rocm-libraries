@@ -50,24 +50,24 @@
 
 template <typename Tref>
 int64_t mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
-                    Tref* params,
-                    Tref* grads,
-                    Tref* exp_avgs,
-                    Tref* exp_avg_sqs,
-                    Tref* max_exp_avg_sqs,
-                    int32_t step,
-                    float lr,
-                    float beta1,
-                    float beta2,
-                    float weight_decay,
-                    float eps,
-                    bool amsgrad,
-                    bool maximize,
-                    bool adamw,
-                    bool is_amp,
-                    int32_t grad_scale,
-                    bool found_inf,
-                    bool multi_threaded)
+                       Tref* params,
+                       Tref* grads,
+                       Tref* exp_avgs,
+                       Tref* exp_avg_sqs,
+                       Tref* max_exp_avg_sqs,
+                       int32_t step,
+                       float lr,
+                       float beta1,
+                       float beta2,
+                       float weight_decay,
+                       float eps,
+                       bool amsgrad,
+                       bool maximize,
+                       bool adamw,
+                       bool is_amp,
+                       int32_t grad_scale,
+                       bool found_inf,
+                       bool multi_threaded)
 {
     const auto t0 = std::chrono::high_resolution_clock::now();
     if(is_amp && found_inf)
@@ -534,7 +534,6 @@ int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardGPU()
 template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
 {
-    const auto ns =
     mloAdamRunHost<Tref>(paramDesc,
                          param_host.data(),
                          grad_host.data(),
@@ -554,9 +553,6 @@ int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
                          grad_scale,
                          found_inf,
                          use_multithread);
-
-    std::ofstream ofs("/data/Dev/MIOpenDriverStats-" + this->name + ".csv", std::ofstream::app);
-    ofs << ns;
 
     return miopenStatusSuccess;
 }

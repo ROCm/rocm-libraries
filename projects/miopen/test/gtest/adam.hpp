@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,13 +51,14 @@ struct AdamTestCase
     {
         os << (tc.adamw ? "adam_w " : "adam ");
         os << "input:" << tc.input[0];
-        for(int i = 1; i < tc.input.size(); i++)
+        for(size_t i = 1; i < tc.input.size(); i++)
         {
             os << "x" << tc.input[i];
         }
         return os << " lr:" << tc.lr << " beta1:" << tc.beta1 << " beta2:" << tc.beta2
                   << " weight_decay:" << tc.weight_decay << " eps:" << tc.eps
-                  << " amsgrad:" << tc.amsgrad << " maximize:" << tc.maximize;
+                  << " amsgrad:" << std::boolalpha << tc.amsgrad << " maximize:" << tc.maximize
+                  << std::noboolalpha;
     }
 
     const std::vector<int>& GetInput() { return input; }
@@ -84,7 +85,10 @@ std::vector<AdamTestCase> AdamTestConfigs()
         {{128,1024,1,1}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false},
         {{192,192,3,3}, 0.001, 0.9, 0.999, 0.0005, 0.000001, false, false, false, false},
         {{255,640,1,1}, 0.001, 0.9, 0.999, 0.0005, 0.000001, false, false, false, false},
-        {{256,512,3,3}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false}};
+        {{256,512,3,3}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false},
+        {{256,512,8,8}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false}
+    
+    };
     // clang-format on
     std::vector<AdamTestCase> result;
     result.reserve(base_shape.size() * 16);
@@ -179,7 +183,7 @@ protected:
         }
     }
 
-    void RunTest()
+    void RunTest(bool multi_threaded)
     {
         const miopen::TensorDescriptor emptyDesc;
         auto&& handle = get_handle();
@@ -200,155 +204,8 @@ protected:
                          is_amp,
                          grad_scale[0],
                          found_inf[0],
-                         step_count);
-
-        for(uint32_t i = 1; i <= step_count; i++)
-        {
-            auto status = miopen::Adam(handle,
-                                       param.desc,
-                                       param_dev.get(),
-                                       param.desc,
-                                       param_dev.get(),
-                                       param_fp16.desc,
-                                       param_fp16_dev.get(),
-                                       grad.desc,
-                                       grad_dev.get(),
-                                       exp_avg.desc,
-                                       exp_avg_dev.get(),
-                                       exp_avg.desc,
-                                       exp_avg_dev.get(),
-                                       exp_avg_sq.desc,
-                                       exp_avg_sq_dev.get(),
-                                       exp_avg_sq.desc,
-                                       exp_avg_sq_dev.get(),
-                                       max_exp_avg_sq.desc,
-                                       max_exp_avg_sq_dev.get(),
-                                       max_exp_avg_sq.desc,
-                                       max_exp_avg_sq_dev.get(),
-                                       grad_scale.desc,
-                                       grad_scale_dev.get(),
-                                       found_inf.desc,
-                                       found_inf_dev.get(),
-                                       use_step_tensor ? step.desc : emptyDesc,
-                                       step_dev.get(),
-                                       use_step_tensor ? step.desc : emptyDesc,
-                                       step_dev.get(),
-                                       i,
-                                       lr,
-                                       beta1,
-                                       beta2,
-                                       weight_decay,
-                                       eps,
-                                       amsgrad,
-                                       maximize,
-                                       adamw,
-                                       is_amp);
-
-            EXPECT_EQ(status, miopenStatusSuccess);
-        }
-
-        param.data = handle.Read<Tp>(param_dev, param.data.size());
-
-        if(is_amp)
-            param_fp16.data = handle.Read<half_float::half>(param_fp16_dev, param_fp16.data.size());
-    }
-
-    void RunUpdatedTest()
-    {
-        const miopen::TensorDescriptor emptyDesc;
-        auto&& handle = get_handle();
-
-        cpu_adam_updated<Tp, Tg>(ref_param,
-                                 grad,
-                                 exp_avg,
-                                 exp_avg_sq,
-                                 max_exp_avg_sq,
-                                 lr,
-                                 beta1,
-                                 beta2,
-                                 weight_decay,
-                                 eps,
-                                 amsgrad,
-                                 maximize,
-                                 adamw,
-                                 is_amp,
-                                 grad_scale[0],
-                                 found_inf[0],
-                                 step_count);
-
-        for(uint32_t i = 1; i <= step_count; i++)
-        {
-            auto status = miopen::Adam(handle,
-                                       param.desc,
-                                       param_dev.get(),
-                                       param.desc,
-                                       param_dev.get(),
-                                       param_fp16.desc,
-                                       param_fp16_dev.get(),
-                                       grad.desc,
-                                       grad_dev.get(),
-                                       exp_avg.desc,
-                                       exp_avg_dev.get(),
-                                       exp_avg.desc,
-                                       exp_avg_dev.get(),
-                                       exp_avg_sq.desc,
-                                       exp_avg_sq_dev.get(),
-                                       exp_avg_sq.desc,
-                                       exp_avg_sq_dev.get(),
-                                       max_exp_avg_sq.desc,
-                                       max_exp_avg_sq_dev.get(),
-                                       max_exp_avg_sq.desc,
-                                       max_exp_avg_sq_dev.get(),
-                                       grad_scale.desc,
-                                       grad_scale_dev.get(),
-                                       found_inf.desc,
-                                       found_inf_dev.get(),
-                                       use_step_tensor ? step.desc : emptyDesc,
-                                       step_dev.get(),
-                                       use_step_tensor ? step.desc : emptyDesc,
-                                       step_dev.get(),
-                                       i,
-                                       lr,
-                                       beta1,
-                                       beta2,
-                                       weight_decay,
-                                       eps,
-                                       amsgrad,
-                                       maximize,
-                                       adamw,
-                                       is_amp);
-
-            EXPECT_EQ(status, miopenStatusSuccess);
-        }
-
-        param.data = handle.Read<Tp>(param_dev, param.data.size());
-
-        if(is_amp)
-            param_fp16.data = handle.Read<half_float::half>(param_fp16_dev, param_fp16.data.size());
-    }
-
-    void RunUpdatedSingleThreadTest()
-    {
-        const miopen::TensorDescriptor emptyDesc;
-        auto&& handle = get_handle();
-
-        cpu_adam_updated_singlethread<Tp, Tg>(ref_param,
-                                              grad,
-                                              exp_avg,
-                                              exp_avg_sq,
-                                              max_exp_avg_sq,
-                                              lr,
-                                              beta1,
-                                              beta2,
-                                              weight_decay,
-                                              eps,
-                                              amsgrad,
-                                              maximize,
-                                              adamw,
-                                              is_amp,
-                                              grad_scale[0],
-                                              found_inf[0],
-                                              step_count);
+                         step_count,
+                         multi_threaded);
 
         for(uint32_t i = 1; i <= step_count; i++)
         {
