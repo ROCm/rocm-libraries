@@ -274,7 +274,6 @@ rocm_export_targets(
     PACKAGE hip
     PACKAGE rocprim
     COMPATIBILITY SameMajorVersion
-    CONFIG_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocsparse-config.cmake.in"
 )
 
 
