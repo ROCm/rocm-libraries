@@ -225,20 +225,20 @@ add_dependencies(rocsparse-test rocsparse-test-data rocsparse-common)
 rocm_install(TARGETS rocsparse-test COMPONENT tests DESTINATION "${CMAKE_INSTALL_BINDIR}")
 rocm_install(FILES ${ROCSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/rocsparse/test" COMPONENT tests)
 
-# Windows: Copy DLLs
+# Copy runtime DLLs next to executable (Windows has no RPATH equivalent)
 if(WIN32)
-    file(GLOB third_party_dlls
+    file(GLOB _rocsparse_runtime_dlls
         LIST_DIRECTORIES OFF
         CONFIGURE_DEPENDS
-        $ENV{HIP_DIR}/bin/*.dll
-        $ENV{HIP_DIR}/bin/hipinfo.exe
-        ${PROJECT_SOURCE_DIR}/rtest.*
-        $ENV{rocblas_DIR}/bin/*.dll
-        C:/Windows/System32/libomp140*.dll
+        "$ENV{HIP_DIR}/bin/*.dll"
+        "$ENV{HIP_DIR}/bin/hipinfo.exe"
+        "$ENV{rocblas_DIR}/bin/*.dll"
+        "${PROJECT_SOURCE_DIR}/rtest.*"
+        "C:/Windows/System32/libomp140*.dll"
     )
-    foreach(file_i ${third_party_dlls})
-        add_custom_command(TARGET rocsparse-test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy ${file_i} ${CMAKE_CURRENT_BINARY_DIR}/../staging/
-        )
-    endforeach()
+    add_custom_command(TARGET rocsparse-test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_rocsparse_runtime_dlls}
+                "${CMAKE_CURRENT_BINARY_DIR}/../staging/"
+        COMMAND_EXPAND_LISTS
+    )
 endif()
