@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <gtest/gtest.h>
+
 #include <miopen/convolution.hpp>
 #include <miopen/db.hpp>
 #include <miopen/find_solution.hpp>
@@ -35,10 +37,12 @@
 #include <cstdlib>
 #include <functional>
 #include <sstream>
+#include <string_view>
 #include <typeinfo>
+#include <utility>
 
-#include "get_handle.hpp"
-#include "test.hpp"
+#include "random.hpp"
+#include "../get_handle.hpp"
 
 namespace miopen {
 namespace tests {
@@ -165,52 +169,91 @@ public:
     }
 };
 
-class SolverTest
+struct TestParams
+{
+    std::string expected_kernel;
+    std::vector<size_t> in;
+    std::function<void(ExecutionContext&)> context_filter = [](ExecutionContext&) {};
+};
+
+using TestCase = std::tuple<std::vector<TestParams>, std::vector<TestParams>>; // pre-check parameters and post-check parameters
+
+auto GenCases()
+{
+    return std::vector<TestCase>{std::make_tuple<std::vector<TestParams>, std::vector<TestParams>>(
+        {
+            TestParams{TrivialTestSolver::FileName(),
+                      {1, 1, 1, 1},
+                      [](ExecutionContext&) {}},
+            TestParams{TrivialTestSolver::FileName(),
+                      {1, 1, 1, 1},
+                      [](ExecutionContext& c) { c.do_search = true; }},
+            TestParams{SearchableTestSolver::NoSearchFileName(),
+                      {1, 1, 1, 2},
+                      [](ExecutionContext& c) { c.do_search = false; }},
+            TestParams{ SearchableTestSolver::FileName(),
+                      {1, 1, 1, 2},
+                      [](ExecutionContext& c) { c.do_search = true; }}
+        },
+        {
+            TestParams{SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](ExecutionContext&) {}},
+            TestParams{SearchableTestSolver::FileName(),
+                      {1, 1, 1, 2},
+                      [](ExecutionContext& c) { c.do_search = true; }}
+        }
+    )};
+}
+
+auto GetCases()
+{
+    static auto cases = GenCases();
+    return cases;
+}
+
+} // namespace tests
+} // namespace miopen
+
+using namespace miopen;
+using namespace miopen::tests;
+
+class SolverTest : public ::testing::TestWithParam<TestCase>
 {
 public:
-    void Run() const
+    void SetUp() override
     {
+        prng::reset_seed();
+    }
+
+    void Run()
+    {
+        auto [pre_check_param, post_check_param] = GetParam();
         const TempFile db_path("miopen.tests.solver");
 
-        ConstructTest(db_path, TrivialTestSolver::FileName(), {1, 1, 1, 1});
-
-        ConstructTest(db_path,
-                      TrivialTestSolver::FileName(),
-                      {1, 1, 1, 1},
-                      [](ExecutionContext& c) { c.do_search = true; });
-
-        ConstructTest(db_path,
-                      SearchableTestSolver::NoSearchFileName(),
-                      {1, 1, 1, 2},
-                      [](ExecutionContext& c) { c.do_search = false; });
-
-        ConstructTest(db_path,
-                      SearchableTestSolver::FileName(),
-                      {1, 1, 1, 2},
-                      [](ExecutionContext& c) { c.do_search = true; });
+        for(auto const& param : pre_check_param)
+        {
+            ConstructTest(db_path, param.expected_kernel.c_str(), param.in, param.context_filter);
+        }
 
         const auto& searchable_solver = StaticContainer<const SearchableTestSolver>::Instance();
         const auto searches           = SearchableTestSolver::searches_done();
 
         // Should read in both cases: result is already in DB, solver is searchable.
-        ConstructTest(
-            db_path, SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](ExecutionContext&) {});
 
-        ConstructTest(db_path,
-                      SearchableTestSolver::FileName(),
-                      {1, 1, 1, 2},
-                      [](ExecutionContext& c) { c.do_search = true; });
+        for(auto const& param : post_check_param)
+        {
+            ConstructTest(db_path, param.expected_kernel.c_str(), param.in, param.context_filter);
+        }
 
         // Checking no more searches were done.
-        EXPECT_EQUAL(searches, searchable_solver.searches_done());
+        EXPECT_EQ(searches, searchable_solver.searches_done());
     }
 
-private:
-    static void ConstructTest(
+protected:
+    void ConstructTest(
         const fs::path& db_path,
         const char* expected_kernel,
-        const std::initializer_list<size_t>& in,
-        const std::function<void(ExecutionContext&)>& context_filler = [](ExecutionContext&) {})
+        const std::vector<size_t>& in,
+        const std::function<void(ExecutionContext&)>& context_filler = [](ExecutionContext&) {}) const
     {
         const auto problem = conv::ProblemDescription{TensorDescriptor{miopenFloat, in},
                                                       TensorDescriptor{miopenFloat, in},
@@ -223,12 +266,11 @@ private:
 
         const auto sol = FindSolution(ctx, problem, db_path);
 
-        EXPECT_OP(sol.construction_params.size(), >, 0);
-        EXPECT_EQUAL(sol.construction_params[0].kernel_file, expected_kernel);
+        EXPECT_TRUE(sol.construction_params.size() > 0);
+        EXPECT_EQ(sol.construction_params[0].kernel_file, expected_kernel);
     }
 };
 
-} // namespace tests
-} // namespace miopen
+TEST_P(SolverTest, GPU_TestSolver_None) { Run(); }
 
-int main() { miopen::tests::SolverTest().Run(); }
+INSTANTIATE_TEST_SUITE_P(Smoke, SolverTest, ::testing::ValuesIn(GetCases()));
