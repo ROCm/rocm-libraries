@@ -32,7 +32,7 @@
 
 // This test is currently failing as const_scalar_object cannot be used with get_device_address
 // This is tracked in SWDEV-571304
-// XFAIL: hipcc, hiprtc
+// UNSUPPORTED: hipcc, hiprtc
 
 #include <cuda/functional>
 #include <cuda/std/cassert>
