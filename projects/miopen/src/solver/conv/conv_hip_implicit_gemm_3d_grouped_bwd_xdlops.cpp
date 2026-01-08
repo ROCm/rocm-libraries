@@ -377,6 +377,8 @@ std::vector<std::string> GetAllBwdKernelTypeStrings()
     auto scale_ptrs    = DeviceOpGBwdScalePtrs<float>::GetInstances();
     auto default_ptrs  = DeviceOpGBwdDefaultPtrs<float>::GetInstances();
 
+    all_kernels.reserve(bilinear_ptrs.size() + scale_ptrs.size() + default_ptrs.size());
+
     for(const auto& ptr : bilinear_ptrs)
         all_kernels.push_back(ptr->GetTypeString());
     for(const auto& ptr : scale_ptrs)
