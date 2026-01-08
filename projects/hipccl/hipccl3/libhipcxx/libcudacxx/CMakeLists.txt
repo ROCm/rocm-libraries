@@ -1,4 +1,4 @@
-# Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -97,17 +97,27 @@ elseif (LIBCUDACXX_ENABLE_HIP)
   if ("${AMDGPU_TARGETS}" STREQUAL "")
     set(AMDGPU_TARGETS ${CMAKE_HIP_ARCHITECTURES})
   elseif(NOT "${AMDGPU_TARGETS}" STREQUAL "${CMAKE_HIP_ARCHITECTURES}")
-    message(FATAL_ERROR "mismatch between CMAKE_HIP_ARCHITECTURES and AMDGPU_TARGETS; CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', AMDGPU_TARGETS='${AMDGPU_TARGETS}'")
+    message(WARNING "mismatch between CMAKE_HIP_ARCHITECTURES and AMDGPU_TARGETS! Using AMDGPU_TARGETS! CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', AMDGPU_TARGETS='${AMDGPU_TARGETS}'")
+    set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
   endif()
   if ("${GPU_TARGETS}" STREQUAL "")
     set(GPU_TARGETS ${CMAKE_HIP_ARCHITECTURES})
   elseif(NOT "${GPU_TARGETS}" STREQUAL "${CMAKE_HIP_ARCHITECTURES}")
-    message(FATAL_ERROR "mismatch between CMAKE_HIP_ARCHITECTURES and GPU_TARGETS; CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', GPU_TARGETS='${GPU_TARGETS}'")
+    message(WARNING "mismatch between CMAKE_HIP_ARCHITECTURES and GPU_TARGETS! Using GPU_TARGETS! CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', GPU_TARGETS='${GPU_TARGETS}'")
+    set(CMAKE_HIP_ARCHITECTURES ${GPU_TARGETS})
   endif()
 
   find_package(hip REQUIRED)
   enable_language(HIP)
 endif ()
+
+# As part of the TheRock testing process, we need the source directory within the build folder
+# since we need to configure, build and run the tests from within the tester using lit.
+# The reason for this is that lit cannot seperately generate binaries in the build step
+# and execute them in the tester but directly executes and deletes any test binaries during the build.
+if(DEFINED THEROCK_TOOLCHAIN_ROOT)
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 
 option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libhip++ tests." ON)
 if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
