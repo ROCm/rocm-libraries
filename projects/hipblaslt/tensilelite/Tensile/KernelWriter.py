@@ -5237,13 +5237,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # TODO: Avoid the logic which does not make sense.
       # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
       # Changed the value based on this and also to mitigate some instruction scheduling issues.
-      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2:
+      # Invalidate this adjustment if ExtraMiLatencyLeft is >= 0
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
         self.states.miLatency = kernel["MatrixInstM"] // 2
         miIssueLatency = 2
 
       # give 1 quad-cycle buffer to prevend bubble from sync
       miLatencyBuffer = 1
       self.states.miLatencyLeft = max(self.states.miLatency - miLatencyBuffer - miIssueLatency,0)
+      # add extra miLatencyLeft from parameter
+      if kernel["ExtraMiLatencyLeft"] > 0:
+        self.states.miLatencyLeft += kernel["ExtraMiLatencyLeft"]
 
       # Special dependency cases
       if kernel["ProblemType"]["ComputeDataType"].isDouble():

@@ -2,6 +2,12 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.2.1 for ROCm 7.2.1
+
+### Resolved issues
+
+* Fix issue where users might encounter a `HIPBLAS_STATUS_INTERNAL_ERROR` with various sizes in CPX mode.
+
 ## hipBLASLt 1.2.0 for ROCm 7.2.0
 
 ### Added

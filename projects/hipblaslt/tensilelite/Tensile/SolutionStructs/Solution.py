@@ -3497,6 +3497,10 @@ class Solution(collections.abc.Mapping):
         #print("Force to Disable PreloadKernArgs since this hipcc version doesn't support",)
         state["PreloadKernArgs"] = 0
 
+    # change negative ExtraLatencyForLR to 0 for non DirectToVgpr
+    if state["ExtraLatencyForLR"] < 0 and not (state["DirectToVgprA"] or state["DirectToVgprB"]):
+      state["ExtraLatencyForLR"] = 0
+
   ########################################
   @ staticmethod
   def getParametersIndented(state, indent):

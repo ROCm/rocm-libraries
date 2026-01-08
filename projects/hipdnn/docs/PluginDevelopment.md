@@ -89,7 +89,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
 1. **Create Plugin Structure**
    - Create a new project/repository for your plugin
    - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-   - See [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/) as a reference implementation (currently included but will become a separate project)
+   - See [MIOpen Legacy Plugin](../../../dnn-providers/miopen-provider/) as a reference implementation.
 
 2. **Implement Plugin API Functions**
 
@@ -139,9 +139,9 @@ In general, the **best practices** consist of:
 ### Key Files Reference
 
 - **Plugin API Interface**: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-- **Example Plugin Implementation**: [`plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp`](../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp)
-- **Example Engine Manager**: [`plugins/miopen_legacy_plugin/EngineManager.hpp`](../plugins/miopen_legacy_plugin/EngineManager.hpp)
-- **Example Engine Implementation**: [`plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp`](../plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp)
+- **Example Plugin Implementation**: [`dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp)
+- **Example Engine Manager**: [`dnn-providers/miopen-provider/EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp)
+- **Example Engine Implementation**: [`dnn-providers/miopen-provider/engines/MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp)
 
 ## Plugin Architecture
 
@@ -394,11 +394,11 @@ Integration tests validate end-to-end functionality of your plugin:
     - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
     - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-For a comprehensive example of an integration test, see: [`plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
+For a comprehensive example of an integration test, see: [`dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../../../dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
 
 Moreover, see our [general testing requirements](./testing/TestingStrategy.md#general-testing-requirements).
 
-## Example: [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/)
+## Example: [MIOpen Legacy Plugin](../../../dnn-providers/miopen-provider/)
 
 The MIOpen Legacy Plugin is a complete example of a kernel engine plugin. It demonstrates how a plugin integrates with hipDNN and delegates execution to a backend. Furthermore, it incorporates the recommended structure and best practices for kernel engine plugins.
 
@@ -409,6 +409,6 @@ At a high level, it:
 - Coordinates streams and handles synchronization
 
 ### Structure
-- **Main Plugin**: [`MiopenLegacyPlugin.cpp`](../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp) - Entry point and plugin registration
-- **Engine Manager**: [`EngineManager.hpp`](../plugins/miopen_legacy_plugin/EngineManager.hpp) - Manages MIOpen engines
-- **MIOpen Engine**: [`MiopenEngine.cpp`](../plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp) - Implements graph execution using MIOpen kernels
+- **Main Plugin**: [`MiopenLegacyPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp) - Entry point and plugin registration
+- **Engine Manager**: [`EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp) - Manages MIOpen engines
+- **MIOpen Engine**: [`MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp) - Implements graph execution using MIOpen kernels
