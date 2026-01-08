@@ -201,7 +201,7 @@ if(ROCSPARSE_ENABLE_MARKER)
 endif()
 
 # Prepare testing data
-set(ROCSPARSE_TEST_DATA "${CMAKE_CURRENT_BINARY_DIR}/../staging/rocsparse_test.data")
+set(ROCSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/clients/staging/rocsparse_test.data")
 string(REGEX REPLACE ".cpp" ".yaml" ROCSPARSE_TEST_YAMLS "${ROCSPARSE_TEST_SOURCES}")
 
 add_custom_command(
