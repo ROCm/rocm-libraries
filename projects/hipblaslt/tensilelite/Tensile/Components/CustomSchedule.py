@@ -79,15 +79,6 @@ class SyncSchedule:
             barrier_idx = barrier_idx if barrier_idx is not None else idx
             self.schedule.append( (barrier_idx, SBarrier(comment=barrier_comment)) )
 
-    def add_barrier(self, idx: int, comment: str = ""):
-        """ Add a SBarrier to the schedule at the given index.
-
-        Args:
-            idx:     The index at which to add the SBarrier.
-            comment: An optional comment for the SBarrier.
-        """
-        self.schedule.append( (idx, SBarrier(comment=comment)) )
-
     def get_indicies(self):
         return [item[0] for item in self.schedule]
     def get_code(self):
@@ -174,34 +165,6 @@ class ScheduleInfo:
 
     def isValidationDisabled(self):
         return self._skipValidation
-
-    def disableOrderValidation(self, keys: list[str] = []):
-        """
-        Disable order validation for specified keys.
-        
-        Args:
-            keys: list of keys to disable order validation for. If empty, disables for all keys.
-        
-        """
-        self._skipOrderValidation = keys if keys else list(self.optSchedule.keys())
-    
-    def getSkippedOrderValidationKeys(self):
-        return self._skipOrderValidation
-
-    def pretty_print(self):
-        klen = max(len(k) for k in self.optSchedule.keys())
-        for k,v in self.optSchedule.items():
-            print(f"{k:>{klen}}: {v}")
-        
-        if snops := self.optSchedule.get('SNOP', []):
-            print("---- SNOP code ----")
-            for idx, code in zip(snops[0], self.snopCode):
-                print(f"{idx:>2}: {str(code).strip()}")
-        
-        if syncs := self.optSchedule.get('SYNC', []):
-            print("---- SYNC code ----")
-            for idx, code in zip(syncs[0], self.syncCode):
-                print(f"{idx:>2}: {str(code).strip()}")
 
 def removeComments(module):
     retModule = Module()
@@ -2852,7 +2815,6 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        reorder_packing = True
 
         lra0 = [0,0,1,1]
         syncs.add( 3, dscnt=2, comment="Wait for the first 2 LRA0 to complete before pack")
@@ -2919,8 +2881,4 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         snopCode = [s[1] for s in snops]
  
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
-
-    if reorder_packing:
-        # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
-        opt1.disableOrderValidation(["PackA0", "PackB0", "PackA3", "PackB3", ])
     return True, opt1
