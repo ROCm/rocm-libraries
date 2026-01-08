@@ -773,12 +773,6 @@ namespace rocsparse
         return atomic_add_check(base_ptr + idx, static_cast<T1>(val));
     }
 
-    // Global spinlock for odd-sized array edge cases.
-    // Using 'static' gives each translation unit its own copy of this lock variable.
-    // This is acceptable because the spinlock is only used for synchronization within
-    // a single kernel launch, and all threads in a kernel come from the same TU.
-    static __device__ unsigned int g_fp16_lock = 0;
-
     template <typename T>
     __device__ __forceinline__ T wfreduce_sum_mask(T sum, unsigned long long int active_mask)
     {
@@ -799,6 +793,12 @@ namespace rocsparse
 
     __device__ half atomic_add_by_CAS(half* base_ptr, int idx, half val, int size)
     {
+        // Spinlock for odd-sized fp16 array edge cases.
+        // Using 'static __device__' creates a persistent device variable per translation unit.
+        // This is acceptable because the spinlock is only used for synchronization within
+        // a single kernel launch, and all threads in a kernel come from the same TU.
+        static __device__ unsigned int g_fp16_lock = 0;
+
         // Check bounds
         if(idx >= 0 && idx < size)
         {
@@ -896,17 +896,17 @@ namespace rocsparse
         return base_ptr[idx];
     }
 
-    // Global spinlock for odd-sized bfloat16 array edge cases.
-    // Using 'static' gives each translation unit its own copy of this lock variable.
-    // This is acceptable because the spinlock is only used for synchronization within
-    // a single kernel launch, and all threads in a kernel come from the same TU.
-    static __device__ unsigned int g_bf16_lock = 0;
-
     __device__ rocsparse_bfloat16 atomic_add_by_CAS(rocsparse_bfloat16* base_ptr,
                                                     int                 idx,
                                                     rocsparse_bfloat16  val,
                                                     int                 size)
     {
+        // Spinlock for odd-sized bfloat16 array edge cases.
+        // Using 'static __device__' creates a persistent device variable per translation unit.
+        // This is acceptable because the spinlock is only used for synchronization within
+        // a single kernel launch, and all threads in a kernel come from the same TU.
+        static __device__ unsigned int g_bf16_lock = 0;
+
         // Check bounds
         if(idx >= 0 && idx < size)
         {
