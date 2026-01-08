@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_TOPK_HPP_
 
 #include "../detail/temp_storage.hpp"
+#include "detail/device_topk_air_topk.hpp"
 
 #include "device_merge_sort.hpp"
 #include "device_radix_sort.hpp"
@@ -80,7 +81,7 @@ struct TopKImpl
                          const ValuesInputIterator  values_input,
                          const ValuesOutputIterator values_output,
                          const SizeIn               size,
-                         const SizeOut              k,
+                         const SizeOut              K,
                          const hipStream_t          stream,
                          const bool                 debug_synchronous,
                          const BinaryFunction /*compare_function*/,
@@ -97,27 +98,87 @@ struct TopKImpl
                       "RadixTopK does not support custom keys");
         static_assert(Ordered == false, "Radix TopK does not support ordered output");
         static_assert(Deterministic == false, "Radix TopK does not support determinism");
-        static_assert(Stable == false, "Radix TopK does not support stability");
 
-        bool ignored;
-        (void)k;
-        return detail::radix_sort_impl<config, radix_checker::descending>(
-            temporary_storage,
-            storage_size,
-            keys_input,
-            nullptr,
-            keys_output,
-            values_input,
-            nullptr,
-            values_output,
-            size,
-            ignored,
-            decomposer,
-            0,
-            sizeof(typename std::iterator_traits<KeysInputIterator>::value_type) * 8,
-            stream,
-            false,
-            debug_synchronous);
+        if constexpr(Stable)
+        {
+            bool ignored;
+            // Radix sort needs keys inplace
+            auto ret = detail::radix_sort_impl<config, radix_checker::descending>(
+                temporary_storage,
+                storage_size,
+                keys_input,
+                nullptr,
+                keys_input,
+                values_input,
+                nullptr,
+                values_input,
+                size,
+                ignored,
+                decomposer,
+                0,
+                sizeof(typename std::iterator_traits<KeysInputIterator>::value_type) * 8,
+                stream,
+                false,
+                debug_synchronous);
+            if(ret != hipSuccess)
+            {
+                return ret;
+            }
+            ret              = transform(keys_input,
+                            keys_output,
+                            K,
+                            ::rocprim::identity<>(),
+                            stream,
+                            debug_synchronous);
+            using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+            // TODO: need also check if input is nullptr, this can be done in the api function
+            // Only pass empty type into this function
+            static constexpr bool with_values
+                = !std::is_same<value_type, rocprim::empty_type>::value;
+            if constexpr(with_values)
+            {
+                if(ret != hipSuccess)
+                {
+                    return ret;
+                }
+                return transform(values_input,
+                                 values_output,
+                                 K,
+                                 ::rocprim::identity<>(),
+                                 stream,
+                                 debug_synchronous);
+            }
+            else
+            {
+                return ret;
+            }
+        }
+        else
+        {
+            // TODO: Launch plan need to be added
+            using topk = rocprim::detail::device_air_topk_impl<256,
+                                                               4,
+                                                               8,
+                                                               radix_checker::ascending,
+                                                               KeysInputIterator,
+                                                               KeysOutputIterator,
+                                                               ValuesInputIterator,
+                                                               ValuesOutputIterator,
+                                                               SizeIn,
+                                                               SizeOut,
+                                                               Decomposer>;
+            return topk{}(temporary_storage,
+                          storage_size,
+                          keys_input,
+                          keys_output,
+                          values_input,
+                          values_output,
+                          size,
+                          K,
+                          decomposer,
+                          stream,
+                          debug_synchronous);
+        }
     }
 };
 
@@ -142,7 +203,7 @@ hipError_t topk_impl(void*                      temporary_storage,
                      const ValuesInputIterator  values_input,
                      const ValuesOutputIterator values_output,
                      const SizeIn               size,
-                     SizeOut                    k,
+                     SizeOut                    K,
                      const BinaryFunction       compare_function  = BinaryFunction(),
                      const Decomposer           decomposer        = {},
                      const hipStream_t          stream            = 0,
@@ -150,8 +211,8 @@ hipError_t topk_impl(void*                      temporary_storage,
 {
     using key_type      = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type    = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using common_size_t = typename std::common_type<decltype(size), decltype(k)>::type;
-    static_assert(std::is_integral<common_size_t>::value, "Size and k must be integral types.");
+    using common_size_t = typename std::common_type<decltype(size), decltype(K)>::type;
+    static_assert(std::is_integral<common_size_t>::value, "Size and K must be integral types.");
     static_assert(
         std::is_same<key_type,
                      typename std::iterator_traits<KeysOutputIterator>::value_type>::value,
@@ -161,12 +222,12 @@ hipError_t topk_impl(void*                      temporary_storage,
                      typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
         "ValuesInputIterator and ValuesOutputIterator must have the same value_type");
 
-    // Limit k to size
-    if(k < 0)
+    // Limit K to size
+    if(K < 0)
     {
         return hipErrorInvalidValue;
     }
-    k = static_cast<SizeOut>(std::min(common_size_t{k}, static_cast<common_size_t>(size)));
+    K = static_cast<SizeOut>(std::min(common_size_t{K}, static_cast<common_size_t>(size)));
 
     if(temporary_storage == nullptr)
     {
@@ -189,7 +250,7 @@ hipError_t topk_impl(void*                      temporary_storage,
                                                        values_input,
                                                        values_output,
                                                        size,
-                                                       k,
+                                                       K,
                                                        stream,
                                                        debug_synchronous,
                                                        compare_function,
@@ -218,29 +279,16 @@ hipError_t topk_impl(void*                      temporary_storage,
                                              Decomposer>::algo_impl(temporary_storage,
                                                                     storage_size,
                                                                     keys_input,
-                                                                    keys_input,
+                                                                    keys_output,
                                                                     values_input,
-                                                                    values_input,
+                                                                    values_output,
                                                                     size,
-                                                                    k,
+                                                                    K,
                                                                     stream,
                                                                     debug_synchronous,
                                                                     compare_function,
                                                                     decomposer));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("TopKImpl::algo_impl", size, start);
 
-    ROCPRIM_RETURN_ON_ERROR(
-        transform(keys_input, keys_output, k, ::rocprim::identity<>(), stream, debug_synchronous));
-    static constexpr bool with_values = !std::is_same<value_type, rocprim::empty_type>::value;
-    if constexpr(with_values)
-    {
-        ROCPRIM_RETURN_ON_ERROR(transform(values_input,
-                                          values_output,
-                                          k,
-                                          ::rocprim::identity<>(),
-                                          stream,
-                                          debug_synchronous));
-    }
     return hipSuccess;
 }
 
@@ -265,7 +313,7 @@ hipError_t topk(void*                    temporary_storage,
                 const KeysInputIterator  keys_input,
                 const KeysOutputIterator keys_output,
                 const SizeIn             size,
-                const SizeOut            k,
+                const SizeOut            K,
                 Decomposer               decomposer        = {},
                 const hipStream_t        stream            = 0,
                 const bool               debug_synchronous = false)
@@ -282,7 +330,7 @@ hipError_t topk(void*                    temporary_storage,
         static_cast<empty_type*>(nullptr),
         static_cast<empty_type*>(nullptr),
         size,
-        k,
+        K,
         compare_function(),
         decomposer,
         stream,
@@ -313,7 +361,7 @@ hipError_t topk_pairs(void*                      temporary_storage,
                       const ValuesInputIterator  values_input,
                       const ValuesOutputIterator values_output,
                       const SizeIn               size,
-                      const SizeOut              k,
+                      const SizeOut              K,
                       const Decomposer           decomposer        = {},
                       const hipStream_t          stream            = 0,
                       const bool                 debug_synchronous = false)
@@ -329,7 +377,7 @@ hipError_t topk_pairs(void*                      temporary_storage,
                                                                            values_input,
                                                                            values_output,
                                                                            size,
-                                                                           k,
+                                                                           K,
                                                                            compare_function(),
                                                                            decomposer,
                                                                            stream,

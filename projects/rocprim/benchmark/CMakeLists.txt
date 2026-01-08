@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -191,6 +191,7 @@ add_rocprim_benchmark(benchmark_device_select.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_keys.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_pairs.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_reduce.cpp)
+add_rocprim_benchmark(benchmark_device_topk_air_topk.cpp)
 add_rocprim_benchmark(benchmark_device_transform.cpp)
 add_rocprim_benchmark(benchmark_device_transform_pointer.cpp)
 add_rocprim_benchmark(benchmark_predicate_iterator.cpp)
