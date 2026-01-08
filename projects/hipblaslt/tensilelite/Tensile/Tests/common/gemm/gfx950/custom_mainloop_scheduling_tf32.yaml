@@ -190,3 +190,51 @@ BenchmarkProblems:
           - Range: [[192], [256], [1], [1,1,64]]
           - Range: [[192], [256], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
+
+########################################
+# TF32 NT - standard
+########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      F32XdlMathOp: X
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s,b]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: false
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16, 32, 1, 1, 4, 6, 2, 2]          
+        - DepthU: [32]
+        - LocalReadVectorWidth: [4]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - UseCustomMainLoopSchedule: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - ClusterLocalRead: [1]
+        - TransposeLDS: [0]
+        - LDSTrInst: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[128], [192], [1], [64, 64, 256]]
+          - Range: [[128], [192], [1], [1,1,64]]
+          - Range: [[128], [192], [1], [32, 64, 256]]
+          - Range: [[4096], [6144], [1], [64, 64, 256]]
+          - Exact: [2048, 3072, 1, 8192]
+        - BiasTypeArgs: ['b']
