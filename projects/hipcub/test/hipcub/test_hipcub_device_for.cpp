@@ -964,6 +964,22 @@ struct LinearStore
     }
 };
 
+template<typename item_t>
+struct ForEachInExtentsOp
+
+{
+    using op_data_t = item_t[3];
+    void* d_data;
+
+    __device__ __host__ __forceinline__
+    void  operator()(int idx, int x, int y, int z)
+    {
+        auto& i = static_cast<op_data_t*>(d_data)[idx];
+        // We use the "placement new" operator to copy the data from an initializer list.
+        new(&i) op_data_t{x, y, z};
+    }
+};
+
 TYPED_TEST_SUITE(HipcubDeviceForEachInExtentsTests, HipcubDeviceForEachInExtentsTestsParams);
 
 TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
@@ -999,21 +1015,7 @@ TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
     HIP_CHECK(hipMemset(d_input, 0, memory_size));
 
-    struct Op
-    {
-        using op_data_t = item_t[3];
-        void* d_data;
-
-        __device__ __host__ __forceinline__
-        void  operator()(int idx, int x, int y, int z)
-        {
-            auto& i = static_cast<op_data_t*>(d_data)[idx];
-            // We use the "placement new" operator to copy the data from an initializer list.
-            new(&i) op_data_t{x, y, z};
-        }
-    };
-
-    HIP_CHECK(hipcub::DeviceFor::ForEachInExtents(ext, Op{d_input}));
+    HIP_CHECK(hipcub::DeviceFor::ForEachInExtents(ext, ForEachInExtentsOp<item_t>{d_input}));
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
