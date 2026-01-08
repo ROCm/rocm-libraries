@@ -252,7 +252,17 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
               set( BLAS_LIBRARY ${PKGBLAS_LIBRARIES} )
               set( BLAS_INCLUDE_DIR ${PKGBLAS_INCLUDE_DIRS} )
             else()
-              message( FATAL_ERROR "Could not find libblis and pkgconfig can not find any other implementation of cblas" )
+              # Fallback: try to find OpenBLAS/cblas directly with full path
+              find_library(FALLBACK_BLAS_LIB 
+                NAMES openblas cblas blas
+                PATHS /usr/lib /usr/lib64 /usr/local/lib
+              )
+              if(FALLBACK_BLAS_LIB)
+                set(BLAS_LIBRARY ${FALLBACK_BLAS_LIB})
+                message(STATUS "Found fallback BLAS library at: ${FALLBACK_BLAS_LIB}")
+              else()
+                message( FATAL_ERROR "Could not find libblis and pkgconfig can not find any other implementation of cblas" )
+              endif()
             endif()
           endif()
         endif()
