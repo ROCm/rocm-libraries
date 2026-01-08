@@ -60,7 +60,10 @@ rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
-set_target_properties(origami PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(origami PROPERTIES 
+    POSITION_INDEPENDENT_CODE ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
 target_compile_features(origami PUBLIC cxx_std_17)
 
 add_library(origami-headers INTERFACE)
