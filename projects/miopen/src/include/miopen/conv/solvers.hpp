@@ -4961,7 +4961,6 @@ private:
 
 struct ConvDepthwiseFwd2D final : ConvTunableSolver<PerformanceConfigConvDepthwiseFwd2D>
 {
-    ConvDepthwiseFwd2D();
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseFwd2D>(); }
 
     MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd2D GetDefaultPerformanceConfig(

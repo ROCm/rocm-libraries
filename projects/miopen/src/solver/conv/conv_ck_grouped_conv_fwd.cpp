@@ -14,7 +14,7 @@
 #include "miopen/conv/device_grouped_conv_fwd.hpp"
 #endif
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD_2D)
 
 namespace miopen {
 namespace solver {
@@ -444,13 +444,11 @@ bool PerformanceConfigConvDepthwiseFwd2D::operator==(
     return kernel_id == other.kernel_id;
 }
 
-ConvDepthwiseFwd2D::ConvDepthwiseFwd2D() {}
-
 bool ConvDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
                                       const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    if(env::disabled(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD))
+    if(env::disabled(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD_2D))
         return false;
     if(!ctx.use_hip_kernels)
         return false;
