@@ -387,23 +387,23 @@ class Solution(collections.abc.Mapping):
     # TLU case, we check AF{0,1}EM instead of ASEM.
     # TLU + ShiftPtr case, we can use wider global read for TailLoop. Enable Tailloop opt for DTL
     # (ShiftPtr is default and not set to state["EdgeType"] yet here)
-    # if not (state["ProblemType"]["TLUA"] and state["EdgeType"] == "ShiftPtr") and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
-    if not (state["ProblemType"]["TLUA"]) and ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
-      if state["DirectToLds"] and not state["DirectToVgprA"]:
+    if ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
+      if (not state["ProblemType"]["TLUA"]) and state["DirectToLds"] and not state["DirectToVgprA"]:
         state["NonDTLTailLoopA"] = True
-      if state["DirectToLds"] or state["DirectToVgprA"]:
         state["tailLoopOptA"] = False
-    # if not (state["ProblemType"]["TLUB"] and state["EdgeType"] == "ShiftPtr") and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
-    if not (state["ProblemType"]["TLUB"]) and ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
-      if state["DirectToLds"] and not state["DirectToVgprB"]:
+    if ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
+      if (not state["ProblemType"]["TLUB"]) and state["DirectToLds"] and not state["DirectToVgprB"]:
         state["NonDTLTailLoopB"] = True
-      if state["DirectToLds"] or state["DirectToVgprB"]:
         state["tailLoopOptB"] = False
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
       state["tailLoopOptA"] = False
+      state["tailLoopOptB"] = False
+    if (not state["ProblemType"]["TLUA"]) and (state["DirectToVgprA"]):
+      state["tailLoopOptA"] = False
+    if (not state["ProblemType"]["TLUB"]) and (state["DirectToVgprB"]):
       state["tailLoopOptB"] = False
 
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
@@ -2514,22 +2514,21 @@ class Solution(collections.abc.Mapping):
 
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.
-    # Unless kernel is Stream-K; Stream-K always requires TailLoop to handle work division.
     state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 and state["StreamK"] == 0:
+    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
 
     # TailloopInNll optimization check
     if state["TailloopInNll"]:
       # Disable TailloopInNll
-      # - StreamK is 0 (need to disable GSU for TailloopInNll)
       # - (not MFMA) or WMMA
       # - PrefetchGlobalRead is 0
       # - NoTailLoop
-      if (state["StreamK"] == 0) or \
-         ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
+      # - DepthU is not power of 2
+      if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
          (state["PrefetchGlobalRead"] == 0) or \
-         state["NoTailLoop"]:
+         state["NoTailLoop"] or \
+         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)):
         state["TailloopInNll"] = False
 
       # need restrictions for TailloopInNll
@@ -2542,7 +2541,7 @@ class Solution(collections.abc.Mapping):
         state["SuppressNoLoadLoop"] = False
         # disable UseCustomMainLoopSchedule
         state["UseCustomMainLoopSchedule"] = False
-        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll-K
+        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved

@@ -3670,15 +3670,8 @@ class KernelWriterAssembly(KernelWriter):
               quotient = loopCounterName
               dividend = "SizesSum+%u"%self.states.unrollIdx
               divisor = kernel["DepthU"]
-              if (kernel["NoTailLoop"] or self.states.tailloopInNll) and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0:
-                # round up SizesSum/DepthU for noTailLoop case
-                module.add(SAddI32(dst=sgpr(quotient), src0=(divisor - 1), src1=sgpr(dividend), \
-                    comment="round up SizeSum / DepthU" ))
-                module.add(scalarStaticDivideAndRemainder(quotient, None, quotient, \
-                            divisor, tmpSgprInfo, 0))
-              else:
-                module.add(scalarStaticDivideAndRemainder(quotient, None, dividend, \
-                            divisor, tmpSgprInfo, 0))
+              module.add(scalarStaticDivideAndRemainder(quotient, None, dividend, \
+                         divisor, tmpSgprInfo, 0))
 
               gsuComponent = Component.GSU.find(self)
               if kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1:
@@ -5514,6 +5507,11 @@ class KernelWriterAssembly(KernelWriter):
           if maxUnit > 1:
             module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=loopCounter, src1=maxUnit-1, \
                                comment="if summation is not multiple of %s, skip TailLoopInNLL"%maxUnit))
+            module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code and use TailLoop"))
+          if kernel["GlobalSplitU"] != 0:
+            # skip tailloopInNll code if GSU>1
+            module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SCmpGtU32(src0=sgpr(tmpSgpr+2), src1=1, comment="GSU > 1 ?"))
             module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code and use TailLoop"))
 
         if kernel["LocalSplitU"] > 1:
