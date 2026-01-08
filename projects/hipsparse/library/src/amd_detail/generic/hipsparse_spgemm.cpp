@@ -120,12 +120,12 @@ namespace hipsparse
         }
         case HIP_R_16F:
         {
-            size = sizeof(_Float16);
+            size = 2; // sizeof(float16)
             return HIPSPARSE_STATUS_SUCCESS;
         }
         case HIP_R_16BF:
         {
-            size = sizeof(rocsparse_bfloat16);
+            size = 2; // sizeof(bfloat16)
             return HIPSPARSE_STATUS_SUCCESS;
         }
         default:
@@ -433,8 +433,29 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
 
     if(computeType == HIP_R_16F)
     {
-        // Convert beta from float16 to float32
-        host_beta_f32  = static_cast<float>(*static_cast<const _Float16*>(beta));
+        // Convert beta from float16 to float32 using bit manipulation
+        // (portable, doesn't require _Float16 type support)
+        uint16_t beta_bits = *static_cast<const uint16_t*>(beta);
+        uint32_t sign      = (beta_bits >> 15) & 0x1;
+        uint32_t exp       = (beta_bits >> 10) & 0x1F;
+        uint32_t mant      = beta_bits & 0x3FF;
+        uint32_t f32_bits;
+        if(exp == 0)
+        {
+            // Zero or subnormal
+            f32_bits = sign << 31;
+        }
+        else if(exp == 0x1F)
+        {
+            // Inf or NaN
+            f32_bits = (sign << 31) | 0x7F800000 | (mant << 13);
+        }
+        else
+        {
+            // Normalized
+            f32_bits = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
+        }
+        memcpy(&host_beta_f32, &f32_bits, sizeof(float));
         beta_for_axpby = &host_beta_f32;
     }
     else if(computeType == HIP_R_16BF)
