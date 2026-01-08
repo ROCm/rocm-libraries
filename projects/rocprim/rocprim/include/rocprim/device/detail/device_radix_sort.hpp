@@ -641,8 +641,8 @@ auto compare_nan_sensitive(const T& a, const T& b) ->
     auto b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b_plus);
 
     // invert negatives, put 1 into sign bit for positives
-    a_bits ^= (sign_bit & a_bits) == 0 ? sign_bit : bit_key_type(-1);
-    b_bits ^= (sign_bit & b_bits) == 0 ? sign_bit : bit_key_type(-1);
+    a_bits ^= (sign_bit & a_bits ? bit_key_type(-1) : 0) | sign_bit;
+    b_bits ^= (sign_bit & b_bits ? bit_key_type(-1) : 0) | sign_bit;
 
     // sort numbers and NaNs according to their bit representation
     return a_bits > b_bits;
