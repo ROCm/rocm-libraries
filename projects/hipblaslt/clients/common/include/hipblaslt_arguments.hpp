@@ -94,8 +94,8 @@ struct Arguments
     int32_t iters;
     int32_t cold_iters;
 
-    float bench_time;
-    float cold_bench_time;
+    float bench_duration;
+    float cold_bench_duration;
 
     uint32_t algo;
     int32_t  solution_index;
@@ -222,8 +222,8 @@ struct Arguments
     OPER(batch_count) SEP            \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
-    OPER(bench_time) SEP             \
-    OPER(cold_bench_time) SEP	     \
+    OPER(bench_duration) SEP	     \
+    OPER(cold_bench_duration) SEP    \
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
     OPER(requested_solution_num) SEP \
@@ -873,7 +873,7 @@ namespace ArgumentsHelper
             func("beta", arg.get_beta<decltype(T)>());
         };
 };
-    // clang-format on
+// clang-format on
 
 #else
 #error "Unsupported C++ version"

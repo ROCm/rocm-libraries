@@ -469,12 +469,12 @@ try
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
          "Cold Iterations to run before entering the timing loop")
 
-        ("bench_time",
-         value<float>(&arg.bench_time)->default_value(-1.0f),
+        ("bench_duration",
+         value<float>(&arg.bench_duration)->default_value(-1.0f),
          "Time in milliseconds to run the benchmark. Overrides 'iters' if set")
 
-        ("cold_bench_time",
-         value<float>(&arg.cold_bench_time)->default_value(-1.0f),
+        ("cold_bench_duration",
+         value<float>(&arg.cold_bench_duration)->default_value(-1.0f),
          "Time in milliseconds to warm up. Overrides 'cold_iters' if set")
 
         ("algo_method",

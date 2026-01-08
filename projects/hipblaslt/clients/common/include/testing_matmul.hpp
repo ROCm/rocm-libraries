@@ -55,8 +55,8 @@
 #include <omp.h>
 #include <set>
 
-const int COLD_TEST_ITER = 10;
-const int TEST_ITER      = 10;
+const int COLD_TEST_ITER = 25;
+const int TEST_ITER      = 25;
 
 extern "C" __global__ void flush_icache()
 {
@@ -314,17 +314,17 @@ static void get_latency_estimate(double& lat_appx, Call& call, bool gpu_timer, h
 }
 
 static void set_iterations_using_latency_estimate(
-    int& hot_iter, int& cold_iter, double lat_appx, float hot_time, float cold_time)
+    int& hot_iter, int& cold_iter, double lat_appx, float hot_dur, float cold_dur)
 {
     hipblaslt_cout << "Setting iterations using latency estimate of " << lat_appx * 1000 << " us";
-    if(cold_time > 0)
+    if(cold_dur > 0)
     {
-        cold_iter = std::max(1, static_cast<int>(cold_time / lat_appx));
+        cold_iter = std::max(1, static_cast<int>(cold_dur / lat_appx));
         hipblaslt_cout << ", cold_iters: " << cold_iter;
     }
-    if(hot_time > 0)
+    if(hot_dur > 0)
     {
-        hot_iter = std::max(1, static_cast<int>(hot_time / lat_appx));
+        hot_iter = std::max(1, static_cast<int>(hot_dur / lat_appx));
         hipblaslt_cout << ", iters: " << hot_iter;
     }
     hipblaslt_cout << std::endl;
@@ -453,7 +453,7 @@ void epilogue_func(int64_t     m,
     auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
     if(e && !gradient)                                                                        \
     {                                                                                         \
-        saturate_cast_to_type(e, in_Tact* scaleE, aux_type, pos);                             \
+        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
     }                                                                                         \
     Tact in_Tact_act = 0;                                                                     \
     if(gradient)                                                                              \
@@ -599,12 +599,12 @@ void epilogue_func(int64_t     m,
                    bool        gradient,
                    hipDataType To)
 {
-#define CALCULATE_EPILOGUE_BASIC                               \
-    auto pos  = j * ld + i;                                    \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;      \
-    if(e)                                                      \
-    {                                                          \
-        saturate_cast_to_type(e, temp* scaleE, aux_type, pos); \
+#define CALCULATE_EPILOGUE_BASIC                                \
+    auto pos  = j * ld + i;                                     \
+    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
+    if(e)                                                       \
+    {                                                           \
+        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
     }
 
     for(int i = 0; i < m; i++)
@@ -1370,7 +1370,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     int32_t gemm_count      = std::max(1, arg.grouped_gemm);
     int64_t rotating        = arg.rotating * 1024 * 1024;
 
-    bool use_duration = (arg.bench_time > 0) || (arg.cold_bench_time > 0);
+    bool use_duration = (arg.bench_duration > 0) || (arg.cold_bench_duration > 0);
 
     std::vector<int64_t> M(gemm_count), N(gemm_count), K(gemm_count), lda(gemm_count),
         ldb(gemm_count), ldc(gemm_count), ldd(gemm_count), lde(gemm_count);
@@ -1559,10 +1559,10 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
                        << "Needed Size: " << totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
                        << "Needed block count: " << block_count;
-	  if(!use_duration)
-	    hipblaslt_cout << " (Capped to max iters: " << max_iters << ")" << std::endl;
-	  else
-	    hipblaslt_cout << std::endl;
+        if(!use_duration)
+            hipblaslt_cout << " (Capped to max iters: " << max_iters << ")" << std::endl;
+        else
+            hipblaslt_cout << std::endl;
     }
     // Calculating block count end
     matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(gemm_count));
@@ -3714,8 +3714,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                   ? 1
                   : arg.cold_iters;
         int   number_hot_calls = arg.iters;
-        float cold_time        = arg.cold_bench_time;
-        float hot_time         = arg.bench_time;
+        float cold_dur         = arg.cold_bench_duration;
+        float hot_dur          = arg.bench_duration;
 
         int    flush_iter      = 100000;
         double flush_time_used = 0;
@@ -3768,7 +3768,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         double lat_appx = 0.0;
                         get_latency_estimate(lat_appx, loop_contents, arg.use_gpu_timer, stream);
                         set_iterations_using_latency_estimate(
-                            number_hot_calls, number_cold_calls, lat_appx, hot_time, cold_time);
+                            number_hot_calls, number_cold_calls, lat_appx, hot_dur, cold_dur);
                     }
 
                     for(int32_t b = 0; b < block_count; b++)
@@ -3857,7 +3857,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         double lat_appx = 0.0;
                         get_latency_estimate(lat_appx, loop_contents, arg.use_gpu_timer, stream);
                         set_iterations_using_latency_estimate(
-                            number_hot_calls, number_cold_calls, lat_appx, hot_time, cold_time);
+                            number_hot_calls, number_cold_calls, lat_appx, hot_dur, cold_dur);
                     }
 
                     if(arg.skip_slow_solution_ratio)
@@ -3941,7 +3941,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         double lat_appx = 0.0;
                         get_latency_estimate(lat_appx, loop_contents, arg.use_gpu_timer, stream);
                         set_iterations_using_latency_estimate(
-                            number_hot_calls, number_cold_calls, lat_appx, hot_time, cold_time);
+                            number_hot_calls, number_cold_calls, lat_appx, hot_dur, cold_dur);
                     }
 
                     if(arg.skip_slow_solution_ratio)
@@ -4011,7 +4011,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         double lat_appx = 0.0;
                         get_latency_estimate(lat_appx, loop_contents, arg.use_gpu_timer, stream);
                         set_iterations_using_latency_estimate(
-                            number_hot_calls, number_cold_calls, lat_appx, hot_time, cold_time);
+                            number_hot_calls, number_cold_calls, lat_appx, hot_dur, cold_dur);
                     }
 
                     if(arg.skip_slow_solution_ratio)
