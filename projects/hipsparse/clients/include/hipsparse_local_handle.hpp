@@ -25,7 +25,7 @@
 #ifndef HIPSPARSE_LOCAL_HANDLE_HPP
 #define HIPSPARSE_LOCAL_HANDLE_HPP
 
-#include <hip/hip_runtime_api.h>
+#include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
 
 #include "hipsparse_arguments.hpp"
