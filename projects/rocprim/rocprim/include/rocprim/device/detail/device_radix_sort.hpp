@@ -629,6 +629,10 @@ auto compare_nan_sensitive(const T& a, const T& b) ->
     using bit_key_type             = decltype(sign_bit);
 
     // convert -0.0 to +0.0
+    // It was concerned that when the flags -fno-signed-zeros or -funsafe-math-optimizations
+    // (or -ffast-math which controls these two) is enabled then it is optimized away, but
+    // the compiler also seems to correctly model this and does not optimize away the addition
+    // when testing with the compile flags.
     const T zero{0};
     const T a_plus = a + zero;
     const T b_plus = b + zero;
