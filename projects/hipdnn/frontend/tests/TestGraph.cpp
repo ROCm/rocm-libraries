@@ -399,10 +399,13 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     scale->set_dim(derivedDims).set_stride(derivedStrides);
     bias->set_dim(derivedDims).set_stride(derivedStrides);
 
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("Epsilon").set_value(1e-5f);
+
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
 
-    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, attributes);
+    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, epsilon, attributes);
 
     EXPECT_EQ(y->get_name(), "BatchnormNodeVariance::Y");
     EXPECT_TRUE(y->get_is_virtual());
@@ -702,11 +705,14 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
         .set_dim(derivedDims)
         .set_stride(derivedStrides);
 
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5f);
+
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNodeVariance");
 
     auto y = graph.batchnorm_inference_variance_ext(
-        x, mean, variance, scale, bias, batchnormAttributes);
+        x, mean, variance, scale, bias, epsilon, batchnormAttributes);
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();

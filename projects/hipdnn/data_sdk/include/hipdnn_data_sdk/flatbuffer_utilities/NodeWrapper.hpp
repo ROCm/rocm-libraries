@@ -77,6 +77,8 @@ public:
         {
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt);
         case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
             return typeid(hipdnn_data_sdk::data_objects::PointwiseAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
