@@ -153,6 +153,7 @@ target_sources(rocsparse-test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/test_check_spmat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_bsrpad_value.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_test_listeners.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_atomic_add.cpp
 )
 
 target_compile_definitions(rocsparse-test PRIVATE GOOGLE_TEST)
@@ -160,6 +161,11 @@ target_compile_definitions(rocsparse-test PRIVATE GOOGLE_TEST)
 if(ROCSPARSE_ENABLE_MEMSTAT)
     target_compile_definitions(rocsparse-test PRIVATE ROCSPARSE_WITH_MEMSTAT)
 endif()
+
+# Library internal headers for testing atomic_add
+target_include_directories(rocsparse-test PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
+)
 
 if(ROCSPARSE_ENABLE_ILP64)
     target_compile_definitions(rocsparse-test PRIVATE rocsparse_ILP64)
