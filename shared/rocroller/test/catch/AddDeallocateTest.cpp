@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,9 @@ namespace AddDeallocateTest
         transforms.push_back(std::make_shared<OrderEpilogueBlocks>());
         transforms.push_back(std::make_shared<CleanLoops>());
         transforms.push_back(std::make_shared<AddPrefetch>(params, context.get()));
-        transforms.push_back(std::make_shared<AddComputeIndex>());
+        transforms.push_back(std::make_shared<UpdateWavefrontParameters>(params));
+        transforms.push_back(
+            std::make_shared<AssignIndexExpressions>(context.get(), example.getCommand()));
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);

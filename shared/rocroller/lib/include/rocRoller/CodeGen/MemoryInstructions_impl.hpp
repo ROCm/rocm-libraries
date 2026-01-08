@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2022-2025 AMD ROCm(TM) Software
+ * Copyright 2022-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -819,7 +819,7 @@ namespace rocRoller
         //
         // If an offset modifier is present, we can't use a 64bit
         // vaddr.  This can happen when: the offset register created
-        // by a ComputeIndex operation for a StoreTiled operation is
+        // by AssignIndexExpressions for a StoreTiled operation is
         // 64bit.
         if(!offsetModifier.empty())
             addr = addr->subset({0});

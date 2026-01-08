@@ -102,7 +102,6 @@ namespace rocRoller::KernelGraph
         void operator()(ControlGraph::Assign const& op, int tag);
         void operator()(ControlGraph::Barrier const& op, int tag);
         void operator()(ControlGraph::Block const& op, int tag);
-        void operator()(ControlGraph::ComputeIndex const& op, int tag);
         void operator()(ControlGraph::ConditionalOp const& op, int tag);
         void operator()(ControlGraph::Deallocate const& op, int tag);
         void operator()(ControlGraph::DoWhileOp const& op, int tag);

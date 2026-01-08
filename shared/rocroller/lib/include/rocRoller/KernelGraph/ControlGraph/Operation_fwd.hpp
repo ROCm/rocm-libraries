@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,6 @@ namespace rocRoller
     {
         struct Assign;
         struct Barrier;
-        struct ComputeIndex;
         struct ConditionalOp;
         struct AssertOp;
         struct Deallocate;
@@ -67,7 +66,6 @@ namespace rocRoller
 
         using Operation = std::variant<Assign,
                                        Barrier,
-                                       ComputeIndex,
                                        ConditionalOp,
                                        AssertOp,
                                        Deallocate,

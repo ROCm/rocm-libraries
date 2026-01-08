@@ -902,7 +902,7 @@ namespace rocRoller
                 ShowValue(Dir) + toString(info)
                 + concatenate(ShowValue(allStridesAreLiteral), ShowValue(colStrideIsOne)));
 
-            // Get the values from the associated ComputeIndex node
+            // Get the offset values set by AssignIndexExpressions
             co_yield getOffset(info, coords, !allStridesAreLiteral && info.m > 1);
             AssertFatal(info.rowOffsetReg, "Invalid row offset register.");
 

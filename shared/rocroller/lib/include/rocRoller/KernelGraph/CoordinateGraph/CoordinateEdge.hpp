@@ -171,7 +171,7 @@ namespace rocRoller
          * Offset - denotes offset between target/increment
          * dimensions.
          *
-         * See ComputeIndex.
+         * See AssignIndexExpressions.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Offset);
 
@@ -179,7 +179,7 @@ namespace rocRoller
          * Stride - denotes stride between target/increment
          * dimensions.
          *
-         * See ComputeIndex.
+         * See AssignIndexExpressions.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Stride);
 

@@ -125,11 +125,6 @@ namespace PermLanesTest
         kgraph                     = kgraph.transform(lowerTile);
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
-        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
-        kgraph                     = kgraph.transform(addComputeIndex);
-        kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
-        if(context->kernelOptions()->removeSetCoordinate)
-            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto command = std::make_shared<rocRoller::Command>();
         command->allocateArgument({DataType::E8M0, PointerType::PointerGlobal},
@@ -142,8 +137,13 @@ namespace PermLanesTest
                                   ArgumentType::Value,
                                   DataDirection::ReadOnly,
                                   "a");
+        auto assignIndexExprs = std::make_shared<AssignIndexExpressions>(context, command);
+        kgraph                = kgraph.transform(assignIndexExprs);
 
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context, command));
+        kgraph = kgraph.transform(std::make_shared<LoadPacked>(context));
+        if(context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
         kgraph = kgraph.transform(std::make_shared<CleanArguments>(context, command));
 
         context->schedule(k->preamble());

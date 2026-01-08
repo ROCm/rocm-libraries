@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,7 +56,7 @@ TEST_CASE("LoadPacked", "[kernel-graph]")
         std::make_shared<AddLDS>(params, context.get()),
         std::make_shared<LowerLinear>(context.get()),
         std::make_shared<LowerTile>(params, context.get()),
-        std::make_shared<AddComputeIndex>(),
+        std::make_shared<AssignIndexExpressions>(context.get(), example.getCommand()),
         std::make_shared<UpdateWavefrontParameters>(params),
     };
 

@@ -5,36 +5,44 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/backend/BackendWrapper.hpp>
 #include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_frontend::graph
 {
 // When an error occurs, get the backend error string and append it to the error_message.
-#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                        \
-    if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
-    {                                                                                   \
-        std::array<char, 256> backend_err_msg{};                                        \
-        hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
-                                                             backend_err_msg.size());   \
-        std::string full_error_msg                                                      \
-            = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
-        return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
-    }
+#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                            \
+    do                                                                                      \
+    {                                                                                       \
+        if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
+        {                                                                                   \
+            std::array<char, 256> backend_err_msg{};                                        \
+            hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
+                                                                 backend_err_msg.size());   \
+            std::string full_error_msg                                                      \
+                = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
+            return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
+        }                                                                                   \
+    } while(0)
 
 class Graph : public INode
 {
@@ -564,6 +572,31 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    // NOLINTBEGIN(readability-identifier-naming)
+    Error build(hipdnnHandle_t handle,
+                std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
+                [[maybe_unused]] BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
+                [[maybe_unused]] bool do_multithreaded_builds = false)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        HIPDNN_FE_LOG_INFO("BUILD with handle for graph '{}', policy: {}, modes: [{}]",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name(),
+                           policy,
+                           fmt::join(modes, ", "));
+
+        HIPDNN_CHECK_ERROR(validate());
+        HIPDNN_CHECK_ERROR(build_operation_graph(handle));
+        HIPDNN_CHECK_ERROR(create_execution_plans(modes));
+        HIPDNN_CHECK_ERROR(check_support());
+        HIPDNN_CHECK_ERROR(build_plans());
+
+        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph {}",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name());
+        return {ErrorCode::OK, ""};
+    }
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_workspace_size(int64_t& workspaceSize) const
     {
@@ -798,6 +831,35 @@ public:
         return y;
     }
 
+    std::shared_ptr<TensorAttributes>
+        batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
+                                         std::shared_ptr<TensorAttributes> mean,
+                                         std::shared_ptr<TensorAttributes> variance,
+                                         std::shared_ptr<TensorAttributes> scale,
+                                         std::shared_ptr<TensorAttributes> bias,
+                                         BatchnormInferenceAttributesVarianceExt attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BatchnormInferenceVarianceExt_"
+                                + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_mean(std::move(mean));
+        attributes.set_variance(std::move(variance));
+        attributes.set_scale(std::move(scale));
+        attributes.set_bias(std::move(bias));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
+            std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
 
@@ -883,6 +945,35 @@ public:
             std::make_shared<PointwiseNode>(std::move(attributes), graph_attributes));
 
         return out0;
+    }
+
+    std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
+                                             std::shared_ptr<TensorAttributes> b,
+                                             MatmulAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Matmul_" + std::to_string(_sub_nodes.size()));
+        }
+        if(a->get_name().empty())
+        {
+            a->set_name(attributes.get_name() + "::A");
+        }
+        if(b->get_name().empty())
+        {
+            b->set_name(attributes.get_name() + "::B");
+        }
+
+        auto c = outputTensor(attributes.get_name() + "::C");
+
+        attributes.set_a(std::move(a));
+        attributes.set_b(std::move(b));
+        attributes.set_c(c);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MatmulNode>(std::move(attributes), graph_attributes));
+
+        return c;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

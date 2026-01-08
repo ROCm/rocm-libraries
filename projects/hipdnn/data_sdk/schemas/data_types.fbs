@@ -10,5 +10,6 @@ enum DataType : byte {
     BFLOAT16 = 3,
     DOUBLE = 4,
     UINT8 = 5,
-    INT32 = 6
+    INT32 = 6,
+    INT8 = 7
 }

@@ -166,6 +166,7 @@ namespace rocRoller
         /**
          * @brief Return DataFlowTag of LHS of binary expression in Assign node.
          */
+
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryLHS(KernelGraph const& kgraph,
                                                                 int                assign);
@@ -388,10 +389,9 @@ namespace rocRoller
         void insertWithBody(KernelGraph& graph, int op, int newOp);
 
         /**
-         * @brief Find load/store operations that need their indexes
-         * precomputed by ComputeIndex.
+         * @brief Find load/store operations that need their indexes precomputed.
          */
-        std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start);
+        std::vector<int> findIndexAssignmentCandidates(KernelGraph const& kgraph, int start);
 
         /**
          * Removes all CommandArgruments found within an expression

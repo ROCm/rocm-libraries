@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,6 @@
 
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
-#include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDirect2LDS.hpp>
@@ -36,7 +35,7 @@
 #include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddStreamK.hpp>
 #include <rocRoller/KernelGraph/Transforms/AliasDataFlowTags.hpp>
-#include <rocRoller/KernelGraph/Transforms/AssignComputeIndex.hpp>
+#include <rocRoller/KernelGraph/Transforms/AssignIndexExpressions.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>

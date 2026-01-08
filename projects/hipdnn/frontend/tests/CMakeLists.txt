@@ -20,7 +20,9 @@ add_executable(
     TestBatchnormBackwardAttributes.cpp
     TestBatchnormBackwardNode.cpp
     TestBatchnormInferenceAttributes.cpp
+    TestBatchnormInferenceAttributesVarianceExt.cpp
     TestBatchnormInferenceNode.cpp
+    TestBatchnormInferenceNodeVarianceExt.cpp
     TestBatchnormNode.cpp
     TestConvolutionDgradAttributes.cpp
     TestConvolutionFwdAttributes.cpp
@@ -33,6 +35,8 @@ add_executable(
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestINode.cpp
+    TestMatmulAttributes.cpp
+    TestMatmulNode.cpp
     TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp

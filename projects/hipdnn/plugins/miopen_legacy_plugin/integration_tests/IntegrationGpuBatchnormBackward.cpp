@@ -83,6 +83,7 @@ protected:
         dyAttr.set_uid(BatchnormBwdTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
+        // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
         auto scaleAttr = graph::makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         scaleAttr.set_uid(BatchnormBwdTensorIds::SCALE_UID);
