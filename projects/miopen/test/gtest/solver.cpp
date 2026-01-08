@@ -176,32 +176,27 @@ struct TestParams
     std::function<void(ExecutionContext&)> context_filter = [](ExecutionContext&) {};
 };
 
-using TestCase = std::tuple<std::vector<TestParams>, std::vector<TestParams>>; // pre-check parameters and post-check parameters
+using TestCase =
+    std::tuple<std::vector<TestParams>,
+               std::vector<TestParams>>; // pre-check parameters and post-check parameters
 
 auto GenCases()
 {
     return std::vector<TestCase>{std::make_tuple<std::vector<TestParams>, std::vector<TestParams>>(
-        {
-            TestParams{TrivialTestSolver::FileName(),
-                      {1, 1, 1, 1},
-                      [](ExecutionContext&) {}},
-            TestParams{TrivialTestSolver::FileName(),
-                      {1, 1, 1, 1},
-                      [](ExecutionContext& c) { c.do_search = true; }},
-            TestParams{SearchableTestSolver::NoSearchFileName(),
-                      {1, 1, 1, 2},
-                      [](ExecutionContext& c) { c.do_search = false; }},
-            TestParams{ SearchableTestSolver::FileName(),
-                      {1, 1, 1, 2},
-                      [](ExecutionContext& c) { c.do_search = true; }}
-        },
-        {
-            TestParams{SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](ExecutionContext&) {}},
-            TestParams{SearchableTestSolver::FileName(),
-                      {1, 1, 1, 2},
-                      [](ExecutionContext& c) { c.do_search = true; }}
-        }
-    )};
+        {TestParams{TrivialTestSolver::FileName(), {1, 1, 1, 1}, [](ExecutionContext&) {}},
+         TestParams{TrivialTestSolver::FileName(),
+                    {1, 1, 1, 1},
+                    [](ExecutionContext& c) { c.do_search = true; }},
+         TestParams{SearchableTestSolver::NoSearchFileName(),
+                    {1, 1, 1, 2},
+                    [](ExecutionContext& c) { c.do_search = false; }},
+         TestParams{SearchableTestSolver::FileName(),
+                    {1, 1, 1, 2},
+                    [](ExecutionContext& c) { c.do_search = true; }}},
+        {TestParams{SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](ExecutionContext&) {}},
+         TestParams{SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](ExecutionContext& c) {
+                        c.do_search = true;
+                    }}})};
 }
 
 auto GetCases()
@@ -219,10 +214,7 @@ using namespace miopen::tests;
 class SolverTest : public ::testing::TestWithParam<TestCase>
 {
 public:
-    void SetUp() override
-    {
-        prng::reset_seed();
-    }
+    void SetUp() override { prng::reset_seed(); }
 
     void Run()
     {
@@ -253,7 +245,8 @@ protected:
         const fs::path& db_path,
         const char* expected_kernel,
         const std::vector<size_t>& in,
-        const std::function<void(ExecutionContext&)>& context_filler = [](ExecutionContext&) {}) const
+        const std::function<void(ExecutionContext&)>& context_filler = [](ExecutionContext&) {
+        }) const
     {
         const auto problem = conv::ProblemDescription{TensorDescriptor{miopenFloat, in},
                                                       TensorDescriptor{miopenFloat, in},
@@ -273,4 +266,6 @@ protected:
 
 TEST_P(SolverTest, GPU_TestSolver_None) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, SolverTest, ::testing::ValuesIn(GetCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, SolverTest, ::testing::ValuesIn(GetCases()), [](auto const&) {
+    return "SearchesDoneTest";
+});
