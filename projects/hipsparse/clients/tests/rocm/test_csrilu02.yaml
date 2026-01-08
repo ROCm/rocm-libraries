@@ -24,6 +24,13 @@
 ---
 include: hipsparse_common.yaml
 
+# Known bugs - tests matching these criteria will be moved to known_bug category
+# These tests fail due to rounding errors with large matrices
+Known bugs:
+  - function: csrilu02
+    filename: bmwcra_1
+  - function: csrilu02
+    filename: shipsec1
 
 Tests:
 - name: csrilu02_bad_arg
@@ -62,16 +69,16 @@ Tests:
              nos6,
              nos7]
 
-# - name: csrilu02
-#   category: nightly
-#   function: csrilu02
-#   precision: *double_only_precisions
-#   M: 1
-#   numericboost: [0, 1]
-#   boosttol: [0.5]
-#   boostval: [0.3]
-#   boostvali: [0.2]
-#   solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
-#   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
-#   filename: [bmwcra_1,
-#              shipsec1]
+- name: csrilu02
+  category: nightly
+  function: csrilu02
+  precision: *double_only_precisions
+  M: 1
+  numericboost: [0, 1]
+  boosttol: [0.5]
+  boostval: [0.3]
+  boostvali: [0.2]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [bmwcra_1,
+             shipsec1]
