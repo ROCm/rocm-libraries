@@ -26,34 +26,16 @@
 
 #pragma once
 
-#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <rocRoller/KernelGraph/Transforms/OrderExchangeNodes.hpp>
 
-namespace rocRoller
+namespace rocRoller::KernelGraph::OrderMultiplyNodesDetail
 {
-    namespace KernelGraph
+    struct ExchangeOrder
     {
-        ConstraintStatus NoUnorderedMultiplyNodes(const KernelGraph& k);
+        int getMultiply(int exchange) const;
 
-        class OrderMultiplyNodes : public GraphTransform
-        {
-        public:
-            OrderMultiplyNodes() = default;
+        bool operator()(int a, int b) const;
 
-            KernelGraph apply(KernelGraph const& original) override;
-            std::string name() const override
-            {
-                return "OrderMultiplyNodes";
-            }
-
-            inline std::vector<GraphConstraint> preConstraints() const override
-            {
-                return {};
-            }
-
-            inline std::vector<GraphConstraint> postConstraints() const override
-            {
-                return {&NoUnorderedMultiplyNodes};
-            }
-        };
-    }
+        KernelGraph const& graph;
+    };
 }
