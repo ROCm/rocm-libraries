@@ -165,5 +165,9 @@ namespace TensileLite
                       ProblemInputs const*      inputs,
                       size_t                    elementsToValidate);
 
+        void SolveGemmCPU(ContractionProblemGemm const& problem,
+                          ContractionInputs const&      inputs,
+                          size_t                        elementsToValidate, bool tryFastPath = true);
+
     } // namespace Client
 } // namespace TensileLite
