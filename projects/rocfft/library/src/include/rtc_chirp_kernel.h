@@ -27,7 +27,8 @@
 struct RTCKernelChirp : public RTCKernel
 {
     // generate chirp kernel from precision
-    static RTCKernelChirp generate(const std::string& gpu_arch, rocfft_precision precision);
+    static std::shared_future<std::unique_ptr<RTCKernel>> generate(const std::string& gpu_arch,
+                                                                   rocfft_precision   precision);
 
     // no DeviceCallIn is available at chirp generation time -
     // these kernels are launched without it

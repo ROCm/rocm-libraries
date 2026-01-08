@@ -27,7 +27,7 @@
 struct RTCKernelTwiddle : public RTCKernel
 {
     // generate twiddle kernel from type and precision
-    static RTCKernelTwiddle
+    static std::shared_future<std::unique_ptr<RTCKernel>>
         generate(const std::string& gpu_arch, TwiddleTableType type, rocfft_precision precision);
 
     // no DeviceCallIn is available at twiddle generation time -

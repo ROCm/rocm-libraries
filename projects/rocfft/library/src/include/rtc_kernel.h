@@ -212,6 +212,8 @@ protected:
         dim3 blockDim;
     };
 
+    // runtime compile a kernel, given a generator struct that
+    // indicates how to generate code for it
     static std::shared_future<std::unique_ptr<RTCKernel>>
         runtime_compile(const RTCGenerator& generator,
                         const std::string&  gpu_arch,
