@@ -105,7 +105,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(tests)
 
     if(ORIGAMI_ENABLE_PYTHON)
-        find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+        find_package(Python 3 REQUIRED COMPONENTS Interpreter Development.Module)
 
         add_test(NAME origami_python_test COMMAND "${Python3_EXECUTABLE}" "origami_test.py"
                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
