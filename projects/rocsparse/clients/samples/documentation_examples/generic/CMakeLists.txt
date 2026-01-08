@@ -1,0 +1,26 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_axpby.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_check_spmat.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_dense_to_sparse.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_extract.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_gather.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_rot.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_scatter.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_sparse_to_dense.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_sparse_to_sparse.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spgeam_1.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spgeam_2.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spgemm.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spitsv.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spmm.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spmm_batched.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spmv.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spsm.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spsv.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_sptrsm.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_sptrsv.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_spvv.cpp)
+add_rocsparse_example(${CMAKE_CURRENT_SOURCE_DIR}/example_rocsparse_v2_spmv.cpp)
+

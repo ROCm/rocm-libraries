@@ -31,7 +31,7 @@ target_compile_options(rocsparse-bench PRIVATE
 target_compile_features(rocsparse-bench PRIVATE cxx_std_17)
 
 target_include_directories(rocsparse-bench PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    ${PROJECT_SOURCE_DIR}/clients/include
 )
 
 target_link_libraries(rocsparse-bench PRIVATE
