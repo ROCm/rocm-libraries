@@ -167,7 +167,7 @@ const IFilesystemChecker& GetFilesystemChecker()
     auto& ptr = FilesystemCheckerPtrRef();
     if(ptr != nullptr)
         return *ptr;
-    
+
     // Only initialize the default checker when actually needed
     static FilesystemChecker default_checker;
     return default_checker;
