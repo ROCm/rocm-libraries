@@ -210,6 +210,15 @@ namespace rocRollerTest
                              int  prefetchInFlight,
                              int  prefetchLDSFactor,
                              bool prefetchMixMemOps);
+            void setScaling(rocRoller::Operations::ScaleMode aMode,
+                            rocRoller::Operations::ScaleMode bMode,
+                            DataType                         scaleTypeA,
+                            DataType                         scaleTypeB,
+                            int                              scaleBlockSize);
+            void setScaleLoadPaths(SolutionParams::LoadPath scalePathA,
+                                   SolutionParams::LoadPath scalePathB);
+            void setSwizzle(int m, int n, int k, int b, bool prefetch);
+            void setTranspose(std::string const& transA, std::string const& transB);
 
             GEMMProblem const& getProblem() const
             {
@@ -221,6 +230,10 @@ namespace rocRollerTest
 
             CommandParametersPtr getCommandParameters() const;
 
+            std::pair<std::optional<rocRoller::Operations::OperationTag>,
+                      std::optional<rocRoller::Operations::OperationTag>>
+                getABScaleTags() const;
+
         private:
             void createCommand();
 
@@ -229,6 +242,7 @@ namespace rocRollerTest
             GEMMProblem m_problem;
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+            rocRoller::Operations::OperationTag m_tagScaleA, m_tagScaleB;
             rocRoller::Operations::OperationTag m_tagNumWGs;
 
             std::map<rocRoller::Operations::ScratchPolicy, rocRoller::Operations::OperationTag>

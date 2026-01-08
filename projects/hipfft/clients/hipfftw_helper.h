@@ -1646,7 +1646,7 @@ public:
             // --> parse them individually and find out if any applicable can be used
             return std::any_of(hipfftw_plan_creation_func_candidates.begin(),
                                hipfftw_plan_creation_func_candidates.end(),
-                               [=](const hipfftw_plan_creation_func& candidate) {
+                               [=, this](const hipfftw_plan_creation_func& candidate) {
                                    return (creation_options & candidate)
                                           && can_use_creation_options(candidate);
                                });

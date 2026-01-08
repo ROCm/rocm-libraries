@@ -7,6 +7,8 @@
 
 #include "HipdnnException.hpp"
 #include <dlfcn.h>
+#include <spdlog/fmt/fmt.h>
+#include <sys/utsname.h>
 
 namespace hipdnn_backend::platform_utilities
 {
@@ -67,6 +69,24 @@ void* getSymbol(PluginLibHandle handle, const char* symbolName)
                                   + (error != nullptr ? error : "Unknown error") + ")");
     }
     return symbol;
+}
+
+std::string getSystemInfo()
+{
+    struct utsname buffer;
+    if(uname(&buffer) != 0)
+    {
+        return "Failed to retrieve system information using uname";
+    }
+
+    return fmt::format(
+        "System Information: {{System Name: {}, Node Name: {}, Release: {}, Version: "
+        "{}, Machine: {}}}",
+        buffer.sysname,
+        buffer.nodename,
+        buffer.release,
+        buffer.version,
+        buffer.machine);
 }
 
 }

@@ -34,6 +34,10 @@ Definitions:
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
     - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
 
+  - &alpha_beta_range_half_checkin
+    - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   1.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
+
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
     - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
@@ -501,6 +505,20 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb]
+
+- name: spmv_csc
+  category: pre_checkin
+  function: spmv_csc
+  indextype: *i32i32_i64i32_i64i64
+  precision: [*float16_float16_float16_float32_axyt_precision, *bfloat16_bfloat16_bfloat16_float32_axyt_precision]
+  M: [22, 100, 196, 500, 1102]
+  N: [45, 100, 150]
+  alpha_beta: *alpha_beta_range_half_checkin
+  transA: [rocsparse_operation_none]
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_rowsplit]
 
 - name: spmv_csc
   category: quick
