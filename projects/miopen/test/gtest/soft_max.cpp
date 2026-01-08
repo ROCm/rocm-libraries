@@ -180,14 +180,12 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
 
         auto out = output;
 
-        int in_n, in_c, in_h, in_w;
-        std::tie(in_n, in_c, in_h, in_w) = miopen::tien<4>(input.desc.GetLengths());
+        const auto [in_n, in_c, in_h, in_w] = miopen::tien<4>(input.desc.GetLengths());
 
-        int in_nstr, in_cstr, in_hstr, in_wstr;
-        std::tie(in_nstr, in_cstr, in_hstr, in_wstr) = miopen::tien<4>(input.desc.GetStrides());
+        const auto [in_nstr, in_cstr, in_hstr, in_wstr] = miopen::tien<4>(input.desc.GetStrides());
 
-        int out_nstr, out_cstr, out_hstr, out_wstr;
-        std::tie(out_nstr, out_cstr, out_hstr, out_wstr) = miopen::tien<4>(out.desc.GetStrides());
+        const auto [out_nstr, out_cstr, out_hstr, out_wstr] =
+            miopen::tien<4>(out.desc.GetStrides());
 
         float alpha = test_case.scale[0];
         float beta  = test_case.scale[1];
@@ -368,14 +366,12 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
 
         auto din = dinput;
 
-        int in_n, in_c, in_h, in_w;
-        std::tie(in_n, in_c, in_h, in_w) = miopen::tien<4>(din.desc.GetLengths());
+        const auto [in_n, in_c, in_h, in_w] = miopen::tien<4>(din.desc.GetLengths());
 
-        int in_nstr, in_cstr, in_hstr, in_wstr;
-        std::tie(in_nstr, in_cstr, in_hstr, in_wstr) = miopen::tien<4>(din.desc.GetStrides());
+        const auto [in_nstr, in_cstr, in_hstr, in_wstr] = miopen::tien<4>(din.desc.GetStrides());
 
-        int out_nstr, out_cstr, out_hstr, out_wstr;
-        std::tie(out_nstr, out_cstr, out_hstr, out_wstr) = miopen::tien<4>(dout.desc.GetStrides());
+        const auto [out_nstr, out_cstr, out_hstr, out_wstr] =
+            miopen::tien<4>(dout.desc.GetStrides());
 
         float alpha = test_case.scale[0];
         float beta  = test_case.scale[1];

@@ -192,8 +192,7 @@ void SoftmaxDriver<Tgpu, Tref>::ValidateLayout()
     }
     else if(layout_value != "NCHW" && layout_value != "NHWC")
     {
-        std::cerr << "Invalid layout parameter value: " << layout_value << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInvalidValue, "Invalid layout parameter value: " + layout_value);
     }
 }
 
