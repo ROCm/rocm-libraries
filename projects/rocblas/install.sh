@@ -258,11 +258,16 @@ install_cmake( )
       pushd .
       mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
       printf "\033[32mDownloading CMake ${cmake_version} from \033[33m${CMAKE_REPO}/v${cmake_version}/${CMAKE_TARGZ}\033[0m\n"
-      wget -nv ${CMAKE_REPO}/v${cmake_version}/${CMAKE_TARGZ}
-      tar -xzf ${CMAKE_TARGZ}
-      rm ${CMAKE_TARGZ}
-      mv cmake-${cmake_version}-${CMAKE_ARCH} cmake-${cmake_version}
-      printf "\033[32m✓ CMake ${cmake_version} successfully installed!\033[0m\n"
+      if wget -nv ${CMAKE_REPO}/v${cmake_version}/${CMAKE_TARGZ}; then
+        tar -xzf ${CMAKE_TARGZ}
+        rm ${CMAKE_TARGZ}
+        mv cmake-${cmake_version}-${CMAKE_ARCH} cmake-${cmake_version}
+        printf "\033[32m✓ CMake ${cmake_version} successfully installed!\033[0m\n"
+      else
+        printf "\033[31mError: Failed to download CMake ${cmake_version} from \033[33m${CMAKE_REPO}/v${cmake_version}/${CMAKE_TARGZ}\033[0m\n"
+        popd
+        return 1
+      fi
       popd
     fi
 
