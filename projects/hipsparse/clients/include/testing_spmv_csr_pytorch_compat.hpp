@@ -44,7 +44,7 @@
 #include "unit.hpp"
 #include "utility.hpp"
 
-#include <hip/hip_fp16.h>
+#include <float.h>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 
