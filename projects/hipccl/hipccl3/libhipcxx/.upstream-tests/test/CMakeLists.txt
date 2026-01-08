@@ -241,7 +241,7 @@ add_test(NAME libcudacxx.test.lit COMMAND
   "${CMAKE_COMMAND}" -E env
     "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
   "${libcudacxx_LIT}" -vv --no-progress-bar --time-tests ${libcudacxx_LIT_FLAGS}
-    -j "${libcudacxx_LIT_PARALLEL_LEVEL}" "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
+    -j "${libcudacxx_LIT_PARALLEL_LEVEL}" "${libhipcxx_SOURCE_DIR}/test"
 )
 
 set_tests_properties(libcudacxx.test.lit PROPERTIES
