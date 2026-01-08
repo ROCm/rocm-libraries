@@ -580,11 +580,12 @@ class TestCustomScheduleBF16:
 
 
 class TestCustomScheduleTF32:
-    def test_schedule_192x256x32_TF32(self):
-        """Tests the 192x256x32 TF32 TN schedule."""
+    @pytest.mark.parametrize("transA, transB", [(True, False), (False, False)])
+    def test_schedule_192x256x32_TF32(self, transA, transB):
+        """Tests the 192x256x32 TF32 schedule."""        
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
-            "TransposeA": True, "TransposeB": False
+            "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
             "UseF32XEmulation": True,
@@ -627,6 +628,32 @@ class TestCustomScheduleTF32:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 72
+        assert kernel["UsePLRPack"]
+        valid, message = isValid(schedule_info, {"kernel": kernel})
+        assert valid, message
+
+    def test_schedule_256x256x32_TF32(self):
+        """Tests the 256x256x32 TF32 TN schedule."""
+        kernel = create_base_kernel()
+        kernel["ProblemType"].update({
+            "TransposeA": True, "TransposeB": False
+        })
+        kernel.update({
+            "UseF32XEmulation": True,
+            "ForceUnrollSubIter": True,
+            "MacroTile0": 256, "MacroTile1": 256, "DepthU": 32,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "DirectToLds": True,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
+            "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 2
+        assert schedule_info.numMfma == 192
         assert kernel["UsePLRPack"]
         valid, message = isValid(schedule_info, {"kernel": kernel})
         assert valid, message

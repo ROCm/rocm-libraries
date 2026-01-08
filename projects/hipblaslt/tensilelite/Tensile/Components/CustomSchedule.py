@@ -2690,7 +2690,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
-    opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1
 
 @RegisterSchedule(
@@ -2829,7 +2828,6 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1
 
 @RegisterSchedule(
