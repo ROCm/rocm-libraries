@@ -130,8 +130,8 @@ namespace rocRoller::Client
             AssertFatal(tileMN == 64 || tileMN == 32, ShowValue(tileMN));
             AssertFatal(tileK % 4 == 0, ShowValue(tileK));
 
-            size_t wgTileSizeK     = preTileSize[0];
-            size_t wgTileSizeMN    = preTileSize[1];
+            size_t ptTileSizeK     = preTileSize[0];
+            size_t ptTileSizeMN    = preTileSize[1];
             size_t nLanesPerSIMD   = 16;
             size_t nSIMDsPerWave   = 4;
             size_t nSIMDIndex      = tileMN / nLanesPerSIMD;
@@ -141,19 +141,21 @@ namespace rocRoller::Client
             size_t nSIMDIndexBlock = nVGPRIndex;
             size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
 
+            AssertFatal(ptTileSizeK / tileK > 0, ShowValue(ptTileSizeK), ShowValue(tileK));
+            AssertFatal(ptTileSizeMN / tileMN > 0, ShowValue(ptTileSizeMN), ShowValue(tileMN));
             AssertFatal(nVGPRIndex * nVGPRBlock * nSIMDBlock == tileK);
             AssertFatal(nLanesPerSIMD * nSIMDIndexIndex * nSIMDIndexBlock == tileMN);
 
             srcSizes = {nVGPRIndex,
                         nVGPRBlock,
                         nSIMDBlock,
-                        wgTileSizeK / tileK,
-                        desc.size(0) / wgTileSizeK,
+                        ptTileSizeK / tileK,
+                        desc.size(0) / ptTileSizeK,
                         nLanesPerSIMD,
                         nSIMDIndexIndex,
                         nSIMDIndexBlock,
-                        wgTileSizeMN / tileMN,
-                        desc.size(1) / wgTileSizeMN};
+                        ptTileSizeMN / tileMN,
+                        desc.size(1) / ptTileSizeMN};
 
             if(tileMN == 64)
             {
@@ -189,6 +191,9 @@ namespace rocRoller::Client
                     ShowValue(src.totalAllocatedElements() / desc.totalAllocatedElements()),
                     ShowValue(src),
                     ShowValue(desc));
+
+        Log::debug("PreSwizzle srcSizes: {}", srcSizes);
+        Log::debug("PreSwizzle dimOrder: {}", dimOrder);
 
         auto dst = TensorDescriptor::ShuffledNoPadding(desc.dataType(), srcSizes, dimOrder);
 
