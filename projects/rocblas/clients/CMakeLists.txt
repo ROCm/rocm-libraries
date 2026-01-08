@@ -243,27 +243,27 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
           set( BLAS_LIBRARY /usr/local/lib/libblis.a )
           set( BLIS_INCLUDE_DIR /usr/local/include/blis )
         else()
-          find_package(PkgConfig)
-          if(NOT PKG_CONFIG_FOUND)
-            message( FATAL_ERROR "Could not find libblis and pkgconfig is not available" )
-          else()
-            pkg_search_module(PKGBLAS cblas)
-            if(PKGBLAS_FOUND)
-              set( BLAS_LIBRARY ${PKGBLAS_LIBRARIES} )
-              set( BLAS_INCLUDE_DIR ${PKGBLAS_INCLUDE_DIRS} )
-            else()
-              # Fallback: try to find OpenBLAS/cblas directly with full path
-              find_library(FALLBACK_BLAS_LIB 
-                NAMES openblas cblas blas
-                PATHS /usr/lib /usr/lib64 /usr/local/lib
-              )
-              if(FALLBACK_BLAS_LIB)
-                set(BLAS_LIBRARY ${FALLBACK_BLAS_LIB})
-                message(STATUS "Found fallback BLAS library at: ${FALLBACK_BLAS_LIB}")
-              else()
-                message( FATAL_ERROR "Could not find libblis and pkgconfig can not find any other implementation of cblas" )
+          # Try to find BLAS library directly (most reliable across distros)
+          find_library(SYSTEM_BLAS_LIB 
+            NAMES openblas cblas blas
+            PATHS /usr/lib /usr/lib64 /usr/local/lib /usr/lib/x86_64-linux-gnu
+          )
+          
+          if(SYSTEM_BLAS_LIB)
+            set(BLAS_LIBRARY ${SYSTEM_BLAS_LIB})
+            message(STATUS "Found system BLAS library at: ${SYSTEM_BLAS_LIB}")
+            
+            # Try to get include dirs from pkg-config if available
+            find_package(PkgConfig)
+            if(PKG_CONFIG_FOUND)
+              pkg_search_module(PKGBLAS cblas)
+              if(PKGBLAS_FOUND AND PKGBLAS_INCLUDE_DIRS)
+                set(BLAS_INCLUDE_DIR ${PKGBLAS_INCLUDE_DIRS})
+                message(STATUS "Found BLAS include directory via pkg-config: ${PKGBLAS_INCLUDE_DIRS}")
               endif()
             endif()
+          else()
+            message(FATAL_ERROR "Could not find any BLAS library (openblas, cblas, or blas)")
           endif()
         endif()
       endif()
