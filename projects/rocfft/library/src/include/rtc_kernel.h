@@ -136,9 +136,12 @@ struct RTCKernel
         std::lock_guard<std::mutex> lock(active_modules_mutex);
         // decrement refcount and remove the module from the map if it's no longer used
         auto it = active_modules.find(rtc_module_key{kernel_name, deviceId});
-        it->second.refcount--;
-        if(it->second.refcount == 0)
-            active_modules.erase(it);
+        if(it != active_modules.end())
+        {
+            it->second.refcount--;
+            if(it->second.refcount == 0)
+                active_modules.erase(it);
+        }
 #endif
     }
 
@@ -180,7 +183,7 @@ struct RTCKernel
     dim3 blockDim;
 
     std::string kernel_name;
-    int         deviceId = 0;
+    int         deviceId = hipInvalidDeviceId;
 
 protected:
     std::shared_future<hipModule_wrapper_t> module;

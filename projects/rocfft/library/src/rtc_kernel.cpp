@@ -54,7 +54,7 @@ RTCKernel::RTCKernel(const std::string&                       kernel_name,
         return;
 #endif
 
-    if(hipGetDevice(&deviceId) != hipSuccess)
+    if(hipGetDevice(&deviceId) != hipSuccess || deviceId == hipInvalidDeviceId)
         throw std::runtime_error("hipGetDevice failed");
 
     if(hipModuleGetFunction(&kernel, module.get(), kernel_name.c_str()) != hipSuccess)
@@ -188,7 +188,8 @@ std::shared_future<std::unique_ptr<RTCKernel>>
         std::promise<std::unique_ptr<RTCKernel>>       kernel_promise;
         std::shared_future<std::unique_ptr<RTCKernel>> kernel_future = kernel_promise.get_future();
 
-        auto make_kernel = [=](std::promise<hipModule_wrapper_t>        module_promise,
+        auto make_kernel = [deviceId, generator, kernel_name, gpu_arch, need_compile](
+                               std::promise<hipModule_wrapper_t>        module_promise,
                                std::shared_future<hipModule_wrapper_t>  module_future,
                                std::promise<std::unique_ptr<RTCKernel>> kernel_promise) {
             // Set device ID for this new thread
@@ -196,6 +197,7 @@ std::shared_future<std::unique_ptr<RTCKernel>>
             {
                 kernel_promise.set_exception(
                     std::make_exception_ptr(std::runtime_error("failed to set device")));
+                return;
             }
 
             // Compile the kernel if necessary, creating a new hipModule
@@ -209,7 +211,7 @@ std::shared_future<std::unique_ptr<RTCKernel>>
                     module.alloc(code.data());
                     module_promise.set_value(std::move(module));
                 }
-                catch(std::exception& e)
+                catch(const std::exception& e)
                 {
                     if(LOG_RTC_ENABLED())
                         (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;
