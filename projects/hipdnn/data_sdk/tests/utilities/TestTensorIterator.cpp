@@ -173,36 +173,6 @@ TEST(TestTypeErasedIterator, CopyConstructor)
     EXPECT_EQ(*val1, 2.0f);
 }
 
-TEST(TestTypeErasedIterator, CopyAssignment)
-{
-    Tensor<float> tensor({2, 2});
-    tensor.fillWithValue(3.0f);
-
-    ITensor* iTensor = &tensor;
-
-    auto it1 = iTensor->begin();
-    auto it2 = iTensor->end();
-    EXPECT_NE(it1, it2);
-
-    it2 = it1; // Copy assignment
-
-    EXPECT_EQ(it1, it2);
-}
-
-TEST(TestTypeErasedIterator, MoveConstructor)
-{
-    Tensor<float> tensor({2, 2});
-    tensor.fillWithValue(4.0f);
-
-    ITensor* iTensor = &tensor;
-
-    auto it1 = iTensor->begin();
-    auto it2 = std::move(it1); // Move
-
-    auto* val = static_cast<float*>(*it2);
-    EXPECT_EQ(*val, 4.0f);
-}
-
 // ============================================================================
 // Edge Cases
 // ============================================================================

@@ -95,17 +95,9 @@ public:
 
     ITensorIterator(ITensorIterator&&) = default;
 
-    ITensorIterator& operator=(const ITensorIterator& other)
-    {
-        if(this != &other)
-        {
-            _tensor = other._tensor;
-            _index = other._index;
-        }
-        return *this;
-    }
+    ITensorIterator& operator=(const ITensorIterator& other) = delete;
 
-    ITensorIterator& operator=(ITensorIterator&&) = default;
+    ITensorIterator& operator=(ITensorIterator&&) = delete;
 
     value_type operator*()
     {

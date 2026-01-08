@@ -207,22 +207,6 @@ TEST(TestTensorView, CopyConstructor)
     EXPECT_EQ(val1, 2.0f);
 }
 
-TEST(TestTensorView, CopyAssignment)
-{
-    Tensor<float> tensor({2, 2});
-    tensor.fillWithValue(3.0f);
-
-    ITensor* iTensor = &tensor;
-    TensorView<float> view(*iTensor);
-
-    auto it1 = view.begin();
-    auto it2 = view.end();
-
-    it2 = it1; // Copy assignment
-
-    EXPECT_EQ(it1, it2);
-}
-
 TEST(TestTensorView, MoveConstructor)
 {
     Tensor<float> tensor({2, 2});
