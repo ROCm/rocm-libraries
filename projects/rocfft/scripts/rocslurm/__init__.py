@@ -30,10 +30,12 @@ class sbatchparams:
         self.modules = []
         self.exports = []
         self.ntaskspernode = None
+        self.ntasks = None
         self.gpuspernode = None
         self.afterok = []
         self.afterany = []
         self.timelimit = None
+        self.wait = False
 
 
 class sbatchjob:
@@ -61,6 +63,9 @@ def sbatch(jobname, params, logdir, workdir, jobcmd, verbose=0):
     if params.ntaskspernode != None:
         batchscript += "#SBATCH --ntasks-per-node=" + str(
             params.ntaskspernode) + "\n"
+    if params.ntasks != None:
+        batchscript += "#SBATCH --ntasks=" + str(params.ntasks) + "\n"
+
     if params.gpuspernode != None:
         batchscript += "#SBATCH --gpus-per-node=" + str(
             params.gpuspernode) + "\n"
@@ -74,6 +79,10 @@ def sbatch(jobname, params, logdir, workdir, jobcmd, verbose=0):
     if len(params.afterok) > 0:
         batchscript += "#SBATCH --dependency=afterok:" + ",".join(
             str(x) for x in params.afterok) + "\n"
+    if len(params.afterany) > 0 or len(params.afterok) > 0:
+        batchscript += "#SBATCH --kill-on-invalid-dep=yes\n"
+
+    batchscript += "#SBATCH --exclusive\n"
 
     for module in params.modules:
         batchscript += "module load " + module + "\n"
@@ -147,6 +156,9 @@ def reportonjobs(params, logdir, jobs, verbose=0):
         batchscript += "#SBATCH --partition=" + params.partition + "\n"
     if params.timelimit != None:
         batchscript += "#SBATCH --time=0:5:00\n"
+    if params.wait:
+        batchscript += "#SBATCH --wait\n"
+
     # TODO: copy out and err log files to the report working dir.
     # TODO: out and err files, and job name.
     if len(jobids) > 0:
@@ -158,8 +170,9 @@ def reportonjobs(params, logdir, jobs, verbose=0):
     for job in jobs:
         joblogdir = os.path.dirname(os.path.realpath(job.outfilename))
         #print(joblogdir)
+        reportcmd += "if [ -e " + joblogdir + " ]; then\n"
         reportcmd += "cp -r " + joblogdir + " " + logdir + "/$SLURM_JOB_ID\n"
-
+        reportcmd += "fi\n"
 
     reportcmd += "sacct -X -j " + ",".join(str(x) for x in jobids) \
         + " -o JobName,JobID,state,Elapsed,ExitCode\n"
@@ -179,8 +192,6 @@ def reportonjobs(params, logdir, jobs, verbose=0):
         byteline = str.encode(line + "\n")
         p.stdin.write(byteline)
     p.stdin.close()
-
-    #sacct -X -j 9628127,9628128 -o JobID,state,ExitCode
 
     #reportjob = sbatch("finalreport", params, logdir, workdir, jobcmd, verbose=False):
 

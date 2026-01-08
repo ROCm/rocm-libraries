@@ -1797,6 +1797,13 @@ class KernelWriterAssembly(KernelWriter):
           moduleRegInit.add(VMovB32(dst=vgpr(i), src=hex(self.consts.initVgprValue), comment="InitVgpr&0x1"))
         moduleRegInit.addSpaceLine()
 
+      # init workgroup id from ttmp
+      if self.states.archCaps["WorkGroupIdFromTTM"]:
+        module.addComment1("Init workgroup id from ttmp")
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+
       # set m0
       moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
           comment="LDS clamp at %u bytes"%(kernel["LdsNumBytes"])))
@@ -14025,9 +14032,6 @@ class KernelWriterAssembly(KernelWriter):
     loopLabelSkipBegin = []
 
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
-
-    # Wait for all LR in pre-loop to complete before we start main loop
-    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
 
     if numCodePath == 1:
       module.add(MacroInstruction(name="MAINLOOP", args=[0]))

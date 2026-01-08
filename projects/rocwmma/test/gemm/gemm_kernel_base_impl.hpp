@@ -642,6 +642,7 @@ namespace rocwmma
                                       this->mLdd, // ldd
                                       this->mAlpha, // alpha
                                       this->mBeta); // beta
+                CHECK_HIP_ERROR(hipGetLastError());
             };
 
             hipEvent_t startEvent, stopEvent;

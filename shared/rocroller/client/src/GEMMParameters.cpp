@@ -78,6 +78,18 @@ namespace rocRoller
                     rv << "_PreSW";
                 }
 
+                if(!scalePretileA.empty())
+                {
+                    rv << "_PTA";
+                    rocRoller::streamJoin(rv, scalePretileA, "x");
+                }
+
+                if(!scalePretileB.empty())
+                {
+                    rv << "_PTB";
+                    rocRoller::streamJoin(rv, scalePretileB, "x");
+                }
+
                 return rv.str();
             }
 
@@ -219,7 +231,9 @@ namespace rocRoller
                 if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
                    or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
                 {
-                    s << " BlockSize:" << x.scaleBlockSize;
+                    s << " BlockSize: " << x.scaleBlockSize;
+                    s << " Pretile A: " << x.scalePretileA;
+                    s << " Pretile B: " << x.scalePretileB;
                 }
                 s << std::endl;
                 return s;

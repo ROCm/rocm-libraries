@@ -473,8 +473,7 @@ namespace rocRoller
             // Change the loop increment calculation
             // Multiply the increment amount by the unroll amount
             // Find the ForLoopIcrement calculation
-            // TODO: Handle multiple ForLoopIncrement edges that might be in a different
-            // format, such as ones coming from ComputeIndex.
+            // TODO: Handle multiple ForLoopIncrement edges that might be in a different format.
             auto loopIncrement = graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).only();
             AssertFatal(loopIncrement.has_value(), "Should only have 1 loop increment edge");
             auto loopIncrementOp       = graph.control.getNode<Assign>(loopIncrement.value());
@@ -510,7 +509,7 @@ namespace rocRoller
                 for(auto const& body : toConnect)
                 {
                     graph.control.addElement(Body(), {tag}, {body});
-                    for(auto const& op : findComputeIndexCandidates(graph, body))
+                    for(auto const& op : findIndexAssignmentCandidates(graph, body))
                     {
                         auto pendingOp        = op;
                         auto [required, path] = findAllRequiredCoordinates(op, graph);
@@ -520,11 +519,14 @@ namespace rocRoller
                             {
                                 auto name = getForLoopName(graph, tag);
                                 if(name == rocRoller::XLOOP)
-                                    graph.mapper.connect<Unroll>(op, unrollDimension, 0);
+                                    graph.mapper.connect<Unroll>(
+                                        op, unrollDimension, rocRoller::XLOOP_UNROLL);
                                 else if(name == rocRoller::YLOOP)
-                                    graph.mapper.connect<Unroll>(op, unrollDimension, 1);
+                                    graph.mapper.connect<Unroll>(
+                                        op, unrollDimension, rocRoller::YLOOP_UNROLL);
                                 else if(name == rocRoller::KLOOP)
-                                    graph.mapper.connect<Unroll>(op, unrollDimension, 2);
+                                    graph.mapper.connect<Unroll>(
+                                        op, unrollDimension, rocRoller::KLOOP_UNROLL);
                                 auto setCoord = replaceWith(graph,
                                                             op,
                                                             graph.control.addElement(SetCoordinate(
@@ -631,7 +633,8 @@ namespace rocRoller
                 for(auto ldsLoad : currentLDSLoads)
                 {
                     if(name == rocRoller::KLOOP)
-                        graph.mapper.connect<Unroll>(ldsLoad, unrollDimension, 2);
+                        graph.mapper.connect<Unroll>(
+                            ldsLoad, unrollDimension, rocRoller::KLOOP_UNROLL);
                 }
             }
 
@@ -830,7 +833,7 @@ namespace rocRoller
                 = graph.control.getOutputNodeIndices<Body>(tailLoop).to<std::vector>();
             for(auto const body : bodies)
             {
-                for(auto const op : findComputeIndexCandidates(graph, body))
+                for(auto const op : findIndexAssignmentCandidates(graph, body))
                 {
                     auto [_, path] = findAllRequiredCoordinates(op, graph);
                     if(path.contains(unrollDimension))
@@ -843,7 +846,8 @@ namespace rocRoller
                                                             Expression::literal(coordValue))),
                                                         false);
                             graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                            graph.mapper.connect<Unroll>(op, unrollDimension, 2);
+                            graph.mapper.connect<Unroll>(
+                                op, unrollDimension, rocRoller::KLOOP_UNROLL);
                             graph.control.chain<Body>(setCoord, op);
                         }
                     }

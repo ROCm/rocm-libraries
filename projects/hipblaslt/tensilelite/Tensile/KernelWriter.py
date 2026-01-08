@@ -2295,7 +2295,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "3wait for local write"))
             if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]):
               # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before s_barrier
-              waitLWCode.add(self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u, isNLL=(not isNGLL), beforeBarrier=True))
+              waitLWCode.add(self.getWaitcntCodeForDirectToVgpr(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, u, \
+                             isNLL=(not isNGLL), beforeBarrier=True))
             elif kernel["PrefetchGlobalRead"]==2 and (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for global reads with lds"))
             syncCode.add(self._syncThreads(kernel))
@@ -3025,9 +3026,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]):
                 module.addComment1("local read inc b")
                 module.add(self.localReadInc(kernel, iui, tensorParametersB))
-              if kernel["UsePLRPack"] and self.states.numItersPLR:
-                module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete"))
-                module.add(pack[plrIdx])
+              if kernel["UseCustomMainLoopSchedule"]:
+                # Wait for all LR in pre-loop to complete before we start main loop
+                module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
+                if kernel["UsePLRPack"] and self.states.numItersPLR:
+                  module.add(pack[plrIdx])
         self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       elif self.states.numItersPLR == 0 and kernel["UseCustomMainLoopSchedule"]:
         # For numItersPLR=0 and CMS we prefetch only half the local reads
@@ -4699,7 +4702,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["DataType"].isComplex() \
       and kernel["MIArchVgpr"] \
       and (kernel["_GlobalAccumulation"] == 'SingleBuffer' or kernel["_GlobalAccumulation"] == None):
-      
+
       # need proper alignment
       vgprIdx = ((vgprIdx+2 - 1)//2)*2
       self.states.startVgprAlphaTmp = vgprIdx
@@ -5132,7 +5135,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
                                               getMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
 
-      # TODO: Avoid the logic which does not make sense. 
+      # TODO: Avoid the logic which does not make sense.
       # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
       # Changed the value based on this and also to mitigate some instruction scheduling issues.
       if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2:

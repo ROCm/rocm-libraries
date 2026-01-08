@@ -36,15 +36,13 @@ target_include_directories(
 )
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_sdk)
+target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 
 clang_tidy_check(hipdnn_backend_private)
 
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
-
-target_include_directories(hipdnn_backend SYSTEM PUBLIC ${HIP_INCLUDE_DIRS})
 
 target_include_directories(
     hipdnn_backend
@@ -60,8 +58,8 @@ target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 # different name.
 target_compile_definitions(hipdnn_backend PRIVATE HIPDNN_BACKEND_COMPILATION)
 target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
-target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL") # HIDE symbols from
-                                                                            # linked static libs
+# HIDE symbols from linked static libs
+target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
 set_target_properties(hipdnn_backend PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 clang_tidy_check(hipdnn_backend)
