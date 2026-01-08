@@ -440,10 +440,6 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         scaleAlphaVec,
                                         matmul_descr->scaleAType,
                                         matmul_descr->scaleBType,
-                                        matmul_descr->scaleABlockRowSize,
-                                        matmul_descr->scaleABlockColSize,
-                                        matmul_descr->scaleBBlockRowSize,
-                                        matmul_descr->scaleBBlockColSize,
                                         bias_type,
                                         aux_type,
                                         epilogue,
@@ -1025,18 +1021,17 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     switch(mode)
                     {
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0:
-                        matmulDesc->scaleABlockRowSize = 32;
-                        matmulDesc->scaleABlockColSize = 1;
-                        matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Block;
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
-                        matmulDesc->scaleABlockRowSize = 1;
-                        matmulDesc->scaleABlockColSize = 1;
                         matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Scalar;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
-                        matmulDesc->scaleABlockRowSize = 1;
-                        matmulDesc->scaleABlockColSize = 1;
                         matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Vector;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
@@ -1074,18 +1069,17 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     switch(mode)
                     {
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0:
-                        matmulDesc->scaleBBlockRowSize = 1;
-                        matmulDesc->scaleBBlockColSize = 32;
-                        matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Block;
+                        matmulDesc->scaleBType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
+                        matmulDesc->scaleBType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
-                        matmulDesc->scaleBBlockRowSize = 1;
-                        matmulDesc->scaleBBlockColSize = 1;
                         matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Scalar;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
-                        matmulDesc->scaleBBlockRowSize = 1;
-                        matmulDesc->scaleBBlockColSize = 1;
                         matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Vector;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
@@ -1352,11 +1346,15 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 else
                 {
                     hipblasLtMatmulMatrixScale_t mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
-                    if(matmulDesc->scaleABlockRowSize == 32 && matmulDesc->scaleABlockColSize == 1
-                       && matmulDesc->scaleAType
-                              == RocblasltContractionProblem::ScalingFormat::Block)
+                    if(matmulDesc->scaleAType
+                       == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                     }
                     else if(matmulDesc->scaleAType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)
@@ -1397,11 +1395,15 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 else
                 {
                     hipblasLtMatmulMatrixScale_t mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
-                    if(matmulDesc->scaleBBlockRowSize == 1 && matmulDesc->scaleBBlockColSize == 32
-                       && matmulDesc->scaleBType
-                              == RocblasltContractionProblem::ScalingFormat::Block)
+                    if(matmulDesc->scaleBType
+                       == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+                    }
+                    else if(matmulDesc->scaleBType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                     }
                     else if(matmulDesc->scaleBType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)
