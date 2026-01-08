@@ -127,6 +127,7 @@ GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::stri
 
     return features;
 }
+
 // Helper: Tokenize kernel string
 MIOPEN_INTERNALS_EXPORT
 std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
@@ -146,20 +147,83 @@ std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
         if(!prefix.empty())
             tokens.push_back(prefix);
 
-        // Split parameters (inside '<...>') by commas
-        auto gt_pos = kernel.find('>', lt_pos);
+        // Find the matching '>' for the opening '<' by counting brackets
+        size_t gt_pos     = std::string::npos;
+        int bracket_count = 1; // We've already seen one '<'
+        for(size_t i = lt_pos + 1; i < kernel.size(); ++i)
+        {
+            if(kernel[i] == '<')
+                bracket_count++;
+            else if(kernel[i] == '>')
+            {
+                bracket_count--;
+                if(bracket_count == 0)
+                {
+                    gt_pos = i;
+                    break;
+                }
+            }
+        }
+
         if(gt_pos != std::string::npos && gt_pos > lt_pos + 1)
         {
             std::string params = kernel.substr(lt_pos + 1, gt_pos - lt_pos - 1);
-            std::stringstream ps(params);
-            std::string token;
-            while(std::getline(ps, token, ','))
+
+            // Smart splitting: split on commas at depth 0, and after closing brackets at depth 0
+            std::string current_token;
+            int depth = 0;
+
+            for(char c : params)
+            {
+                if(c == '<')
+                {
+                    depth++;
+                    current_token += c;
+                }
+                else if(c == '>')
+                {
+                    depth--;
+                    current_token += c;
+
+                    // If we just closed a bracket at depth 0, finalize the token
+                    if(depth == 0)
+                    {
+                        std::string clean_token;
+                        std::remove_copy_if(current_token.begin(),
+                                            current_token.end(),
+                                            std::back_inserter(clean_token),
+                                            [](char ch) { return std::isspace(ch); });
+                        if(!clean_token.empty())
+                            tokens.push_back(clean_token);
+                        current_token.clear();
+                    }
+                }
+                else if(c == ',' && depth == 0)
+                {
+                    // This is a top-level comma, finalize the current token
+                    std::string clean_token;
+                    std::remove_copy_if(current_token.begin(),
+                                        current_token.end(),
+                                        std::back_inserter(clean_token),
+                                        [](char ch) { return std::isspace(ch); });
+                    if(!clean_token.empty())
+                        tokens.push_back(clean_token);
+                    current_token.clear();
+                }
+                else
+                {
+                    current_token += c;
+                }
+            }
+
+            // Don't forget the last token (if any)
+            if(!current_token.empty())
             {
                 std::string clean_token;
-                std::remove_copy_if(token.begin(),
-                                    token.end(),
+                std::remove_copy_if(current_token.begin(),
+                                    current_token.end(),
                                     std::back_inserter(clean_token),
-                                    [](char c) { return std::isspace(c); });
+                                    [](char ch) { return std::isspace(ch); });
                 if(!clean_token.empty())
                     tokens.push_back(clean_token);
             }
