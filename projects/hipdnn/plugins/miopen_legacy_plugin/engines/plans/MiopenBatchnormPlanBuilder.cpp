@@ -320,7 +320,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                std::set<hipdnn_data_sdk::data_objects::NodeAttributes>{
                    hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
                    hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+                   hipdnn_data_sdk::data_objects::NodeAttributes::
+                       BatchnormInferenceAttributesVarianceExt,
                    hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
         {
             HIPDNN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
@@ -364,9 +365,11 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                 checkBatchnormTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
                 break;
-            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            case hipdnn_data_sdk::data_objects::NodeAttributes::
+                BatchnormInferenceAttributesVarianceExt:
                 checkBatchnormTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt(), opGraph.getTensorMap());
+                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
+                    opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
                 checkBatchnormTensorConfigSupported(
@@ -514,13 +517,14 @@ void buildPlanInferenceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandl
     executionContext.setPlan(std::move(plan));
 }
 
-void buildPlanInferenceWithVarianceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                              const hipdnn_plugin_sdk::IGraph& opGraph,
-                                              const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
-                                              HipdnnEnginePluginExecutionContext& executionContext)
+void buildPlanInferenceWithVarianceSingleNode(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    const hipdnn_plugin_sdk::IGraph& opGraph,
+    const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
+    HipdnnEnginePluginExecutionContext& executionContext)
 {
-    const auto& attr
-        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+    const auto& attr = nodeWrapper.attributesAs<
+        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
 
     BatchnormFwdInferenceWithVarianceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(std::move(params));
@@ -613,7 +617,8 @@ void MiopenBatchnormPlanBuilder::buildPlan(
         buildPlanInferenceSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
-        HIPDNN_LOG_INFO("Building batchnorm fwd inference with variance plan for node: {}", nodeName);
+        HIPDNN_LOG_INFO("Building batchnorm fwd inference with variance plan for node: {}",
+                        nodeName);
         buildPlanInferenceWithVarianceSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:

@@ -73,12 +73,12 @@ protected:
         graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
 
         auto yTensorAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
-                                                                      meanTensorAttr,
-                                                                      varianceTensorAttr,
-                                                                      scaleTensorAttr,
-                                                                      biasTensorAttr,
-                                                                      epsilonTensorAttr,
-                                                                      bnAttrs);
+                                                                     meanTensorAttr,
+                                                                     varianceTensorAttr,
+                                                                     scaleTensorAttr,
+                                                                     biasTensorAttr,
+                                                                     epsilonTensorAttr,
+                                                                     bnAttrs);
 
         yTensorAttr->set_output(true);
 

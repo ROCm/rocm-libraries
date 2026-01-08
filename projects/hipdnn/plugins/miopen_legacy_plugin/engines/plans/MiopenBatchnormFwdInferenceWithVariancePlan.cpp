@@ -90,8 +90,7 @@ const std::optional<MiopenActivationDescriptor>&
     return _optActivation;
 }
 
-const std::optional<MiopenTensor>&
-    BatchnormFwdInferenceWithVarianceParams::activationOut() const
+const std::optional<MiopenTensor>& BatchnormFwdInferenceWithVarianceParams::activationOut() const
 {
     return _activationOut;
 }
@@ -109,11 +108,10 @@ size_t BatchnormFwdInferenceWithVariancePlan::getWorkspaceSize(
     return 0;
 }
 
-void BatchnormFwdInferenceWithVariancePlan::execute(
-    const HipdnnEnginePluginHandle& handle,
-    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-    uint32_t numDeviceBuffers,
-    [[maybe_unused]] void* workspace) const
+void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHandle& handle,
+                                                    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                    uint32_t numDeviceBuffers,
+                                                    [[maybe_unused]] void* workspace) const
 {
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);

@@ -36,8 +36,7 @@ public:
         = delete;
 
     BatchnormFwdInferenceWithVarianceParams(BatchnormFwdInferenceWithVarianceParams&&) = default;
-    BatchnormFwdInferenceWithVarianceParams&
-        operator=(BatchnormFwdInferenceWithVarianceParams&&)
+    BatchnormFwdInferenceWithVarianceParams& operator=(BatchnormFwdInferenceWithVarianceParams&&)
         = default;
 
     const MiopenTensor& x() const;
@@ -71,8 +70,7 @@ public:
         BatchnormFwdInferenceWithVarianceParams&& inferenceParams);
 
     BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
-    BatchnormFwdInferenceWithVariancePlan&
-        operator=(const BatchnormFwdInferenceWithVariancePlan&)
+    BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
         = delete;
 
     BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVariancePlan&&) = default;

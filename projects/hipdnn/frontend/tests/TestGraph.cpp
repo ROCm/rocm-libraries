@@ -405,7 +405,8 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
 
-    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, epsilon, attributes);
+    auto y = graph.batchnorm_inference_variance_ext(
+        x, mean, variance, scale, bias, epsilon, attributes);
 
     EXPECT_EQ(y->get_name(), "BatchnormNodeVariance::Y");
     EXPECT_TRUE(y->get_is_virtual());
@@ -728,7 +729,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     EXPECT_EQ(deserializedGraph->intermediate_data_type,
               hipdnn_data_sdk::data_objects::DataType::HALF);
     EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->tensors.size(), 6);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 7);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
     std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
@@ -742,6 +743,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     validateTensor(*variance, tensorLookup[variance->get_uid()]);
     validateTensor(*scale, tensorLookup[scale->get_uid()]);
     validateTensor(*bias, tensorLookup[bias->get_uid()]);
+    validateTensor(*epsilon, tensorLookup[epsilon->get_uid()]);
     validateTensor(*y, tensorLookup[y->get_uid()]);
 
     EXPECT_EQ(deserializedGraph->nodes[0]->name, "BatchnormNodeVariance");
@@ -755,6 +757,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     EXPECT_EQ(deserializedBatchnormAttributes->variance_tensor_uid, variance->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->scale_tensor_uid, scale->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->bias_tensor_uid, bias->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->epsilon_tensor_uid, epsilon->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->y_tensor_uid, y->get_uid());
 }
 

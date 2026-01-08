@@ -210,8 +210,13 @@ protected:
         BatchnormInferenceAttributesVarianceExt bnAttrs;
         bnAttrs.set_name("batchnorm_inference_variance_ext");
 
-        tensors.y = graph->batchnorm_inference_variance_ext(
-            tensors.x, tensors.mean, tensors.variance, tensors.scale, tensors.bias, epsilon, bnAttrs);
+        tensors.y = graph->batchnorm_inference_variance_ext(tensors.x,
+                                                            tensors.mean,
+                                                            tensors.variance,
+                                                            tensors.scale,
+                                                            tensors.bias,
+                                                            epsilon,
+                                                            bnAttrs);
 
         if(useManualUids)
         {
