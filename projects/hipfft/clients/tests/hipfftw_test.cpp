@@ -2082,7 +2082,7 @@ namespace
             {
                 GTEST_FAIL() << "undefined function pointers detected. Error info: " << e.what();
             }
-            catch(const std::runtime_error e)
+            catch(const std::runtime_error& e)
             {
                 if(log_content.empty() && exception_logger)
                     log_content = exception_logger->get_log();
@@ -2976,14 +2976,14 @@ namespace
             {
                 GTEST_FAIL() << "undefined function pointers detected. Error info: " << e.what();
             }
-            catch(const hip_runtime_error e)
+            catch(const hip_runtime_error& e)
             {
                 if(skip_runtime_fails)
                     GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
                 else
                     GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
             }
-            catch(const std::runtime_error e)
+            catch(const std::runtime_error& e)
             {
                 GTEST_FAIL() << e.what();
             }
