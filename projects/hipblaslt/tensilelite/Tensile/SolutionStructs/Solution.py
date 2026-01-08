@@ -891,11 +891,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "DirectToLds%s + input conversion + ConvertAfterDS=False not supported"%(tc))
         return False
 
-    # does not work with UnrollLoopSwapGlobalReadOrder
-    if state["UnrollLoopSwapGlobalReadOrder"]:
-      reject(state, printRejectionReason, "DirectToLds%c does not supports UnrollLoopSwapGlobalReadOrder"%(tc))
-      return False
-
     return True
 
   @staticmethod
@@ -1785,21 +1780,15 @@ class Solution(collections.abc.Mapping):
           bpeA = state["ProblemType"]["DataTypeA"].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
           MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
-          if state["UseGeneralizedNLCOneA"]:
-            LdsBlockSizePerPadA = MinLdsBlockSizePerPadA
-          else:
-            LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
-            LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
+          LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
+          LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
 
         if state["DirectToLdsB"]:
           bpeB = state["ProblemType"]["DataTypeB"].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
           MinLdsBlockSizePerPadB = (state[f"GlobalReadVectorWidthB"] * bpeB) * state["WavefrontSize"]
-          if state["UseGeneralizedNLCOneB"]:
-            LdsBlockSizePerPadB = MinLdsBlockSizePerPadB
-          else:
-            LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
-            LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
+          LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
+          LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
 
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
 
@@ -2567,6 +2556,11 @@ class Solution(collections.abc.Mapping):
       #1LDS buffer must be 0 for DirectToLdsA
       state["1LDSBuffer"] = 0
 
+    # does not work with UnrollLoopSwapGlobalReadOrder
+    if (state["DirectToLds"] == 2 or state["DirectToLds"] == 3) and state["UnrollLoopSwapGlobalReadOrder"]:
+      reject(state, printRejectionReason, "DirectToLdsA or B only does not supports UnrollLoopSwapGlobalReadOrder")
+      return False
+
     # Temp: Force enable CLR when DTL is used for TF32.
     # TODO: Determine why DTL+CLR=0 causes issues
     if state["UseF32XEmulation"] and state["DirectToLds"]:
@@ -2588,6 +2582,14 @@ class Solution(collections.abc.Mapping):
     if state["LdsBlockSizePerPadB"] == -1:
       auto_LdsBlockSizePerPadB_for_mix = 1
     state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
+
+    for tc in ["A", "B"]:
+      if state["UseGeneralizedNLCOne%s"%tc]:
+        bpe = state["ProblemType"]["DataType%s"%tc].numBytes()
+        MinLdsBlockSizePerPad = (state["GlobalReadVectorWidth%s"%tc] * bpe) * state["WavefrontSize"]
+        if state["LdsBlockSizePerPad%s"%tc] != MinLdsBlockSizePerPad:
+          reject(state, printRejectionReason, "UseGeneralizedNLCOne%s case, LdsBlockSizePerPad%s(%u) should be same as MinLdsBlockSizePerPad(%u)" \
+                 %(tc, tc, state["LdsBlockSizePerPad%s"%tc], MinLdsBlockSizePerPad))
 
     if state["LdsBlockSizePerPadMetadata"] == -1:
       state["LdsBlockSizePerPadMetadata"] = state["LdsBlockSizePerPadA"]
