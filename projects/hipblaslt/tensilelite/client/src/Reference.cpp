@@ -135,6 +135,7 @@ namespace TensileLite
                 return false;
             }
 
+
             // Guard rails to check that the fast path is appropriate to use. Some of these can be relaxed
             // as support on this path is generalized.
             auto isSupportedType = [](rocisa::DataType t) {
@@ -157,6 +158,36 @@ namespace TensileLite
             if(problem.useBias())
             {
                 return false;
+            }
+
+            if (problem.useGradient()){
+              return false;
+            }
+
+            if (problem.outputAmaxD()){
+              return false;
+            }
+
+            if (problem.useE())
+            {
+                return false;
+            }
+
+            if (problem.activationType() != ActivationType::None)
+            {
+                return false;
+            }
+
+            if (problem.useScaleCD()){
+                return false;
+            }
+
+            if (problem.useScaleAB() == "Scalar"){
+              return false;
+            }
+
+            if (problem.useScaleAB() == "Vector"){
+              return false;
             }
 
             // Resolve strides & dimensions
