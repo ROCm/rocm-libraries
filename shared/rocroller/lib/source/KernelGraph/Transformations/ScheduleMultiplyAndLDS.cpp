@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/KernelGraph/Transforms/ScheduleMultiplyAndLDS.hpp>
+#include <rocRoller/KernelGraph/Transforms/ScheduleMultiplyAndLDS_detail.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 #include <rocRoller/Graph/GraphUtilities.hpp>
@@ -35,29 +36,6 @@ namespace rocRoller::KernelGraph
 {
     namespace ScheduleMultiplyAndLDSDetail
     {
-        /**
-         * Glossary: Within this file, a 'chain' refers to
-         *
-         *  - a series of nodes of the same type that are all directly connected to each other
-         *    with Sequence edges, or
-         *  - a vector containing the node IDs of those nodes, or
-         *  - a vector containing the node IDs ot those nodes, but filtered according to
-         *    some criteria.
-         */
-
-        using vec  = std::vector<int>;
-        using vec2 = std::vector<vec>;
-        using vec3 = std::vector<vec2>;
-
-        /**
-         * Identifies groups within `nodes` that are directly connected in a linear chain.
-         *
-         * If the connections between `nodes` is:
-         *
-         * 1 -> 2 -> 3 -> 4 -> NOP -> 5 -> 6 -> 7 -> 8
-         *
-         * This would return 2 vectors, {1, 2, 3, 4} and {5, 6, 7, 8}.
-         */
         vec2 makeChains(KernelGraph const& graph, std::vector<int> nodes)
         {
             std::ranges::sort(nodes, TopologicalCompare(graph));
@@ -102,15 +80,6 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
-        /**
-         * Given a SetCoordinate node, find the actual memory node associated with it.
-         * Given a memory node, just return that node.
-         *
-         * SetCoordinate(3) -> Body -> SetCoordinate(4) -> Body -> LoadLDSTile(5)
-         *
-         * getLDSNode(graph, 3) should return 5.
-         * getLDSNode(graph, 5) should also return 5.
-         */
         int getLDSNode(KernelGraph const& graph, int node)
         {
             while(auto body = graph.control.getOutputNodeIndices<ControlGraph::Body>(node).only())
@@ -121,10 +90,6 @@ namespace rocRoller::KernelGraph
             return node;
         }
 
-        /**
-         * Get the data type associated with the memory node associated with the
-         * SetCoordinate node.
-         */
         DataType getLDSType(KernelGraph const& graph, int node)
         {
             node = getLDSNode(graph, node);
@@ -133,8 +98,6 @@ namespace rocRoller::KernelGraph
             AssertFatal(ldsType != DataType::None);
             return ldsType;
         };
-
-        using ChainTypes = std::vector<std::map<DataType, int>>;
 
         std::string toString(std::map<DataType, int> const& typeCounts)
         {
@@ -156,11 +119,6 @@ namespace rocRoller::KernelGraph
             return fmt::format("{{{}}}", fmt::join(formatted, ", "));
         }
 
-        /**
-         * Given a chain of (multiply) nodes, modify it to only contain those nodes that are the
-         * last nodes that read a DataFlowTag. Returns a parallel vector containing the data
-         * types read by each node.
-         */
         ChainTypes filterLastCoordinateReads(KernelGraph const& graph, vec& chain)
         {
             ControlFlowRWTracer tracer(graph);
@@ -224,13 +182,6 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
-        /**
-         * Given a graph,
-         *
-         * - Finds chains of multiply nodes
-         * - Filters those chains to only the ones that are the last reads of some tag.
-         * - Returns those chains as well as info about the data types of those tags.
-         */
         std::tuple<vec2, std::vector<ChainTypes>>
             findMultiplyChainsAndCoords(KernelGraph const& graph)
         {
@@ -248,22 +199,6 @@ namespace rocRoller::KernelGraph
                 chainTypes.push_back(filterLastCoordinateReads(graph, chain));
 
             return {chains, chainTypes};
-        }
-
-        vec2 findMultiplyChains(KernelGraph const& graph)
-        {
-            auto isMultiply = [&](int idx) -> bool {
-                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
-            };
-
-            auto multiplies = graph.control.getNodes().filter(isMultiply).to<std::vector>();
-
-            auto rv = makeChains(graph, std::move(multiplies));
-
-            for(auto& chain : rv)
-                auto _ = filterLastCoordinateReads(graph, chain);
-
-            return rv;
         }
 
         void getImmediateBodyParents(KernelGraph const& graph, std::vector<int>& nodes)
@@ -295,31 +230,6 @@ namespace rocRoller::KernelGraph
             return makeChains(graph, std::move(nodes));
         }
 
-        std::string abbrev(LayoutType t)
-        {
-            switch(t)
-            {
-            case LayoutType::SCRATCH:
-                return "SCR";
-            case LayoutType::MATRIX_A:
-                return "A";
-            case LayoutType::MATRIX_B:
-                return "B";
-            case LayoutType::MATRIX_ACCUMULATOR:
-                return "ACC";
-            case LayoutType::None:
-                return "N/A";
-            case LayoutType::Count:
-                return "MAX";
-            }
-
-            return "";
-        }
-
-        /**
-         * Logs a nice table that will show which nodes in `chain` use which DataFlowTags, and
-         * what type they are. Very useful for determining what the schedule should be.
-         */
         void logChainTagTable(KernelGraph const& graph, vec chain)
         {
             ControlFlowRWTracer tracer(graph);
@@ -500,30 +410,6 @@ namespace rocRoller::KernelGraph
             Log::debug("\n{}", msg);
         }
 
-        vec2 findLoadTiledChains(KernelGraph const& graph)
-        {
-            auto isLoadTiled = [&](int idx) -> bool {
-                return graph.control.get<ControlGraph::LoadTiled>(idx).has_value();
-            };
-
-            auto nodes = graph.control.getNodes().filter(isLoadTiled).to<std::vector>();
-            getImmediateBodyParents(graph, nodes);
-
-            return makeChains(graph, std::move(nodes));
-        }
-
-        vec2 findD2LDSChains(KernelGraph const& graph)
-        {
-            auto isD2LDS = [&](int idx) -> bool {
-                return graph.control.get<ControlGraph::LoadTileDirect2LDS>(idx).has_value();
-            };
-
-            auto nodes = graph.control.getNodes().filter(isD2LDS).to<std::vector>();
-            getImmediateBodyParents(graph, nodes);
-
-            return makeChains(graph, std::move(nodes));
-        }
-
         std::string showChains(vec2 const& chains)
         {
             std::ostringstream msg;
@@ -552,39 +438,6 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
-        /**
-         * Given groups of chains (grouped by node type), identifies which chains of different
-         * types are parallel to each other. Returns sets of chains that each contain at least 2
-         * chains and are parallel to each other.
-         *
-         * E.g. Input:
-         *
-         * {
-         *     {
-         *         {chain of multiply A}, {chain of multiply B}, chain of multiply C}},
-         *     {
-         *         {chain of LoadLDSTile E}, {chain of LoadLDSTile F},
-         *         {chain of LoadLDSTile G}, {chain of LoadLDSTile H}},
-         *     }
-         * }
-         *
-         * Let's say that:
-         *     * Chain E is not parallel to anything because it's before the K loop
-         *       (it's for prefetching)
-         *     * Chain A is parallel to chain F
-         *     * Chain B is parallel to chain G
-         *     * Chain C is parallel to chain H
-         *
-         * The return value should be:
-         * {
-         *      { {chain A}, {chain F} },
-         *      { {chain B}, {chain G} },
-         *      { {chain C}, {chain H} }
-         * }
-         *
-         * TODO: This *might* reverse the order of each set (i.e. {{chain F}, {chain A}})
-         * Verify if this is the case and update the comment if so.
-         */
         vec3 identifyParallelChains(KernelGraph const& graph, vec3 groups)
         {
             vec3 rv;
@@ -673,48 +526,6 @@ namespace rocRoller::KernelGraph
             }
 
             return rv;
-        }
-
-        struct ParallelChainSet
-        {
-            vec multiplyChain;
-            vec ldsChain;
-
-            ChainTypes            multiplyTagTypes;
-            std::vector<DataType> ldsChainTypes;
-        };
-
-        template <std::ranges::forward_range ARange, std::ranges::forward_range BRange>
-        Generator<
-            std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<BRange>>>
-            zip(ARange const& a, BRange const& b)
-        {
-            auto aIter = a.begin();
-            auto bIter = b.begin();
-
-            for(; aIter != a.end() && bIter != b.end(); ++aIter, ++bIter)
-            {
-                co_yield std::make_tuple(*aIter, *bIter);
-            }
-        }
-
-        template <std::ranges::forward_range ARange,
-                  std::ranges::forward_range BRange,
-                  std::ranges::forward_range CRange>
-        Generator<std::tuple<std::ranges::range_value_t<ARange>,
-                             std::ranges::range_value_t<BRange>,
-                             std::ranges::range_value_t<CRange>>>
-            zip(ARange const& a, BRange const& b, CRange const& c)
-        {
-            auto aIter = a.begin();
-            auto bIter = b.begin();
-            auto cIter = c.begin();
-
-            for(; aIter != a.end() && bIter != b.end() && cIter != c.end();
-                ++aIter, ++bIter, ++cIter)
-            {
-                co_yield std::make_tuple(*aIter, *bIter, *cIter);
-            }
         }
 
         std::vector<ParallelChainSet>

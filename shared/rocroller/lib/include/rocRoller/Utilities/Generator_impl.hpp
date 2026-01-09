@@ -495,4 +495,52 @@ namespace rocRoller
         return range.begin() == range.end();
     }
 
+        template <std::ranges::forward_range ARange, std::ranges::forward_range... Rest>
+        Generator<
+            std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+            zip(ARange const& a, Rest const&... rest)
+        {
+            if constexpr(sizeof...(Rest) == 0)
+            {
+                for(auto const& el : a)
+                    co_yield std::make_tuple(el);
+            }
+            else
+            {
+                auto aIter = a.begin();
+
+                auto restGen  = zip(rest...);
+                auto restIter = restGen.begin();
+
+                for(; aIter != a.end() && restIter != restGen.end(); ++aIter, ++restIter)
+                {
+                    co_yield std::tuple_cat(std::make_tuple(*aIter), *restIter);
+                }
+            }
+        }
+
+        template <std::ranges::forward_range ARange, std::ranges::forward_range... Rest>
+        Generator<
+            std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+            zip(ARange & a, Rest &... rest)
+        {
+            if constexpr(sizeof...(Rest) == 0)
+            {
+                for(auto & el : a)
+                    co_yield std::make_tuple(el);
+            }
+            else
+            {
+                auto aIter = a.begin();
+
+                auto restGen  = zip(rest...);
+                auto restIter = restGen.begin();
+
+                for(; aIter != a.end() && restIter != restGen.end(); ++aIter, ++restIter)
+                {
+                    co_yield std::tuple_cat(std::make_tuple(*aIter), *restIter);
+                }
+            }
+        }
+
 }
