@@ -4,4 +4,4 @@
 # Extra flag to be used for the plugins when building them as part of the main hipdnn build
 option(BUILD_PLUGIN_AS_DEPENDENCY "Flag to build the plugins as part of the main hipdnn build" ON)
 
-add_subdirectory(../../../dnn-providers/miopen-provider miopen_legacy_plugin)
+add_subdirectory(miopen_legacy_plugin)
