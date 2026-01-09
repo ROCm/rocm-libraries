@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,8 @@
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_DOCUMENTATION_BUILD // Do not document
 
 namespace detail
 {
@@ -136,6 +138,8 @@ inline hipError_t transform_impl(InputIterator     input,
 }
 
 } // namespace detail
+
+#endif // DOXYGEN_DOCUMENTATION_BUILD
 
 /// \brief Parallel transform primitive for device level.
 ///

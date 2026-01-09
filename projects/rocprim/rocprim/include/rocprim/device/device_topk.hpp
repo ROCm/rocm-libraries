@@ -21,6 +21,8 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_TOPK_HPP_
 #define ROCPRIM_DEVICE_DEVICE_TOPK_HPP_
 
+#include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/temp_storage.hpp"
 #include "detail/device_topk_air_topk.hpp"
 
@@ -31,10 +33,12 @@
 #include <iterator>
 #include <type_traits>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -294,9 +298,74 @@ hipError_t topk_impl(void*                      temporary_storage,
 
 } // namespace detail
 
-/// \brief Find the largest/smallest K elements from an input array of keys.
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+/// \brief Find the largest or smallest K elements from an input array of keys.
 ///
-/// The K elements are returned within the K first positions of the output array and in a non specific order.
+/// Returns the K largest or smallest elements. These maybe be in any order.
+///
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `topk_config`.
+/// \tparam Descending [optional] determines the starting direction. If \p true, select the largest K elements, and vice versa.
+/// \tparam Ordered [optional] determines whether the output results are sorted by size.
+/// \note Ordered output is not supported yet. This feature will be added in the future.
+/// \tparam Deterministic [optional] to ensure that the results are exactly the same every time.
+/// \note Deterministic output is not supported yet. This feature will be added in the future.
+/// \tparam Stable [optional] determines whether elements in the output are arranged according to their relative position in the input.
+/// \note Stable output is not supported yet. This feature will be added in the future.
+/// \tparam Decomposer [optional] the type of the decomposer functor.
+/// \tparam KeysInputIterator [optional] random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator [optional] random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam SizeIn [optional] integral type that represents the problem size.
+/// \tparam SizeOut [optional] integral type that counts the number of output elements.
+///
+/// \param [in] temporary_storage pointer to device-accessible temporary storage.
+/// If a null pointer is provided, the required allocation size (in bytes) is written
+/// to \p storage_size, and the function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the input range.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of elements in the input range.
+/// \param [in] K number of elements to be selected from the input.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] if \p true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after a successful top-k operation; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending top-k is performed on an array.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+/// // Prepare input and output (declare pointers, allocate device memory, etc.)
+/// size_t input_size;      // e.g., 8
+/// size_t k;               // e.g., 3
+/// int * input;            // e.g., [2, 3, 4, -1, -2, -3, 0, 5]
+/// int * output;           // empty array of 3 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::topk(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, k
+/// );
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+/// // perform topk
+/// rocprim::topk(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, k
+/// );
+/// // output should be [5, 4, 3] (order is not guaranteed)
+/// \endcode
+/// \endparblock
 template<class Config       = default_config,
          bool Descending    = false,
          bool Ordered       = false,
@@ -337,10 +406,81 @@ hipError_t topk(void*                    temporary_storage,
         debug_synchronous);
 }
 
-/// \brief Find the largest/smallest K elements from an input array of values based on their correspondent keys.
+/// \brief Find the largest or smallest K elements from an input array of values based on their corresponding keys.
 ///
-/// The K pairs (key, value) are returned within the K first positions of the output keys and values arrays,
-/// and in a non specific order.
+/// Returns the K largest or smallest (key, value) pairs. These maybe be in any order.
+///
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `topk_config`.
+/// \tparam Descending [optional] determines the starting direction. If \p true, select the largest K elements, and vice versa.
+/// \tparam Ordered [optional] determines whether the output results are sorted by size.
+/// \note Ordered output is not supported yet. This feature will be added in the future.
+/// \tparam Deterministic [optional] to ensure that the results are exactly the same every time.
+/// \note Deterministic output is not supported yet. This feature will be added in the future.
+/// \tparam Stable [optional] determines whether elements in the output are arranged according to their relative position in the input.
+/// \note Stable output is not supported yet. This feature will be added in the future.
+/// \tparam Decomposer [optional] the type of the decomposer functor.
+/// \tparam KeysInputIterator [optional] random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator [optional] random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator [optional] random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator [optional] random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam SizeIn [optional] integral type that represents the problem size.
+/// \tparam SizeOut [optional] integral type that counts the number of output elements.
+///
+/// \param [in] temporary_storage pointer to device-accessible temporary storage.
+/// If a null pointer is provided, the required allocation size (in bytes) is written
+/// to \p storage_size, and the function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first key in the input range.
+/// \param [out] keys_output pointer to the first key in the output range.
+/// \param [in] values_input pointer to the first value in the output range.
+/// \param [out] values_output pointer to the first value in the output range.
+/// \param [in] size number of elements in the input range.
+/// \param [in] K number of elements to be selected from the input.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] if \p true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after a successful top-k operation; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending top-k is performed on an array.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+/// // Prepare input and output (declare pointers, allocate device memory, etc.)
+/// size_t input_size;      // e.g., 8
+/// size_t k;               // e.g., 3
+/// int * input_keys;       // e.g., [2, 3, 4, -1, -2, -3, 0, 5]
+/// int * output_keys;      // empty array of 3 elements
+/// int * input_vals;       // e.g., [0, 1, 2, 3, 4, 5, 6, 7]
+/// int * output_vals;      // empty array of 3 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::topk(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_keys, output_keys, input_vals, output_vals, input_size, k
+/// );
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+/// // perform topk
+/// rocprim::topk(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_keys, output_keys, input_vals, output_vals, input_size, k
+/// );
+/// // output_keys should be [5, 4, 3] (order is not guaranteed)
+/// // output_vals should be [7, 2, 1] (order matches output_keys)
+/// \endcode
+/// \endparblock
 template<class Config       = default_config,
          bool Descending    = false,
          bool Ordered       = false,

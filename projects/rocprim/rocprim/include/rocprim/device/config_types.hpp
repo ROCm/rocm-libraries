@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -532,8 +532,8 @@ template<class Config,
          class Target,
          template<class, class, class>
          class LaunchSelector>
-ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
-void trampoline_kernel(Kernel kernel)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS((LaunchSelector<Config, Selector, Target>::block_size)) void
+    trampoline_kernel(Kernel kernel)
 {
     using ArchConfig = target_config<Config, Selector, Target>;
 

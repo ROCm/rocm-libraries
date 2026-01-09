@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,10 +32,10 @@
 
 #include "device_partition.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Parallel select primitive for device level using range of flags.
 ///
@@ -675,9 +675,9 @@ inline hipError_t unique_by_key(void*                           temporary_storag
                                                no_predicate);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SELECT_HPP_

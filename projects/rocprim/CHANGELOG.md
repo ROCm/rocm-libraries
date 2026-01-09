@@ -2,7 +2,10 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM x.y.z for ROCm 8.0
+## rocPRIM 5.0.0 for ROCm 8.0
+
+### Added
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
 
 ### Optimizations
 
