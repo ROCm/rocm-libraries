@@ -78,8 +78,15 @@ endfunction()
 # ``rocsparse_get_base_architectures(<output_var>)``
 #
 # Sets <output_var> to the list of base architectures used when "all" is specified.
+# Uses rocm_check_target_ids to filter out architectures not supported by the current GPU.
 function(rocsparse_get_base_architectures output_var)
-    set(${output_var} ${BASE_ARCHITECTURES} PARENT_SCOPE)
+    if(COMMAND rocm_check_target_ids)
+        rocm_check_target_ids(_validated_targets TARGETS "${BASE_ARCHITECTURES}")
+        set(${output_var} ${_validated_targets} PARENT_SCOPE)
+    else()
+        message(WARNING "rocm_check_target_ids not available - using all base architectures without hardware validation")
+        set(${output_var} ${BASE_ARCHITECTURES} PARENT_SCOPE)
+    endif()
 endfunction()
 
 # .rst: Returns the list of all supported GPU architectures.

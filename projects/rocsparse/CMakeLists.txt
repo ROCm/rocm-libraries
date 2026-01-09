@@ -68,10 +68,7 @@ option(ROCSPARSE_ENABLE_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 cmake_dependent_option(ROCSPARSE_ENABLE_MARKER "Enable rocTracer marker support" ON "NOT WIN32" OFF)
 option(ROCSPARSE_ENABLE_OFFLOAD_COMPRESS "Enable offload compression during compilation" ON)
 option(ROCSPARSE_ENABLE_OPENMP "Enable OpenMP support" ON)
-
-if(NOT ROCSPARSE_ENABLE_FORTRAN)
-    option(ROCSPARSE_ENABLE_FORTRAN "Build rocSPARSE clients requiring Fortran capabilities" ON)
-endif()
+option(ROCSPARSE_ENABLE_FORTRAN "Build rocSPARSE clients requiring Fortran capabilities" OFF)
 
 if(ROCSPARSE_ENABLE_SAMPLES OR ROCSPARSE_BUILD_TESTING OR ROCSPARSE_ENABLE_BENCHMARKS)
     set(ROCSPARSE_ENABLE_CLIENT ON)
