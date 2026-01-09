@@ -224,8 +224,8 @@ class GEMMSolution:
     storeLDS_D: bool = True
     betaInFma: bool = True
 
-    padLDS_A: int = -1
-    padLDS_B: int = -1
+    padLDS_A: tuple[int, int] = (0, 0)
+    padLDS_B: tuple[int, int] = (0, 0)
 
     scheduler: str = "Priority"
     schedulerCost: str = "LinearWeighted"

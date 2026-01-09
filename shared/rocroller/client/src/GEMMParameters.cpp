@@ -311,7 +311,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         if(arg.empty())
             return PARSE_FAILURE;
 
-        std::regex  pattern(R"(\d+)x(\d+)");
+        std::regex  pattern(R"((\d+),(\d+))");
         std::smatch match;
 
         bool matched = std::regex_match(arg, match, pattern);
@@ -322,7 +322,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         }
         else
         {
-            std::cerr << "Invalid format for XxY pair.\n" << std::endl;
+            std::cerr << "Invalid format for X,Y pair.\n" << std::endl;
             return PARSE_FAILURE;
         }
 
