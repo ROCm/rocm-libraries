@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,10 +39,12 @@
 #include "detail/device_segmented_scan.hpp"
 #include "device_scan.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -146,6 +148,8 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 }
 
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel segmented inclusive scan primitive for device level.
 ///
@@ -621,9 +625,9 @@ inline hipError_t segmented_exclusive_scan(void*               temporary_storage
         debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SEGMENTED_SCAN_HPP_

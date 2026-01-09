@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,10 +42,12 @@
 #include <iostream>
 #include <iterator>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -245,6 +247,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
 }
 } // namespace run_length_encode
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel run-length encoding for device level.
 ///
@@ -465,9 +469,9 @@ inline hipError_t run_length_encode_non_trivial_runs(void*                   tem
         debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_

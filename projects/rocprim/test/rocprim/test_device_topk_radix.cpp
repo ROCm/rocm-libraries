@@ -190,9 +190,9 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     [[maybe_unused]] constexpr bool ordered               = TestFixture::ordered;
     [[maybe_unused]] constexpr bool deterministic         = TestFixture::deterministic;
     [[maybe_unused]] constexpr bool stable                = TestFixture::stable;
-    const bool     debug_synchronous     = TestFixture::debug_synchronous;
-    constexpr bool use_graphs            = TestFixture::use_graphs;
-    constexpr bool use_indirect_iterator = TestFixture::use_indirect_iterator;
+    const bool                      debug_synchronous     = TestFixture::debug_synchronous;
+    constexpr bool                  use_graphs            = TestFixture::use_graphs;
+    constexpr bool                  use_indirect_iterator = TestFixture::use_indirect_iterator;
 
     for(unsigned int seed_index = 0; seed_index < number_of_runs; seed_index++)
     {

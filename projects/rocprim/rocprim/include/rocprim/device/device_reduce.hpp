@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,10 +37,12 @@
 #include "detail/device_reduce.hpp"
 #include "device_reduce_config.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -291,6 +293,8 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 #undef ROCPRIM_DETAIL_HIP_SYNC
 
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel reduction primitive for device level.
 ///
@@ -573,9 +577,9 @@ inline hipError_t reduce(void*             temporary_storage,
                                               debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_

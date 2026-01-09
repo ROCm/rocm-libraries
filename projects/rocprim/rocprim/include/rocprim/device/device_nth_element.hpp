@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,12 @@
 #include <cstddef>
 #include <cstdio>
 
+/// \addtogroup devicemodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -186,8 +191,7 @@ hipError_t
 
 } // namespace detail
 
-/// \addtogroup devicemodule
-/// @{
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Rearrange elements smaller than the n-th before and bigger than n-th after the n-th element.
 ///
@@ -424,9 +428,9 @@ hipError_t nth_element(void*              temporary_storage,
                                debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_NTH_ELEMENT_HPP_

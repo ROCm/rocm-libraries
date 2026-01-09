@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,6 +48,8 @@
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -704,6 +706,8 @@ hipError_t
 }
 
 } // end namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel ascending radix sort primitive for device level.
 ///

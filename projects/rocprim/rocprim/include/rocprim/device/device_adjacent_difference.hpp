@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,9 @@
 /// \file
 ///
 /// Device level adjacent_difference parallel primitives
+
+/// \addtogroup devicemodule
+/// @{
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -199,9 +202,6 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 } // namespace detail
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS
-
-/// \addtogroup devicemodule
-/// @{
 
 /// \brief Parallel primitive for applying a binary operation across pairs of consecutive elements
 /// in device accessible memory. Writes the output to the position of the left item.
@@ -636,9 +636,9 @@ hipError_t adjacent_difference_right_inplace(void* const          temporary_stor
                                                                      debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_ADJACENT_DIFFERENCE_HPP_
