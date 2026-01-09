@@ -195,14 +195,16 @@ inline float to_float<hipsparseFloat16>(hipsparseFloat16 val)
 
 /**
  * @brief Generate a random sparse CSR matrix similar to PyTorch's genSparseCSRTensor
+ * @tparam T The value type (e.g., float, double, hipsparseBfloat16, hipsparseFloat16)
  */
-inline int generate_random_csr_pytorch(int                 m,
-                                       int                 n,
-                                       int                 target_nnz,
-                                       std::vector<int>&   crow_indices,
-                                       std::vector<int>&   col_indices,
-                                       std::vector<float>& values,
-                                       unsigned int        seed = 12345)
+template <typename T>
+inline int generate_random_csr_pytorch(int               m,
+                                       int               n,
+                                       int               target_nnz,
+                                       std::vector<int>& crow_indices,
+                                       std::vector<int>& col_indices,
+                                       std::vector<T>&   values,
+                                       unsigned int      seed = 12345)
 {
     std::mt19937                          gen(seed);
     std::uniform_real_distribution<float> val_dist(-1.0f, 1.0f);
@@ -253,7 +255,7 @@ inline int generate_random_csr_pytorch(int                 m,
         for(int col : row_cols)
         {
             col_indices.push_back(col);
-            values.push_back(val_dist(gen));
+            values.push_back(from_float<T>(val_dist(gen)));
         }
 
         crow_indices[i + 1] = static_cast<int>(col_indices.size());
@@ -266,14 +268,15 @@ inline int generate_random_csr_pytorch(int                 m,
 // Convert sparse CSR to dense matrix
 // ============================================================================
 
-inline void csr_to_dense_pytorch(int                       m,
-                                 int                       n,
-                                 const std::vector<int>&   crow_indices,
-                                 const std::vector<int>&   col_indices,
-                                 const std::vector<float>& values,
-                                 std::vector<float>&       dense)
+template <typename T>
+inline void csr_to_dense_pytorch(int                     m,
+                                 int                     n,
+                                 const std::vector<int>& crow_indices,
+                                 const std::vector<int>& col_indices,
+                                 const std::vector<T>&   values,
+                                 std::vector<T>&         dense)
 {
-    dense.assign(m * n, 0.0f);
+    dense.assign(m * n, static_cast<T>(0));
 
     for(int i = 0; i < m; i++)
     {
@@ -287,21 +290,25 @@ inline void csr_to_dense_pytorch(int                       m,
 
 // ============================================================================
 // Dense matrix-vector multiplication (reference)
+// Accumulates in compute_datatype to match GPU compute type
 // ============================================================================
 
+template <typename T>
 inline void dense_matvec_pytorch(
-    int m, int n, const std::vector<float>& A, const std::vector<float>& x, std::vector<float>& y)
+    int m, int n, const std::vector<T>& A, const std::vector<T>& x, std::vector<T>& y)
 {
-    y.assign(m, 0.0f);
+    using compute_t = typename compute_datatype<T>::scalar_type;
+    y.resize(m);
 
     for(int i = 0; i < m; i++)
     {
-        float sum = 0.0f;
+        // Accumulate in compute type to match GPU SpMV behavior
+        compute_t sum = static_cast<compute_t>(0);
         for(int j = 0; j < n; j++)
         {
-            sum += A[i * n + j] * x[j];
+            sum += static_cast<compute_t>(A[i * n + j]) * static_cast<compute_t>(x[j]);
         }
-        y[i] = sum;
+        y[i] = static_cast<T>(sum);
     }
 }
 
@@ -309,17 +316,18 @@ inline void dense_matvec_pytorch(
 // Compare results with tolerance
 // ============================================================================
 
-inline bool compare_results_pytorch(const std::vector<float>& expected,
-                                    const std::vector<float>& actual,
-                                    float                     atol,
-                                    float                     rtol,
-                                    int&                      num_errors,
-                                    float&                    max_abs_error,
-                                    float&                    max_rel_error)
+template <typename T>
+inline bool compare_results_pytorch(const std::vector<T>& expected,
+                                    const std::vector<T>& actual,
+                                    double                atol,
+                                    double                rtol,
+                                    int&                  num_errors,
+                                    double&               max_abs_error,
+                                    double&               max_rel_error)
 {
     num_errors    = 0;
-    max_abs_error = 0.0f;
-    max_rel_error = 0.0f;
+    max_abs_error = 0.0;
+    max_rel_error = 0.0;
 
     if(expected.size() != actual.size())
     {
@@ -328,8 +336,10 @@ inline bool compare_results_pytorch(const std::vector<float>& expected,
 
     for(size_t i = 0; i < expected.size(); i++)
     {
-        float diff          = std::abs(expected[i] - actual[i]);
-        float abs_tolerance = atol + rtol * std::abs(expected[i]);
+        double exp_val       = static_cast<double>(expected[i]);
+        double act_val       = static_cast<double>(actual[i]);
+        double diff          = std::abs(exp_val - act_val);
+        double abs_tolerance = atol + rtol * std::abs(exp_val);
 
         if(diff > abs_tolerance)
         {
@@ -337,9 +347,9 @@ inline bool compare_results_pytorch(const std::vector<float>& expected,
         }
 
         max_abs_error = std::max(max_abs_error, diff);
-        if(std::abs(expected[i]) > 1e-6f)
+        if(std::abs(exp_val) > 1e-6)
         {
-            max_rel_error = std::max(max_rel_error, diff / std::abs(expected[i]));
+            max_rel_error = std::max(max_rel_error, diff / std::abs(exp_val));
         }
     }
 
@@ -353,38 +363,29 @@ inline bool compare_results_pytorch(const std::vector<float>& expected,
 template <typename T>
 inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool use_int64)
 {
-    // Generate random CSR matrix on host (always in float32)
-    std::vector<int>   h_crow_indices;
-    std::vector<int>   h_col_indices;
-    std::vector<float> h_values_f32;
+    // Generate random CSR matrix on host directly in type T
+    std::vector<int> h_crow_indices;
+    std::vector<int> h_col_indices;
+    std::vector<T>   h_values;
 
-    int actual_nnz = generate_random_csr_pytorch(
-        m, n, target_nnz, h_crow_indices, h_col_indices, h_values_f32);
+    int actual_nnz
+        = generate_random_csr_pytorch<T>(m, n, target_nnz, h_crow_indices, h_col_indices, h_values);
 
-    // Convert values to target type
-    std::vector<T> h_values(actual_nnz);
-    for(int i = 0; i < actual_nnz; i++)
-    {
-        h_values[i] = from_float<T>(h_values_f32[i]);
-    }
-
-    // Generate random input vector x
-    std::vector<float>                    h_x_f32(n);
+    // Generate random input vector x directly in type T
     std::vector<T>                        h_x(n);
     std::mt19937                          gen(54321);
     std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
     for(int i = 0; i < n; i++)
     {
-        h_x_f32[i] = dist(gen);
-        h_x[i]     = from_float<T>(h_x_f32[i]);
+        h_x[i] = from_float<T>(dist(gen));
     }
 
-    // Compute reference result using dense matmul (in float32)
-    std::vector<float> h_dense;
-    csr_to_dense_pytorch(m, n, h_crow_indices, h_col_indices, h_values_f32, h_dense);
+    // Compute reference result using dense matmul (converts to float internally)
+    std::vector<T> h_dense;
+    csr_to_dense_pytorch(m, n, h_crow_indices, h_col_indices, h_values, h_dense);
 
-    std::vector<float> h_y_ref;
-    dense_matvec_pytorch(m, n, h_dense, h_x_f32, h_y_ref);
+    std::vector<T> h_y_ref;
+    dense_matvec_pytorch(m, n, h_dense, h_x, h_y_ref);
 
     // Allocate device memory
     auto d_crow_indices_managed
@@ -489,18 +490,11 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
     std::vector<T> h_y(m);
     CHECK_HIP_ERROR(hipMemcpy(h_y.data(), d_y, sizeof(T) * m, hipMemcpyDeviceToHost));
 
-    // Convert result to float for comparison
-    std::vector<float> h_y_actual(m);
-    for(int i = 0; i < m; i++)
-    {
-        h_y_actual[i] = to_float(h_y[i]);
-    }
-
     // Compare results using type-specific tolerance
-    int   num_errors;
-    float max_abs_error, max_rel_error;
-    bool  passed = compare_results_pytorch(h_y_ref,
-                                          h_y_actual,
+    int    num_errors;
+    double max_abs_error, max_rel_error;
+    bool   passed = compare_results_pytorch(h_y_ref,
+                                          h_y,
                                           tolerance_traits<T>::atol,
                                           tolerance_traits<T>::rtol,
                                           num_errors,
