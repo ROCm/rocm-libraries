@@ -45,3 +45,8 @@ set_target_properties(origami_python PROPERTIES
 
 target_link_libraries(origami_python PRIVATE roc::origami)
 
+# Install Python module to bin/origami for TheRock CI testing
+rocm_install(TARGETS origami_python
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
+    COMPONENT tests
+)
