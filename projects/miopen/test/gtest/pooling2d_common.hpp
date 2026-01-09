@@ -95,10 +95,11 @@ inline size_t GetIndexMax(miopenIndexType_t index_type)
 
 // Filtering function matching ctest's run() method exactly
 // This copies the exact logic from pooling_common.hpp pooling_driver::run()
-// Matching variable names: idx_typ, idx_sz, spt_dim, skip_many_configs_with_non_int8_index, wide_dataset, full_set
-inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case, 
-                                   bool skip_wide_check = false,
-                                   bool apply_index_type_limits = true)
+// Matching variable names: idx_typ, idx_sz, spt_dim, skip_many_configs_with_non_int8_index,
+// wide_dataset, full_set
+inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case,
+                                  bool skip_wide_check         = false,
+                                  bool apply_index_type_limits = true)
 {
     // Match ctest variable names exactly
     auto idx_typ = test_case.index_type;
