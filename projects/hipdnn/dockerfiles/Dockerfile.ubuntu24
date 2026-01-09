@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y \
     rsync \
     ca-certificates \
     wget \
+    texinfo \
+    bison \
+    flex \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
