@@ -313,10 +313,10 @@ build_aocl_5_2( )
         return 1
     fi
     cd aocl
-    CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DENABLE_ILP64=ON -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
+    CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DENABLE_ILP64=ON -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
     elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
-    printf "\033[32m✓ AOCL 5.2 successfully built with ILP64 support\033[0m\n"
-    printf "\033[32m  Location: \033[33m${build_dir}/deps/aocl/install_package/lib/libaocl.so\033[0m\n"
+    printf "\033[32m✓ AOCL 5.2 successfully built with ILP64 support (static)\033[0m\n"
+    printf "\033[32m  Location: \033[33m${build_dir}/deps/aocl/install_package/lib/libaocl.a\033[0m\n"
     popd
 }
 
