@@ -145,7 +145,6 @@ table StringValue {
 table Knob {
     knob_id: int64;               // Hashed from knob_id_str
     knob_id_str: string;          // Unique identifier (namespaced by plugin)
-    display_name: string;         // Human-readable name
     description: string;          // Help text
     value_type: KnobValue;        // Discriminator for union
     default_value: KnobValue;     // Default setting
@@ -285,7 +284,6 @@ public:
     // Register an integer knob
     void registerIntKnob(
         const std::string& knobId,
-        const std::string& displayName,
         const std::string& description,
         int64_t defaultValue,
         int64_t minValue,
@@ -296,7 +294,6 @@ public:
     // Register an integer knob with explicit valid values
     void registerIntKnob(
         const std::string& knobId,
-        const std::string& displayName,
         const std::string& description,
         int64_t defaultValue,
         const std::vector<int64_t>& validValues
@@ -305,7 +302,6 @@ public:
     // Register a float knob
     void registerFloatKnob(
         const std::string& knobId,
-        const std::string& displayName,
         const std::string& description,
         double defaultValue,
         double minValue,
@@ -380,7 +376,6 @@ public:
         // Throw if the user tries to register a knob that starts with "global."
         registry.registerIntKnob(
             "miopen.conv.tile_size",
-            "Tile Size",
             "Size of computation tile (must be power of 2)",
             16,  // default
             {8, 16, 32, 64, 128}  // valid values
@@ -412,13 +407,11 @@ enum class KnobValueType {
 class Knob {
 public:
     Knob(const std::string& knobIdStr, // knob_id hashed from this string internally
-         const std::string& displayName,
          const std::string& description);
 
     // Accessors
     int64_t getKnobId() const; // A hash id of Knob ID String
     const std::string& getKnobIdStr() const;
-    const std::string& getDisplayName() const;
     const std::string& getDescription() const;
     const bool isDeprecated() const;
 
@@ -595,7 +588,6 @@ Examples:
 
 **Rationale**:
 - **Plugin Autonomy**: Plugins can define custom knobs without modifying core hipDNN
-- **Collision Avoidance**: Namespace prefixes prevent conflicts
 - **Readability**: String IDs are self-documenting
 - **Extensibility**: New plugins can be added without coordination
 
