@@ -482,9 +482,9 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
     | 1 |  7 |     | 1 |  4 |
     | 2 |  8 |     | 2 |  5 |
     ----------     ----------
-    | 3 |  9 |  -> | 3 |  9 |
-    | 4 | 10 |     | 4 | 10 |
-    | 5 | 11 |     | 5 | 11 |
+    | 3 |  9 |  -> | 6 |  9 |
+    | 4 | 10 |     | 7 | 10 |
+    | 5 | 11 |     | 8 | 11 |
     """
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
