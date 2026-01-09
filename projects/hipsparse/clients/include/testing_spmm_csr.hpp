@@ -39,6 +39,8 @@
 #include <string>
 #include <typeinfo>
 
+#include <algorithm>
+
 using namespace hipsparse;
 using namespace hipsparse_test;
 
@@ -239,6 +241,9 @@ void testing_spmm_csr(Arguments argus)
                             hcsr_col_ind,
                             hcsr_val,
                             idx_base));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val, hcsr_val.size(), 1);
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;

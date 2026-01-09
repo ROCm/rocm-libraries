@@ -8493,7 +8493,9 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP["tensorChar"]
     imod = Module("directToLdsM0Update%s_%u"%(tc,mode))
     DtldsModule = imod.add(Module("dtls_offset%s"%tP["tensorChar"]))
-    if not self.do["GlobalRead%s"%tP["tensorChar"]]: return imod
+    if not self.do["GlobalRead%s"%tP["tensorChar"]]:
+      return imod
+
     if kernel["DirectToLds%s"%tc]:
       # DirectToLds only enabled for TLU=1 cases, where the registers are directly copied into LDS
       # for cases both A&B are DTLS, updating m0 for each GlobalRead requires instruction schedule
@@ -8510,9 +8512,6 @@ class KernelWriterAssembly(KernelWriter):
         # do not generate local read wait for PGR=2
         DtldsModule.addComment0("before DirectToLds load, ensure prior ds_reads have finished")
         DtldsModule.add(SWaitCnt(dscnt=0, comment=""))
-        if not kernel["NoLdsWriteCode"]:
-          waitStr = 0
-          DtldsModule.add(SWaitCnt(vlcnt=waitStr, comment=""))
         DtldsModule.add(SBarrier())
 
     return imod

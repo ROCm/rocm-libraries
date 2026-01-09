@@ -225,6 +225,9 @@ void testing_spmm_batched_coo(Arguments argus)
                             hval,
                             idx_base));
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
+
     std::vector<I> hrow_ind(nnz_A);
 
     // Convert to COO
