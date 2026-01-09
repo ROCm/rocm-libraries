@@ -24,9 +24,8 @@
 ################################################################################
 
 from typing import Any, Optional
-from rocisa.instruction import SWaitCnt
+from rocisa.instruction import SWaitCnt, SNop
 
-from Tensile.Common.DataType import DataType
 from Tensile.Components.CMSValidator import verify_packs_start_and_end_at_correct_indices
 from cms_validation_base import CMSValidationTestBase
 
@@ -446,6 +445,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
+        
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=3 issued too early, must be issued after idx=5 (because of LRB0 issued @ idx=3).")
 
     def test_failing_too_late(self):
@@ -472,6 +472,64 @@ class TestValidatePackTF32(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=5 issued too late, must be issued before MFMA @ idx=3.")
+
+    def test_failing_too_late_B(self):
+        """
+        Failing case where PackB0s are issued too late (after their result is needed by the v_mfmas).
+
+        """
+        # 2 A tiles, 2 B tiles, 3 bf16 MFMAs per tile
+        assert self.num_vmfma == 12
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            # Must finish before 2nd quarter (i < 3)
+            "LRA0": [[self.q1s] * 2],
+            "PackA0": [[self.q1e] * 24],
+
+            # Must finish before 3rd quarter (i < 6)
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [[self.q3e] * 24],  # Issued in 3rd quarter, too late
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=8 issued too late, must be issued before MFMA @ idx=6.")
+
+    def test_failing_not_enough_time_CVT1_MFMA(self):
+        """
+        Failing case where there is not enough time between the last cvt pack command the first "real" mfma using the result.
+        """
+        assert self.num_vmfma == 12
+
+        optSchedule = {
+            "SYNC": [[self.q1s+2, self.q2s+2]],
+            "SNOP": [[self.q2s]],  # 
+
+            # Must finish before 2nd quarter (i < 3)
+            "LRA0": [[self.q1s+1] * 2],
+            "PackA0": [
+                [self.q1e] * 22 +
+                [self.q2s] *2 
+            ],
+
+            # Must finish before 3rd quarter (i < 6)
+            "LRB0": [[self.q2s+1] * 2],
+            "PackB0": [[self.q2e] * 24],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+
+        snopCode = [
+            SNop(waitState=1, comment="Needed to force the last 2 PackA0s to be too close to the MFMA."),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=3 has too little gap between it and MFMA @ idx=4. Expected at least 2 quad-cycles but only 1 passed.", snopCode=snopCode)
 
 class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
     """
@@ -805,3 +863,294 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, 'PackA0 @ idx=2 has wrong interleaving. Should have been followed by PackA0 @ idx=3 but was followed by PackA0 @ idx=2.')
+
+class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
+    """
+    Tests for TF32 validation with 4x4x4 MFMA.
+    """
+    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates["UsePLRPack"] = True
+        kernel_updates["UseF32XEmulation"] = True
+        kernel_updates["UseMFMAF32XEmulation"] = True
+        kernel_updates["ForceUnrollSubIter"] = True
+        kernel_updates["DepthU"] = 32
+        kernel_updates["MIWaveTileA"] = 4
+        kernel_updates["MIWaveTileB"] = 4
+        super().setUp(kernel_updates)
+
+        self.q1s = 0
+        self.q1e = self.num_vmfma // 4 - 1
+
+        self.q2s = self.q1e + 1
+        self.q2e = self.num_vmfma // 2 - 1
+
+        self.q3s = self.q2e + 1
+        self.q3e = self.num_vmfma // 4 * 3 - 1
+
+        self.q4s = self.q3e + 1
+        self.q4e = self.num_vmfma - 1
+    
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    
+    def test_passing(self):
+        """
+        Simple passing case.
+        """
+        assert self.num_vmfma == 48
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1, self.q3s+1, self.q4s+1]],
+
+            "LRA0": [[self.q1s] * 2],
+            "PackA0": [
+                [self.q1s+2] * 4 + 
+                [self.q1s+2] * 2 +
+                [self.q1s+4] * 4  # Needs +2 MFMAs to satisfy the 5 quad-cycle gap.
+            ],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [
+                [self.q2s+2] * 4 +
+                [self.q2s+2] * 2 +
+                [self.q2s+4] * 4  # Needs +2 MFMAs to satisfy the 5 quad-cycle gap.
+            ],
+            
+            "LRB3": [[self.q3s] * 2],
+            "PackB3": [
+                [self.q3s+2] * 4 +
+                [self.q3s+2] * 2 +
+                [self.q3s+4] * 4  # Needs +2 MFMAs to satisfy the 5 quad-cycle gap.
+            ],
+
+            "LRA3": [[self.q4s] * 2],
+            "PackA3": [
+                [self.q4s+2] * 4 +
+                [self.q4s+2] * 2 +
+                [self.q4s+4] * 4  # Needs +2 MFMAs to satisfy the 5 quad-cycle gap.
+            ],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s")
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+    def test_failing_too_early(self):
+        """
+        Failing case where the PackB0 are issued before the LRB0s are complete.
+        """
+        assert self.num_vmfma == 48
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2e]],
+
+            "LRA0": [[self.q1s] * 2],
+            "PackA0": [
+                [self.q1s+2] * 4 +
+                [self.q1s+2] * 2 +
+                [self.q1s+4] * 4
+            ],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [
+                [self.q2s+1] +  # Issued too early.
+                [self.q3s] * 3 +
+                [self.q3s] * 2 +
+                [self.q3s+2] * 4
+            ],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+        
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=13 issued too early, must be issued after idx=23 (because of LRB0 issued @ idx=12).")
+
+    def test_failing_too_late(self):
+        """
+        Failing case where PackA0s are issued too late (after their result is needed by the v_mfmas).
+        """
+        assert self.num_vmfma == 48
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            # Must finish before 2nd quarter
+            "LRA0": [[self.q1s] * 2],
+            "PackA0": [
+                [self.q1s+1] * 4 +
+                [self.q1s+1] * 2 +
+                [self.q2s+2] * 4  # Issued after the 2nd mfma in the 2nd quarter
+            ],
+
+            # Must finish before 3rd quarter
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [
+                [self.q2s+2] * 4 +
+                [self.q2s+2] * 2 +
+                [self.q2s+3] * 4
+            ],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=14 issued too late, must be issued before MFMA @ idx=13.")
+
+    def test_passing_snop(self):
+        """
+        Passing case that relies on s_nop instructions to guarantee there is enough time around the 4x4 MFMAs.
+        This test verifies that SNop instructions are properly counted for quad-cycle spacing.
+        The first 4 packs (CVT0) need 2 quad-cycles before their result is used by the 4x4 MFMA.
+        
+        For TF32 4x4 MFMA with MIWaveTileA=4, MIWaveTileB=4:
+        - 48 total vmfmas (4*4*3)
+        - q1: 0-11, q2: 12-23, q3: 24-35, q4: 36-47
+        - PackA0 packs are needed for MFMAs in q2 starting at idx 12
+        """
+        assert self.num_vmfma == 48
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+            "SNOP": [[self.q1s+2, self.q2s+2]],
+
+            # Must finish before 2nd quarter
+            "LRA0": [[self.q1s, self.q1s]],
+            "PackA0": [
+                [self.q1s+1] * 4 +
+                [self.q1s+1] + 
+                [self.q1s+1] + # Only 2 quad-cycles before Pack[6] without SNop.
+                [self.q1s+2] * 4
+            ],
+
+            # Must finish before 3rd quarter
+            "LRB0": [[self.q2s, self.q2s]],
+            "PackB0": [
+                [self.q2s+1] * 4 +
+                [self.q2s+1] +
+                [self.q2s+1] + # Only 2 quad-cycles before Pack[6] without SNop.
+                [self.q2s+2] * 4
+            ],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+
+        snopCode = [
+            SNop(waitState=1, comment="Needed to have 5 quad-cycle space between PackA0[5] and PackBo[6]."),
+            SNop(waitState=1, comment="Needed to have 5 quad-cycle space between PackB0[5] and PackB0[6]."),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None, snopCode=snopCode)
+
+    def test_failing_not_enough_time_CVTO_MFMA(self):
+        """
+        Failing case where there is not enough time between the first pair of CVT0 and the first 4x4 MFMA.
+        """
+        assert self.num_vmfma == 48
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+            
+            "LRA0": [[self.q1s] * 2],
+            "PackA0": [
+                [self.q1s+1] * 2 +
+                [self.q1s+2] * 2 +
+                [self.q1s+1] +
+                [self.q1s+3] +
+                [self.q1s+4] * 4
+            ],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [
+                [self.q2s+1] * 2 +
+                [self.q2s+2] * 2 +
+                [self.q2s+1] +
+                [self.q2s+3] +
+                [self.q2s+4] * 4
+            ],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=1 has too little gap between it and PackA0 @ idx=1. Expected at least 2 quad-cycles but only 1 passed.")
+    
+    def test_failing_not_enough_time_MFMA_CVT1(self):
+        """
+        Failing case where there is not enough time between the 4x4 MFMA (Pack 5) and the first CVT1 pack (Pack 6).
+        Pack 5 (second 4x4 MFMA) needs 5 quad-cycles before Pack 6 (first CVT1) can use its result.
+        With only 1 standard MFMA between them, there's only 3 quad-cycles, which is not enough.
+        """
+        assert self.num_vmfma == 48
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            "LRA0": [[self.q1s] * 2],
+            "PackA0": [
+                [self.q1s+2] * 4 +
+                [self.q1s+2] * 2 +
+                [self.q1s+3] * 4     # CVT1: indices 6-9 at vmfma 3 (only 1 MFMA between, not enough time!)
+            ],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [
+                [self.q2s+2] * 4 +
+                [self.q2s+2] * 2 +
+                [self.q2s+4] * 4  # CVT1 at vmfma q2s+4, enough time for B
+            ],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=2 has too little gap between it and PackA0 @ idx=3. Expected at least 5 quad-cycles but only 3 passed.")
+
+    def test_failing_not_enough_time_CVT1_MFMA(self):
+        """
+        Failing case where there is not enough time between the last CVT1 pack and the first "real" MFMA using the result.
+        CVT1 packs (indices 6-9) need 2 quad-cycles before the MFMAs can use their results.
+        """
+        assert self.num_vmfma == 48
+
+        optSchedule = {
+            "SYNC": [[self.q1s+2, self.q2s+2]],
+            "SNOP": [[self.q2s]],
+
+            "LRA0": [[self.q1s+1] * 2],
+            "PackA0": [
+                [self.q1s+2] * 4 +
+                [self.q1s+2] * 2 +
+                [self.q1e] * 2 +
+                [self.q2s] * 2       # CVT1 (8-9) at vmfma 12 (too close to MFMA at q2s+1)
+            ],
+
+            "LRB0": [[self.q2s+1] * 2],
+            "PackB0": [[self.q2e] * 10],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+
+        snopCode = [
+            SNop(waitState=1, comment="Needed to force the last 2 PackA0s to be too close to the MFMA."),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=12 has too little gap between it and MFMA @ idx=13. Expected at least 2 quad-cycles but only 1 passed.", snopCode=snopCode)
