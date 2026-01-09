@@ -2593,6 +2593,11 @@ namespace TensileLite
                     sk.grid      = tiles;
                 }
             }
+
+            if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
+            {
+                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with StreamK kernel with splitting factor < 2\n");
+            }
         }
 
         if(debug)

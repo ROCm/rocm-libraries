@@ -37,6 +37,7 @@ add_executable(
     TestGraphSerialization.cpp
     TestINode.cpp
     TestMatmulAttributes.cpp
+    TestMatmulNode.cpp
     TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
