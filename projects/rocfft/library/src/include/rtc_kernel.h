@@ -186,7 +186,12 @@ struct RTCKernel
     int         deviceId = hipInvalidDeviceId;
 
 protected:
-    hipFunction_t kernel = nullptr;
+    // Hang on to the module that was used to construct this kernel, to
+    // ensure that the module lives long enough.  Normally we'd expect
+    // the module to be kept alive by the active_modules map below, but
+    // it's possible to have standalone RTCKernels too.
+    std::shared_future<hipModule_wrapper_t> module;
+    hipFunction_t                           kernel = nullptr;
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     struct RTCGenerator

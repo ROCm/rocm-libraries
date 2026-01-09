@@ -46,6 +46,7 @@ RTCKernel::RTCKernel(const std::string&                       kernel_name,
     : gridDim(gridDim)
     , blockDim(blockDim)
     , kernel_name(kernel_name)
+    , module(module)
 {
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     // if we're only compiling, no need to actually load the code objects
