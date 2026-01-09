@@ -1298,7 +1298,15 @@ namespace rocRoller::Client::GEMMClient::CLI
         auto update = [&](const std::string& optionName, auto& value) -> bool {
             if(app.get_option(optionName)->count())
             {
-                value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                if constexpr(std::is_same_v<std::decay_t<decltype(value)>, std::pair<int, int>>)
+                {
+                    auto arg = app.get_option(optionName)->as<std::string>();
+                    rocRoller::Client::GEMMClient::CLI::ParseIntPair(arg, value);
+                }
+                else
+                {
+                    value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                }
                 return true;
             }
             return false;
@@ -1744,10 +1752,8 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::matchMemoryAccess),
                  "Match memory access to transpose.  Currently decreases performance.");
     app.add_option(SN(&SP::padLDSA),
-                   solution.padLDSA,
                    "Element padding for A LDS buffer.  Tuple of contiguous-bytes,padding-bytes.");
     app.add_option(SN(&SP::padLDSB),
-                   solution.padLDSB,
                    "Element padding for B LDS buffer.  Tuple of contiguous-bytes,padding-bytes.");
     app.add_flag(SN(&SP::prefetch), "Enable prefetching (UnrollK=2 implied).");
     app.add_option(SN(&SP::prefetchInFlight), "Number of prefetches in flight at the same time");

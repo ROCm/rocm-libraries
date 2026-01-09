@@ -234,7 +234,7 @@ namespace rocRoller::Client::GEMMClient::CLI
     /**
      * @brief Parse an XxY pair.
      */
-    bool ParseUIntPair(const std::string& arg, std::pair<uint, uint>& x);
+    bool ParseIntPair(const std::string& arg, std::pair<int, int>& x);
 
     /**
      * @brief Parse an MxNxK or MxNxKxB tuple from a string.
