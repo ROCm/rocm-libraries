@@ -41,6 +41,8 @@ function( apply_omp_settings lib_target_ )
   endif()
 endfunction()
 
+# Search for AOCL 4.x BLIS library for the specified compiler (gcc or aocc)
+# Sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope if found
 function(find_libblis compiler)
   file(GLOB DIRS "/opt/AMD/aocl/aocl-linux-${compiler}-*")
   list(SORT DIRS)
@@ -76,6 +78,9 @@ if ( BUILD_FORTRAN_CLIENTS )
   set( fortran_language "Fortran" )
 endif()
 project( rocblas-clients LANGUAGES CXX C ${fortran_language} )
+
+# Note: BUILD_DIR is a custom variable passed by rmake.py (via -DBUILD_DIR=<build_path>)
+# to locate bundled dependencies. Use rmake.py or install.sh to build, not cmake directly.
 
 if ( BUILD_FORTRAN_CLIENTS )
   set(rocblas_f90_source_clients
@@ -300,33 +305,39 @@ set( ROCBLAS_COMMON "${PROJECT_BINARY_DIR}/staging/rocblas_common.yaml")
 add_custom_command( OUTPUT "${ROCBLAS_COMMON}"
                     COMMAND ${CMAKE_COMMAND} -E copy include/rocblas_common.yaml "${ROCBLAS_COMMON}"
                     DEPENDS include/rocblas_common.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_common.yaml to staging" )
 
 set( ROCBLAS_TEMPLATE "${PROJECT_BINARY_DIR}/staging/rocblas_template.yaml")
 add_custom_command( OUTPUT "${ROCBLAS_TEMPLATE}"
                     COMMAND ${CMAKE_COMMAND} -E copy include/rocblas_template.yaml "${ROCBLAS_TEMPLATE}"
                     DEPENDS include/rocblas_template.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_template.yaml to staging" )
 
 set( ROCBLAS_GENERAL_YAML "${PROJECT_BINARY_DIR}/staging/rocblas_general.yaml")
 add_custom_command( OUTPUT "${ROCBLAS_GENERAL_YAML}"
                     COMMAND ${CMAKE_COMMAND} -E copy include/rocblas_general.yaml "${ROCBLAS_GENERAL_YAML}"
                     DEPENDS include/rocblas_general.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_general.yaml to staging" )
 
 set( ROCBLAS_GENTEST "${PROJECT_BINARY_DIR}/staging/rocblas_gentest.py")
 add_custom_command( OUTPUT "${ROCBLAS_GENTEST}"
                     COMMAND ${CMAKE_COMMAND} -E copy common/rocblas_gentest.py "${ROCBLAS_GENTEST}"
                     DEPENDS common/rocblas_gentest.py
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_gentest.py to staging" )
 
 set( ROCBLAS_CLIENTS_README "${PROJECT_BINARY_DIR}/staging/rocblas_clients_readme.txt")
 add_custom_command( OUTPUT "${ROCBLAS_CLIENTS_README}"
                     COMMAND ${CMAKE_COMMAND} -E copy rocblas_clients_readme.txt "${ROCBLAS_CLIENTS_README}"
                     DEPENDS rocblas_clients_readme.txt
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    COMMENT "Copying rocblas_clients_readme.txt to staging" )
 
-add_custom_target( rocblas-common DEPENDS "${ROCBLAS_COMMON}" "${ROCBLAS_TEMPLATE}" "${ROCBLAS_GENERAL_YAML}" "${ROCBLAS_GENTEST}" "${ROCBLAS_CLIENTS_README}" )
+add_custom_target( rocblas-common DEPENDS "${ROCBLAS_COMMON}" "${ROCBLAS_TEMPLATE}" "${ROCBLAS_GENERAL_YAML}" "${ROCBLAS_GENTEST}" "${ROCBLAS_CLIENTS_README}"
+                   COMMENT "Building rocblas-common files" )
 
 rocm_install(
   FILES ${ROCBLAS_COMMON} ${ROCBLAS_TEMPLATE} ${ROCBLAS_GENERAL_YAML}
