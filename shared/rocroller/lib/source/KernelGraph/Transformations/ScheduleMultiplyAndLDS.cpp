@@ -626,24 +626,27 @@ namespace rocRoller::KernelGraph
 
         auto rv = original;
 
-        auto something = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
+        auto chainSets = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
 
-        for(auto chainSet : something)
+        if(Log::getLogger()->should_log(LogLevel::Debug))
         {
-            auto ts = [](auto x) { return toString(x); };
-            Log::debug("Chains:\nMultiplies: {{{}}}({})\nTypes: {}({})\nLDS: "
-                       "{{{}}}({})\nTypes: {}({})",
-                       fmt::join(chainSet.multiplyChain, ", "),
-                       chainSet.multiplyChain.size(),
-                       toString(chainSet.multiplyTagTypes),
-                       chainSet.multiplyTagTypes.size(),
-                       fmt::join(chainSet.ldsChain, ", "),
-                       chainSet.ldsChain.size(),
-                       fmt::join(chainSet.ldsChainTypes | std::views::transform(ts), ", "),
-                       chainSet.ldsChainTypes.size());
+            for(auto chainSet : chainSets)
+            {
+                auto ts = [](auto x) { return toString(x); };
+                Log::debug("Chains:\nMultiplies: {{{}}}({})\nTypes: {}({})\nLDS: "
+                           "{{{}}}({})\nTypes: {}({})",
+                           fmt::join(chainSet.multiplyChain, ", "),
+                           chainSet.multiplyChain.size(),
+                           toString(chainSet.multiplyTagTypes),
+                           chainSet.multiplyTagTypes.size(),
+                           fmt::join(chainSet.ldsChain, ", "),
+                           chainSet.ldsChain.size(),
+                           fmt::join(chainSet.ldsChainTypes | std::views::transform(ts), ", "),
+                           chainSet.ldsChainTypes.size());
+            }
         }
 
-        distributeChains(rv, something);
+        distributeChains(rv, chainSets);
         return rv;
     }
 }
