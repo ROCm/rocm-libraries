@@ -187,8 +187,6 @@ namespace Tensilelite
             double WGs = std::min(NumCUs, double(numWGs)) / GlobalSplitU;
             double L2BandWidthPerCU_local = L2ReadArbEff * 128 * 16 / WGs; //90% eff
             double atomic_overhead = GlobalSplitU * 0.1;
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
             double GSU_L1_req      = (bpeIn * (GlobalSplitU - 1) * MT0 * MT1 * bpeIn) / 64;
             if (GlobalSplitU > 2)
             {
@@ -200,19 +198,7 @@ namespace Tensilelite
             double GSU_L2_clk = GSU_L2_req / 2 * 128 / std::min(L2BandWidthPerCU_local, L2BusWidthPerCU);
 
             double cost_overhead = 2*1024.0/1900/(GlobalSplitU-1);
-            // gsu_overall       = atomic_overhead + (1 * std::max(GSU_L1_clk/cu_freq, GSU_L2_clk/cu_freq) + 2*1024.0/1900/std::floor(GSUtotal-1));
             return 0 + (GlobalSplitU * std::max(std::max(GSU_L1_clk/cu_freq, GSU_L2_clk/cu_freq), cost_overhead));
-#else
-            double GSU_L1_req      = ((GlobalSplitU - 1) * MT0 * MT1 * bpeIn) / 64;
-            if (GlobalSplitU > 2)
-            {
-                GSU_L1_req += (MT0 * MT1 * bpeIn) / 64;
-            }
-            double GSU_L1_clk      = GSU_L1_req * 64 / L1BusWidthPerCU;
-            double GSU_L2_clk = GSU_L1_req / 2 * 128 / std::min(L2BandWidthPerCU_local, L2BusWidthPerCU);
-
-            return atomic_overhead + (std::max(GSU_L1_clk/cu_freq, GSU_L2_clk/cu_freq)) + storeGSU;
-#endif
         }
 
         double getLSUOverhead(double MT0, double MT1, double lsu, uint32_t svw, 
@@ -467,64 +453,8 @@ namespace Tensilelite
 
             for(uint32_t wg = 0; wg < std::min(totalWGNum, 10 * NumCUs); wg++)
             {
-                //clean cache
                 if((wg % WGMXCCG) == 0)
                 {
-                    // FIXME: loop every XCDs is disabled
-                    // for(uint32_t xcd = 0; xcd < NumXCDs && wg > 0; xcd++)
-                    // {
-                    //     uint32_t MT0_A = 0;
-                    //     for(uint32_t g = 0; g < gsuMulBatch; g++)
-                    //     {
-                    //         for(uint32_t i = 0; i < wg0; i++)
-                    //         {
-                    //             if(arrA[g * wg0 + i] & (1 << xcd))
-                    //             {
-                    //                 if(i == (wg0 - 1)) //Edge
-                    //                     MT0_A += (MT0_Edge * (K / gsu)) * bpeA;
-                    //                 else
-                    //                     MT0_A += (MT0 * (K / gsu)) * bpeA;
-                    //             }
-                    //         }
-                    //     }
-
-                    //     uint32_t MT1_B = 0;
-                    //     for(uint32_t g = 0; g < gsuMulBatch; g++)
-                    //     {
-                    //         for(uint32_t i = 0; i < wg1; i++)
-                    //         {
-                    //             if(arrB[g * wg1 + i] & (1 << xcd))
-                    //             {
-                    //                 if(i == (wg1 - 1)) //Edge
-                    //                     MT1_B += (MT1_Edge * (K / gsu)) * bpeB;
-                    //                 else
-                    //                     MT1_B += (MT1 * (K / gsu)) * bpeB;
-                    //             }
-                    //         }
-                    //     }
-                    //     if(MT0_A + MT1_B <= L2Capacity)
-                    //     {
-                    //         //keep in cache
-                    //         for(uint32_t g = 0; g < gsuMulBatch; g++)
-                    //             for(uint32_t i = 0; i < wg0; i++)
-                    //                 arrA_2[g * wg0 + i] |= arrA[g * wg0 + i] & (1 << xcd);
-                    //         for(uint32_t g = 0; g < gsuMulBatch; g++)
-                    //             for(uint32_t i = 0; i < wg1; i++)
-                    //                 arrB_2[g * wg1 + i] |= arrB[g * wg1 + i] & (1 << xcd);
-                    //     }
-                    //     else
-                    //     {
-                    //         //clean cache
-                    //         //arrA_2.assign(wg0 * gsuMulBatch, 0);
-                    //         //arrB_2.assign(wg1 * gsuMulBatch, 0);
-
-                    //         std::memset(arrA_2.data(), 0, arrA_2.size() * sizeof(uint32_t));
-                    //         std::memset(arrB_2.data(), 0, arrB_2.size() * sizeof(uint32_t));
-                    //     }
-                    // }
-
-                    //arrA.assign(wg0 * gsuMulBatch, 0);
-                    //arrB.assign(wg1 * gsuMulBatch, 0);
                     std::memset(arrA_2.data(), 0, arrA_2.size() * sizeof(uint32_t));
                     std::memset(arrB_2.data(), 0, arrB_2.size() * sizeof(uint32_t));
                 }

@@ -75,33 +75,13 @@ namespace origami
     // ============================================================================
     double getLoopOverall(const MemoryAccessCosts& mem, double math, uint32_t loopCnt, double pgr)
     {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         double loop_overall;
 
         if(pgr > 1 && loopCnt > 0)
             loop_overall = std::max(math, mem.mem_overall) * (loopCnt - 1) + (math);
-            // loop_overall = mem.mem_overall * (loopCnt - 1) + (math);
         else
             loop_overall = std::max(math, mem.mem_overall) * loopCnt;
         return loop_overall;
-#else
-        double path1 = std::max(math, mem.mem_l1);
-        double path2 = std::max(math, mem.mem_l2);
-        double path3 = std::max(math, mem.mem_l3);
-        double path4 = std::max(math, mem.mem_hbm);
-
-        double ratio1 = mem.l1_hit;
-        double ratio2 = (1 - ratio1) * mem.l2_hit;
-        double ratio3 = (1 - ratio1 - ratio2) * mem.l3_hit;
-        double ratio4 = (1 - ratio1 - ratio2 - ratio3);
-
-        if(pgr > 1 && loopCnt > 0)
-            return (path1 * ratio1 + path2 * ratio2 + path3 * ratio3 + path4 * ratio4) * (loopCnt - 1) + (math);
-        else
-            return (path1 * ratio1 + path2 * ratio2 + path3 * ratio3 + path4 * ratio4) * loopCnt;
-#endif
     }
 
     // ============================================================================
@@ -139,9 +119,6 @@ namespace origami
         double B_L3_clk = B_L3_req * 128 / L3BandWidthPerCU;
         double B_hbm_clk = B_hbm_req * 128 / HBMBandWidthPerCU;
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         A_L1_clk = A_L1_req * tile0_L1_hit * 64 / hw.L1BusWidthPerCU;
         A_L3_clk = A_L3_req * 64 / L3BandWidthPerCU;
         A_hbm_clk = A_hbm_req * 8 / HBMBandWidthPerCU;
@@ -162,22 +139,6 @@ namespace origami
         mem.l1_hit = (tile0_L1_hit * MT0 + tile1_L1_hit * MT1) / (MT0 + MT1);
         mem.l2_hit = totalL2HitRate;
         mem.l3_hit = totalL3HitRate;
-#else
-        double L1_overall   = (A_L1_clk + B_L1_clk) / hw.math_frequency;
-        double L2_overall   = (A_L2_clk + B_L2_clk) / hw.math_frequency;
-        double L3_overall   = (A_L3_clk + B_L3_clk) / hw.mem_frequency;
-        double hbm_overall  = (A_hbm_clk + B_hbm_clk) / hw.mem_frequency;
-        mem.mem_overall     = L1_overall + L2_overall + L3_overall + hbm_overall;
-
-        mem.mem_l1 = L1_overall;
-        mem.mem_l2 = std::max(mem.mem_l1, L2_overall);
-        mem.mem_l3 = std::max(mem.mem_l2, L3_overall);
-        mem.mem_hbm = std::max(mem.mem_l3, hbm_overall);
-        mem.l1_hit = (tile0_L1_hit * MT0 + tile1_L1_hit * MT1) / (MT0 + MT1);
-        mem.l2_hit = totalL2HitRate;
-        mem.l3_hit = totalL3HitRate;
-
-#endif
         //for debug
         mem.A_L1_req = A_L1_req;
         mem.B_L1_req = B_L1_req;
@@ -193,52 +154,16 @@ namespace origami
     // ============================================================================
     double resolveOccupancy(const HardwareConstants& hw, double perf, double prefetch, double mathCost, double storeCost, uint32_t num_tiles, uint32_t CUOccupancy)
     {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if ((num_tiles > 1)  && CUOccupancy >= 2)
         {
-#define USE_OLD_OCCUPANCY_TWO 0 //Old Occupancy 2 doesn't make sense but has better perf.
-#if USE_OLD_OCCUPANCY_TWO
-            auto preLoopCost   = hw.initialCost + prefetch;
-            perf = (preLoopCost + mathCost
-                    + std::max(mathCost, storeCost))
-                        * (num_tiles - 1)
-                   + storeCost;
-#else
             perf = (prefetch + mathCost)
                     + (mathCost + storeCost)
                        * (num_tiles - 1);
-#endif
-#else
-        if ((num_tiles > 1)  && CUOccupancy >= 2 && num_tiles == CUOccupancy)
-        {
-#define USE_OLD_OCCUPANCY_TWO 1 //Old Occupancy 2 doesn't make sense but has better perf.
-#if USE_OLD_OCCUPANCY_TWO
-            auto preLoopCost   = hw.initialCost + prefetch;
-            perf = (preLoopCost + mathCost
-                    + std::max(mathCost, storeCost))
-                        * (num_tiles - 1)
-                   + storeCost;
-#else
-            perf = (hw.initialCost + prefetch + mathCost)
-                    + std::max(mathCost, storeCost)
-                       * (num_tiles - 1)
-                   + storeCost;
-
-#endif
-#endif
         }
         else
         {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
             perf *= num_tiles;
             perf += 1.7*(num_tiles-1);
-#else
-            perf = perf + (perf - hw.initialCost + hw.initialCostHit) * (num_tiles - 1);
-#endif
         }
         return perf;
     }
@@ -325,19 +250,11 @@ namespace origami
         uint32_t K_tail = K_AfterGSU - (loopCnt * depthU);
 
         int PGR = configMapping.PrefetchGlobalRead;
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         PGR = (std::floor(K_AfterGSU/depthU > 1)) ? configMapping.PrefetchGlobalRead : int(K_AfterGSU/depthU);
-#endif
 
         double L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / WGs_per_tile_XCD;
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if (L2BandWidthPerCU > hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs))
             L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs);
-#endif
         double L3BandWidthPerCU = hw_consts.L3BandWidth / WGs_per_tile;
         double HBMBandWidthPerCU = hw_consts.hbmBandWidth / WGs_per_tile;
 
@@ -360,23 +277,13 @@ namespace origami
         double math_overall = metrics.compute_cycles / hw_consts.math_frequency;
         double loop_overall = getLoopOverall(mem_costs, math_overall, loopCnt, PGR);
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         loop_overall += loopCnt * 0.2;
-#endif
 
         // 3. Handle Tail Loop
         double tail_overall = 0.0;
         if (K_tail > 0)
         {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
             tail_overall = (mem_costs.mem_overall * K_tail / depthU + math_overall) + metrics.prefetch_cost * 2;
-#else
-            tail_overall = (mem_costs.mem_hbm + math_overall);
-#endif
         }
 
         // 4. Calculate preLoopCost
@@ -395,11 +302,7 @@ namespace origami
             store = edge_percentage * store_edge + (1 - edge_percentage) * store;
             perf = preLoopCost + loop_overall + store;
         }
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         else { store = std::max(store_edge, store); perf = metrics.prefetch_cost + loop_overall + store;}
-#endif
 
         // 6. Add tail loop cost
         perf += tail_overall;
@@ -413,12 +316,8 @@ namespace origami
         // 9. Add GSU Reduction Part
         perf += metrics.split_accumulation_overhead;
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if (int(M) % int(MT0) != 0)
             perf = perf + std::max(store_edge, store);
-#endif
 
         pp.microSeconds = perf;
         pp.hitRate = metrics.totalL2HitRate * 100;

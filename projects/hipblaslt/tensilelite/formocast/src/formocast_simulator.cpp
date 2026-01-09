@@ -66,33 +66,13 @@ namespace Tensilelite
 
     double Formocast::getLoopOverall(const MemoryAccessCosts& mem, double math, uint32_t loopCnt, double pgr) const
     {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         double loop_overall;
 
         if(pgr > 1 && loopCnt > 0)
             loop_overall = std::max(math, mem.mem_overall) * (loopCnt - 1) + (math);
-            // loop_overall = mem.mem_overall * (loopCnt - 1) + (math);
         else
             loop_overall = std::max(math, mem.mem_overall) * loopCnt;
         return loop_overall;
-#else
-        double path1 = std::max(math, mem.mem_l1);
-        double path2 = std::max(math, mem.mem_l2);
-        double path3 = std::max(math, mem.mem_l3);
-        double path4 = std::max(math, mem.mem_hbm);
-
-        double ratio1 = mem.l1_hit;
-        double ratio2 = (1 - ratio1) * mem.l2_hit;
-        double ratio3 = (1 - ratio1 - ratio2) * mem.l3_hit;
-        double ratio4 = (1 - ratio1 - ratio2 - ratio3);
-
-        if(pgr > 1 && loopCnt > 0)
-            return (path1 * ratio1 + path2 * ratio2 + path3 * ratio3 + path4 * ratio4) * (loopCnt - 1) + (math);
-        else
-            return (path1 * ratio1 + path2 * ratio2 + path3 * ratio3 + path4 * ratio4) * loopCnt;
-#endif
     }
 
     Formocast::HardwareConstants archConstantMap(const unsigned char* magic, size_t magicSize) {
@@ -147,16 +127,6 @@ namespace Tensilelite
             = Simulator::calculateStoreL2Request(M, N, MT0, MT1, GWVWD, D_L2_req, D_L2_edge_req);
         double total_store_req3 = Simulator::calculateStoreL3Request(M, N, MT0, MT1, D_L3_req, D_L3_edge_req);
 
-        // std::cout<<"store L1 non-edge= "<<D_L1_req<<std::endl;
-        // std::cout<<"store L1 edge    = "<<D_L1_edge_req<<std::endl;
-        // std::cout<<"store L2 non-edge= "<<D_L2_req<<std::endl;
-        // std::cout<<"store L2 edge    = "<<D_L2_edge_req<<std::endl;
-        // std::cout<<"store L3 non-edge= "<<D_L3_req<<std::endl;
-        // std::cout<<"store L3 edge    = "<<D_L3_edge_req<<std::endl;
-        // std::cout<<"store L1 request = "<<total_store_req1<<std::endl;
-        // std::cout<<"store L2 request = "<<total_store_req2<<std::endl;
-        // std::cout<<"store L3 request = "<<total_store_req3<<std::endl;
-
         double L2WriteBandWidthPerCU = hw_consts.L2WriteArbEff * 128 * 16 / WGs_per_tile_XCD; //58% eff
         double L3BandWidthPerCU      = hw_consts.L3BandWidth / WGs_per_tile;
         double HBMBandWidthPerCU     = hw_consts.hbmBandWidth / WGs_per_tile;
@@ -185,16 +155,11 @@ namespace Tensilelite
         // Use the max of edge/non-edge store
         store      = store_non_edge_overall;
         store_edge = store_edge_overall;
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         store = (GWVWD==1) ? store*2: store;
         store = (GWVWD==2) ? store*1.5: store;
 
         store_edge = (GWVWD==1) ? store_edge*2: store_edge;
         store_edge = (GWVWD==2) ? store_edge*1.5: store_edge;
-#else
-#endif
     }
 
     Formocast::L1CacheHitRate
@@ -307,9 +272,6 @@ namespace Tensilelite
         double B_L3_clk = B_L3_req * 128 / L3BandWidthPerCU;
         double B_hbm_clk = B_hbm_req * 128 / HBMBandWidthPerCU;
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         A_L1_clk = A_L1_req * hr.A_L1_hit * 64 / hw.L1BusWidthPerCU;
         A_L3_clk = A_L3_req * 64 / L3BandWidthPerCU;
         A_hbm_clk = A_hbm_req * 8 / HBMBandWidthPerCU;
@@ -330,22 +292,6 @@ namespace Tensilelite
         mem.l1_hit = (hr.A_L1_hit * MT0 + hr.B_L1_hit * MT1) / (MT0 + MT1);
         mem.l2_hit = hr.totalL2HitRate;
         mem.l3_hit = hr.totalL3HitRate;
-#else
-        double L1_overall   = (A_L1_clk + B_L1_clk) / hw.math_frequency;
-        double L2_overall   = (A_L2_clk + B_L2_clk) / hw.math_frequency;
-        double L3_overall   = (A_L3_clk + B_L3_clk) / hw.mem_frequency;
-        double hbm_overall  = (A_hbm_clk + B_hbm_clk) / hw.mem_frequency;
-        mem.mem_overall     = L1_overall + L2_overall + L3_overall + hbm_overall;
-
-        mem.mem_l1 = L1_overall;
-        mem.mem_l2 = std::max(mem.mem_l1, L2_overall);
-        mem.mem_l3 = std::max(mem.mem_l2, L3_overall);
-        mem.mem_hbm = std::max(mem.mem_l3, hbm_overall);
-        mem.l1_hit = (hr.A_L1_hit * MT0 + hr.B_L1_hit * MT1) / (MT0 + MT1);
-        mem.l2_hit = hr.totalL2HitRate;
-        mem.l3_hit = hr.totalL3HitRate;
-
-#endif
         //for debug
         mem.A_L1_req = A_L1_req;
         mem.B_L1_req = B_L1_req;
@@ -357,52 +303,16 @@ namespace Tensilelite
 
     double Formocast::resolveOccupancy(const HardwareConstants& hw, double perf, double prefetch, double mathCost, double storeCost, uint32_t num_tiles, uint32_t CUOccupancy) const
     {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if ((num_tiles > 1)  && CUOccupancy >= 2)
         {
-#define USE_OLD_OCCUPANCY_TWO 0 //Old Occupancy 2 doesn't make sense but has better perf.
-#if USE_OLD_OCCUPANCY_TWO
-            auto preLoopCost   = hw.initialCost + prefetch;
-            perf = (preLoopCost + mathCost
-                    + std::max(mathCost, storeCost))
-                        * (num_tiles - 1)
-                   + storeCost;
-#else
             perf = (prefetch + mathCost)
                     + (mathCost + storeCost)
                        * (num_tiles - 1);
-#endif
-#else
-        if ((num_tiles > 1)  && CUOccupancy >= 2 && num_tiles == CUOccupancy)
-        {
-#define USE_OLD_OCCUPANCY_TWO 1 //Old Occupancy 2 doesn't make sense but has better perf.
-#if USE_OLD_OCCUPANCY_TWO
-            auto preLoopCost   = hw.initialCost + prefetch;
-            perf = (preLoopCost + mathCost
-                    + std::max(mathCost, storeCost))
-                        * (num_tiles - 1)
-                   + storeCost;
-#else
-            perf = (hw.initialCost + prefetch + mathCost)
-                    + std::max(mathCost, storeCost)
-                       * (num_tiles - 1)
-                   + storeCost;
-
-#endif
-#endif
         }
         else
         {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
             perf *= num_tiles;
             perf += 1.7*(num_tiles-1);
-#else
-            perf = perf + (perf - hw.initialCost + hw.initialCostHit) * (num_tiles - 1);
-#endif
         }
         return perf;
     }
@@ -473,8 +383,6 @@ namespace Tensilelite
     {
         PredictedPerformance pp;
 
-        //std::cout<<"[Formocast] predictedPerformance"<<std::endl;
-
         // 1. Problem Dimension Calculation
         double M = problem.M;
         double N = problem.N;
@@ -542,24 +450,6 @@ namespace Tensilelite
         // Clock calculation
         // TODO: No need to check minMathClock if we guarantee that MathClocksUnrolledLoop is correct.
         double math_clk = sizeMapping.MathClocksUnrolledLoop;
-        //auto miLatency = hardware.get_mi_latency(sizeMapping.matrixInstruction[0], sizeMapping.matrixInstruction[1], sizeMapping.matrixInstruction[2], DataType::BFloat16); //FIXME: Only for Bf16 now (TF32 is also BF16 in gfx950)
-        //auto minMathClock = ((double)MT0 * MT1 * depthU / (sizeMapping.matrixInstruction[0] * sizeMapping.matrixInstruction[1] * sizeMapping.matrixInstruction[2]) * miLatency);
-        //assert(math_clk >= minMathClock);
-        //math_clk = std::max(math_clk, minMathClock); //FIXME: CMS kernel has incorrect MathClocksUnrolledLoop
-
-        // Debug output (commented)
-        //std::cout<<"DTVA         =          "<<DTVA<<std::endl;
-        //std::cout<<"DTVB         =          "<<DTVB<<std::endl;
-        //std::cout<<"MT0          =          "<<MT0<<std::endl;
-        //std::cout<<"MT1          =          "<<MT1<<std::endl;
-        //std::cout<<"GlobalSplitU =          "<<GlobalSplitU<<std::endl;
-        //std::cout<<"math_clk     =          "<<math_clk<<std::endl;
-        //std::cout<<"WGM          =          "<<WGM<<std::endl;
-        //std::cout<<"CUOccupancy  =          "<<CUOccupancy<<std::endl;
-        //std::cout<<"depthU       =          "<<depthU<<std::endl;
-        //std::cout<<"PGR          =          "<<PGR<<std::endl;
-        //std::cout<<"GWVWD        =          "<<GWVWD<<std::endl;
-        //std::cout<<"miSize       =          "<<miSize<<std::endl;
 
         // 3.1 Early terminate. FIXME: Can filter most of the solutions with an outside function.
         // FIXME: add an extra function to reject the solutions first.
@@ -573,25 +463,21 @@ namespace Tensilelite
         }
         if ((M < 128 && MT0 - M >= 16) || (N < 128 && MT1 - N >= 16))
         {
-            //std::cout<<"M:"<<M<<",N:"<<N<<",MT0:"<<MT0<<",MT1:"<<MT1<<std::endl;
             pp.microSeconds = 9999999.9;
             pp.hitRate = 0;
             return pp;
         }
         if ((M >= 128 && MT0 - M >= 32) || (N >= 128 && MT1 - N >= 32))
         {
-            //std::cout<<"M:"<<M<<",N:"<<N<<",MT0:"<<MT0<<",MT1:"<<MT1<<std::endl;
             pp.microSeconds = 9999999.9;
             pp.hitRate = 0;
             return pp;
         }
         if(problem.dataType == DataType::BFloat16 || problem.dataType == DataType::Half)
         {
-            //TODO: handle TF32 problem so that check the BPE here.
             if(problem.bpeA == 2 && problem.bpeB == 2)
                 if (((K >= 64 && depthU <=32) || (K <= 32 && depthU > 32) || (K > 32 && depthU > K)) && NumBatches < hw_consts.NumCUs && sizeMapping.matrixInstruction[2] >= 32)
                 {
-                    //std::cout<<"K:"<<K<<",depthU:"<<depthU<<",NumBatches:"<<NumBatches<<",sizeMapping.matrixInstruction[2]:"<<sizeMapping.matrixInstruction[2]<<std::endl;
                     pp.microSeconds = 9999999.9;
                     pp.hitRate = 0;
                     return pp;
@@ -626,21 +512,15 @@ namespace Tensilelite
         uint32_t num_tiles = ceilDivide(numberWGs, uint32_t(hw_consts.NumCUs));
         uint32_t loopCnt = K_AfterGSU / depthU;
         uint32_t K_tail = K_AfterGSU - (loopCnt * depthU);
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         PGR = (std::floor(K_AfterGSU/depthU > 1)) ? sizeMapping.PrefetchGlobalRead : int(K_AfterGSU/depthU);
         int      PLR = (std::floor(K_AfterGSU/sizeMapping.LocalSplitU/depthU) < 1) ? 0: 1;//sizeMapping.PrefetchLocalRead;
 
         if (PLR == 0)
         {
-            //std::cout<<"M:"<<M<<",N:"<<N<<",MT0:"<<MT0<<",MT1:"<<MT1<<std::endl;
             pp.microSeconds = 9999999.9;
             pp.hitRate = 0;
             return pp;
         }
-#else
-#endif
         // 5. Cache Hit Rates and Bandwidths
         CacheHitRates cache_hits;
         L1CacheHitRate l1 = computeL1CacheHitRate(hw_consts,
@@ -691,13 +571,8 @@ namespace Tensilelite
 
         // 9. Calculate Memory Access and Math Costs
         double L2BandWidthPerCU     = hw_consts.L2ReadArbEff * 128 * 16 / WGs_per_tile_XCD; //90% eff
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if (L2BandWidthPerCU > hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs))
             L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs);
-#else
-#endif
         double L3BandWidthPerCU     = hw_consts.L3BandWidth / WGs_per_tile;
         double HBMBandWidthPerCU    = hw_consts.hbmBandWidth / WGs_per_tile;
 
@@ -758,12 +633,7 @@ namespace Tensilelite
         double math_overall = math_clk / hw_consts.math_frequency;
         double loop_overall = getLoopOverall(mem_costs, math_overall, loopCnt, PGR);
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         loop_overall += loopCnt*0.2;
-#else
-#endif
         // 12. Aggregate Performance: pre-loop + unrolled-loop + post-loop
         double perf = preLoopCost + loop_overall + store;
         if (num_tiles > 1)
@@ -777,25 +647,14 @@ namespace Tensilelite
             store = edge_percentage * store_edge + (1 - edge_percentage) * store;
             perf = preLoopCost + loop_overall + store;
         }
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         else { store = std::max(store_edge, store); perf = prefetch + loop_overall + store;}
-#else
-#endif
 
         // 13. Handle Tail Loop
         double tail_overall = 0.0;
         if (K_tail > 0)
         {
             // FIXME: need to add new opt.
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
             tail_overall = (mem_costs.mem_overall*K_tail/depthU + math_overall) + prefetch*2;
-#else
-            tail_overall = (mem_costs.mem_hbm + math_overall);
-#endif
             perf += tail_overall;
         }
 
@@ -808,18 +667,8 @@ namespace Tensilelite
         // 16. Add GSU Reduction Part
         perf += gsu_overall;
 
-
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if (int(M) % int(MT0) != 0)
-            // perf += store_edge;
-            // perf += store;
-            // perf += store* ((int(M) % int(MT0))/MT0);
-            // perf = perf - store + std::max(store_edge, store);
             perf = perf + std::max(store_edge, store);
-#else
-#endif
         pp.microSeconds = perf;
         pp.hitRate = cache_hits.totalL2HitRate * 100;
 
@@ -837,48 +686,6 @@ namespace Tensilelite
         perfInfo.mt1 = MT1;
         perfInfo.du = depthU;
 
-#if 0
-        std::cout<<"MT0               =          "<<MT0<<std::endl;
-        std::cout<<"MT1               =          "<<MT1<<std::endl;
-        std::cout<<"depthU            =          "<<depthU<<std::endl;
-        std::cout<<"NumCUs            =          "<<hw_consts.NumCUs<<std::endl;
-        std::cout<<"WorkGroupMapping  =          "<<WGM<<std::endl;
-        std::cout<<"CUOccupancy       =          "<<CUOccupancy<<std::endl;
-        std::cout<<"GlobalSplitU      =          "<<GlobalSplitU<<std::endl;
-        std::cout<<"loopCnt           =          "<<loopCnt<<std::endl;
-        std::cout<<"flopsPerClk       =          "<<hw_consts.flopsPerClk<<std::endl;
-        std::cout<<"A_L1_req          =          "<<mem_costs.A_L1_req<<std::endl;
-        std::cout<<"B_L1_req          =          "<<mem_costs.B_L1_req<<std::endl;
-        std::cout<<"A_L2_req          =          "<<mem_costs.A_L2_req<<std::endl;
-        std::cout<<"B_L2_req          =          "<<mem_costs.B_L2_req<<std::endl;
-        std::cout<<"A_L1_hit          =          "<<cache_hits.A_L1_hit<<std::endl;
-        std::cout<<"B_L1_hit          =          "<<cache_hits.B_L1_hit<<std::endl;
-        std::cout<<"A_L2_hit          =          "<<cache_hits.A_L2_hit<<std::endl;
-        std::cout<<"B_L2_hit          =          "<<cache_hits.B_L2_hit<<std::endl;
-        std::cout<<"overall L2 Hit    =          "<<cache_hits.totalL2HitRate<<std::endl;
-        std::cout<<"A_L3_hit          =          "<<cache_hits.A_L3_hit<<std::endl;
-        std::cout<<"B_L3_hit          =          "<<cache_hits.B_L3_hit<<std::endl;
-        std::cout<<"math_clk          =          "<<math_clk<<std::endl;
-        std::cout<<"mem_l1            =          "<<mem_costs.mem_l1<<std::endl;
-        std::cout<<"mem_l2            =          "<<mem_costs.mem_l2<<std::endl;
-        std::cout<<"mem_l3            =          "<<mem_costs.mem_l3<<std::endl;
-        std::cout<<"mem_hbm           =          "<<mem_costs.mem_hbm<<std::endl;
-        std::cout<<"mem_overall       =          "<<mem_costs.mem_overall<<std::endl;
-        std::cout<<"math_overall      =          "<<math_overall<<std::endl;
-        std::cout<<"tail_overall      =          "<<tail_overall<<std::endl;
-        std::cout<<"M_WGs_total       =          "<<M_WGs_total<<std::endl;
-        std::cout<<"N_WGs_total       =          "<<N_WGs_total<<std::endl;
-        std::cout<<"K_tail            =          "<<K_tail<<std::endl;
-        std::cout<<"loop_overall      =          "<<loop_overall<<std::endl;
-        std::cout<<"preLoopCost       =          "<<preLoopCost<<std::endl;
-        std::cout<<"prefetch          =          "<<prefetch<<std::endl;
-        std::cout<<"store_edge        =          "<<store_edge<<std::endl;
-        std::cout<<"store             =          "<<store<<std::endl;
-        std::cout<<"gsu_overall       =          "<<gsu_overall<<std::endl;
-        std::cout<<"lsu_overall       =          "<<lsu_overall<<std::endl;
-        std::cout<<"num_tiles         =          "<<num_tiles<<std::endl;
-        std::cout<<"=================="<<perf<<" us"<<std::endl;
-#endif
         return pp;
     }
 
@@ -966,11 +773,7 @@ namespace Tensilelite
         uint32_t loopCnt = K_AfterGSU / depthU;
         uint32_t K_tail = K_AfterGSU - (loopCnt * depthU);
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         PGR = (std::floor(K_AfterGSU/depthU > 1)) ? sizeMapping.PrefetchGlobalRead : int(K_AfterGSU/depthU);
-#endif
 
         // 4. Cache Hit Rates and Bandwidths
         CacheHitRates cache_hits;
@@ -1026,12 +829,8 @@ namespace Tensilelite
 
         // 8. Calculate Memory Access and Math Costs
         double L2BandWidthPerCU     = hw_consts.L2ReadArbEff * 128 * 16 / WGs_per_tile_XCD; //90% eff
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if (L2BandWidthPerCU > hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs))
             L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs);
-#endif
         double L3BandWidthPerCU     = hw_consts.L3BandWidth / WGs_per_tile;
         double HBMBandWidthPerCU    = hw_consts.hbmBandWidth / WGs_per_tile;
 
@@ -1129,19 +928,11 @@ namespace Tensilelite
         uint32_t K_tail = K_AfterGSU - (loopCnt * depthU);
 
         int PGR = sizeMapping.PrefetchGlobalRead;
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         PGR = (std::floor(K_AfterGSU/depthU > 1)) ? sizeMapping.PrefetchGlobalRead : int(K_AfterGSU/depthU);
-#endif
 
         double L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / WGs_per_tile_XCD;
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if (L2BandWidthPerCU > hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs))
             L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs);
-#endif
         double L3BandWidthPerCU = hw_consts.L3BandWidth / WGs_per_tile;
         double HBMBandWidthPerCU = hw_consts.hbmBandWidth / WGs_per_tile;
 
@@ -1163,23 +954,13 @@ namespace Tensilelite
         double math_overall = metrics.compute_cycles / hw_consts.math_frequency;
         double loop_overall = getLoopOverall(mem_costs, math_overall, loopCnt, PGR);
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         loop_overall += loopCnt * 0.2;
-#endif
 
         // 3. Handle Tail Loop
         double tail_overall = 0.0;
         if (K_tail > 0)
         {
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
             tail_overall = (mem_costs.mem_overall * K_tail / depthU + math_overall) + metrics.prefetch_cost * 2;
-#else
-            tail_overall = (mem_costs.mem_hbm + math_overall);
-#endif
         }
 
         // 4. Calculate preLoopCost
@@ -1198,11 +979,7 @@ namespace Tensilelite
             store = edge_percentage * store_edge + (1 - edge_percentage) * store;
             perf = preLoopCost + loop_overall + store;
         }
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         else { store = std::max(store_edge, store); perf = metrics.prefetch_cost + loop_overall + store;}
-#endif
 
         // 6. Add tail loop cost
         perf += tail_overall;
@@ -1216,12 +993,8 @@ namespace Tensilelite
         // 9. Add GSU Reduction Part
         perf += metrics.split_accumulation_overhead;
 
-#undef EXPERIMENTAL
-#define EXPERIMENTAL 1
-#if EXPERIMENTAL
         if (int(M) % int(MT0) != 0)
             perf = perf + std::max(store_edge, store);
-#endif
 
         pp.microSeconds = perf;
         pp.hitRate = metrics.cache_hits.totalL2HitRate * 100;
