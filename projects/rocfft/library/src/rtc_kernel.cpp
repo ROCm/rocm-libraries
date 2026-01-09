@@ -48,14 +48,14 @@ RTCKernel::RTCKernel(const std::string&                       kernel_name,
     , kernel_name(kernel_name)
     , module(module)
 {
+    if(hipGetDevice(&deviceId) != hipSuccess || deviceId == hipInvalidDeviceId)
+        throw std::runtime_error("hipGetDevice failed");
+
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     // if we're only compiling, no need to actually load the code objects
     if(rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1")
         return;
 #endif
-
-    if(hipGetDevice(&deviceId) != hipSuccess || deviceId == hipInvalidDeviceId)
-        throw std::runtime_error("hipGetDevice failed");
 
     if(hipModuleGetFunction(&kernel, module.get(), kernel_name.c_str()) != hipSuccess)
         throw std::runtime_error("failed to get function " + kernel_name);
