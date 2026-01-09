@@ -38,6 +38,60 @@
 
 #include <omp.h>
 
+TEST_CASE("zip function works.", "[infrastructure][generator][utils]")
+{
+    using namespace rocRoller;
+
+    std::vector<int>         a{1, 2, 3, 4, 5};
+    std::vector<std::string> b{"one", "two", "three", "four"};
+    std::vector<int>         c{4, 5, 6, 7, 8};
+
+    SECTION("Second range is shorter")
+    {
+        std::vector<std::tuple<int, std::string>> expected{
+            {1, "one"}, {2, "two"}, {3, "three"}, {4, "four"}};
+
+        CHECK(expected == zip(a, b).to<std::vector>());
+    }
+
+    SECTION("First range is shorter")
+    {
+        std::vector<std::tuple<int, std::string>> expected{{1, "one"}, {2, "two"}, {3, "three"}};
+
+        CHECK(expected == zip(take(3, a), b).to<std::vector>());
+    }
+
+    SECTION("Same size & types")
+    {
+        std::vector<std::tuple<int, int>> expected{{1, 4}, {2, 5}, {3, 6}, {4, 7}, {5, 8}};
+
+        CHECK(expected == zip(a, c).to<std::vector>());
+    }
+
+    SECTION("Unlimited")
+    {
+        std::vector<std::tuple<int, int>> expected{{1, 4}, {2, 5}, {3, 6}, {4, 7}, {5, 8}};
+
+        auto actual = zip(iota(1), iota(4)).take(5).to<std::vector>();
+
+        CHECK(expected == actual);
+    }
+
+    SECTION("Three ranges")
+    {
+        std::vector<std::tuple<int, int, int>> expected{{1, 10, 4}, {2, 12, 5}, {3, 14, 6}};
+
+        CHECK(expected == zip(a, iota(10, 15, 2), c).to<std::vector>());
+    }
+
+    SECTION("One range")
+    {
+        std::vector<std::tuple<int>> expected{{1}, {2}, {3}, {4}, {5}};
+
+        CHECK(expected == zip(a).to<std::vector>());
+    }
+}
+
 TEST_CASE("concatenate_join joins different types", "[infrastructure][utils]")
 {
     CHECK(rocRoller::concatenate_join(", ", "x", 5, rocRoller::DataType::Double) == "x, 5, Double");
