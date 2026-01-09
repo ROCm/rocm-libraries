@@ -34,14 +34,14 @@ namespace rocRoller
         namespace AddLDSPaddingDetail
         {
             /**
-	     * @brief Information about LDS padding.
-	     *
-	     * Information about LDS padding that is being added to
-	     * the graph.
+             * @brief Information about LDS padding.
              *
-	     * For direct-to-LDS loads, the loadLaneWidth field is the
-	     * workgroup size (usually 256 lanes).
-	     */
+             * Information about LDS padding that is being added to
+             * the graph.
+             *
+             * For direct-to-LDS loads, the loadLaneWidth field is the
+             * workgroup size (usually 256 lanes).
+             */
             struct LDSPaddingInfo
             {
                 int ldsTag; //< LDS coordinate.
@@ -51,13 +51,14 @@ namespace rocRoller
                 std::array<int, 2> downstreamTags; //< Coordinates downstream of downstreamEdge.
                 DataType           dataType; //< DataType of the data in LDS.
                 LayoutType         layoutType; //< LayoutType of the data in LDS.
-                uint loadInstructionByteWidth; //< Byte-width of the instructions used to load data destined for LDS.
+                uint
+                    loadInstructionByteWidth; //< Byte-width of the instructions used to load data destined for LDS.
                 uint loadLaneWidth; //< Number of lanes that should be considered contiguous.
             };
 
             /**
-	     * @brief Get the number of padding elements.
-	     */
+             * @brief Get the number of padding elements.
+             */
             uint computeDefaultLDSPaddingElements(KernelGraph const&    graph,
                                                   LDSPaddingInfo const& info,
                                                   ContextPtr            context);

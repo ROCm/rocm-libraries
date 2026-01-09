@@ -433,9 +433,7 @@ namespace GEMMTests
         return ::testing::ValuesIn(filtered);
     }
 
-    INSTANTIATE_TEST_SUITE_P(GEMMDirectLDSTestBasic,
-                             GEMMDirectLDSTestBasicGPU,
-                             ::testing::Combine(currentGPUISA(), ));
+    INSTANTIATE_TEST_SUITE_P(GEMMDirectLDSTestBasic, GEMMDirectLDSTestBasicGPU, currentGPUISA());
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMDirectLDSTest,

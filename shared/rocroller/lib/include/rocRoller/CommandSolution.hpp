@@ -146,18 +146,18 @@ namespace rocRoller
         std::optional<int> workgroupRemapXCC   = {};
 
         /**
-	 * @brief Padding for LDS.
-	 *
-	 * Map from LayoutType to LDS padding specification.
+         * @brief Padding for LDS.
+         *
+         * Map from LayoutType to LDS padding specification.
          *
          * An LDS padding specification is a pair of integers: the
          * first integer is how many contiguous bytes, followed by
          * size of padding (gap) in bytes.
-	 *
-	 * A specification of {0, 0} means no padding.  This is the default.
+         *
+         * A specification of {0, 0} means no padding.  This is the default.
          *
          * A specification of {-1, -1} means automatic padding.
-	 */
+         */
         std::map<LayoutType, std::pair<uint, uint>> padLDS
             = {{LayoutType::MATRIX_A, {0u, 0u}}, {LayoutType::MATRIX_B, {0u, 0u}}};
 

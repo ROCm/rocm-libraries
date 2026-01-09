@@ -1743,10 +1743,12 @@ int main(int argc, const char* argv[])
 
     app.add_flag(SN(&SP::matchMemoryAccess),
                  "Match memory access to transpose.  Currently decreases performance.");
-    app.add_option(SN(&SP::padLDSA), solution.padLDSA,
-                   "Element padding for A LDS buffer.  XXX");
-    app.add_option(SN(&SP::padLDSB), solution.padLDSB,
-                   "Element padding for B LDS buffer.  XXX");
+    app.add_option(SN(&SP::padLDSA),
+                   solution.padLDSA,
+                   "Element padding for A LDS buffer.  Tuple of contiguous-bytes,padding-bytes.");
+    app.add_option(SN(&SP::padLDSB),
+                   solution.padLDSB,
+                   "Element padding for B LDS buffer.  Tuple of contiguous-bytes,padding-bytes.");
     app.add_flag(SN(&SP::prefetch), "Enable prefetching (UnrollK=2 implied).");
     app.add_option(SN(&SP::prefetchInFlight), "Number of prefetches in flight at the same time");
     app.add_option(SN(&SP::prefetchLDSFactor),

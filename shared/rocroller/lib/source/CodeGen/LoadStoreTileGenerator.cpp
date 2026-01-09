@@ -368,8 +368,8 @@ namespace rocRoller
             auto m0 = m_context->getM0();
 
             // When padding, the ldsWriteStride might be larger than m_workgroupSizeTotal * numBytes
-            // AssertFatal(info.ldsWriteStride >= m_workgroupSizeTotal * numBytes,
-            //             ShowValue(info.ldsWriteStride));
+            AssertFatal(info.ldsWriteStride >= m_workgroupSizeTotal * numBytes,
+                        ShowValue(info.ldsWriteStride));
 
             if(setM0)
             {
@@ -1020,7 +1020,7 @@ namespace rocRoller
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
             auto varType         = load.varType;
 
-            auto packing  = DataTypeInfo::Get(varType).packing;
+            auto packing = DataTypeInfo::Get(varType).packing;
 
             rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::"
                                                "loadMacroTileDirect2LDS: OP {} LDS {} MacroTile {}",

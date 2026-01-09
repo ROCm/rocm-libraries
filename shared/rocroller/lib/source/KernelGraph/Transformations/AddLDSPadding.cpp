@@ -141,8 +141,6 @@ namespace rocRoller
                         ldsBankCount = arch.GetCapability(GPUCapability::LdsBankCount);
                 }
 
-                // XXX NEED TO HANDLE Direct2LDS
-
                 // 6bit data is handled by byte-padding LDS; so we
                 // return 0 here
                 auto elementBits = DataTypeInfo::Get(info.dataType).elementBits;
@@ -332,7 +330,7 @@ namespace rocRoller
         /**
          * @brief Make padded blocks for the given tags.
          */
-        bool MakePaddedBlocks(KernelGraph&        graph,
+        void MakePaddedBlocks(KernelGraph&        graph,
                               Graph::Direction    direction,
                               int&                edge,
                               std::array<int, 2>& tags,
@@ -348,8 +346,6 @@ namespace rocRoller
 
             auto one = literal(1u);
 
-            auto numElements = literal(32u);
-
             auto linearFlat
                 = graph.coordinates.addElement(Linear(simplify(slowSize * fastSize), one));
 
@@ -359,7 +355,7 @@ namespace rocRoller
             auto linearSlow    = graph.coordinates.addElement(Linear(newSlowSize, newSlowStride));
             auto linearFast    = graph.coordinates.addElement(Linear(newFastSize, one));
 
-            Log::debug("KernelGraph::AddLDSPadding::makeContiguousWGBlocks: "
+            Log::debug("KernelGraph::AddLDSPadding::MakePaddedBlocks: "
                        "slowSize {}, fastSize {}, newSlowSize {}, newSlowStride {}, newFastSize {}",
                        toString(slowSize),
                        toString(fastSize),
@@ -389,8 +385,6 @@ namespace rocRoller
 
             // Update tags to point to the new Linear nodes, these will be padded
             tags = {linearSlow, linearFast};
-
-            return true;
         }
 
         /**
