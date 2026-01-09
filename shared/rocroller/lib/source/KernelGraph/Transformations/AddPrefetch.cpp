@@ -405,6 +405,9 @@ namespace rocRoller
                     insertAfter(graph, tag, postBarrier, postBarrier);
 
                     auto ldsTileTag = graph.mapper.get<LDS>(tag);
+                    // pre-operation barrier to handle loop entry and loop-carried dependencies.
+                    // post-operation barrier to handle forward dependency.
+                    graph.mapper.connect<LDS>(preBarrier, ldsTileTag, 0);
                     graph.mapper.connect<LDS>(postBarrier, ldsTileTag, 0);
                 }
                 auto maybeLoadTile = graph.control.get<LoadTiled>(tag);
@@ -416,7 +419,13 @@ namespace rocRoller
                     AssertFatal(tile.memoryType == MemoryType::WAVE_Direct2LDS);
 
                     auto preBarrier = graph.control.addElement(Barrier());
+
                     insertBefore(graph, tag, preBarrier, preBarrier);
+
+                    auto ldsTileTag = graph.mapper.get<LDS>(tag);
+                    // pre-operation barrier to handle loop entry and loop-carried dependencies.
+                    // post-operation barrier is currently added by AddPrefetchVisitor.
+                    graph.mapper.connect<LDS>(preBarrier, ldsTileTag, 0);
                 }
             }
         }
