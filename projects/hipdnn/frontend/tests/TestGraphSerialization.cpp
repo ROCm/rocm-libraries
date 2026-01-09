@@ -65,6 +65,54 @@ void expectVectorsEqual(const flatbuffers::Vector<T>* expected,
     }
 }
 
+// Helper to compare pass-by-value tensor values
+void expectTensorValuesEqual(const hipdnn_data_sdk::data_objects::TensorAttributes* expected,
+                             const hipdnn_data_sdk::data_objects::TensorAttributes* actual,
+                             const std::string& context)
+{
+    using namespace hipdnn_data_sdk::data_objects;
+
+    ASSERT_EQ(expected->value_type(), actual->value_type()) << context << ".value_type";
+
+    switch(expected->value_type())
+    {
+    case TensorValue::NONE:
+        break;
+    case TensorValue::Float32Value:
+        EXPECT_EQ(expected->value_as_Float32Value()->value(),
+                  actual->value_as_Float32Value()->value())
+            << context << ".value (float32)";
+        break;
+    case TensorValue::Float16Value:
+        EXPECT_EQ(expected->value_as_Float16Value()->value(),
+                  actual->value_as_Float16Value()->value())
+            << context << ".value (float16)";
+        break;
+    case TensorValue::BFloat16Value:
+        EXPECT_EQ(expected->value_as_BFloat16Value()->value(),
+                  actual->value_as_BFloat16Value()->value())
+            << context << ".value (bfloat16)";
+        break;
+    case TensorValue::Float8Value:
+        EXPECT_EQ(expected->value_as_Float8Value()->value(),
+                  actual->value_as_Float8Value()->value())
+            << context << ".value (float8)";
+        break;
+    case TensorValue::Int32Value:
+        EXPECT_EQ(expected->value_as_Int32Value()->value(), actual->value_as_Int32Value()->value())
+            << context << ".value (int32)";
+        break;
+    case TensorValue::Float64Value:
+        EXPECT_EQ(expected->value_as_Float64Value()->value(),
+                  actual->value_as_Float64Value()->value())
+            << context << ".value (float64)";
+        break;
+    default:
+        FAIL() << context << ": unknown tensor value type "
+               << static_cast<int>(expected->value_type());
+    }
+}
+
 // Compare tensor attributes from FlatBuffer
 void expectTensorsEqual(const hipdnn_data_sdk::data_objects::TensorAttributes* expected,
                         const hipdnn_data_sdk::data_objects::TensorAttributes* actual,
@@ -82,6 +130,7 @@ void expectTensorsEqual(const hipdnn_data_sdk::data_objects::TensorAttributes* e
     EXPECT_EQ(expected->virtual_(), actual->virtual_()) << context << ".virtual";
     expectVectorsEqual(expected->dims(), actual->dims(), context + ".dims");
     expectVectorsEqual(expected->strides(), actual->strides(), context + ".strides");
+    expectTensorValuesEqual(expected, actual, context);
 }
 
 // Compare node attributes based on type
@@ -299,6 +348,70 @@ void expectGraphsEqual(Graph& expected, Graph& actual)
     }
 }
 
+// Deep comparison using FlatBuffer-generated == operators on unpacked native types.
+// This provides a second verification layer using different code paths than expectGraphsEqual.
+// Note: We cannot use GraphT::operator== directly because it compares tensor vectors
+// positionally (using std::equal), but serialization may reorder tensors. Since tensors
+// are referenced by UID in graph operations, ordering is semantically irrelevant.
+// Instead, we match tensors by UID and use TensorAttributesT::operator== on each pair.
+void expectGraphsEqualUnpacked(Graph& expected, Graph& actual)
+{
+    using namespace hipdnn_data_sdk::data_objects;
+
+    auto expectedBuffer = expected.toFlatBuffer();
+    auto actualBuffer = actual.toFlatBuffer();
+
+    auto expectedUnpacked = UnPackGraph(expectedBuffer.data());
+    auto actualUnpacked = UnPackGraph(actualBuffer.data());
+
+    // Verify graph-level fields match
+    EXPECT_EQ(expectedUnpacked->name, actualUnpacked->name) << "GraphT name mismatch";
+    EXPECT_EQ(expectedUnpacked->compute_data_type, actualUnpacked->compute_data_type)
+        << "GraphT compute_data_type mismatch";
+    EXPECT_EQ(expectedUnpacked->io_data_type, actualUnpacked->io_data_type)
+        << "GraphT io_data_type mismatch";
+    EXPECT_EQ(expectedUnpacked->intermediate_data_type, actualUnpacked->intermediate_data_type)
+        << "GraphT intermediate_data_type mismatch";
+    EXPECT_EQ(expectedUnpacked->preferred_engine_id, actualUnpacked->preferred_engine_id)
+        << "GraphT preferred_engine_id mismatch";
+
+    // Verify tensor count matches
+    ASSERT_EQ(expectedUnpacked->tensors.size(), actualUnpacked->tensors.size())
+        << "GraphT tensor count mismatch";
+
+    // Build UID -> tensor map for actual graph
+    std::unordered_map<int64_t, const TensorAttributesT*> actualUnpackedTensorMap;
+    for(const auto& tensor : actualUnpacked->tensors)
+    {
+        actualUnpackedTensorMap[tensor->uid] = tensor.get();
+    }
+
+    // Verify no duplicate UIDs in actual (all UIDs should be unique)
+    EXPECT_EQ(actualUnpackedTensorMap.size(), actualUnpacked->tensors.size())
+        << "Duplicate tensor UIDs detected in actual graph";
+
+    // Compare each tensor using generated == operator (matched by UID)
+    for(const auto& expTensor : expectedUnpacked->tensors)
+    {
+        auto it = actualUnpackedTensorMap.find(expTensor->uid);
+        ASSERT_NE(it, actualUnpackedTensorMap.end())
+            << "tensor with uid " << expTensor->uid << " not found in actual graph";
+
+        // Compare using generated == operator
+        EXPECT_EQ(*expTensor, *(it->second))
+            << "TensorAttributesT == failed for uid " << expTensor->uid;
+    }
+
+    // Compare each node using generated == operator
+    ASSERT_EQ(expectedUnpacked->nodes.size(), actualUnpacked->nodes.size())
+        << "GraphT node count mismatch";
+    for(size_t i = 0; i < expectedUnpacked->nodes.size(); ++i)
+    {
+        EXPECT_EQ(*expectedUnpacked->nodes[i], *actualUnpacked->nodes[i])
+            << "NodeT == failed for node[" << i << "]";
+    }
+}
+
 //==============================================================================
 // Basic JSON Serialization Tests
 //==============================================================================
@@ -351,12 +464,6 @@ TEST(TestGraphSerialization, GraphAttributesPreserved)
     graph.set_io_data_type(DataType::HALF);
     graph.set_intermediate_data_type(DataType::BFLOAT16);
 
-    // Add a simple node so graph is not empty
-    auto x = createTensor("x", {1, 16, 8, 8}, DataType::HALF, 1);
-    PointwiseAttributes pwAttrs;
-    pwAttrs.set_mode(PointwiseMode::IDENTITY);
-    graph.pointwise(x, pwAttrs);
-
     auto json = graph.toJson();
 
     Graph newGraph;
@@ -371,14 +478,7 @@ TEST(TestGraphSerialization, GraphAttributesPreserved)
 TEST(TestGraphSerialization, PreferredEngineIdPreserved)
 {
     Graph graph;
-    graph.set_name("engine_id_test");
-    graph.set_compute_data_type(DataType::FLOAT);
     graph.set_preferred_engine_id_ext(42);
-
-    auto x = createTensor("x", {1, 16, 8, 8}, DataType::FLOAT, 1);
-    PointwiseAttributes pwAttrs;
-    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(x, pwAttrs);
 
     auto json = graph.toJson();
 
@@ -430,6 +530,7 @@ TEST(TestGraphSerialization, TensorAttributesPreserved)
             EXPECT_EQ(dims, (std::vector<int64_t>{2, 64, 32, 32}));
             auto strides = tensor["strides"].get<std::vector<int64_t>>();
             EXPECT_EQ(strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+            EXPECT_EQ(tensor["data_type"].get<std::string>(), "float");
             break;
         }
     }
@@ -456,24 +557,65 @@ TEST(TestGraphSerialization, VirtualTensorsSerialized)
     // Apply ReLU to make a multi-node graph
     PointwiseAttributes reluAttrs;
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(convOut, reluAttrs);
+    auto reluOut = graph.pointwise(convOut, reluAttrs);
+    reluOut->set_output(true); // Mark as output so only convOut is virtual
 
     auto json = graph.toJson();
 
     // Should have 4 tensors: x, w, conv_out (virtual), relu_out
     EXPECT_EQ(json["tensors"].size(), 4);
 
-    // Find the virtual tensor (conv output)
+    // Find the virtual tensor (conv output) and verify it's marked correctly
     bool foundVirtualTensor = false;
+    int64_t virtualTensorUid = -1;
     for(const auto& tensor : json["tensors"])
     {
         if(tensor.contains("virtual") && tensor["virtual"].get<bool>())
         {
             foundVirtualTensor = true;
+
+            // Virtual tensor must have a UID
+            EXPECT_TRUE(tensor.contains("uid"));
+            virtualTensorUid = tensor["uid"];
+
+            // Must be marked as virtual
+            EXPECT_TRUE(tensor["virtual"].get<bool>());
+
+            // The remaining properties are handled by the engine, and therefore not stored.
+
             break;
         }
     }
     EXPECT_TRUE(foundVirtualTensor);
+    EXPECT_NE(virtualTensorUid, -1);
+
+    // Verify virtual tensor is correctly marked in FlatBuffer
+    auto buffer = graph.toFlatBuffer();
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+    bool foundVirtualInFB = false;
+    for(size_t i = 0; i < fbGraph->tensors()->size(); ++i)
+    {
+        auto fbTensor = fbGraph->tensors()->Get(static_cast<flatbuffers::uoffset_t>(i));
+        if(fbTensor->uid() == virtualTensorUid)
+        {
+            foundVirtualInFB = true;
+
+            // Verify it's marked as virtual
+            EXPECT_TRUE(fbTensor->virtual_());
+
+            // Note: Virtual tensors are placeholders and don't store full tensor attributes.
+            // The graph execution engine infers their properties from the operations.
+
+            break;
+        }
+    }
+    EXPECT_TRUE(foundVirtualInFB);
+
+    // Verify full round-trip correctness
+    Graph restored;
+    restored.deserialize(json);
+    expectGraphsEqual(graph, restored);
 }
 
 //==============================================================================
@@ -685,52 +827,6 @@ TEST(TestGraphSerialization, BnInfDReluBnBwdFusion)
 }
 
 //==============================================================================
-// Data Type Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, HalfPrecisionSerialization)
-{
-    Graph graph;
-    graph.set_name("half_precision_test");
-    graph.set_compute_data_type(DataType::FLOAT);
-    graph.set_io_data_type(DataType::HALF);
-
-    auto x = createTensor("x", {1, 64, 32, 32}, DataType::HALF, 1);
-
-    PointwiseAttributes pwAttrs;
-    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(x, pwAttrs);
-
-    auto json = graph.toJson();
-
-    Graph newGraph;
-    newGraph.deserialize(json);
-
-    EXPECT_EQ(newGraph.get_io_data_type(), DataType::HALF);
-}
-
-TEST(TestGraphSerialization, BFloat16Serialization)
-{
-    Graph graph;
-    graph.set_name("bfloat16_test");
-    graph.set_compute_data_type(DataType::FLOAT);
-    graph.set_io_data_type(DataType::BFLOAT16);
-
-    auto x = createTensor("x", {1, 64, 32, 32}, DataType::BFLOAT16, 1);
-
-    PointwiseAttributes pwAttrs;
-    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(x, pwAttrs);
-
-    auto json = graph.toJson();
-
-    Graph newGraph;
-    newGraph.deserialize(json);
-
-    EXPECT_EQ(newGraph.get_io_data_type(), DataType::BFLOAT16);
-}
-
-//==============================================================================
 // Binary Serialization Tests
 //==============================================================================
 
@@ -764,13 +860,8 @@ TEST(TestGraphSerialization, BinarySerializationRoundTrip)
     auto err = newGraph.deserialize(nullHandle, binaryData);
     EXPECT_EQ(err.get_code(), ErrorCode::OK);
 
-    EXPECT_EQ(newGraph.get_name(), "binary_roundtrip_test");
-    EXPECT_EQ(newGraph.get_compute_data_type(), DataType::FLOAT);
-    EXPECT_EQ(newGraph.get_io_data_type(), DataType::FLOAT);
-
-    // Re-serialize to verify
-    auto newBinaryData = newGraph.toBinary();
-    EXPECT_FALSE(newBinaryData.empty());
+    // Verify full round-trip correctness
+    expectGraphsEqual(graph, newGraph);
 }
 
 TEST(TestGraphSerialization, BinaryVsJsonConsistency)
@@ -800,9 +891,12 @@ TEST(TestGraphSerialization, BinaryVsJsonConsistency)
     hipdnnHandle_t nullHandle = nullptr;
     binaryGraph.deserialize(nullHandle, binaryData);
 
-    // Both should produce the same result
-    EXPECT_EQ(jsonGraph.get_name(), binaryGraph.get_name());
-    EXPECT_EQ(jsonGraph.get_compute_data_type(), binaryGraph.get_compute_data_type());
+    // Verify both deserialized graphs are fully identical
+    expectGraphsEqual(jsonGraph, binaryGraph);
+
+    // Also verify they match the original
+    expectGraphsEqual(graph, jsonGraph);
+    expectGraphsEqual(graph, binaryGraph);
 }
 
 //==============================================================================
@@ -859,12 +953,10 @@ TEST(TestGraphSerialization, FromFlatBufferRestoresGraph)
     // Restore to new graph using fromFlatBuffer
     Graph newGraph;
     auto err = newGraph.fromFlatBuffer(fbGraph);
-
     EXPECT_EQ(err.get_code(), ErrorCode::OK);
-    EXPECT_EQ(newGraph.get_name(), "from_flatbuffer_test");
-    EXPECT_EQ(newGraph.get_compute_data_type(), DataType::FLOAT);
-    EXPECT_EQ(newGraph.get_io_data_type(), DataType::HALF);
-    EXPECT_EQ(newGraph.get_intermediate_data_type(), DataType::BFLOAT16);
+
+    // Verify full round-trip correctness
+    expectGraphsEqual(graph, newGraph);
 }
 
 TEST(TestGraphSerialization, FlatBufferRoundTripPreservesNodes)
@@ -896,11 +988,8 @@ TEST(TestGraphSerialization, FlatBufferRoundTripPreservesNodes)
     auto err = newGraph.fromFlatBuffer(fbGraph);
     EXPECT_EQ(err.get_code(), ErrorCode::OK);
 
-    // Verify by re-serializing to JSON and checking structure
-    auto json = newGraph.toJson();
-
-    EXPECT_EQ(json["nodes"].size(), 2);
-    EXPECT_EQ(json["tensors"].size(), 4); // x, w, conv_out, relu_out
+    // Full verification - ensure complete round-trip correctness
+    expectGraphsEqual(graph, newGraph);
 }
 
 TEST(TestGraphSerialization, FlatBufferPreservesPreferredEngineId)
@@ -929,6 +1018,9 @@ TEST(TestGraphSerialization, FlatBufferPreservesPreferredEngineId)
     auto json = newGraph.toJson();
     EXPECT_TRUE(json.contains("preferred_engine_id"));
     EXPECT_EQ(json["preferred_engine_id"], 42);
+
+    // Full verification - ensure complete round-trip correctness
+    expectGraphsEqual(graph, newGraph);
 }
 
 TEST(TestGraphSerialization, BinaryUsesPackedFlatBuffer)
@@ -1693,6 +1785,7 @@ TEST(TestGraphSerialization, ConvFpropDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, PointwiseWithParamsDeepComparison)
@@ -1731,6 +1824,8 @@ TEST(TestGraphSerialization, PointwiseWithParamsDeepComparison)
     EXPECT_TRUE(restPw->elu_alpha().has_value());
     EXPECT_FLOAT_EQ(origPw->elu_alpha().value(), 0.5f);
     EXPECT_FLOAT_EQ(restPw->elu_alpha().value(), 0.5f);
+
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, BatchnormBackwardDeepComparison)
@@ -1757,6 +1852,7 @@ TEST(TestGraphSerialization, BatchnormBackwardDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, ConvDgradDeepComparison)
@@ -1785,6 +1881,7 @@ TEST(TestGraphSerialization, ConvDgradDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, ConvWgradDeepComparison)
@@ -1813,6 +1910,7 @@ TEST(TestGraphSerialization, ConvWgradDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, BatchnormDeepComparison)
@@ -1839,6 +1937,7 @@ TEST(TestGraphSerialization, BatchnormDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, BatchnormInferenceDeepComparison)
@@ -1865,4 +1964,5 @@ TEST(TestGraphSerialization, BatchnormInferenceDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
