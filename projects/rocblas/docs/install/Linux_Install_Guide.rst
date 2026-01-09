@@ -268,7 +268,7 @@ listed in this table.
    "``./install.sh -dc --skip-aocl``", "Build clients without AOCL, using the next available BLAS library."
    "``./install.sh -dc --clean-deps``", "Clean and rebuild all dependencies before building."
    "``./install.sh -c``", "Build the library and client in your local directory. It is assumed the dependencies have been built."
-   "``./install.sh -idc``", "Build the library  dependencies, client dependencies, library, and client, then build and install the rocBLAS package. You will be prompted for ``sudo`` access. To install rocBLAS for all users, use the ``-i`` flag. To restrict it to your local directory, do not use the ``-i`` flag."
+   "``./install.sh -idc``", "Build the library dependencies, client dependencies, library, and client, then build and install the rocBLAS package. You will be prompted for ``sudo`` access. To install rocBLAS for all users, use the ``-i`` flag. To restrict it to your local directory, do not use the ``-i`` flag."
    "``./install.sh -ic``", "Build and install the rocBLAS package and build the client. You will be prompted for ``sudo`` access. This installs it for all users. To restrict rocBLAS to your local directory, do not use the ``-i`` flag."
    "``./install.sh -t /path/to/Tensile``", "``tensile_tag.txt`` has been deprecated so use this option to build a folder that has a different Tensile commit than the rocBLAS commit."
 
