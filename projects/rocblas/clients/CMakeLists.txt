@@ -245,34 +245,32 @@ function(find_bundled_blis)
   endif()
 endfunction()
 
-# Search for system cblas via pkg-config
+# Search for system cblas/OpenBLAS
 # Sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope, or errors if not found
 function(find_system_cblas)
-  find_package(PkgConfig)
-  if (NOT PKG_CONFIG_FOUND)
-    message(FATAL_ERROR "Could not find libaocl/libblis and pkg-config is not available")
-  endif()
-
-  pkg_search_module(PKGBLAS cblas)
-  if (PKGBLAS_FOUND)
-    set(BLAS_LIBRARY "${PKGBLAS_LIBRARIES}" PARENT_SCOPE)
-    set(BLIS_INCLUDE_DIR "${PKGBLAS_INCLUDE_DIRS}" PARENT_SCOPE)
-    message(STATUS "✓ Found system CBLAS via pkg-config (likely OpenBLAS)")
-    message(STATUS "  Libraries: ${PKGBLAS_LIBRARIES}")
-    message(STATUS "  Include: ${PKGBLAS_INCLUDE_DIRS}")
-  else()
-    # Fallback: try to find OpenBLAS/cblas directly with full path
-    find_library(FALLBACK_BLAS_LIB 
-      NAMES openblas cblas blas
-      PATHS /usr/lib /usr/lib64 /usr/local/lib
-    )
-    if(FALLBACK_BLAS_LIB)
-      set(BLAS_LIBRARY "${FALLBACK_BLAS_LIB}" PARENT_SCOPE)
-      message(STATUS "✓ Found fallback BLAS library via direct search")
-      message(STATUS "  Location: ${FALLBACK_BLAS_LIB}")
-    else()
-      message(FATAL_ERROR "Could not find libaocl/libblis and pkg-config cannot find any other implementation of cblas")
+  # Try to find BLAS library directly (most reliable across distros)
+  # pkg-config can be unreliable - sometimes it returns library names without paths
+  find_library(SYSTEM_BLAS_LIB 
+    NAMES openblas cblas blas
+    PATHS /usr/lib /usr/lib64 /usr/local/lib /usr/lib/x86_64-linux-gnu
+  )
+  
+  if(SYSTEM_BLAS_LIB)
+    set(BLAS_LIBRARY "${SYSTEM_BLAS_LIB}" PARENT_SCOPE)
+    message(STATUS "✓ Found system BLAS library")
+    message(STATUS "  Location: ${SYSTEM_BLAS_LIB}")
+    
+    # Try to get include dirs from pkg-config if available
+    find_package(PkgConfig)
+    if(PKG_CONFIG_FOUND)
+      pkg_search_module(PKGBLAS cblas)
+      if(PKGBLAS_FOUND AND PKGBLAS_INCLUDE_DIRS)
+        set(BLIS_INCLUDE_DIR "${PKGBLAS_INCLUDE_DIRS}" PARENT_SCOPE)
+        message(STATUS "  Include: ${PKGBLAS_INCLUDE_DIRS} (via pkg-config)")
+      endif()
     endif()
+  else()
+    message(FATAL_ERROR "Could not find any BLAS library (openblas, cblas, or blas)")
   endif()
 endfunction()
 
