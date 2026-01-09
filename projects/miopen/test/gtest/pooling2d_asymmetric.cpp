@@ -6,12 +6,18 @@
 #include <half/half.hpp>
 #include "pooling2d_common.hpp"
 
-using namespace pooling2d_gtest;
-
 std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
 {
+    // Cache results to avoid duplicate generation when called multiple times
+    static std::vector<Pooling2dTestCase> cached_test_cases;
+    static bool cached = false;
+    
+    if(cached)
+    {
+        return cached_test_cases;
+    }
+    
     std::vector<Pooling2dTestCase> test_cases;
-    IndexTypeCounters counters;
 
     // Dataset 1: Asymmetric configurations
     // Input: {{1, 4, 4, 4}} - minimal input for asymmetric testing
@@ -30,8 +36,9 @@ std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
     std::vector<std::vector<int>> dataset1_pads = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
 #endif
 
+    // Dataset 1 uses only uint8 and uint32 (matching ctest behavior)
     std::vector<miopenIndexType_t> dataset1_index_types = {
-        miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
+        miopenIndexUint8, miopenIndexUint32};
     std::vector<miopenPoolingMode_t> modes = {
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
@@ -48,11 +55,15 @@ std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
                              dataset1_index_types,
                              modes,
                              wsidx_values,
-                             counters,
                              test_cases,
-                             true); // skip_wide_check=true for Dataset 1 (asymmetric)
+                             true, // skip_wide_check=true for Dataset 1 (asymmetric)
+                             false); // apply_index_type_limits=false for Dataset 1
     }
 
+    // Cache the results
+    cached_test_cases = test_cases;
+    cached = true;
+    
     return test_cases;
 }
 
@@ -73,3 +84,4 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_AsymPooling2d_FP16,
                          testing::ValuesIn(GetPooling2dAsymmetricTestCases()),
                          GetPooling2dTestCaseName);
+

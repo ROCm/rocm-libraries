@@ -16,12 +16,20 @@
 #define TEST_GET_INPUT_TENSOR 0
 #endif
 
-using namespace pooling2d_gtest;
 
 std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 {
+    // Cache results to avoid duplicate generation when called multiple times
+    // (e.g., for both FP32 and FP16 test instantiations)
+    static std::vector<Pooling2dTestCase> cached_test_cases;
+    static bool cached = false;
+    
+    if(cached)
+    {
+        return cached_test_cases;
+    }
+    
     std::vector<Pooling2dTestCase> test_cases;
-    IndexTypeCounters counters;
 
     // Dataset 0: Default dataset (various tensor sizes)
     std::vector<std::vector<int>> dataset0_inputs;
@@ -54,6 +62,7 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
                        {1, 16, 4096, 4096}}; // Shape 18
 #endif
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
+    // Note: Order matters for index type limits! CTest processes stride (2,2) before (1,1)
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
     std::vector<std::vector<int>> dataset0_pads         = {{0, 0}, {1, 1}};
     std::vector<miopenIndexType_t> dataset0_index_types = {
@@ -74,15 +83,19 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
                              dataset0_index_types,
                              modes,
                              wsidx_values,
-                             counters,
                              test_cases,
-                             false); // skip_wide_check=false for Dataset 0
+                             false, // skip_wide_check=false for Dataset 0
+                             true); // apply_index_type_limits=true for Dataset 0
     }
 
     // Note: Dataset 1 (asymmetric) and Dataset 2 (wide window) are tested separately
     // via pooling2d_asymmetric.cpp and pooling2d_wide.cpp to maintain the same
     // structure as the original ctest implementation.
 
+    // Cache the results
+    cached_test_cases = test_cases;
+    cached = true;
+    
     return test_cases;
 }
 
