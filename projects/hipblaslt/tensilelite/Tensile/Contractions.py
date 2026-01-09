@@ -608,6 +608,20 @@ class SizeMapping:
                  'synchronizerSizePerWG',
                  'nonTemporalA',
                  'nonTemporalB',
+                 'NonTemporalD',
+                 'WaveSeparateGlobalReadA',
+                 'WaveSeparateGlobalReadB',
+                 'UnrollLoopSwapGlobalReadOrder',
+                 'DirectToVgprA',
+                 'DirectToVgprB',
+                 'NumLoadsCoalescedA',
+                 'NumLoadsCoalescedB',
+                 'WaveGroup',
+                 'VectorWidthA',
+                 'VectorWidthB',
+                 'LocalSplitU',
+                 'DirectToLdsA',
+                 'DirectToLdsB'
                  ]
 
     @classmethod
@@ -640,6 +654,10 @@ class SizeMapping:
             # WGM kernel param is interpreted as int so, 32bit output to 32b int
             return ctypes.c_int(output & 0xFFFFFFFF).value
 
+        dtva = False if d['DirectToVgprA'] == 0 else True
+        dtvb = False if d['DirectToVgprB'] == 0 else True
+        dtlA = False if d['DirectToLdsA'] == 0 else True
+        dtlB = False if d['DirectToLdsB'] == 0 else True
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
@@ -677,6 +695,20 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
+                   NonTemporalD             = d['NonTemporalD'],
+                   WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
+                   WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
+                   UnrollLoopSwapGlobalReadOrder = d['UnrollLoopSwapGlobalReadOrder'],
+                   DirectToVgprA            = dtva,
+                   DirectToVgprB            = dtvb,
+                   NumLoadsCoalescedA       = d['NumLoadsCoalescedA'],
+                   NumLoadsCoalescedB       = d['NumLoadsCoalescedB'],
+                   WaveGroup                = d["MIWaveGroup"],
+                   VectorWidthA             = d["VectorWidthA"],
+                   VectorWidthB             = d["VectorWidthB"],
+                   LocalSplitU              = d["LocalSplitU"],
+                   DirectToLdsA             = dtlA,
+                   DirectToLdsB             = dtlB,
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

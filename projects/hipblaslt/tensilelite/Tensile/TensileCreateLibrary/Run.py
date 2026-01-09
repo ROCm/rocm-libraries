@@ -176,6 +176,47 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
 
+def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
+    resultDict = {}
+    for kernIdx, r in enumerate(results):
+        kName = getKeyNoInternalArgs(kernels[kernIdx], splitGSU)
+        resultDict["%s"%kName] = r
+    for _, masterLibrary in masterLibraries.items():
+        for _, sol in masterLibrary.solutions.items():
+            solutionKernels = sol.originalSolution.getKernels()
+            for kernel in solutionKernels:
+                kName = getKeyNoInternalArgs(kernel, splitGSU)
+                result = resultDict["%s"%kName]
+                sol.sizeMapping.CUOccupancy = result.cuoccupancy
+                sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
+                sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
+                sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
+                sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
+                sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
+                sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
+                sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
+                sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
+                sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+        masterLibrary.lazyLibraries = dict(sorted(masterLibrary.lazyLibraries.items()))
+        for name, lib in masterLibrary.lazyLibraries.items():
+            for _, sol in lib.solutions.items():
+                solutionKernels = sol.originalSolution.getKernels()
+                for kernel in solutionKernels:
+                    kName = getKeyNoInternalArgs(kernel, splitGSU)
+                    result = resultDict["%s"%kName]
+                    sol.sizeMapping.CUOccupancy = result.cuoccupancy
+                    sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
+                    sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
+                    sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
+                    sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                    sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
+                    sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
+                    sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
+                    sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
+                    sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
+                    sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+
 def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     if result.err:
         printExit(f"Failed to build kernel {result.name} because it has error code {result.err}")
@@ -403,7 +444,14 @@ def writeSolutionsAndKernelsTCL(
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
-    compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
+    def compose(assemble, unaryWriteAssembly, unaryProcessKernelSource):
+        def composed_function(kernel):
+            processed_kernel = unaryProcessKernelSource(kernel)
+            written_kernel = unaryWriteAssembly(processed_kernel)
+            assembled_kernel = assemble(written_kernel)
+            return assembled_kernel, processed_kernel
+        return composed_function
+
     ret = ParallelMap2(
         compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
         uniqueAsmKernels,
@@ -411,9 +459,11 @@ def writeSolutionsAndKernelsTCL(
         multiArg=False,
         return_as="list"
     )
-    passPostKernelInfoToSolution(
-        ret, uniqueAsmKernels, solutions, splitGSU
-    )
+
+    results = []
+    for r, processed_kernel in ret:
+        results.append(processed_kernel)
+
     # result.src is very large so let garbage collector know to clean up
     del ret
     buildAssemblyCodeObjectFiles(
@@ -444,7 +494,7 @@ def writeSolutionsAndKernelsTCL(
             cmdlineArchs,
         )
 
-    return len(uniqueAsmKernels)
+    return len(uniqueAsmKernels), uniqueAsmKernels, results
 
 
 @timing
@@ -749,7 +799,7 @@ def run():
     copyStaticFiles(outputPath)
 
     start_wsk = timer()
-    numKernels = writeSolutionsAndKernelsTCL(
+    numKernels, uniqueKernels, kernelInfo = writeSolutionsAndKernelsTCL(
         outputPath,
         asmToolchain,
         srcToolchain,
@@ -772,6 +822,11 @@ def run():
     ]
     newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
     splitGSU = False
+
+    start_pki = timer()
+    passPostKernelInfoToLibrary(kernelInfo, uniqueKernels, masterLibraries, splitGSU)
+    stop_pki = timer()
+    print(f"Time to pass kernel info to library (s): {(stop_pki-start_pki):3.2f}")
 
     solDict = {}
     for solution in solutions:

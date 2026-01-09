@@ -1,0 +1,1019 @@
+GlobalParameters:
+  # MinimumRequiredVersion: 4.14.0
+  # ForceRedoBenchmarkProblems: False
+  # ForceRedoLibraryLogic: False
+  # ForceRedoLibraryClient: False
+  # MergeFiles: False
+  # ForceGenerateKernel: True
+  # CMakeBuildType: Debug
+  NumElementsToValidate: 0
+  # ValidationPrintValids: True
+  # ValidationMaxToPrint: 256
+  
+  # NumWarmups: 3
+  # NumBenchmarks: 1
+  # SyncsPerBenchmark: 1
+  # EnqueuesPerSync: 10
+  # MinFlopsPerSync: 10737418240
+  # MaxEnqueuesPerSync: 500
+  # SleepPercent: 0
+
+  SleepPercent: 0
+  # NumWarmups: 1000
+  # EnqueuesPerSync: 500
+  # SleepPercent: 0 #100
+  NumWarmups: 1 #10 #1000
+  EnqueuesPerSync: 10
+  SyncsPerBenchmark: 1
+  MinFlopsPerSync: 50000000000000 #17592186044416 #137438953472 #2K*2K*16K*2*16 #17592186044416 #10737418240 MAXflopsx20(bigsize min iter)
+  MaxEnqueuesPerSync: 1 #1000 #2048 #512 #20
+  NumElementsToValidate: 0
+
+  # PrintSolutionRejectionReason: True
+  PrintWinnersOnly: True
+  DataInitTypeA: 23
+  DataInitTypeB: 24
+  DataInitTypeC: 0
+  DataInitTypeD: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBias: 0
+  DataInitTypeScaleAlphaVec: 1
+  DataInitTypeScaleA: 1
+  DataInitTypeScaleB: 1
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  # CpuThreads: 1
+  # ShortNames: 1
+  MinKForGSU: 64
+  MaxWorkspaceSize: 67108864
+  # BoundsCheck: 4
+  MaxFileName: 256
+  KernelTime: True
+  # CEqualD: True
+  # PristineOnGPU: False
+  # HardwareMonitor: False
+  # PrintCodeCommands: True
+  # PrintLevel: 2
+  # UseUserArgs: True
+  RotatingBufferSize: 512
+  RotatingMode: 1
+  PredictionThreshold: 0.0
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      # DataTypeA: f8
+      # DataTypeB: h
+      # UseScaleAB: True
+
+      # F32XdlMathOp: x
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+      # SwizzleTensorA: True
+
+      UseBias: 1
+      # BiasTypeList: [S,B]
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseScaleAlphaVec: 1
+
+      # GroupedGemm: True
+      # SupportUserArgs: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      CustomKernels: 
+        [
+          # "Custom_Cijk_Ailk_Bljk_F8H_HSS_BH_Bias_GG_AS_SAB_SAV_UserArgs_MT256x144x32_MI16x16x1_GRVWA4_GRVWB2_AF0EM4_WGM1_MO2_DTVA",
+        ]
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ActivationFuncCall: [0]
+        - MatrixInstruction:
+          - [16,16,32, 1,  1,   1, 1,  1,1 ] # 16x32 (No 1LDSB1)
+        # - AssertFree0ElementMultiple: [8]
+        # - AssertFree1ElementMultiple: [16]
+        # - AssertSummationElementMultiple: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64,128,256,512]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [16]
+        - StaggerUStride: [-1] #[128,256,512,1024]
+        - WorkGroupMapping: [1,4,6,8]
+        - UnrollLoopSwapGlobalReadOrder: [0,1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [-1]
+        - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [-1]
+        - ClusterLocalRead: [1]
+        - WorkGroupMappingXCC: [8]
+        - WorkGroupMappingXCCGroup: [-1]
+        - GlobalSplitUCoalesced: [True]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [True]
+        - NonTemporalD: [4]
+        - ForceDisableShadowInit: [1]
+        - Groups:
+          -
+            - MatrixInstruction: [16,16,32, 1,  1,   1, 1,  1,1 ] # 16x32 (No 1LDSB1)
+            - MatrixInstruction: [16,16,32, 1,  1,   1, 1,  2,1 ] # 16x32 (No 1LDSB1)
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 32, 4, 1] # 64 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 31, 4, 1] # 64 x 496
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 30, 4, 1] # 64 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 29, 4, 1] # 64 x 464
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 28, 4, 1] # 64 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 27, 4, 1] # 64 x 432
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 26, 4, 1] # 64 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 25, 4, 1] # 64 x 400
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 24, 4, 1] # 64 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 23, 4, 1] # 64 x 368
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 22, 4, 1] # 64 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 21, 4, 1] # 64 x 336
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 20, 4, 1] # 64 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 19, 4, 1] # 64 x 304
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 18, 4, 1] # 64 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 17, 4, 1] # 64 x 272
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 16, 4, 1] # 64 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 15, 4, 1] # 64 x 240
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 14, 4, 1] # 64 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 13, 4, 1] # 64 x 208
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 12, 4, 1] # 64 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 11, 4, 1] # 64 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 10, 4, 1] # 64 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 9, 4, 1] # 64 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 8, 4, 1] # 64 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 7, 4, 1] # 64 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 6, 4, 1] # 64 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 5, 4, 1] # 64 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 4, 4, 1] # 64 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 3, 4, 1] # 64 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 2, 4, 1] # 64 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 1, 4, 1] # 64 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 32, 4, 1] # 128 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 31, 4, 1] # 128 x 496
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 30, 4, 1] # 128 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 29, 4, 1] # 128 x 464
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 28, 4, 1] # 128 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 27, 4, 1] # 128 x 432
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 26, 4, 1] # 128 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 25, 4, 1] # 128 x 400
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 24, 4, 1] # 128 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 23, 4, 1] # 128 x 368
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 22, 4, 1] # 128 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 21, 4, 1] # 128 x 336
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 20, 4, 1] # 128 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 19, 4, 1] # 128 x 304
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 18, 4, 1] # 128 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 17, 4, 1] # 128 x 272
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 16, 4, 1] # 128 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 15, 4, 1] # 128 x 240
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 14, 4, 1] # 128 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 13, 4, 1] # 128 x 208
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 12, 4, 1] # 128 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 11, 4, 1] # 128 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 10, 4, 1] # 128 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 9, 4, 1] # 128 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 8, 4, 1] # 128 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 7, 4, 1] # 128 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 6, 4, 1] # 128 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 5, 4, 1] # 128 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 4, 4, 1] # 128 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 3, 4, 1] # 128 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 2, 4, 1] # 128 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 1, 4, 1] # 128 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 21, 4, 1] # 192 x 336
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 20, 4, 1] # 192 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 19, 4, 1] # 192 x 304
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 18, 4, 1] # 192 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 17, 4, 1] # 192 x 272
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 16, 4, 1] # 192 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 14, 4, 1] # 192 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 13, 4, 1] # 192 x 208
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 12, 4, 1] # 192 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 11, 4, 1] # 192 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 10, 4, 1] # 192 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 9, 4, 1] # 192 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 8, 4, 1] # 192 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 7, 4, 1] # 192 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 6, 4, 1] # 192 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 5, 4, 1] # 192 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 4, 4, 1] # 192 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 3, 4, 1] # 192 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 2, 4, 1] # 192 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 1, 4, 1] # 192 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 16, 4, 1] # 256 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 14, 4, 1] # 256 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 12, 4, 1] # 256 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 11, 4, 1] # 256 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 10, 4, 1] # 256 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 9, 4, 1] # 256 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 8, 4, 1] # 256 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 7, 4, 1] # 256 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 6, 4, 1] # 256 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 5, 4, 1] # 256 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 4, 4, 1] # 256 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 3, 4, 1] # 256 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 2, 4, 1] # 256 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 1, 4, 1] # 256 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 12, 4, 1] # 320 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 11, 4, 1] # 320 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 10, 4, 1] # 320 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 9, 4, 1] # 320 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 8, 4, 1] # 320 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 7, 4, 1] # 320 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 6, 4, 1] # 320 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 5, 4, 1] # 320 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 4, 4, 1] # 320 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 3, 4, 1] # 320 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 2, 4, 1] # 320 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 1, 4, 1] # 320 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 10, 4, 1] # 384 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 9, 4, 1] # 384 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 8, 4, 1] # 384 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 7, 4, 1] # 384 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 6, 4, 1] # 384 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 5, 4, 1] # 384 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 4, 4, 1] # 384 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 3, 4, 1] # 384 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 2, 4, 1] # 384 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 1, 4, 1] # 384 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 9, 4, 1] # 448 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 8, 4, 1] # 448 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 7, 4, 1] # 448 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 6, 4, 1] # 448 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 5, 4, 1] # 448 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 4, 4, 1] # 448 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 3, 4, 1] # 448 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 2, 4, 1] # 448 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 1, 4, 1] # 448 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 8, 4, 1] # 512 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 7, 4, 1] # 512 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 6, 4, 1] # 512 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 5, 4, 1] # 512 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 4, 4, 1] # 512 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 3, 4, 1] # 512 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 2, 4, 1] # 512 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 1, 4, 1] # 512 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 7, 4, 1] # 576 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 6, 4, 1] # 576 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 5, 4, 1] # 576 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 4, 4, 1] # 576 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 3, 4, 1] # 576 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 2, 4, 1] # 576 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 1, 4, 1] # 576 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 6, 4, 1] # 640 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 5, 4, 1] # 640 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 4, 4, 1] # 640 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 3, 4, 1] # 640 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 2, 4, 1] # 640 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 1, 4, 1] # 640 x 16
+  
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 10, 1, 4] # 16 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 9, 1, 4] # 16 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 8, 1, 4] # 16 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 7, 1, 4] # 16 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 6, 1, 4] # 16 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 5, 1, 4] # 16 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 4, 1, 4] # 16 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 3, 1, 4] # 16 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 2, 1, 4] # 16 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 1, 1, 4] # 16 x 64
+
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 10, 1, 4] # 32 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 9, 1, 4] # 32 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 8, 1, 4] # 32 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 7, 1, 4] # 32 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 6, 1, 4] # 32 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 5, 1, 4] # 32 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 4, 1, 4] # 32 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 3, 1, 4] # 32 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 2, 1, 4] # 32 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 1, 1, 4] # 32 x 64
+ 
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 10, 1, 4] # 48 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 9, 1, 4] # 48 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 8, 1, 4] # 48 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 7, 1, 4] # 48 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 6, 1, 4] # 48 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 5, 1, 4] # 48 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 4, 1, 4] # 48 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 3, 1, 4] # 48 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 2, 1, 4] # 48 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 1, 1, 4] # 48 x 64
+
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 10, 1, 4] # 64 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 9, 1, 4] # 64 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 8, 1, 4] # 64 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 7, 1, 4] # 64 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 6, 1, 4] # 64 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 5, 1, 4] # 64 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 4, 1, 4] # 64 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 3, 1, 4] # 64 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 2, 1, 4] # 64 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 1, 1, 4] # 64 x 64
+ 
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 10, 1, 4] # 96 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 9, 1, 4] # 96 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 8, 1, 4] # 96 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 7, 1, 4] # 96 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 6, 1, 4] # 96 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 5, 1, 4] # 96 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 4, 1, 4] # 96 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 3, 1, 4] # 96 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 2, 1, 4] # 96 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 1, 1, 4] # 96 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 9, 1, 4] # 112 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 8, 1, 4] # 112 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 7, 1, 4] # 112 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 6, 1, 4] # 112 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 5, 1, 4] # 112 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 4, 1, 4] # 112 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 3, 1, 4] # 112 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 2, 1, 4] # 112 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 1, 1, 4] # 112 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 8, 1, 4] # 128 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 7, 1, 4] # 128 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 6, 1, 4] # 128 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 5, 1, 4] # 128 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 4, 1, 4] # 128 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 3, 1, 4] # 128 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 2, 1, 4] # 128 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 1, 1, 4] # 128 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 7, 1, 4] # 144 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 6, 1, 4] # 144 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 5, 1, 4] # 144 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 4, 1, 4] # 144 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 3, 1, 4] # 144 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 2, 1, 4] # 144 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 1, 1, 4] # 144 x 64
+
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 5, 1, 4] # 176 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 4, 1, 4] # 176 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 3, 1, 4] # 176 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 2, 1, 4] # 176 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 1, 1, 4] # 176 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 5, 1, 4] # 192 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 4, 1, 4] # 192 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 3, 1, 4] # 192 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 2, 1, 4] # 192 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 1, 1, 4] # 192 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 4, 1, 4] # 208 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 3, 1, 4] # 208 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 2, 1, 4] # 208 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 1, 1, 4] # 208 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 4, 1, 4] # 224 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 3, 1, 4] # 224 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 2, 1, 4] # 224 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 1, 1, 4] # 224 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 2, 1, 4] # 240 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 1, 1, 4] # 240 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 4, 1, 4] # 256 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 3, 1, 4] # 256 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 2, 1, 4] # 256 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 1, 1, 4] # 256 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 3, 1, 4] # 272 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 2, 1, 4] # 272 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 1, 1, 4] # 272 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 3, 1, 4] # 288 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 2, 1, 4] # 288 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 1, 1, 4] # 288 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 2, 1, 4] # 304 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 1, 1, 4] # 304 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 3, 1, 4] # 320 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 2, 1, 4] # 320 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 1, 1, 4] # 320 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 3, 1, 4] # 336 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 2, 1, 4] # 336 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 1, 1, 4] # 336 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 22, 2, 1, 4] # 352 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 22, 1, 1, 4] # 352 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 23, 2, 1, 4] # 368 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 23, 1, 1, 4] # 368 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 24, 2, 1, 4] # 384 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 24, 1, 1, 4] # 384 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 25, 2, 1, 4] # 400 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 25, 1, 1, 4] # 400 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 26, 2, 1, 4] # 416 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 26, 1, 1, 4] # 416 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 27, 2, 1, 4] # 432 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 27, 1, 1, 4] # 432 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 28, 2, 1, 4] # 448 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 28, 1, 1, 4] # 448 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 29, 2, 1, 4] # 464 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 29, 1, 1, 4] # 464 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 30, 2, 1, 4] # 480 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 30, 1, 1, 4] # 480 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 31, 2, 1, 4] # 496 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 31, 1, 1, 4] # 496 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 32, 2, 1, 4] # 512 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 32, 1, 1, 4] # 512 x 64
+
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 21, 2, 2] # 32 x 672
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 20, 2, 2] # 32 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 19, 2, 2] # 32 x 608
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 18, 2, 2] # 32 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 17, 2, 2] # 32 x 544
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 16, 2, 2] # 32 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 15, 2, 2] # 32 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 14, 2, 2] # 32 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 13, 2, 2] # 32 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 12, 2, 2] # 32 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 11, 2, 2] # 32 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 10, 2, 2] # 32 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 9, 2, 2] # 32 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 8, 2, 2] # 32 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 7, 2, 2] # 32 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 6, 2, 2] # 32 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 5, 2, 2] # 32 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 4, 2, 2] # 32 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 3, 2, 2] # 32 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 2, 2, 2] # 32 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 1, 2, 2] # 32 x 32
+
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 21, 2, 2] # 64 x 672
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 20, 2, 2] # 64 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 19, 2, 2] # 64 x 608
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 18, 2, 2] # 64 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 17, 2, 2] # 64 x 544
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 16, 2, 2] # 64 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 15, 2, 2] # 64 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 14, 2, 2] # 64 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 13, 2, 2] # 64 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 12, 2, 2] # 64 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 11, 2, 2] # 64 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 10, 2, 2] # 64 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 9, 2, 2] # 64 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 8, 2, 2] # 64 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 7, 2, 2] # 64 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 6, 2, 2] # 64 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 5, 2, 2] # 64 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 4, 2, 2] # 64 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 3, 2, 2] # 64 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 2, 2, 2] # 64 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 1, 2, 2] # 64 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 21, 2, 2] # 96 x 672
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 20, 2, 2] # 96 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 19, 2, 2] # 96 x 608
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 18, 2, 2] # 96 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 17, 2, 2] # 96 x 544
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 16, 2, 2] # 96 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 15, 2, 2] # 96 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 14, 2, 2] # 96 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 13, 2, 2] # 96 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 12, 2, 2] # 96 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 11, 2, 2] # 96 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 10, 2, 2] # 96 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 9, 2, 2] # 96 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 8, 2, 2] # 96 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 7, 2, 2] # 96 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 6, 2, 2] # 96 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 5, 2, 2] # 96 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 4, 2, 2] # 96 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 3, 2, 2] # 96 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 2, 2, 2] # 96 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 1, 2, 2] # 96 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 16, 2, 2] # 128 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 15, 2, 2] # 128 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 14, 2, 2] # 128 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 13, 2, 2] # 128 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 12, 2, 2] # 128 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 11, 2, 2] # 128 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 10, 2, 2] # 128 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 9, 2, 2] # 128 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 8, 2, 2] # 128 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 7, 2, 2] # 128 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 6, 2, 2] # 128 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 5, 2, 2] # 128 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 4, 2, 2] # 128 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 3, 2, 2] # 128 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 2, 2, 2] # 128 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 1, 2, 2] # 128 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 12, 2, 2] # 160 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 11, 2, 2] # 160 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 10, 2, 2] # 160 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 9, 2, 2] # 160 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 8, 2, 2] # 160 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 7, 2, 2] # 160 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 6, 2, 2] # 160 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 5, 2, 2] # 160 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 4, 2, 2] # 160 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 3, 2, 2] # 160 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 1, 2, 2] # 160 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 10, 2, 2] # 192 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 9, 2, 2] # 192 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 8, 2, 2] # 192 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 7, 2, 2] # 192 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 6, 2, 2] # 192 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 5, 2, 2] # 192 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 4, 2, 2] # 192 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 3, 2, 2] # 192 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 2, 2, 2] # 192 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 1, 2, 2] # 192 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 9, 2, 2] # 224 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 8, 2, 2] # 224 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 7, 2, 2] # 224 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 6, 2, 2] # 224 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 5, 2, 2] # 224 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 3, 2, 2] # 224 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 2, 2, 2] # 224 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 1, 2, 2] # 224 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 8, 2, 2] # 256 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 7, 2, 2] # 256 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 6, 2, 2] # 256 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 5, 2, 2] # 256 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 4, 2, 2] # 256 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 3, 2, 2] # 256 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 2, 2, 2] # 256 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 1, 2, 2] # 256 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 7, 2, 2] # 288 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 6, 2, 2] # 288 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 5, 2, 2] # 288 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 4, 2, 2] # 288 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 3, 2, 2] # 288 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 2, 2, 2] # 288 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 1, 2, 2] # 288 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 6, 2, 2] # 320 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 4, 2, 2] # 320 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 3, 2, 2] # 320 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 2, 2, 2] # 320 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 1, 2, 2] # 320 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 5, 2, 2] # 352 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 4, 2, 2] # 352 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 3, 2, 2] # 352 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 2, 2, 2] # 352 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 1, 2, 2] # 352 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 5, 2, 2] # 384 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 4, 2, 2] # 384 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 3, 2, 2] # 384 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 2, 2, 2] # 384 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 1, 2, 2] # 384 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 4, 2, 2] # 416 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 3, 2, 2] # 416 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 2, 2, 2] # 416 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 1, 2, 2] # 416 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 4, 2, 2] # 448 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 3, 2, 2] # 448 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 2, 2, 2] # 448 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 1, 2, 2] # 448 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 4, 2, 2] # 480 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 3, 2, 2] # 480 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 2, 2, 2] # 480 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 1, 2, 2] # 480 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 4, 2, 2] # 512 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 3, 2, 2] # 512 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 2, 2, 2] # 512 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 1, 2, 2] # 512 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 3, 2, 2] # 544 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 2, 2, 2] # 544 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 1, 2, 2] # 544 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 3, 2, 2] # 576 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 2, 2, 2] # 576 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 1, 2, 2] # 576 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 3, 2, 2] # 608 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 2, 2, 2] # 608 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 1, 2, 2] # 608 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 3, 2, 2] # 640 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 2, 2, 2] # 640 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 1, 2, 2] # 640 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 3, 2, 2] # 672 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 2, 2, 2] # 672 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 1, 2, 2] # 672 x 32
+
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 32, 4, 1] # 192 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 31, 4, 1] # 192 x 496
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 30, 4, 1] # 192 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 29, 4, 1] # 192 x 464
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 28, 4, 1] # 192 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 27, 4, 1] # 192 x 432
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 26, 4, 1] # 192 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 25, 4, 1] # 192 x 400
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 24, 4, 1] # 192 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 23, 4, 1] # 192 x 368
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 22, 4, 1] # 192 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 24, 4, 1] # 256 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 23, 4, 1] # 256 x 368
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 22, 4, 1] # 256 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 21, 4, 1] # 256 x 336
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 20, 4, 1] # 256 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 19, 4, 1] # 256 x 304
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 18, 4, 1] # 256 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 17, 4, 1] # 256 x 272
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 19, 4, 1] # 320 x 304
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 18, 4, 1] # 320 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 17, 4, 1] # 320 x 272
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 16, 4, 1] # 320 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 15, 4, 1] # 320 x 240
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 14, 4, 1] # 320 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 13, 4, 1] # 320 x 208
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 16, 4, 1] # 384 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 15, 4, 1] # 384 x 240
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 14, 4, 1] # 384 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 13, 4, 1] # 384 x 208
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 12, 4, 1] # 384 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 11, 4, 1] # 384 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 13, 4, 1] # 448 x 208
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 12, 4, 1] # 448 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 11, 4, 1] # 448 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 10, 4, 1] # 448 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 12, 4, 1] # 512 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 11, 4, 1] # 512 x 176
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 10, 4, 1] # 512 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 9, 4, 1] # 512 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 10, 4, 1] # 576 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 9, 4, 1] # 576 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 8, 4, 1] # 576 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 9, 4, 1] # 640 x 144
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 8, 4, 1] # 640 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 7, 4, 1] # 640 x 112
+          
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 10, 1, 4] # 128 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 9, 1, 4] # 128 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 10, 1, 4] # 144 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 9, 1, 4] # 144 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 8, 1, 4] # 144 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 9, 1, 4] # 160 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 8, 1, 4] # 160 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 7, 1, 4] # 160 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 8, 1, 4] # 176 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 7, 1, 4] # 176 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 6, 1, 4] # 176 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 8, 1, 4] # 192 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 7, 1, 4] # 192 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 6, 1, 4] # 192 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 7, 1, 4] # 208 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 6, 1, 4] # 208 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 5, 1, 4] # 208 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 6, 1, 4] # 224 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 5, 1, 4] # 224 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 6, 1, 4] # 240 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 5, 1, 4] # 240 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 6, 1, 4] # 256 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 5, 1, 4] # 256 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 5, 1, 4] # 272 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 4, 1, 4] # 272 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 5, 1, 4] # 288 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 4, 1, 4] # 288 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 5, 1, 4] # 304 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 4, 1, 4] # 304 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 4, 1, 4] # 320 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 4, 1, 4] # 336 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 22, 4, 1, 4] # 352 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 22, 3, 1, 4] # 352 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 23, 4, 1, 4] # 368 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 23, 3, 1, 4] # 368 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 24, 4, 1, 4] # 384 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 24, 3, 1, 4] # 384 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 25, 3, 1, 4] # 400 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 26, 3, 1, 4] # 416 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 27, 3, 1, 4] # 432 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 28, 3, 1, 4] # 448 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 29, 3, 1, 4] # 464 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 30, 3, 1, 4] # 480 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 31, 3, 1, 4] # 496 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 32, 3, 1, 4] # 512 x 192
+
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 21, 2, 2] # 128 x 672
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 20, 2, 2] # 128 x 640
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 19, 2, 2] # 128 x 608
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 18, 2, 2] # 128 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 17, 2, 2] # 128 x 544
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 19, 2, 2] # 160 x 608
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 18, 2, 2] # 160 x 576
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 17, 2, 2] # 160 x 544
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 16, 2, 2] # 160 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 15, 2, 2] # 160 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 14, 2, 2] # 160 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 13, 2, 2] # 160 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 16, 2, 2] # 192 x 512
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 15, 2, 2] # 192 x 480
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 14, 2, 2] # 192 x 448
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 13, 2, 2] # 192 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 12, 2, 2] # 192 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 11, 2, 2] # 192 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 13, 2, 2] # 224 x 416
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 12, 2, 2] # 224 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 11, 2, 2] # 224 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 10, 2, 2] # 224 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 12, 2, 2] # 256 x 384
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 11, 2, 2] # 256 x 352
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 10, 2, 2] # 256 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 9, 2, 2] # 256 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 10, 2, 2] # 288 x 320
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 9, 2, 2] # 288 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 9, 8, 2, 2] # 288 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 9, 2, 2] # 320 x 288
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 8, 2, 2] # 320 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 10, 7, 2, 2] # 320 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 8, 2, 2] # 352 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 7, 2, 2] # 352 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 11, 6, 2, 2] # 352 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 8, 2, 2] # 384 x 256
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 7, 2, 2] # 384 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 12, 6, 2, 2] # 384 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 7, 2, 2] # 416 x 224
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 6, 2, 2] # 416 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 13, 5, 2, 2] # 416 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 6, 2, 2] # 448 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 14, 5, 2, 2] # 448 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 6, 2, 2] # 480 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 15, 5, 2, 2] # 480 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 6, 2, 2] # 512 x 192
+            - MatrixInstruction: [16,16,32, 1, 1, 16, 5, 2, 2] # 512 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 5, 2, 2] # 544 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 17, 4, 2, 2] # 544 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 5, 2, 2] # 576 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 18, 4, 2, 2] # 576 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 5, 2, 2] # 608 x 160
+            - MatrixInstruction: [16,16,32, 1, 1, 19, 4, 2, 2] # 608 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 20, 4, 2, 2] # 640 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 21, 4, 2, 2] # 672 x 128
+
+            #LSU
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 1, 1, 1]
+              WorkGroup: [4,4,4]
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 2, 1, 1]
+              WorkGroup: [4,4,4] # 16 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 3, 1, 1]
+              WorkGroup: [4,4,4] # 16 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 4, 1, 1]
+              WorkGroup: [4,4,4] # 16 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 5, 1, 1]
+              WorkGroup: [4,4,4] # 16 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 6, 1, 1]
+              WorkGroup: [4,4,4] # 16 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 7, 1, 1]
+              WorkGroup: [4,4,4] # 16 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 8, 1, 1]
+              WorkGroup: [4,4,4] # 16 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 1, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 2, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 3, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 4, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 5, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 6, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 7, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 8, 1, 1]
+              WorkGroup: [4,4,4] # 32 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 1, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 2, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 3, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 4, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 5, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 6, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 7, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 8, 1, 1]
+              WorkGroup: [4,4,4] # 48 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 1, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 2, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 3, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 4, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 5, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 6, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 7, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 8, 1, 1]
+              WorkGroup: [4,4,4] # 64 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 1, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 2, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 3, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 4, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 5, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 6, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 7, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 8, 1, 1]
+              WorkGroup: [4,4,4] # 80 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 1, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 2, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 3, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 4, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 5, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 6, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 7, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 8, 1, 1]
+              WorkGroup: [4,4,4] # 96 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 1, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 2, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 3, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 4, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 5, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 6, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 7, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 8, 1, 1]
+              WorkGroup: [4,4,4] # 112 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 1, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 2, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 3, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 4, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 5, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 6, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 7, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 8, 1, 1]
+              WorkGroup: [4,4,4] # 128 x 128
+            #LSU2
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 16 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 2, 1, 2, ]
+              WorkGroup: [4,4,2] # 16 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 16 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 16 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 32 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 2, 1, 2, ]
+              WorkGroup: [4,4,2] # 32 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 32 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 32 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 48 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 2, 1, 2, ]
+              WorkGroup: [4,4,2] # 48 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 48 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 48 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 64 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 64 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 64 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 80 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 2, 1, 2, ]
+              WorkGroup: [4,4,2] # 80 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 80 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 5, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 80 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 96 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 2, 1, 2, ]
+              WorkGroup: [4,4,2] # 96 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 96 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 6, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 96 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 112 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 2, 1, 2, ]
+              WorkGroup: [4,4,2] # 112 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 112 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 7, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 112 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 1, 1, 2, ]
+              WorkGroup: [4,4,2] # 128 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 2, 1, 2, ]
+              WorkGroup: [4,4,2] # 128 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 3, 1, 2, ]
+              WorkGroup: [4,4,2] # 128 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 8, 4, 1, 2, ]
+              WorkGroup: [4,4,2] # 128 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 1, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 2, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 3, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 4, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 5, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 6, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 7, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 1, 8, 2, 1, ]
+              WorkGroup: [4,4,2] # 32 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 1, 2, 1, ]
+              WorkGroup: [4,4,2] # 64 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 2, 2, 1, ]
+              WorkGroup: [4,4,2] # 64 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 3, 2, 1, ]
+              WorkGroup: [4,4,2] # 64 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 5, 2, 1, ]
+              WorkGroup: [4,4,2] # 64 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 6, 2, 1, ]
+              WorkGroup: [4,4,2] # 64 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 7, 2, 1, ]
+              WorkGroup: [4,4,2] # 64 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 2, 8, 2, 1, ]
+              WorkGroup: [4,4,2] # 64 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 1, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 2, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 3, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 4, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 5, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 6, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 7, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 3, 8, 2, 1, ]
+              WorkGroup: [4,4,2] # 96 x 128
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 1, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 16
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 2, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 32
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 3, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 48
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 4, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 64
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 5, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 80
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 6, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 96
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 7, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 112
+            - MatrixInstruction: [16,16,32, 1, 1, 4, 8, 2, 1, ]
+              WorkGroup: [4,4,2] # 128 x 128
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4352, 256, 1, 2432]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]

@@ -39,6 +39,7 @@
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/SizeMapping.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
@@ -110,60 +111,7 @@ namespace TensileLite
         size_t depthUorMT1;
     };
 
-    struct SizeMapping
-    {
-        size_t waveNum;
-
-        dim3 workGroupSize;
-        dim3 threadTile;
-        dim3 macroTile;
-
-        std::array<int, 4> matrixInstruction;
-        size_t             grvwA = 1;
-        size_t             grvwB = 1;
-        size_t             gwvwC = 1;
-        size_t             gwvwD = 1;
-
-        size_t  staggerU           = 0;
-        size_t  staggerUMapping    = 0;
-        size_t  depthU             = 0;
-        size_t  globalSplitUPGR    = 0;
-        int16_t globalSplitU       = 0;
-        size_t  staggerStrideShift = 0;
-        int     workGroupMapping   = 0;
-
-        size_t packBatchDims              = 0;
-        int    packSummationDims          = 0;
-        int    magicDivAlg                = 1;
-        int    streamK                    = 0;
-        int    streamKAtomic              = 0;
-        int    persistentKernel           = 0;
-        bool   persistentKernelAlongBatch = false;
-
-        bool sourceKernel = false;
-
-        int    globalAccumulation       = 0;
-        size_t workspaceSizePerElemC    = 0;
-        size_t workspaceSizePerElemBias = 0;
-
-        bool activationFused = true;
-
-        std::string customKernelName;
-
-        int  workGroupMappingXCC                    = 0;
-        int  workGroupMappingXCCGroup               = 0;
-        bool globalSplitUCoalesced                  = false;
-        bool globalSplitUWorkGroupMappingRoundRobin = false;
-
-        int CUOccupancy            = 0;
-        int PrefetchGlobalRead     = 2;
-        int MathClocksUnrolledLoop = 0;
-
-        size_t synchronizerSizePerWG = 0;
-
-        int nonTemporalA = 0;
-        int nonTemporalB = 0;
-    };
+    // SizeMapping is now defined in SizeMapping.hpp
 
     struct StreamKSettings
     {
@@ -590,6 +538,12 @@ namespace TensileLite
                                                      Hardware const* hardware,
                                                      uint32_t        skgrid) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
+
+        double calculateDimensionM(Problem const&  problem) const;
+        double calculateDimensionN(Problem const&  problem) const;
+        double calculateNumBatches(Problem const&  problem) const;
+        SizeMapping getSizeMapping(void) const {return sizeMapping;};
+        origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
     };
 
     template <typename TAct>

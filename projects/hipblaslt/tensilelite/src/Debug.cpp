@@ -145,6 +145,11 @@ namespace TensileLite
         return m_predictionLib;
     }
 
+    int Debug::usePredictionSelection() const
+    {
+        return m_predictionSelection;
+    }
+
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;
