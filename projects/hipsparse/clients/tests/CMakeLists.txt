@@ -110,7 +110,12 @@ endif()
 if(NOT USE_CUDA)
   target_link_libraries(hipsparse-test PRIVATE hip::host)
 else()
-  target_compile_definitions(hipsparse-test PRIVATE __HIP_PLATFORM_NVIDIA__)
+  # When not using hipcc compiler, we must manually define these macros
+  # that hipcc would normally define automatically
+  target_compile_definitions(hipsparse-test PRIVATE 
+    __HIP_PLATFORM_NVIDIA__
+    __HIPCC__
+  )
   target_include_directories(hipsparse-test PRIVATE ${HIP_INCLUDE_DIRS})
   target_link_libraries(hipsparse-test PRIVATE ${CUDA_LIBRARIES})
 endif()

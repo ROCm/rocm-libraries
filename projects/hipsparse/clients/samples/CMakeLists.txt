@@ -52,7 +52,12 @@ function(add_hipsparse_example EXAMPLE_SOURCE)
   if(NOT USE_CUDA)
     target_link_libraries(${EXAMPLE_TARGET} PRIVATE hip::host)
   else()
-    target_compile_definitions(${EXAMPLE_TARGET} PRIVATE __HIP_PLATFORM_NVIDIA__)
+    # When not using hipcc compiler, we must manually define these macros
+    # that hipcc would normally define automatically
+    target_compile_definitions(${EXAMPLE_TARGET} PRIVATE 
+      __HIP_PLATFORM_NVIDIA__
+      __HIPCC__
+    )
     target_include_directories(${EXAMPLE_TARGET} PRIVATE ${HIP_INCLUDE_DIRS})
     target_link_libraries(${EXAMPLE_TARGET} PRIVATE ${CUDA_LIBRARIES})
   endif()
