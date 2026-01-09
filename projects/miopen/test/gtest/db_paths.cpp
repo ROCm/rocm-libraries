@@ -90,13 +90,11 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
     std::cout << "MIOPEN_BUILD_DEV = 0 (not defined)" << std::endl;
 #endif
 
-    const auto cache_path = miopen::GetCachePath(false);
-    std::cout << "Returned cache_path = '" << cache_path.string() << "'" << std::endl;
-    std::cout << "PathContains(cache_path, temp_dir) = "
-              << (PathContains(cache_path, temp_dir.string()) ? "true" : "false") << std::endl;
-    std::cout << "============================================\n" << std::endl;
-
     const auto& user_db_path = miopen::GetUserDbPath();
+    std::cout << "Returned user_db_path = '" << user_db_path.string() << "'" << std::endl;
+    std::cout << "PathContains(user_db_path, temp_dir) = "
+              << (PathContains(user_db_path, temp_dir.string()) ? "true" : "false") << std::endl;
+    std::cout << "============================================\n" << std::endl;
 
     if(user_db_path.empty())
     {

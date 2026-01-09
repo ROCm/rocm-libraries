@@ -71,6 +71,10 @@ static fs::path ComputeUserCachePath()
     {
         std::cout << "Using MIOPEN_CUSTOM_CACHE_DIR=" << custom << "\n";
     }
+    else
+    {
+        std::cout << "Using MIOPEN_CACHE_DIR=" << MIOPEN_CACHE_DIR << "\n";
+    }
 
     const std::string cache_dir = !custom.empty() ? custom : MIOPEN_CACHE_DIR;
     const std::string version   = std::to_string(MIOPEN_VERSION_MAJOR)       //
