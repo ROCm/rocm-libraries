@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <set>
 #include <vector>
 
@@ -46,7 +47,8 @@ namespace TensileLite
     {
         using Element = std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>;
         using Table   = Matching::MatchingTable<MyProblem, Element, std::shared_ptr<MySolution>>;
-        std::shared_ptr<Table> table;
+        std::shared_ptr<Table>    table;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -176,7 +178,15 @@ namespace TensileLite
                 else
                     std::cout << "No solution found" << std::endl;
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (solutions.size() < numSolutions);
             return solutions;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

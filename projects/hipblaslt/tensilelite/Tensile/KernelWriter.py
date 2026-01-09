@@ -3247,8 +3247,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # if swapGlobalRoad is true, swap the order of global read (B->A)
       tensorParameters1st = tensorParametersA
       tensorParameters2nd = tensorParametersB
-      tailLoopOpt1st = kernel["tailLoopOptA"]
-      tailLoopOpt2nd = kernel["tailLoopOptB"]
+      tailLoopOpt1st = kernel["tailLoopOptA"] and self.do["GlobalReadA"]
+      tailLoopOpt2nd = kernel["tailLoopOptB"] and self.do["GlobalReadB"]
 
       tc1 = 'A'
       tc2 = 'B'
@@ -3285,6 +3285,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif tc2 == 'B':
           globalReadMode2nd = 2
 
+      # Opt Mode 2
       module.addComment1("Update M0 for DTLDS")
       moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters1st)
       module.add(replaceHolder(moduleTmp, 0))
@@ -3304,6 +3305,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
 
+      # Opt Mode 3
       doA = False
       doB = False
       if globalReadMode1st == 3:
