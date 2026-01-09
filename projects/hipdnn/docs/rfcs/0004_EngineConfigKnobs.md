@@ -16,13 +16,12 @@
 
 ## 1. Executive Summary
 
-This RFC proposes a flexible engine configuration knobs system for hipDNN that allows plugin developers to expose custom runtime settings and enables end-users to adjust and serialize these settings. Unlike a more limited int64_t-based knob system with min/max/stride constraints, this design leverages Flatbuffers' union types to support multiple value types (integers, floats, booleans, strings, enums) while maintaining type safety and efficient serialization.
+This RFC proposes a flexible engine configuration knobs system for hipDNN that allows plugin developers to expose custom runtime settings and enables end-users to adjust these settings. Unlike a more limited int64_t-based knob system with min/max/stride constraints, this design leverages Flatbuffers' union types to support multiple value types (integers, floats, booleans, strings, enums) while maintaining type safety.
 
 The knobs system is designed to be:
 - **Optional**: Plugins can opt-in to exposing knobs
 - **Flexible**: Support for multiple data types beyond int64_t
 - **Namespace-safe**: Plugin-specific knob identifiers prevent conflicts
-- **Serializable**: Engine configurations with knob settings can be saved and restored
 - **Extensible**: New knob types can be added without breaking existing code
 
 ## 2. Problem Statement
@@ -64,7 +63,7 @@ A robust knobs system for hipDNN must support:
 3. **Plugin Autonomy**: Plugins can define custom knobs without modifying core hipDNN
 4. **Namespace Isolation**: Different plugins can have knobs with the same semantic meaning without conflicts
 5. **Discovery**: Users can query available knobs and their valid ranges/values
-6. **Serialization**: Engine configurations with knob settings can be saved and restored
+6. **Execution Plan Serialization**: Eventually plugin authors will wish to serialize / deserialize / cache execution plans, and if the selected mechanism can support that, it should.,
 
 ## 3. Current System Overview
 
@@ -108,7 +107,7 @@ The current engine configuration workflow is:
 The Plugin SDK (RFC 0002) provides the infrastructure for plugins to implement engines. The knobs system will integrate with this architecture by:
 
 - Allowing `EngineBase` implementations to declare supported knobs
-- Providing helper classes for knob validation and serialization
+- Providing helper classes for knob validation
 - Extending the plugin API to expose knob metadata
 
 ## 4. Proposed Design
@@ -127,9 +126,7 @@ namespace hipdnn_data_sdk.data_objects;
 union KnobValue {
     IntValue,
     FloatValue,
-    BoolValue,
     StringValue,
-    EnumValue
 }
 
 table IntValue {
@@ -140,16 +137,8 @@ table FloatValue {
     value: float64;
 }
 
-table BoolValue {
-    value: bool;
-}
-
 table StringValue {
     value: string;
-}
-
-table EnumValue {
-    selected_index: int32;  // Index into valid_values array
 }
 
 // Knob metadata for discovery
@@ -160,42 +149,33 @@ table Knob {
     description: string;          // Help text
     value_type: KnobValue;        // Discriminator for union
     default_value: KnobValue;     // Default setting
-    constraints: KnobConstraints; // Validation rules
+    constraints: KnobConstraint;  // Validation rules
+    deprecated: bool;             // Allow knob deprecation
 }
 
 // Type-specific constraints
-union KnobConstraints {
-    IntConstraints,
-    FloatConstraints,
-    BoolConstraints,
-    StringConstraints,
-    EnumConstraints
+union KnobConstraint {
+    IntConstraint,
+    FloatConstraint,
+    StringConstraint,
 }
 
-table IntConstraints {
+table IntConstraint {
     min_value: int64;
     max_value: int64;
     stride: int64 = 1;            // Step size (default 1)
     valid_values: [int64];        // Optional: explicit list of valid values
 }
 
-table FloatConstraints {
+table FloatConstraint {
     min_value: float64;
     max_value: float64;
     valid_values: [float64];      // Optional: explicit list
 }
 
-table BoolConstraints {
-    // No constraints needed for boolean
-}
-
-table StringConstraints {
+table StringConstraint {
     max_length: int32;
     valid_values: [string];       // Optional: enum-like string choices
-}
-
-table EnumConstraints {
-    valid_values: [string];       // Required: list of valid enum strings
 }
 ```
 
@@ -332,34 +312,8 @@ public:
         double maxValue
     );
 
-    // Register a boolean knob
-    void registerBoolKnob(
-        const std::string& knobId,
-        const std::string& displayName,
-        const std::string& description,
-        bool defaultValue
-    );
-
-    // Register an enum knob
-    void registerEnumKnob(
-        const std::string& knobId,
-        const std::string& displayName,
-        const std::string& description,
-        const std::string& defaultValue,
-        const std::vector<std::string>& validValues
-    );
-
-    // Serialize to EngineDetails flatbuffer
-    std::vector<uint8_t> serializeKnob() const;
-
-    // Validate knob settings
-    bool validateKnobSettings(
-        const std::vector<uint8_t>& serializedSettings,
-        std::string& errorMessage
-    ) const;
-
 private:
-    std::vector<KnobInfo> _knobs;
+    std::vector<Knob> _knobs;
 };
 
 } // namespace hipdnn_plugin_sdk
@@ -375,18 +329,41 @@ class EngineBase : public IEngine {
 public:
     // Existing methods...
 
+    // NEW: Register some common global namespace knobs
+    void registerDeterministicKnob();
+    void registerBenchmarkingKnob();
+
     // NEW: Override to register knobs
     virtual void registerKnobs(KnobRegistry& registry) {
         // Default: no knobs
     }
-
-    // NEW: Override to apply knob settings
-    virtual void applyKnobSettings(const KnobSettings& settings) {
-        // Default: no-op
     }
 
 protected:
     KnobRegistry _knobRegistry;
+};
+
+} // namespace hipdnn_plugin_sdk
+```
+
+#### 4.3.3 PlanBuilderBase Class Extension
+```cpp
+// plugin_sdk/include/hipdnn_plugin_sdk/EngineBase.hpp
+namespace hipdnn_plugin_sdk {
+
+class PlanBuilderBase : public IPlanBuilder {
+public:
+    // Existing methods...
+
+    virtual ExecutionContext initializeExecutionContext(handle, graph, engine_config) {
+
+        // KnobSettings can be pulled from the engine_config, and resultant values should be stored
+        // on the IPlan that is attached to the execution context
+
+        // Knobs have already been validated against constraints on the frontend, so rather than
+        // check them here, this is the place to validate logical knob combinations,
+        // for example: knob A can only have a value of 1 if knob B is zero
+    }
 };
 
 } // namespace hipdnn_plugin_sdk
@@ -400,6 +377,7 @@ class ConvolutionEngine : public EngineBase {
 public:
     void registerKnobs(KnobRegistry& registry) override {
         // Register tile size knob with power-of-2 values
+        // Throw if the user tries to register a knob that starts with "global."
         registry.registerIntKnob(
             "miopen.conv.tile_size",
             "Tile Size",
@@ -408,41 +386,10 @@ public:
             {8, 16, 32, 64, 128}  // valid values
         );
 
-        // Register algorithm selection
-        registry.registerEnumKnob(
-            "miopen.conv.algorithm",
-            "Algorithm",
-            "Convolution algorithm to use",
-            "winograd",  // default
-            {"direct", "gemm", "winograd", "fft"}
-        );
-
-        // Register workspace reuse flag
-        registry.registerBoolKnob(
-            "miopen.conv.reuse_workspace",
-            "Reuse Workspace",
-            "Reuse workspace memory across calls",
-            true  // default
-        );
+        // Register the built-in deterministic knob
+        // This will register a knob called global.deterministic
+        registry.registerDeterministicKnob();
     }
-
-    void applyKnobSettings(const KnobSettings& settings) override {
-        // Extract and apply settings
-        if (auto tileSize = settings.getInt("miopen.conv.tile_size")) {
-            _tileSize = *tileSize;
-        }
-        if (auto algo = settings.getEnum("miopen.conv.algorithm")) {
-            _algorithm = parseAlgorithm(*algo);
-        }
-        if (auto reuse = settings.getBool("miopen.conv.reuse_workspace")) {
-            _reuseWorkspace = *reuse;
-        }
-    }
-
-private:
-    int64_t _tileSize = 16;
-    Algorithm _algorithm = Algorithm::Winograd;
-    bool _reuseWorkspace = true;
 };
 ```
 
@@ -458,9 +405,7 @@ namespace hipdnn::frontend {
 enum class KnobValueType {
     INT64,
     FLOAT64,
-    BOOL,
     STRING,
-    ENUM
 };
 
 // Knob information class - describes available knobs for an engine
@@ -475,34 +420,30 @@ public:
     const std::string& getKnobIdStr() const;
     const std::string& getDisplayName() const;
     const std::string& getDescription() const;
+    const bool isDeprecated() const;
 
     KnobValueType getValueType() const;
 
     // Get default value (type-specific)
     std::optional<int64_t> getDefaultInt() const;
     std::optional<double> getDefaultFloat() const;
-    std::optional<bool> getDefaultBool() const;
     std::optional<std::string> getDefaultString() const;
 
     // Get constraints (type-specific)
-    struct IntConstraints {
+    struct IntConstraint {
         int64_t minValue;
         int64_t maxValue;
         int64_t stride;
         std::vector<int64_t> validValues;  // Optional explicit list
     };
-    struct FloatConstraints {
+    struct FloatConstraint {
         double minValue;
         double maxValue;
         std::vector<double> validValues;  // Optional explicit list
     };
-    struct EnumConstraints {
-        std::vector<std::string> validValues;
-    };
 
-    std::optional<IntConstraints> getIntConstraints() const;
-    std::optional<FloatConstraints> getFloatConstraints() const;
-    std::optional<EnumConstraints> getEnumConstraints() const;
+    std::optional<IntConstraint> getIntConstraint() const;
+    std::optional<FloatConstraint> getFloatConstraint() const;
 
     // Convert to Knob with default value
     KnobSetting toDefaultKnob() const;
@@ -510,10 +451,6 @@ public:
     // flatbuffer pack and unpack methods
     pack()
     unpack()
-
-    // Helper: Convert Knob vector to KnobSettings map with defaults
-    static std::unordered_map<int64_t, KnobSetting> knobToDefaultKnobSettings(
-        const std::vector<Knob>& knobs);
 
     // Helper, to hash the string ID to the int ID
     static int64_t make_knob_id(const std::string& strID);
@@ -525,7 +462,6 @@ public:
     // Constructors for different value types
     KnobSetting(int64_t knobId, int64_t value);
     KnobSetting(int64_t knobId, double value);
-    KnobSetting(int64_t knobId, bool value);
     KnobSetting(int64_t knobId, const std::string& value);
 
     // Accessors
@@ -535,7 +471,6 @@ public:
     // Get value (type-specific)
     std::optional<int64_t> getIntValue() const;
     std::optional<double> getFloatValue() const;
-    std::optional<bool> getBoolValue() const;
     std::optional<std::string> getStringValue() const;
 
     // flatbuffer pack and unpack methods
@@ -549,6 +484,7 @@ typedef int64_t KnobType_t;
 class Graph {
 public:
     // Existing methods... only supports int64_t values for knobs
+
     // The key is KnobID
     // Supplied for added compatibility
     error_t Graph::create_execution_plan(int64_t engineId,
@@ -558,7 +494,15 @@ public:
 
     // New methods
     error_t Graph::create_execution_plan(int64_t engineId,
-                                         std::unordered_map<int64_t, KnobSetting> const &user_knobs) const;
+                                         std::unordered_map<int64_t, KnobSetting> const &user_knobs
+                                         bool filterByKnobs = false) const;
+
+    error_t Graph::get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
+                                         const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK});
+
+private:
+    // Internal method for validating knob settings against knob constraints
+    error_t Graph::validate_knob_settings(std::unordered_map<int64_t, KnobSetting> const &user_knobs);
 
 };
 
@@ -583,7 +527,7 @@ auto defaultKnobSettings = Graph::knobToDefaultKnobSettings(knobs);
 graph.create_execution_plan_ext(MIOPEN_ENGINE, defaultKnobSettings);
 
 // Option 2: Customize specific knobs
-std::unordered_map<int64_t, KnobSettings> customKnobSettings;
+std::unordered_map<int64_t, KnobSetting> customKnobSettings;
 customKnobSettings.insert(Knob::make_knob_id("miopen.conv.tile_size"), 32);
 graph.create_execution_plan_ext(MIOPEN_ENGINE, customKnobSettings);
 ```
@@ -592,12 +536,13 @@ The extension methods provide:
 - **Richer metadata**: `Knob` includes display names, descriptions, constraints, and default values
 - **Type safety**: `KnobSetting` class enforces type-safe value setting
 - **Flexibility**: Support for multiple value types beyond int64_t
+- **Early Validation**: Since we know the constraints for the knobs, we can error out early if they defy constraints
 
 The existing methods will use the flatbuffer variants under the hood.
 
 ### 4.5 Knob Naming Convention
 
-To prevent conflicts between plugins, we recommend a hierarchical naming scheme:
+We recommend a hierarchical naming scheme:
 
 ```
 <plugin_name>.<engine_name>.<knob_name>
@@ -611,6 +556,15 @@ Examples:
 
 The plugin name prefix ensures that different plugins can have semantically similar knobs without collision.
 
+Additionally, we will define a "global." namespace which will contain commonly used knobs.  Custom knobs registered in the global namespace will be rejected.
+
+```
+Examples:
+- global.deterministic
+- global.workspace
+- global.benchmarking
+```
+
 ## 5. Key Design Decisions
 
 ### 5.1 Flatbuffer Unions vs. Original Approach
@@ -621,7 +575,7 @@ The plugin name prefix ensures that different plugins can have semantically simi
 - **Type Safety**: Unions provide compile-time and runtime type checking
 - **Expressiveness**: Can represent boolean flags, floating-point parameters, and enumerations naturally
 - **Flexibility**: Easy to add new value types without breaking existing code
-- **Efficiency**: Flatbuffers are zero-copy and highly efficient for serialization
+- **Efficiency**: Flatbuffers are zero-copy and highly efficient
 - **Validation**: Type-specific constraints are more intuitive (e.g., enum valid values vs. min/max/stride)
 
 **Trade-off**: Slightly more complex schema, but significantly better developer experience.
@@ -656,15 +610,6 @@ The plugin name prefix ensures that different plugins can have semantically simi
 - **Clear Error Messages**: Can provide detailed validation errors
 - **Consistency**: Matches existing finalization pattern in hipDNN
 
-### 5.5 Serialization Support
-
-**Decision**: Engine configurations with knob settings are serializable via Flatbuffers.
-
-**Rationale**:
-- **Persistence**: Users can save optimal configurations
-- **Reproducibility**: Configurations can be shared across runs/systems
-- **Debugging**: Serialized configs can be inspected and modified
-- **Integration**: Works naturally with existing Flatbuffer infrastructure
 
 ## 6. Risks
 
@@ -680,7 +625,7 @@ The plugin name prefix ensures that different plugins can have semantically simi
 
 ### 6.2 Performance Overhead
 
-**Risk**: Knob validation and serialization could add overhead.
+**Risk**: Knob validation could add overhead.
 
 **Mitigation**:
 - Validation only occurs during finalization (one-time cost)
@@ -698,16 +643,7 @@ The plugin name prefix ensures that different plugins can have semantically simi
 - Consider adding a knob registry service for conflict detection
 - Document best practices for knob design
 
-### 6.4 Serialization Versioning
-
-**Risk**: Serialized configurations may become incompatible across hipDNN versions.
-
-**Mitigation**:
-- Include version information in serialized data (a separate RFC will address versioning)
-- Design schemas to be forward/backward compatible where possible
-- Document serialization format stability guarantees
-
-### 6.5 Testing Complexity
+### 6.4 Testing Complexity
 
 **Risk**: Testing all combinations of knob values is impractical.
 
@@ -727,7 +663,7 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
    - Update `engine_config.fbs` to include KnobSetting array
    - Update `engine_details.fbs` to include Knob array
    - Generate C++ code from schemas using flatc
-   - Write unit tests for schema serialization/deserialization
+   - Write unit tests for schema handling
    - Verify union type handling and constraint validation
 
 2. **Backend API Implementation**
@@ -753,17 +689,16 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 6. **KnobSettings Class Implementation**
    - Implement `KnobSettings` class with type-safe constructors
    - Add type-specific value getters
-   - Implement serialization/deserialization methods
-   - Add validation against Knob constraints
+   - Add validation against Knob constraints (and warn on deprecated knobs)
    - Write unit tests for Knob class
 
 7. **Graph Extension Methods**
    - Implement `Graph::get_knobs_for_engine_ext(int64_t engineId)`
      - Query backend for engine details
-     - Deserialize Knob array from flatbuffer
+     - Extract Knob array from flatbuffer
      - Return vector of Knob objects
-   - Implement `Graph::create_execution_plan_ext(int64_t engineId, const std::unordered_map<int64_t, KnobSettings>&)`
-     - Serialize KnobSettings vector to flatbuffer
+   - Implement `Graph::create_execution_plan_ext(int64_t engineId, const std::unordered_map<int64_t, KnobSetting>&)`
+     - Convert KnobSetting vector to flatbuffer
      - Create EngineConfig with knob settings
      - Validate knobs during finalization
      - Create and return ExecutionPlan
@@ -774,6 +709,10 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 8. **Documentation**
    - Write user guide for knobs API
    - Create plugin developer guide for knob registration
+       - Define some best practices
+           - Document how execution plans should and shouldn't be serialized, regarding how it interacts with knob settings
+           - If a knob setting isn't supplied by the user, it's up to the plugin author to supply default values
+           - If a knob is no longer needed, deprecate it rather than removing it.  There is a deprecated flag on knobs that can be used.  Deprecated knobs can be removed during a major version udpate.
    - Document naming conventions and best practices
    - Provide code examples for all three usage patterns
 
@@ -789,7 +728,7 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 
 11. **Integration Testing**
     - End-to-end tests with real plugins and knobs
-    - Test all three usage patterns (defaults, customization, serialization)
+    - Test usage patterns (defaults, customization)
     - Cross-plugin knob namespace isolation tests
     - Error handling and validation edge cases
     - Performance benchmarking (knob overhead should be negligible)
@@ -809,17 +748,15 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
    - Implement `KnobRegistry` class with registration methods:
      - `registerIntKnob()` (both range-based and explicit values)
      - `registerFloatKnob()`
-     - `registerBoolKnob()`
-     - `registerEnumKnob()`
-   - Add `serializeKnob()` to generate EngineDetails flatbuffer
    - Implement `validateKnobSettings()` against registered constraints
    - Add helper methods for knob lookup and type checking
    - Write comprehensive unit tests for all knob types
 
-4. **EngineBase Integration**
+4. **EngineBase and PlanBuilderBase Integration**
    - Add `registerKnobs(KnobRegistry&)` virtual method to `EngineBase`
-   - Add `applyKnobSettings(const KnobSettings&)` virtual method to `EngineBase`
-   - Implement `KnobSettings` helper class for extracting typed values
+   - Add `validateKnobSettings(const std::vector<KnobSetting>&)` virtual method to `EngineBase`
+   - Implement `KnobSetting` helper class for extracting typed values
+   - Extract knob settings during initializeExecutionContext
    - Update engine lifecycle to call knob registration during initialization
    - Update engine configuration to call knob application before execution
    - Provide utility methods for common knob patterns
@@ -833,8 +770,8 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 ### 8.1 Unit Tests
 
 #### Flatbuffer Schema Tests
-- Serialize/deserialize each knob value type
-- Validate constraint serialization
+- Handle each knob value type
+- Validate constraint handling
 - Test union type discrimination
 - Verify default value handling
 
@@ -843,7 +780,7 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 - Register each knob type
 - Validate constraint enforcement
 - Test duplicate knob ID detection
-- Verify serialization to EngineDetails
+- Verify conversion to EngineDetails
 
 #### Validation Tests
 - Valid values pass validation
@@ -869,7 +806,6 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 #### Frontend Integration
 - Type-safe knob setting
 - Knob value retrieval
-- Serialization round-trip
 - Error propagation to user
 
 ### 8.3 Plugin-Specific Tests
@@ -891,18 +827,22 @@ Future work could integrate knobs with auto-tuning:
 - **Optimal Configuration**: Automatically find best knob values for a workload
 - **Caching**: Store optimal configurations for reuse
 
+### 9.2 Knob identifier headers
+
+- **Global Knob Identifier Header** - A header that lives in the frontend that defines an enum or consts for common knob types, preventing the need for knowing "special strings"
+- **Plugin Knob Identifier Header** - Plug devs could have their plugin knob id consts / enums in a header that installs to a known frontend include location, providing the same features as the Global Knob Identifier Header
+
 ## 10. Glossary
 
 - **Knob**: A runtime-configurable parameter that affects engine behavior
 - **Knob ID**: A unique string identifier for a knob (e.g., "miopen.conv.tile_size")
 - **Knob Value**: The actual setting for a knob (int, float, bool, string, or enum)
-- **Knob Constraints**: Validation rules for a knob (min/max, valid values, etc.)
+- **Knob Constraint**: Validation rules for a knob (min/max, valid values, etc.)
 - **Knob Registry**: A collection of knob metadata for an engine
 - **Engine Config**: A configuration object that includes engine ID and knob settings
 - **Engine Details**: Metadata about an engine, including supported knobs
 - **Knob Setting**: A (knob_id, value) pair in an engine configuration
 - **Namespace**: A prefix for knob IDs to prevent conflicts (e.g., "miopen.")
-- **Serialization**: Converting knob settings to/from binary format for persistence
 - **Validation**: Checking that knob values satisfy constraints
 - **Finalization**: The process of validating and locking a configuration
 - **Auto-Tuning**: Automatically searching for optimal knob values
