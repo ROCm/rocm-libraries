@@ -438,7 +438,7 @@ extern template struct ConvWinoFuryRxSFused<2, 3>;
 #endif
 
 template <uint32_t Winodata, uint32_t Winofilter>
-struct MIOPEN_INTERNALS_EXPORT ConvWinoRageRxSFused final : FusionSolverBase
+struct ConvWinoRageRxSFused final : FusionSolverBase
 {
     const std::string& SolverDbId() const override
     {
