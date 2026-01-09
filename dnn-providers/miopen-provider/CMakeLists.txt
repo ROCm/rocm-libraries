@@ -39,7 +39,13 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     )
 
     # Enable testing for standalone build
-    option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
+    # Migrate HIP_DNN_SKIP_TESTS -> HIPDNN_SKIP_TESTS
+    if(DEFINED HIP_DNN_SKIP_TESTS)
+        set(HIPDNN_SKIP_TESTS ${HIP_DNN_SKIP_TESTS} CACHE BOOL "Skip building tests" FORCE)
+        unset(HIP_DNN_SKIP_TESTS CACHE)
+        message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
+    endif()
+    option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 
     list(
         PREPEND
@@ -154,19 +160,14 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin)
 endif()
 
-if(NOT HIP_DNN_SKIP_TESTS)
+if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
     if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-        create_test_name_validation_target()
-
-        finalize_custom_check_target()
-        finalize_unit_check_target()
-        finalize_integration_check_target()
-
-        add_dependencies(check validate_test_names)
-        add_dependencies(check_ctest validate_test_names)
+        # Keep this after all build folders have been added so they have a chance to register their tests
+        # using add_*_test_target()
+        finalize_test_targets()
 
         # For standalone builds we need to install the ctest files
         install_miopen_legacy_plugin_ctest_files()
