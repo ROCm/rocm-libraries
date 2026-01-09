@@ -3,7 +3,7 @@
 
 include(GoogleTest)
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     message(STATUS "Skipping HIP-DNN Frontend Unit tests")
     return()
 endif()

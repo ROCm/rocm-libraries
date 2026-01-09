@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -40,23 +40,35 @@ Tests:
   row_block_dimA: [2, 5]
   col_block_dimA: [3, 7]
   action: [HIPSPARSE_ACTION_NUMERIC]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
 
 - name: gebsr2gebsc_file
   category: pre_checkin
   function: gebsr2gebsc
   precision: *single_double_precisions_complex_real
   M: 1
-  row_block_dimA: [3]
-  col_block_dimA: [5]
+  row_block_dimA: [3, 7, 11]
+  col_block_dimA: [5, 9]
   action: [HIPSPARSE_ACTION_NUMERIC]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  filename: [scircuit,
-             nos1,
+  filename: [nos1,
              nos2,
              nos3,
              nos4,
              nos5,
              nos6,
              nos7]
+
+- name: gebsr2gebsc_file
+  category: nightly
+  function: gebsr2gebsc
+  precision: *single_only_precisions
+  M: 1
+  row_block_dimA: [4]
+  col_block_dimA: [6]
+  action: [HIPSPARSE_ACTION_NUMERIC]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [mc2depi,
+             rma10,
+             scircuit]
 
