@@ -1628,6 +1628,36 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment=""),
         ]
         nglshift = nllshift = 15
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        optSchedule = {
+            'SYNC'   : [[-1, 21, 21, 51, 51, 79, 79]],
+            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB' : [[9,10,11,12,13,14,15,16,17]],
+
+            'LRA0'   : [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]],
+            'LRB0'   : [[14, 17, 20, 23, 26, 29, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50]],
+
+            'GRA'    : [[22,22, 26,26, 30,30, 34,34, 38,38, 42,42, 46,46]],
+            'GRB'    : [[52,53, 56,57, 60,61, 64,65, 68,69, 71,72, 74,75, 77,78]],
+
+            'LRA1'   : [[79,80, 81,82, 83,84, 85,86, 87,88, 89,90, 91,92]],
+            'LRB1'   : [[93,94, 95,96, 97,98, 99,100, 101,102, 103,104, 105,106, 107,108]],
+            'LRSA'   : [[54]],
+            'LRSB'   : [[54]],
+            'LWSA'   : [[91]],
+            'LWSB'   : [[91]],
+            'LCC'    : [[111, 111]]
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment=""),
+        ]
+        nglshift = nllshift = 15
     else:
         return False, None
     numMfma = 112
