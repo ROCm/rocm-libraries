@@ -42,6 +42,10 @@ target_link_libraries(rocsparse-bench PRIVATE
 
 if(TARGET OpenMP::OpenMP_CXX)
     target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX)
+    # Set RPATH to find libomp.so at install time
+    set_target_properties(rocsparse-bench PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../llvm/lib;$ORIGIN/../lib"
+    )
 endif()
 
 if(ROCSPARSE_ENABLE_MARKER)
