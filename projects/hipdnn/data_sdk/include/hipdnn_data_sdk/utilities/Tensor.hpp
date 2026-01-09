@@ -15,6 +15,7 @@
 #include <random>
 #include <typeindex>
 #include <vector>
+#include <variant>
 
 namespace hipdnn_data_sdk::utilities
 {
@@ -68,7 +69,6 @@ public:
     using TensorType = std::conditional_t<IsConst, const ITensor&, ITensor&>;
     using IndexType = std::variant<LinearIndex, CompositeIndex>;
 
-public:
     ITensorIterator() = default;
 
     template <bool C = IsConst, std::enable_if_t<!C, int> = 0>
@@ -136,8 +136,7 @@ public:
     struct LinearIndex
     {
         LinearIndex(TensorType tensor, bool isEnd)
-            : index(0)
-            , tensor(tensor)
+            : tensor(tensor)
 
         {
             if(isEnd && !tensor.dims().empty())
@@ -179,7 +178,7 @@ public:
             return index;
         }
 
-        int64_t index;
+        int64_t index{0};
         TensorType tensor;
     };
 
@@ -261,10 +260,7 @@ private:
         {
             return LinearIndex(tensor, isEnd);
         }
-        else
-        {
-            return CompositeIndex(tensor, isEnd);
-        }
+        return CompositeIndex(tensor, isEnd);
     }
 
     TensorType _tensor;
