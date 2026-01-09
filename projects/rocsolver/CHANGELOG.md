@@ -4,6 +4,14 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ## rocSOLVER 3.32.0 for ROCm 7.2.0
 
+### Resolved issues
+
+* Fixed a synchronization issue in GETF2.
+
+
+
+## rocSOLVER 3.32.0 for ROCm 7.2.0
+
 ### Optimized
 
 * Improved the performance of LARFB and downstream functions such as GEQRF and ORMTR.
