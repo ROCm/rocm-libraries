@@ -37,9 +37,12 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 
+#  include <rocprim/rocprim.hpp>
 #  include <thrust/system/hip/config.h>
+
+#  include <rocprim/config.hpp>
 
 #  include <thrust/advance.h>
 #  include <thrust/detail/alignment.h>
@@ -52,9 +55,6 @@
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
-
-// rocPRIM includes
-#  include <rocprim/rocprim.hpp>
 
 #  include <cstdint>
 

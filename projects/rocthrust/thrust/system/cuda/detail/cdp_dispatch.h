@@ -46,7 +46,7 @@
  * the device.
  *
  * `par_impl` and `seq_impl` are blocks of C++ statements enclosed in
- * parentheses, similar to NV_IF_TARGET blocks:
+ * parentheses, similar to _THRUST_IF_TARGET blocks:
  *
  * \code
  * THRUST_CDP_DISPATCH((launch_parallel_kernel();), (run_serial_impl();));
@@ -61,12 +61,12 @@
 #  define THRUST_CDP_DISPATCH(par_impl, seq_impl)                    \
     if (false)                                                       \
     { /* Without this, the device pass won't compile any kernels. */ \
-      NV_IF_TARGET(NV_ANY_TARGET, par_impl);                         \
+      _THRUST_IF_TARGET(_THRUST_ANY_TARGET, par_impl);               \
     }                                                                \
-    NV_IF_TARGET(NV_IS_HOST, par_impl, seq_impl)
+    _THRUST_IF_TARGET(_THRUST_IS_HOST, par_impl, seq_impl)
 
 #else // !(NVCC device pass):
 
-#  define THRUST_CDP_DISPATCH(par_impl, seq_impl) NV_IF_TARGET(NV_IS_HOST, par_impl, seq_impl)
+#  define THRUST_CDP_DISPATCH(par_impl, seq_impl) _THRUST_IF_TARGET(_THRUST_IS_HOST, par_impl, seq_impl)
 
 #endif // NVCC device pass

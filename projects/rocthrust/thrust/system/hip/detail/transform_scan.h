@@ -29,7 +29,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/transform_iterator.h>

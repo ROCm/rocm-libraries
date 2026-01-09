@@ -17,7 +17,7 @@
 
 #pragma once
 
-#if !THRUST_HAS_CUDA_COMPILER() || !THRUST_COMPILER(HIP)
+#if !THRUST_HAS_CUDA_COMPILER() || !THRUST_HAS_HIP_COMPILER()
 
 #  ifndef __host__
 #    define __host__

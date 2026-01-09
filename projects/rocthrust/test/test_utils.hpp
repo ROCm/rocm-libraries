@@ -53,7 +53,7 @@
 #include <string>
 
 // HIP API
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  include <hip/hip_runtime.h>
 #  include <hip/hip_runtime_api.h>
 
@@ -75,7 +75,7 @@
       } while (0)
 #  endif
 
-#endif // THRUST_COMPILER(HIP)
+#endif // THRUST_HAS_HIP_COMPILER()
 
 namespace test
 {
@@ -931,7 +931,7 @@ void test_equality_pair_scan(const thrust::host_vector<Pair<X, Y>>& hvalue,
   }
 }
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name

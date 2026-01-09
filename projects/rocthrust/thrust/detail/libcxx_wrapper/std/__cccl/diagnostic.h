@@ -22,23 +22,6 @@
 
 #  include _THRUST_STD_INCLUDE(__cccl/diagnostic.h)
 
-#  if _CCCL_COMPILER(HIP)
-#    undef _CCCL_DIAG_PUSH
-#    undef _CCCL_DIAG_POP
-#    undef _CCCL_DIAG_SUPPRESS_CLANG
-#    undef _CCCL_SUPPRESS_DEPRECATED_PUSH
-#    undef _CCCL_SUPPRESS_DEPRECATED_POP
-#    define _CCCL_DIAG_PUSH                     _CCCL_PRAGMA(clang diagnostic push)
-#    define _CCCL_DIAG_POP                      _CCCL_PRAGMA(clang diagnostic pop)
-#    define _CCCL_DIAG_SUPPRESS_CLANG(_WARNING) _CCCL_PRAGMA(clang diagnostic ignored _WARNING)
-#    define _CCCL_SUPPRESS_DEPRECATED_PUSH                   \
-      _CCCL_DIAG_PUSH                                        \
-      _CCCL_DIAG_SUPPRESS_CLANG("-Wdeprecated")              \
-      _CCCL_DIAG_SUPPRESS_CLANG("-Wdeprecated-declarations") \
-      _CCCL_BEGIN_NV_DIAG_SUPPRESS(1444, 20199)
-#    define _CCCL_SUPPRESS_DEPRECATED_POP _CCCL_NV_DIAG_POP() _CCCL_DIAG_POP
-#  endif
-
 #  define THRUST_DIAG_PUSH                     _CCCL_DIAG_PUSH
 #  define THRUST_DIAG_POP                      _CCCL_DIAG_POP
 #  define THRUST_DIAG_SUPPRESS_CLANG(_WARNING) _CCCL_DIAG_SUPPRESS_CLANG(_WARNING)
@@ -50,7 +33,7 @@
 
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/preprocessor.h>
 
-#  if THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#  if THRUST_COMPILER(CLANG)
 #    define THRUST_DIAG_PUSH                     THRUST_PRAGMA(clang diagnostic push)
 #    define THRUST_DIAG_POP                      THRUST_PRAGMA(clang diagnostic pop)
 #    define THRUST_DIAG_SUPPRESS_CLANG(_WARNING) THRUST_PRAGMA(clang diagnostic ignored _WARNING)
@@ -111,7 +94,7 @@
 #    define THRUST_END_NV_DIAG_SUPPRESS()
 #  endif // !THRUST_CUDA_COMPILER(NVCC)
 
-#  if THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#  if THRUST_COMPILER(CLANG)
 #    define THRUST_SUPPRESS_DEPRECATED_PUSH                   \
       THRUST_DIAG_PUSH                                        \
       THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated")              \

@@ -188,12 +188,12 @@ _CCCL_HOST_DEVICE inline void throw_on_error(cudaError_t status)
 #ifdef THRUST_RDC_ENABLED
   cudaGetLastError();
 #else
-  NV_IF_TARGET(NV_IS_HOST, (cudaGetLastError();));
+  _THRUST_IF_TARGET(_THRUST_IS_HOST, (cudaGetLastError();));
 #endif
 
   if (cudaSuccess != status)
   {
-    // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+    // Can't use #if inside _THRUST_IF_TARGET, use a temp macro to hoist the device
     // instructions out of the target logic.
 #ifdef THRUST_RDC_ENABLED
 
@@ -206,9 +206,9 @@ _CCCL_HOST_DEVICE inline void throw_on_error(cudaError_t status)
 
 #endif
 
-    NV_IF_TARGET(NV_IS_HOST,
-                 (throw thrust::system_error(status, thrust::cuda_category());),
-                 (THRUST_TEMP_DEVICE_CODE; ::cuda::std::terminate();));
+    _THRUST_IF_TARGET(_THRUST_IS_HOST,
+                      (throw thrust::system_error(status, thrust::cuda_category());),
+                      (THRUST_TEMP_DEVICE_CODE; ::cuda::std::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
@@ -221,12 +221,12 @@ _CCCL_HOST_DEVICE inline void throw_on_error(cudaError_t status, char const* msg
 #ifdef THRUST_RDC_ENABLED
   cudaGetLastError();
 #else
-  NV_IF_TARGET(NV_IS_HOST, (cudaGetLastError();));
+  _THRUST_IF_TARGET(_THRUST_IS_HOST, (cudaGetLastError();));
 #endif
 
   if (cudaSuccess != status)
   {
-    // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+    // Can't use #if inside _THRUST_IF_TARGET, use a temp macro to hoist the device
     // instructions out of the target logic.
 #ifdef THRUST_RDC_ENABLED
 
@@ -239,9 +239,9 @@ _CCCL_HOST_DEVICE inline void throw_on_error(cudaError_t status, char const* msg
 
 #endif
 
-    NV_IF_TARGET(NV_IS_HOST,
-                 (throw thrust::system_error(status, thrust::cuda_category(), msg);),
-                 (THRUST_TEMP_DEVICE_CODE; ::cuda::std::terminate();));
+    _THRUST_IF_TARGET(_THRUST_IS_HOST,
+                      (throw thrust::system_error(status, thrust::cuda_category(), msg);),
+                      (THRUST_TEMP_DEVICE_CODE; ::cuda::std::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }

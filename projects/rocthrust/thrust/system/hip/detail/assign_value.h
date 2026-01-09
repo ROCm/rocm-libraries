@@ -27,10 +27,9 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/libcxx_wrapper/nv/target.h>
 #  include <thrust/detail/raw_pointer_cast.h>
 #  include <thrust/system/hip/detail/copy.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
@@ -44,7 +43,7 @@ THRUST_HOST_DEVICE void assign_value([[maybe_unused]] execution_policy<DerivedPo
   // Because of https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cuda-arch point 2., if a call from a __host__
   // __device__ function leads to the template instantiation of a __global__ function, then this instantiation needs to
   // happen regardless of whether __CUDA_ARCH__ is defined. Therefore, we make the host path visible outside the
-  // NV_IF_TARGET switch. See also NVBug 881631.
+  // _THRUST_IF_TARGET switch. See also NVBug 881631.
   struct HostPath
   {
     THRUST_HOST auto operator()(execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
@@ -52,8 +51,8 @@ THRUST_HOST_DEVICE void assign_value([[maybe_unused]] execution_policy<DerivedPo
       hip_rocprim::copy(exec, src, src + 1, dst);
     }
   };
-  NV_IF_TARGET(
-    NV_IS_HOST, (HostPath{}(exec, dst, src);), *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src););
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST, (HostPath{}(exec, dst, src);), *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src););
 }
 
 template <typename System1, typename System2, typename Pointer1, typename Pointer2>
@@ -63,7 +62,7 @@ assign_value([[maybe_unused]] cross_system<System1, System2>& systems, Pointer1 
   // Because of https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cuda-arch point 2., if a call from a __host__
   // __device__ function leads to the template instantiation of a __global__ function, then this instantiation needs to
   // happen regardless of whether __CUDA_ARCH__ is defined. Therefore, we make the host path visible outside the
-  // NV_IF_TARGET switch. See also NVBug 881631.
+  // _THRUST_IF_TARGET switch. See also NVBug 881631.
   struct HostPath
   {
     THRUST_HOST auto operator()(cross_system<System1, System2>& systems, Pointer1 dst, Pointer2 src)
@@ -73,11 +72,12 @@ assign_value([[maybe_unused]] cross_system<System1, System2>& systems, Pointer1 
       hip_rocprim::copy(rotated_systems, src, src + 1, dst);
     }
   };
-  NV_IF_TARGET(NV_IS_HOST,
-               (HostPath{}(systems, dst, src);),
-               (
-                 // XXX forward the true hip::execution_policy inside systems here instead of materializing a tag
-                 hip::tag hip_tag; hip_rocprim::assign_value(hip_tag, dst, src);));
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
+    (HostPath{}(systems, dst, src);),
+    (
+      // XXX forward the true hip::execution_policy inside systems here instead of materializing a tag
+      hip::tag hip_tag; hip_rocprim::assign_value(hip_tag, dst, src);));
 }
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END

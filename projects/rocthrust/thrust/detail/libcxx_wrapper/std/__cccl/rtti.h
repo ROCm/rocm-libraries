@@ -22,7 +22,7 @@
 
 #  include _THRUST_STD_INCLUDE(__cccl/rtti.h)
 
-#  if !defined(CCCL_DISABLE_RTTI) && _CCCL_COMPILER(HIP)
+#  if !defined(CCCL_DISABLE_RTTI) && THRUST_HAS_HIP_COMPILER()
 #    undef _CCCL_NO_RTTI
 #    if !_CCCL_HAS_FEATURE(cxx_rtti)
 #      define _CCCL_NO_RTTI
@@ -50,7 +50,7 @@
 #      if _CPPRTTI == 0
 #        define THRUST_NO_RTTI
 #      endif
-#    elif THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#    elif THRUST_COMPILER(CLANG)
 #      if !THRUST_HAS_FEATURE(cxx_rtti)
 #        define THRUST_NO_RTTI
 #      endif

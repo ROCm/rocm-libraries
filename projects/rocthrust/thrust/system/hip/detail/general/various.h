@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <rocprim/rocprim.hpp>
 #include <thrust/detail/config.h>
 
 #include <thrust/detail/type_traits.h>

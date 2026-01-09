@@ -33,8 +33,6 @@
 #  include <type_traits>
 #endif
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
-
 THRUST_NAMESPACE_BEGIN
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -120,8 +118,8 @@ THRUST_HOST_DEVICE void uninitialized_construct(ForwardIt first, ForwardIt last,
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; current != last; ++current)
@@ -147,8 +145,8 @@ void uninitialized_construct_with_allocator(Allocator const& alloc, ForwardIt fi
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; current != last; ++current)
@@ -170,8 +168,8 @@ void uninitialized_construct_n(ForwardIt first, Size n, Args const&... args)
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; n > 0; ++current, --n)
@@ -197,8 +195,8 @@ void uninitialized_construct_n_with_allocator(Allocator const& alloc, ForwardIt 
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; n > 0; (void) ++current, --n)

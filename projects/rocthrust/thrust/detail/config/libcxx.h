@@ -69,7 +69,7 @@
 #elif THRUST_HAS_INCLUDE(<hip/std/version>) && USE_LIBHIPCXX
 #  include <hip/std/version>
 // If version matches and '_CUDA_VSTD' is available.
-#  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MINOR \
+#  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
     && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <hip/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <hip/std/LIB>
@@ -99,4 +99,53 @@
     {
 #  define _THRUST_STD_NAMESPACE_END }
 #  define _THRUST_USE_ROCPRIM (THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CPP)
+#endif
+
+// In case libhipcxx is not available, load a basic version from our libcxx wrapper.
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// libhipcxx exposes <nv/target>, but does not expose <hip/target>.
+#  include <nv/target>
+#else
+#  include <thrust/detail/libcxx_wrapper/nv/detail/__target_macros.h>
+#endif
+
+// NV_* macros provided by 'libhipcxx' are suffixed with _LIBHIPCXX.
+#if defined(NV_IF_TARGET)
+#  define _THRUST_IF_TARGET NV_IF_TARGET
+#elif defined(NV_IF_TARGET_LIBHIPCXX)
+#  define _THRUST_IF_TARGET NV_IF_TARGET_LIBHIPCXX
+#else
+#  error Could not find definition for '_THRUST_IF_TARGET'!
+#endif
+
+#if defined(NV_IF_ELSE_TARGET)
+#  define _THRUST_IF_ELSE_TARGET NV_IF_ELSE_TARGET
+#elif defined(NV_IF_ELSE_TARGET_LIBHIPCXX)
+#  define _THRUST_IF_ELSE_TARGET NV_IF_ELSE_TARGET_LIBHIPCXX
+#else
+#  error Could not find definition for '_THRUST_IF_ELSE_TARGET'!
+#endif
+
+#if defined(NV_IS_HOST)
+#  define _THRUST_IS_HOST NV_IS_HOST
+#elif defined(NV_IS_HOST_LIBHIPCXX)
+#  define _THRUST_IS_HOST NV_IS_HOST_LIBHIPCXX
+#else
+#  error Could not find definition for '_THRUST_IS_HOST'!
+#endif
+
+#if defined(NV_IS_DEVICE)
+#  define _THRUST_IS_DEVICE NV_IS_DEVICE
+#elif defined(NV_IS_DEVICE_LIBHIPCXX)
+#  define _THRUST_IS_DEVICE NV_IS_DEVICE_LIBHIPCXX
+#else
+#  error Could not find definition for '_THRUST_IS_DEVICE'!
+#endif
+
+#if defined(NV_ANY_TARGET)
+#  define _THRUST_ANY_TARGET NV_ANY_TARGET
+#elif defined(NV_ANY_TARGET_LIBHIPCXX)
+#  define _THRUST_ANY_TARGET NV_ANY_TARGET_LIBHIPCXX
+#else
+#  error Could not find definition for '_THRUST_ANY_TARGET'!
 #endif

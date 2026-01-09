@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
@@ -434,4 +434,4 @@ THRUST_NAMESPACE_END
 
 #  include <thrust/scan.h>
 
-#endif // THRUST_COMPILER(HIP)
+#endif // THRUST_HAS_HIP_COMPILER()

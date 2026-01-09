@@ -44,7 +44,7 @@ _CCCL_HOST_DEVICE void assign_value(execution_policy<DerivedPolicy>& exec, Point
   // Because of https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cuda-arch point 2., if a call from a __host__
   // __device__ function leads to the template instantiation of a __global__ function, then this instantiation needs to
   // happen regardless of whether __CUDA_ARCH__ is defined. Therefore, we make the host path visible outside the
-  // NV_IF_TARGET switch. See also NVBug 881631.
+  // _THRUST_IF_TARGET switch. See also NVBug 881631.
   struct HostPath
   {
     _CCCL_HOST auto operator()(execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
@@ -52,8 +52,8 @@ _CCCL_HOST_DEVICE void assign_value(execution_policy<DerivedPolicy>& exec, Point
       cuda_cub::copy(exec, src, src + 1, dst);
     }
   };
-  NV_IF_TARGET(
-    NV_IS_HOST, (HostPath{}(exec, dst, src);), *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src););
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST, (HostPath{}(exec, dst, src);), *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src););
 }
 
 template <typename System1, typename System2, typename Pointer1, typename Pointer2>
@@ -62,7 +62,7 @@ _CCCL_HOST_DEVICE void assign_value(cross_system<System1, System2>& systems, Poi
   // Because of https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cuda-arch point 2., if a call from a __host__
   // __device__ function leads to the template instantiation of a __global__ function, then this instantiation needs to
   // happen regardless of whether __CUDA_ARCH__ is defined. Therefore, we make the host path visible outside the
-  // NV_IF_TARGET switch. See also NVBug 881631.
+  // _THRUST_IF_TARGET switch. See also NVBug 881631.
   struct HostPath
   {
     _CCCL_HOST auto operator()(cross_system<System1, System2>& systems, Pointer1 dst, Pointer2 src)
@@ -72,11 +72,12 @@ _CCCL_HOST_DEVICE void assign_value(cross_system<System1, System2>& systems, Poi
       cuda_cub::copy(rotated_systems, src, src + 1, dst);
     }
   };
-  NV_IF_TARGET(NV_IS_HOST,
-               (HostPath{}(systems, dst, src);),
-               (
-                 // XXX forward the true cuda::execution_policy inside systems here instead of materializing a tag
-                 cuda::tag cuda_tag; cuda_cub::assign_value(cuda_tag, dst, src);));
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
+    (HostPath{}(systems, dst, src);),
+    (
+      // XXX forward the true cuda::execution_policy inside systems here instead of materializing a tag
+      cuda::tag cuda_tag; cuda_cub::assign_value(cuda_tag, dst, src);));
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END

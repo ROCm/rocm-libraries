@@ -52,7 +52,7 @@ THRUST_HOST_DEVICE pointer<Element, Tag, Reference, Derived>::pointer(OtherEleme
     : super_t(other)
 {} // end pointer::pointer
 
-#if THRUST_COMPILER(HIP) // Fixes hipcc linkage error
+#if THRUST_HAS_HIP_COMPILER() // Fixes hipcc linkage error
 template <typename Element, typename Tag, typename Reference, typename Derived>
 THRUST_HOST_DEVICE pointer<Element, Tag, Reference, Derived>::pointer(Element* ptr)
     : super_t(ptr)

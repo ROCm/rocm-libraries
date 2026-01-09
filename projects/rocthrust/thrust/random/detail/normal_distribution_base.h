@@ -39,7 +39,7 @@
 #include <cmath>
 #include <limits>
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/random/detail/erfcinv.h>
 #endif
 

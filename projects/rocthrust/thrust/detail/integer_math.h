@@ -30,8 +30,6 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
-
 #include <limits>
 
 THRUST_NAMESPACE_BEGIN
@@ -43,16 +41,17 @@ THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer clz(Integer x)
 {
   Integer result;
 
-  NV_IF_TARGET(NV_IS_DEVICE,
-               (result = ::__clz(x);),
-               (int num_bits = 8 * sizeof(Integer); int num_bits_minus_one = num_bits - 1; result = num_bits;
-                for (int i = num_bits_minus_one; i >= 0; --i) {
-                  if ((Integer(1) << i) & x)
-                  {
-                    result = num_bits_minus_one - i;
-                    break;
-                  }
-                }));
+  _THRUST_IF_TARGET(
+    _THRUST_IS_DEVICE,
+    (result = ::__clz(x);),
+    (int num_bits = 8 * sizeof(Integer); int num_bits_minus_one = num_bits - 1; result = num_bits;
+     for (int i = num_bits_minus_one; i >= 0; --i) {
+       if ((Integer(1) << i) & x)
+       {
+         result = num_bits_minus_one - i;
+         break;
+       }
+     }));
 
   return result;
 }

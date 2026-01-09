@@ -84,7 +84,7 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 // D->D copy requires HIP compiler
 
 THRUST_EXEC_CHECK_DISABLE

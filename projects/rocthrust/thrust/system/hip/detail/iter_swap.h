@@ -27,7 +27,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
@@ -38,8 +38,6 @@
 #  if _THRUST_HAS_DEVICE_SYSTEM_STD
 #    include _THRUST_STD_INCLUDE(utility)
 #  endif
-
-#  include <thrust/detail/libcxx_wrapper/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -67,7 +65,7 @@ inline THRUST_HOST_DEVICE void iter_swap(thrust::hip::execution_policy<DerivedPo
     }
   };
 
-  NV_IF_TARGET(NV_IS_HOST, (war_nvbugs_881631::host_path(a, b);), (war_nvbugs_881631::device_path(a, b);));
+  _THRUST_IF_TARGET(_THRUST_IS_HOST, (war_nvbugs_881631::host_path(a, b);), (war_nvbugs_881631::device_path(a, b);));
 
 } // end iter_swap()
 

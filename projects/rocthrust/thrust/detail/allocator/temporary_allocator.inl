@@ -32,8 +32,6 @@
 
 #include <cassert>
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
-
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__))
 #    include <thrust/system/cuda/detail/terminate.h>
@@ -60,15 +58,15 @@ temporary_allocator<T, System>::allocate(typename temporary_allocator<T, System>
     deallocate(result.first, cnt);
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    NV_IF_TARGET(NV_IS_HOST,
+    _THRUST_IF_TARGET(_THRUST_IS_HOST,
                  (throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");),
-                 ( // NV_IS_DEVICE
+                 ( // _THRUST_IS_DEVICE
                    thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: "
                                                                         "get_temporary_buffer failed");));
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-    NV_IF_TARGET(NV_IS_HOST,
+    _THRUST_IF_TARGET(_THRUST_IS_HOST,
                  (throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");),
-                 ( // NV_IS_DEVICE
+                 ( // _THRUST_IS_DEVICE
                    thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: "
                                                                        "get_temporary_buffer failed");));
 #else

@@ -27,10 +27,9 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/libcxx_wrapper/nv/target.h>
 #  include <thrust/detail/raw_pointer_cast.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/system/hip/detail/cross_system.h>
@@ -45,7 +44,7 @@ get_value([[maybe_unused]] execution_policy<DerivedPolicy>& exec, Pointer ptr)
   // Because of https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cuda-arch point 2., if a call from a __host__
   // __device__ function leads to the template instantiation of a __global__ function, then this instantiation needs to
   // happen regardless of whether __CUDA_ARCH__ is defined. Therefore, we make the host path visible outside the
-  // NV_IF_TARGET switch. See also NVBug 881631.
+  // _THRUST_IF_TARGET switch. See also NVBug 881631.
   struct HostPath
   {
     THRUST_HOST auto operator()(execution_policy<DerivedPolicy>& exec, Pointer ptr)
@@ -58,7 +57,7 @@ get_value([[maybe_unused]] execution_policy<DerivedPolicy>& exec, Pointer ptr)
       return result;
     }
   };
-  NV_IF_TARGET(NV_IS_DEVICE, return *thrust::raw_pointer_cast(ptr);, (return HostPath{}(exec, ptr);))
+  _THRUST_IF_TARGET(_THRUST_IS_DEVICE, return *thrust::raw_pointer_cast(ptr);, (return HostPath{}(exec, ptr);))
 }
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END

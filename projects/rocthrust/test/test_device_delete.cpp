@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/device_delete.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
@@ -32,7 +31,8 @@ struct Foo
 
   THRUST_HOST_DEVICE ~Foo()
   {
-    NV_IF_TARGET(NV_IS_DEVICE, (if (set_me_upon_destruction != nullptr) { *set_me_upon_destruction = true; }));
+    _THRUST_IF_TARGET(_THRUST_IS_DEVICE,
+                      (if (set_me_upon_destruction != nullptr) { *set_me_upon_destruction = true; }));
   }
 
   bool* set_me_upon_destruction;

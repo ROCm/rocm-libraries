@@ -410,7 +410,7 @@ TEST(HipThrustMemory, TypeMalloc)
   thrust::free(dev_tag, ptr);
 }
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 TEST(HipThrustMemory, MallocUseMemory)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -427,4 +427,4 @@ TEST(HipThrustMemory, MallocUseMemory)
   // Free
   thrust::free(dev_tag, ptr);
 }
-#endif // THRUST_COMPILER(HIP)
+#endif // THRUST_HAS_HIP_COMPILER()

@@ -13,9 +13,17 @@
 #define LIBCXX_WRAPPER_STD__CCCL_COMPILER_H
 
 // TODO(libhipcxx): check if libhipcxx supports THRUST_COMPILER_HIP, remove this file,
-// and replace all THRUST* with _CCCL* in rocThrust once libhipcxx gets ready
+// and replace all THRUST* with _CCCL* in rocThrust once libhipcxx gets ready.
 
 #include <thrust/detail/config/libcxx.h>
+
+// 'libhipcxx' does not provide _CCCL_HAS_HIP_COMPILER, we must add it ourselves.
+// When fully swapping over to libhipcxx, do not forget to port this properly!
+#if defined(__HIP__)
+#  define THRUST_HAS_HIP_COMPILER() 1
+#else
+#  define THRUST_HAS_HIP_COMPILER() 0
+#endif // __HIP__
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
@@ -23,45 +31,11 @@
 
 #  define THRUST_COMPILER(...) _CCCL_COMPILER(__VA_ARGS__)
 
-#  if defined(__HIP__)
-#    define _CCCL_COMPILER_HIP() _CCCL_COMPILER_CLANG()
-#    undef _CCCL_COMPILER_CLANG
-#    define _CCCL_COMPILER_CLANG() _CCCL_VERSION_INVALID()
-#  else
-#    define _CCCL_COMPILER_HIP() _CCCL_VERSION_INVALID()
-#  endif
-
 #  define THRUST_CUDA_COMPILER(...)  _CCCL_CUDA_COMPILER(__VA_ARGS__)
 #  define THRUST_HAS_CUDA_COMPILER() _CCCL_HAS_CUDA_COMPILER()
 #  define THRUST_CUDA_COMPILATION()  _CCCL_CUDA_COMPILATION()
 
-#  undef _CCCL_HOST_COMPILATION
-#  if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-#    define _CCCL_HOST_COMPILATION() 1
-#  else // ^^^ compiling host code ^^^ / vvv not compiling host code vvv
-#    define _CCCL_HOST_COMPILATION() 0
-#  endif // ^^^ not compiling host code ^^^
-
-#  undef _CCCL_DEVICE_COMPILATION
-#  if (_CCCL_CUDA_COMPILATION() && defined(__CUDA_ARCH__)) || _CCCL_CUDA_COMPILER(NVHPC) \
-    || (_CCCL_COMPILER(HIP) && defined(__HIP_DEVICE_COMPILE__))
-#    define _CCCL_DEVICE_COMPILATION() 1
-#  else // ^^^ compiling device code ^^^ / vvv not compiling device code vvv
-#    define _CCCL_DEVICE_COMPILATION() 0
-#  endif // ^^^ not compiling device code ^^^
-
-#  define THRUST_PRAGMA(ARG) _CCCL_PRAGMA(ARG)
-
-#  undef _CCCL_PRAGMA_UNROLL_FULL
-#  if _CCCL_DEVICE_COMPILATION()
-#    define _CCCL_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA(unroll)
-#  elif _CCCL_COMPILER(NVHPC) || _CCCL_COMPILER(NVRTC) || _CCCL_COMPILER(CLANG) || _CCCL_COMPILER(HIP)
-#    define _CCCL_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA(unroll)
-#  elif _CCCL_COMPILER(GCC, >=, 8)
-#    define _CCCL_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA_UNROLL(65534)
-#  else // ^^^ has pragma unroll support ^^^ / vvv no pragma unroll support vvv
-#    define _CCCL_PRAGMA_UNROLL_FULL()
-#  endif // ^^^ no pragma unroll support ^^^
+#  define THRUST_PRAGMA(ARG)          _CCCL_PRAGMA(ARG)
 #  define THRUST_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA_UNROLL_FULL()
 
 #else
@@ -112,7 +86,6 @@
 #  define THRUST_COMPILER(...)                         THRUST_VERSION_COMPARE(THRUST_COMPILER_, THRUST_COMPILER_##__VA_ARGS__)
 
 #  define THRUST_COMPILER_NVHPC()    THRUST_VERSION_INVALID()
-#  define THRUST_COMPILER_HIP()      THRUST_VERSION_INVALID()
 #  define THRUST_COMPILER_CLANG()    THRUST_VERSION_INVALID()
 #  define THRUST_COMPILER_GCC()      THRUST_VERSION_INVALID()
 #  define THRUST_COMPILER_MSVC()     THRUST_VERSION_INVALID()
@@ -128,9 +101,6 @@
 #  elif defined(__NVCOMPILER)
 #    undef THRUST_COMPILER_NVHPC
 #    define THRUST_COMPILER_NVHPC() (__NVCOMPILER_MAJOR__, __NVCOMPILER_MINOR__)
-#  elif defined(__HIP__)
-#    undef THRUST_COMPILER_HIP
-#    define THRUST_COMPILER_HIP() (__clang_major__, __clang_minor__)
 #  elif defined(__clang__)
 #    undef THRUST_COMPILER_CLANG
 #    define THRUST_COMPILER_CLANG() (__clang_major__, __clang_minor__)
@@ -194,8 +164,7 @@
 #    define THRUST_CUDA_COMPILATION() 0
 #  endif // ^^^ not compiling .cu file ^^^
 
-#  if (THRUST_CUDA_COMPILATION() && defined(__CUDA_ARCH__)) || THRUST_CUDA_COMPILER(NVHPC) \
-    || (THRUST_COMPILER(HIP) && defined(__HIP_DEVICE_COMPILE__))
+#  if (THRUST_CUDA_COMPILATION() && defined(__CUDA_ARCH__)) || THRUST_CUDA_COMPILER(NVHPC)
 #    define THRUST_DEVICE_COMPILATION() 1
 #  else // ^^^ compiling device code ^^^ / vvv not compiling device code vvv
 #    define THRUST_DEVICE_COMPILATION() 0
@@ -231,7 +200,7 @@
 #  if THRUST_DEVICE_COMPILATION()
 #    define THRUST_PRAGMA_UNROLL(_N)    THRUST_PRAGMA(unroll _N)
 #    define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(unroll)
-#  elif THRUST_COMPILER(NVHPC) || THRUST_COMPILER(NVRTC) || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#  elif THRUST_COMPILER(NVHPC) || THRUST_COMPILER(NVRTC) || THRUST_COMPILER(CLANG)
 #    define THRUST_PRAGMA_UNROLL(_N)    THRUST_PRAGMA(unroll _N)
 #    define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(unroll)
 #  elif THRUST_COMPILER(GCC, >=, 8)

@@ -57,7 +57,7 @@
 
 namespace bench_utils
 {
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 
 #  define HIP_CHECK(condition)                                                     \
     {                                                                              \
