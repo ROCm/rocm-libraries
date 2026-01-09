@@ -3273,3 +3273,106 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
     return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 160, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+
+    n_mfma = 120
+    optSchedule = dict()
+    nglshift = nllshift = 0
+
+    syncs = SyncSchedule()
+    syncCode = []
+    snops: list[tuple[int, SNop]] = []
+    snopCode = []
+    S4 = SNop(4)
+    gr_inc_step = 0
+
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UsePLRPack"] = True
+
+        grinca = [0,1,2,3,4,5,6,7,8]
+        grincb = [9,10,12,13,14,15,16,17,18]
+        lrsa   = [58]
+        lrsb   = [58]
+        lwsa   = [118]
+        lwsb   = [118]
+
+        pack_a = [0,0,0,0, 1,1,   2,2,2,2,
+                  3,3,3,3, 4,4,   5,5,5,5,
+                  6,6,6,6, 7,7,   8,8,8,8,
+                  9,9,9,9, 10,10, 11,11,11,11
+                  ]
+        pack_b = [0,0,0,0, 1,1,   2,2,2,2,
+                  3,3,3,3, 4,4,   5,5,5,5,
+                  6,6,6,6, 7,7,   8,8,8,8,
+                  9,9,9,9, 10,10, 11,11,11,11,
+                  12,12,12,12, 13,13, 14,14,14,14
+                  ]
+        lra0   = [0,1,2,3,4,5,6,7]
+        syncs.add(                 12, dscnt=4, comment="wait for LRA0 before pack to complete")
+        pack_a0 = [                i+13 for i in pack_a]
+        snops.extend([               (14, S4), (17, S4), (20, S4), (23, S4)])
+
+        lrb0   = [               8,9,10,11,12,13,14,15,16,17]
+        syncs.add(                                                   23, dscnt=0, barrier=True, comment="wait for LRB0 before pack to complete + barrier for GR")
+        pack_b0 = [                                                  i+28 for i in pack_b]
+        snops.extend([                                                 (29, S4), (32, S4), (35, S4), (38, S4), (41, S4)])
+
+        gra    = [                                    24,28,32,36, 44,48,52,56] # one index for two instructions
+        grb    = [                                                             66,70,74,78, 88,92,96,100, 110,114] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                                                            59, vlcnt=8, barrier=True, comment="wait for previous set of global reads")
+
+        lra1   = [60,61,62,63,64,65,66,67]
+        syncs.add(                          72, dscnt=4, comment="wait for LRA1 before pack to complete")
+        pack_a1 = [                         i+73 for i in pack_a]
+        snops.extend([                        (74, S4), (77, S4), (80, S4),(83, S4)])
+
+        lrb1   = [                        68,69,70,71,72,73,74,75,76,77]
+        syncs.add(                                                            83, dscnt=0, comment="wait for LRB1 before pack to complete")
+        pack_b1 = [                                                           i+88 for i in pack_b]
+        snops.extend([                                                          (89, S4), (92, S4), (95, S4), (98, S4), (101, S4)])
+
+        optSchedule = {
+            'SYNC':   [syncs.get_indicies()],
+            'GRIncA': [grinca],
+            'GRIncB': [grincb],
+            'LRA0':   [lra0],
+            'LRB0':   [lrb0],
+            'PackA0': [pack_a0],
+            'PackB0': [pack_b0],
+            'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
+            'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
+            'LRSA':   [lrsa],
+            'LRSB':   [lrsb],
+            'LWSA':   [lwsa],
+            'LWSB':   [lwsb],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'PackB1': [pack_b1],
+            'PackA1': [pack_a1],
+            'LCC':    [[n_mfma-2, n_mfma-1]],
+        }
+
+        syncCode = syncs.get_code()
+        nglshift = nllshift = num_gr
+        if snops:
+            optSchedule['SNOP'] = [ [s[0] for s in snops] ]
+            snopCode = [s[1] for s in snops]
+
+        opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+        return True, opt1
+
+    else:
+        return False, None
