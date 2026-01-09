@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,13 +50,13 @@ Tests:
   alpha: [0.3]
   alphai: [-0.2, 1.7]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-
+  
 - name: axpyi
   category: nightly
   function: axpyi
   precision: *single_double_precisions_complex_real
-  N: [100000, 500000]
-  nnz: [0, 10000, 50000, 100000]
+  N: [1000000, 5000000]
+  nnz: [0, 100000, 500000]
   alpha: [0.3]
   alphai: [1.7]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
