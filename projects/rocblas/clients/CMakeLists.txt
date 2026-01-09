@@ -246,7 +246,7 @@ function(find_bundled_blis)
 endfunction()
 
 # Search for system cblas/OpenBLAS
-# Sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope, or errors if not found
+# Sets BLAS_LIBRARY and BLAS_INCLUDE_DIR in parent scope, or errors if not found
 function(find_system_cblas)
   # Try to find BLAS library directly (most reliable across distros)
   # pkg-config can be unreliable - sometimes it returns library names without paths
@@ -265,7 +265,7 @@ function(find_system_cblas)
     if(PKG_CONFIG_FOUND)
       pkg_search_module(PKGBLAS cblas)
       if(PKGBLAS_FOUND AND PKGBLAS_INCLUDE_DIRS)
-        set(BLIS_INCLUDE_DIR "${PKGBLAS_INCLUDE_DIRS}" PARENT_SCOPE)
+        set(BLAS_INCLUDE_DIR "${PKGBLAS_INCLUDE_DIRS}" PARENT_SCOPE)
         message(STATUS "  Include: ${PKGBLAS_INCLUDE_DIRS} (via pkg-config)")
       endif()
     endif()
