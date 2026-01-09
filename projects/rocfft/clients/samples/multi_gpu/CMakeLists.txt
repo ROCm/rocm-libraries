@@ -56,7 +56,7 @@ if( USE_HIPRAND AND NOT hiprand_FOUND )
   find_package( hiprand REQUIRED )
 endif()
 
-set( sample_list mgpu_complex)
+set( sample_list mgpu_complex mgpu_realcomplex)
 
 foreach( sample ${sample_list} )
 
