@@ -3382,7 +3382,7 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_NE(biasUid, 500);
 }
 
-TEST_F(TestGraph, GetTensorByUidReturnsTensor)
+TEST_F(TestGraph, GetTensorsByUidReturnsMap)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)
@@ -3402,24 +3402,29 @@ TEST_F(TestGraph, GetTensorByUidReturnsTensor)
     auto y = graph.pointwise(x, pwAttrs);
     y->set_uid(99);
 
-    // Get tensor by UID
-    auto foundX = graph.getTensor(42);
-    ASSERT_NE(foundX, nullptr);
-    EXPECT_EQ(foundX->get_uid(), 42);
-    EXPECT_EQ(foundX->get_name(), "X");
-    EXPECT_EQ(foundX, x);
+    // Get tensor map by UID
+    auto tensorsByUid = graph.getTensorsByUid();
 
-    auto foundY = graph.getTensor(99);
-    ASSERT_NE(foundY, nullptr);
-    EXPECT_EQ(foundY->get_uid(), 99);
-    EXPECT_EQ(foundY, y);
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByUid.size(), 2);
 
-    // Non-existent UID returns nullptr
-    auto notFound = graph.getTensor(999);
-    EXPECT_EQ(notFound, nullptr);
+    auto itX = tensorsByUid.find(42);
+    ASSERT_NE(itX, tensorsByUid.end());
+    EXPECT_EQ(itX->second->get_uid(), 42);
+    EXPECT_EQ(itX->second->get_name(), "X");
+    EXPECT_EQ(itX->second, x);
+
+    auto itY = tensorsByUid.find(99);
+    ASSERT_NE(itY, tensorsByUid.end());
+    EXPECT_EQ(itY->second->get_uid(), 99);
+    EXPECT_EQ(itY->second, y);
+
+    // Non-existent UID not found in map
+    auto notFound = tensorsByUid.find(999);
+    EXPECT_EQ(notFound, tensorsByUid.end());
 }
 
-TEST_F(TestGraph, GetTensorByNameReturnsTensor)
+TEST_F(TestGraph, GetTensorsByNameReturnsMap)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)
@@ -3438,20 +3443,25 @@ TEST_F(TestGraph, GetTensorByNameReturnsTensor)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     auto y = graph.pointwise(x, pwAttrs);
 
-    // Get tensor by name
-    auto foundX = graph.getTensor("InputTensor");
-    ASSERT_NE(foundX, nullptr);
-    EXPECT_EQ(foundX->get_name(), "InputTensor");
-    EXPECT_EQ(foundX, x);
+    // Get tensor map by name
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByName.size(), 2);
+
+    auto itX = tensorsByName.find("InputTensor");
+    ASSERT_NE(itX, tensorsByName.end());
+    EXPECT_EQ(itX->second->get_name(), "InputTensor");
+    EXPECT_EQ(itX->second, x);
 
     // Output tensor has auto-generated name
-    auto foundY = graph.getTensor("PointwiseNode::OUT_0");
-    ASSERT_NE(foundY, nullptr);
-    EXPECT_EQ(foundY, y);
+    auto itY = tensorsByName.find("PointwiseNode::OUT_0");
+    ASSERT_NE(itY, tensorsByName.end());
+    EXPECT_EQ(itY->second, y);
 
-    // Non-existent name returns nullptr
-    auto notFound = graph.getTensor("NonExistentTensor");
-    EXPECT_EQ(notFound, nullptr);
+    // Non-existent name not found in map
+    auto notFound = tensorsByName.find("NonExistentTensor");
+    EXPECT_EQ(notFound, tensorsByName.end());
 }
 
 TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)

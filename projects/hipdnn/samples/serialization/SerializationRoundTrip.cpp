@@ -109,9 +109,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(jsonGraph.check_support());
     HIPDNN_FE_CHECK(jsonGraph.build_plans());
 
-    auto xAttrJson = jsonGraph.getTensor("x");
-    auto wAttrJson = jsonGraph.getTensor("w");
-    auto yAttrJson = jsonGraph.getTensor("y");
+    auto jsonTensors = jsonGraph.getTensorsByName();
+    auto xAttrJson = jsonTensors.at("x");
+    auto wAttrJson = jsonTensors.at("w");
+    auto yAttrJson = jsonTensors.at("y");
 
     utilities::Tensor<InputType> yJson(yAttrJson->get_dim(), layout);
     yJson.fillWithValue(static_cast<InputType>(0.0f));
@@ -141,9 +142,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(binaryGraph.check_support());
     HIPDNN_FE_CHECK(binaryGraph.build_plans());
 
-    auto xAttrBin = binaryGraph.getTensor("x");
-    auto wAttrBin = binaryGraph.getTensor("w");
-    auto yAttrBin = binaryGraph.getTensor("y");
+    auto binaryTensors = binaryGraph.getTensorsByName();
+    auto xAttrBin = binaryTensors.at("x");
+    auto wAttrBin = binaryTensors.at("w");
+    auto yAttrBin = binaryTensors.at("y");
 
     utilities::Tensor<InputType> yBinary(yAttrBin->get_dim(), layout);
     yBinary.fillWithValue(static_cast<InputType>(0.0f));
