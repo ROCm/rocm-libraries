@@ -466,7 +466,14 @@ inline std::string GetPooling2dTestCaseName(const testing::TestParamInfo<Pooling
 template <typename T>
 struct Pooling2dCommon : public testing::TestWithParam<Pooling2dTestCase>
 {
-    void SetUp() override { prng::reset_seed(); }
+    void SetUp() override
+    {
+        prng::reset_seed();
+        // Reset internal environment values - ensure clean state for each test
+        // Note: get_handle() is called inside verify_forward_pooling::gpu() and
+        // verify_backward_pooling::gpu() (in pooling_common.hpp), which creates a fresh handle
+        // for each test execution, resetting internal MIOpen state
+    }
 
 protected:
     // Common test execution method for all pooling2d tests

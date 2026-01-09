@@ -6,6 +6,8 @@
 #include <half/half.hpp>
 #include "pooling2d_common.hpp"
 
+namespace {
+
 using namespace pooling2d_gtest;
 
 std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
@@ -67,6 +69,8 @@ std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
 
     return test_cases;
 }
+
+} // namespace
 
 // Derived classes for Dataset 1 (asymmetric pooling)
 using GPU_AsymPooling2d_FP32 = Pooling2dCommon<float>;

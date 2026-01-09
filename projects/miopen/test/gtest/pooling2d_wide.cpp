@@ -6,6 +6,8 @@
 #include <half/half.hpp>
 #include "pooling2d_common.hpp"
 
+namespace {
+
 using namespace pooling2d_gtest;
 
 std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
@@ -64,6 +66,8 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
 
     return test_cases;
 }
+
+} // namespace
 
 // Derived classes for Dataset 2 (wide window pooling)
 using GPU_WidePooling2d_FP32 = Pooling2dCommon<float>;

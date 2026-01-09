@@ -16,6 +16,8 @@
 #define TEST_GET_INPUT_TENSOR 0
 #endif
 
+namespace {
+
 using namespace pooling2d_gtest;
 
 std::vector<Pooling2dTestCase> GetPooling2dTestCases()
@@ -99,6 +101,8 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 
     return test_cases;
 }
+
+} // namespace
 
 // Derived classes for Dataset 0 (standard pooling)
 using GPU_Pooling2d_FP32 = Pooling2dCommon<float>;
