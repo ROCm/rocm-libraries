@@ -251,6 +251,8 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     else:
         latencyForLR -= max(latencyLeft,0) # remaining latency in mfma
     latencyForLR -= writer.states.miLatency # last LR will have 1 mfma latency
+    # add extra latency
+    latencyForLR += kernel["ExtraLatencyForLR"]
     while latencyForLR > 0:
         latencyForLR -= writer.states.miLatency
         writer.states.numMfmaForNextLoopLR += 1
