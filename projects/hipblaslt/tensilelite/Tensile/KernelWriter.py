@@ -34,7 +34,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
+  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 from rocisa.register import RegisterPool
@@ -3223,9 +3223,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("remove stagger offsets for tail loop")
         module.add(self.removeStagger(kernel, tensorParametersA))
         module.add(self.removeStagger(kernel, tensorParametersB))
-        if kernel.get("KRingShift", False) and kernel["BufferLoad"]:
-          module.addComment1("KRS: apply reference tail offset macro")
-          module.add(self.kRingShiftTailApplyOffsetMacro(kernel))
+        # KRS: Tail offset patching is now emitted just-in-time immediately before each tail global read,
+        # to allow instruction interleaving (apply -> load) and avoid a large apply-only block here.
 
       # if swapGlobalRoad is true, swap the order of global read (B->A)
       tensorParameters1st = tensorParametersA
@@ -3274,16 +3273,100 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment1("Tail global read %s"%tc1)
       if tailLoopOpt1st and (globalReadMode1st == 2):
         module.add(self.doTailLoopOpt(kernel, tensorParameters1st))
+        module.addComment1("Update M0 for DTLDS")
+        moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, True)
+        module.add(replaceHolder(moduleTmp, 0))
+        module.addComment1("Tail global read %s"%tc2)
+        if tailLoopOpt2nd and (globalReadMode2nd == 2):
+          module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
+        else:
+          # Keep per-tensor tail branching for tc2 when tc1 uses tailLoopOpt.
+          if kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc2 in ("A", "B"):
+            labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc2}"), "")
+            labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc2}"), "")
+            labelNoKRS.comment = f"KRS: tail no-KRS path for {tc2} (sgprKRingShift==0)"
+            labelDoneKRS.comment = f"KRS: tail KRS branch join for {tc2}"
+            module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+            module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads"))
+            module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=False))
+            module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads"))
+            module.add(labelNoKRS)
+            module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=True))
+            module.add(labelDoneKRS)
+          else:
+            module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
       else:
-        module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
-      module.addComment1("Update M0 for DTLDS")
-      moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, True)
-      module.add(replaceHolder(moduleTmp, 0))
-      module.addComment1("Tail global read %s"%tc2)
-      if tailLoopOpt2nd and (globalReadMode2nd == 2):
-        module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
-      else:
-        module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
+        # KRS: If both tail global-read blocks (A/B) are eligible for KRS, do ONE runtime branch and
+        # share ONE set of labels for A/B. When sgprKRingShift==0, force both tail blocks down the
+        # original "load-only" path (no KRS_TAIL_OFFSET_* at all).
+        krsTailBranchable1 = kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc1 in ("A", "B")
+        krsTailBranchable2 = kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc2 in ("A", "B") \
+                             and not (tailLoopOpt2nd and (globalReadMode2nd == 2))
+        if krsTailBranchable1 and krsTailBranchable2:
+          labelNoKRS = Label(self.labels.getNameInc("KRS_tail_noop_AB"), "")
+          labelDoneKRS = Label(self.labels.getNameInc("KRS_tail_done_AB"), "")
+          labelNoKRS.comment = "KRS: tail no-KRS path for A/B (sgprKRingShift==0)"
+          labelDoneKRS.comment = "KRS: tail KRS branch join for A/B"
+
+          module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+          module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads (A+B)"))
+
+          # KRS-enabled path: A then B
+          module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=False))
+          module.addComment1("Update M0 for DTLDS")
+          moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, True)
+          module.add(replaceHolder(moduleTmp, 0))
+          module.addComment1("Tail global read %s"%tc2)
+          module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=False))
+          module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads (A+B)"))
+
+          # no-KRS path: A then B (load-only)
+          module.add(labelNoKRS)
+          module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=True))
+          module.addComment1("Update M0 for DTLDS")
+          moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, True)
+          module.add(replaceHolder(moduleTmp, 0))
+          module.addComment1("Tail global read %s"%tc2)
+          module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=True))
+          module.add(labelDoneKRS)
+        else:
+          # Fallback: keep per-tensor tail branching.
+          if krsTailBranchable1:
+            labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc1}"), "")
+            labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc1}"), "")
+            labelNoKRS.comment = f"KRS: tail no-KRS path for {tc1} (sgprKRingShift==0)"
+            labelDoneKRS.comment = f"KRS: tail KRS branch join for {tc1}"
+            module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+            module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads"))
+            module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=False))
+            module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads"))
+            module.add(labelNoKRS)
+            module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st, krTailForceDisable=True))
+            module.add(labelDoneKRS)
+          else:
+            module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
+
+          module.addComment1("Update M0 for DTLDS")
+          moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, True)
+          module.add(replaceHolder(moduleTmp, 0))
+          module.addComment1("Tail global read %s"%tc2)
+          if tailLoopOpt2nd and (globalReadMode2nd == 2):
+            module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
+          else:
+            if kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc2 in ("A", "B"):
+              labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc2}"), "")
+              labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc2}"), "")
+              labelNoKRS.comment = f"KRS: tail no-KRS path for {tc2} (sgprKRingShift==0)"
+              labelDoneKRS.comment = f"KRS: tail KRS branch join for {tc2}"
+              module.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+              module.add(SCBranchSCC1(labelName=labelNoKRS.getLabelName(), comment="KRS: take no-KRS tail loads"))
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=False))
+              module.add(SBranch(labelName=labelDoneKRS.getLabelName(), comment="KRS: skip no-KRS tail loads"))
+              module.add(labelNoKRS)
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd, krTailForceDisable=True))
+              module.add(labelDoneKRS)
+            else:
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
 
       doA = False
       doB = False
@@ -3448,6 +3531,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       for item in valuResources:
         if item[0] != -1:
           module.add(self.tailLoopFreeVgpr(item[0], item[1]))
+
+      # KRS: tail is finished; sgprKRingShift must not be remapped (e.g. to 0) and can be released now.
+      # Emit an explicit UNDEF here so it lands right after the tail VALU vgpr UNDEF block.
+      if kernel.get("KRingShift", False) and kernel["BufferLoad"]:
+        module.add(TextBlock(".set sgprKRingShift, UNDEF\n"))
 
       # Check in VGPR for DTV
       for item in vDtvResources:

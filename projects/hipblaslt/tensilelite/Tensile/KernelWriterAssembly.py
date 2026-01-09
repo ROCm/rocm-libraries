@@ -1412,6 +1412,14 @@ class KernelWriterAssembly(KernelWriter):
         "    // KRS: maskRange = (lane >= nMinusM) && (lane < n)\n"
         "    v_cmp_ge_u32 s[\\tmp_sgpr+8:\\tmp_sgpr+9], v[\\tmp_vgpr+0], s[\\tmp_sgpr+2]\n"
         "    s_and_b64    s[\\tmp_sgpr+8:\\tmp_sgpr+9], s[\\tmp_sgpr+8:\\tmp_sgpr+9], s[\\tmp_sgpr+6:\\tmp_sgpr+7]\n"
+        "    // KRS: If shift==0 (KRS disabled or no-op), force APPLY to be a true no-op.\n"
+        "    // - maskN := all-ones so Step3 keeps original offsets (no OOB sentinel writes)\n"
+        "    // - maskRange := 0 so Step4/extra-adjust do nothing\n"
+        "    s_cmp_eq_u32 s[sgprKRingShift], 0\n"
+        "    s_cselect_b32 s[\\tmp_sgpr+6], 0xffffffff, s[\\tmp_sgpr+6]\n"
+        "    s_cselect_b32 s[\\tmp_sgpr+7], 0xffffffff, s[\\tmp_sgpr+7]\n"
+        "    s_cselect_b32 s[\\tmp_sgpr+8], 0, s[\\tmp_sgpr+8]\n"
+        "    s_cselect_b32 s[\\tmp_sgpr+9], 0, s[\\tmp_sgpr+9]\n"
         ".endm\n"
         "\n"
         "/* KRS: KRingShift tail offset apply (per offset_reg) */\n"
@@ -2653,6 +2661,19 @@ class KernelWriterAssembly(KernelWriter):
 
       # rem = StrideB1J % cacheLineElements (pow2 => AND mask)
       module.add(SAndB32(dst=sgpr(sRem), src0=sgpr("StrideB1J"), src1=mask, comment=f"rem = StrideB1J & {mask}"))
+      # Runtime restriction requested:
+      #   if (BInterleaveG == 1) or ((K * bpe * BInterleaveG) % cachelineBytes != 0) => disable KRS (shift=0)
+      # In elements (cacheLineElements = cachelineBytes/bpe), this becomes:
+      #   if (BInterleaveG == 1) or ((StrideB1J * BInterleaveG) % cacheLineElements != 0) => disable.
+      if kernel.get("BAddrInterleave", False):
+        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=1, comment="KRS: BInterleaveG==1? => disable"))
+        module.add(SCBranchSCC1(labelName=labelDone.getLabelName(), comment="KRS: disable (G==1)"))
+
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("BInterleaveG"), src1=sgpr(sRem), comment="KRS: tmp = (G * (K%CL))"))
+        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=mask, comment="KRS: (G*K)%cacheLineElements"))
+        module.add(SCmpEQU32(src0=sgpr(sTmp), src1=0, comment="KRS: (K*bpe*G)%cacheline == 0 ?"))
+        module.add(SCBranchSCC0(labelName=labelDone.getLabelName(), comment="KRS: disable (not congruent)"))
+
       module.add(SCmpEQU32(src0=sgpr(sRem), src1=0, comment="KRS: StrideB1J cacheline-aligned?"))
       module.add(SCBranchSCC1(labelName=labelDone.getLabelName(), comment="KRS: aligned => shift=0"))
 
@@ -4986,6 +5007,10 @@ class KernelWriterAssembly(KernelWriter):
           imod.add(SLShiftLeftB32(dst=sgpr(tmp+2), src=sgpr(tmp+2), shiftHex=hex(log2(bpe)), comment="KRS: mainLoopBytes"))
         else:
           imod.add(SMulI32(dst=sgpr(tmp+2), src0=sgpr(tmp+2), src1=bpe, comment="KRS: mainLoopBytes"))
+        # If KRS is disabled at runtime (sgprKRingShift==0), do NOT apply any mainLoopBytes rebias.
+        # Keep the sequence branchless by cselect'ing the delta to 0.
+        imod.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+        imod.add(SCSelectB32(dst=sgpr(tmp+2), src0=0, src1=sgpr(tmp+2), comment="KRS: mainLoopBytesDelta (0 if disabled)"))
         # incBytes -= mainLoopBytes (64-bit subtract with borrow into hi)
         imod.add(SSubU32(dst=sgpr(tmp),   src0=sgpr(tmp),   src1=sgpr(tmp+2), comment="KRS: incBytes -= mainLoopBytes (lo)"))
         imod.add(SSubBU32(dst=sgpr(tmp+1), src0=sgpr(tmp+1), src1=0,          comment="KRS: incBytes -= mainLoopBytes (hi)"))
@@ -6726,6 +6751,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # dot2: add shiftK module to prevent read out of K bound
     shiftK           = Module("shiftK")
+    krsShiftKSkipMaskLabel = None
     inputType        = kernel["ProblemType"]["DataType"]
     numRegistersIn   = inputType.numRegisters()
     loopCounterName  = self.loopCounterName(kernel, self.states.unrollIdx)
@@ -6738,6 +6764,16 @@ class KernelWriterAssembly(KernelWriter):
     kReg    = None
     abReg   = None
     dummy   = -1
+
+    # KRS: If KRingShift is enabled at runtime (sgprKRingShift != 0), we can skip the tail LDS
+    # zero-out masking sequence here since the KRS tail global-read path already forces OOB lanes
+    # to read from a safe sentinel (and thus provides the same "invalid -> 0" behavior).
+    # Place this at the very start of shiftK so it lands right after the local-read waitcnt.
+    if isTail and kernel.get("KRingShift", False) and kernel.get("BufferLoad", False):
+      krsShiftKSkipMaskLabel = Label(self.labels.getUniqueNamePrefix("KRS_ShiftK_SkipMask"), comment="")
+      krsShiftKSkipMaskLabel.comment = "KRS: skip tail LDS zero-out mask when sgprKRingShift!=0"
+      shiftK.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+      shiftK.add(SCBranchSCC0(labelName=krsShiftKSkipMaskLabel.getLabelName(), comment="KRS: enabled => skip tail LDS mask"))
 
     if isTail and (kernel["AssertSummationElementMultiple"] % kPerIter != 0):
       kReg    = self.vgprPool.checkOut(1,"kReg") # remainder
@@ -6802,6 +6838,10 @@ class KernelWriterAssembly(KernelWriter):
 
       s_nop = 2
 
+    # KRS: branch target - must be at end so we skip all masking instructions when enabled.
+    if krsShiftKSkipMaskLabel is not None:
+      shiftK.add(krsShiftKSkipMaskLabel)
+
     if s_nop != 0:
       imod.add(SNop(waitState=(s_nop - 1), comment=""))
 
@@ -6849,6 +6889,7 @@ class KernelWriterAssembly(KernelWriter):
   def mfmaIter(self, kernel, tPA, tPB, u, innerUnroll, vregSetIdx, unrollLoopIdx = 0, unrollIdx = 0, tail = False, firstIter = False, postShiftK = Module()):
     imod = Module("mi")
     shiftK = Module("shiftK")
+    krsShiftKSkipMaskLabel = None
     m = (u) % (self.states.numVgprBuffer) # local to use for MACs
 
     def dataTypeToMfmaInstTypePair(dataType: DataType, sourceSwap: bool) -> Tuple[InstType, InstType]:
@@ -6944,6 +6985,15 @@ class KernelWriterAssembly(KernelWriter):
     # MIK=1 case, we still need this code for Coalesced case
     if tail and (kernel["MatrixInstK"] > 1 or numReadsIterCoalescedA > 1 or numReadsIterCoalescedB > 1):
       if not is_wmma_v1: #mfma or wmma_v2
+        # KRS: If KRingShift is enabled at runtime (sgprKRingShift != 0), skip the tail LDS
+        # zero-out masking sequence (shiftK) and jump to the end of this module.
+        # Placed at the start of shiftK so it lands right after the local-read waitcnt.
+        if kernel.get("KRingShift", False) and kernel.get("BufferLoad", False):
+          krsShiftKSkipMaskLabel = Label(self.labels.getUniqueNamePrefix("KRS_ShiftK_SkipMask"), comment="")
+          krsShiftKSkipMaskLabel.comment = "KRS: skip tail LDS zero-out mask when sgprKRingShift!=0"
+          shiftK.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
+          shiftK.add(SCBranchSCC0(labelName=krsShiftKSkipMaskLabel.getLabelName(), comment="KRS: enabled => skip tail LDS mask"))
+
         # ToDo: Avoid using extra kReg_first for wmma_v2 case
         kReg_first  = self.vgprPool.checkOut(1,"kReg_first") # the first vgpr of remainder
         kReg        = self.vgprPool.checkOut(1,"kReg") # remainder
@@ -7091,8 +7141,9 @@ class KernelWriterAssembly(KernelWriter):
             TailLoop_SkipZeroOutMask = Label((self.labels.getUniqueNamePrefix("TailLoop_SkipZeroOutMask")), comment="")
             shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr("SizeL"), src1=8-1, comment="if summation is multiple of 8, skip masking"))
             shiftK.add(SCmpEQU32(src0=sgpr(tmpSgprX1), src1=0))
-            # KRS: Force skipping the mask (debug): always branch to TailLoop_SkipZeroOutMask.
-            shiftK.add(SBranch(labelName=TailLoop_SkipZeroOutMask.getLabelName(), comment="KRS: skip mask"))
+            # Skip masking only when summation is 8-aligned (SizeL % 8 == 0).
+            # NOTE: Must be conditional; unconditional skipping breaks edge masking when SizeL is not aligned.
+            shiftK.add(SCBranchSCC1(labelName=TailLoop_SkipZeroOutMask.getLabelName(), comment="skip mask if aligned (SCC==1)"))
             shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=numMIInput-1, comment="get inputs for edge thread"))
             shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=numMIInput, src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
             shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(shiftPerElement), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
@@ -7520,6 +7571,9 @@ class KernelWriterAssembly(KernelWriter):
 
     mfmaMod = Module("mfmaCode")
     if self.do["MAC"]:
+      # KRS: branch target - must be placed right before postShiftK to skip all masking code above.
+      if krsShiftKSkipMaskLabel is not None:
+        shiftK.add(krsShiftKSkipMaskLabel)
       shiftK.add(postShiftK)
       mfmaMod.add(shiftK)
       mfmaMod.add(imod)
@@ -8893,7 +8947,7 @@ class KernelWriterAssembly(KernelWriter):
   # Global Read: Do It A/B
   ##############################################################################
   def globalReadDo(self, kernel, mode, tP, unrollLoopIdx=-1, g2lBufIdx=0, \
-                   doTailOpt = 0, optParams = None):
+                   doTailOpt = 0, optParams = None, krTailForceDisable=False):
     tc = tP["tensorChar"]
     problemType = self.states.kernel["ProblemType"]
     imod = StructuredModule("globalReadDo%s_%u"%(tc,mode))
@@ -8964,9 +9018,19 @@ class KernelWriterAssembly(KernelWriter):
       isLds = True if kernel["DirectToLds%s"%tc] else False
       isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
 
-      # KRingShift: use the reference macro form (CHECK_AND_SET_OFFSET_MOD) to patch vgprGlobalReadOffsetA/B
-      # before tail loads, so we do not remap addr0 per-load here.
-      krTailRemap = False
+      # KRingShift: in tail loop, patch each vgprGlobalReadOffset{A,B}+i just-in-time right before
+      # its corresponding buffer_load. This allows interleaving apply/load and avoids a big apply-only block.
+      krTailJIT = (not krTailForceDisable and self.states.inTailLoop and kernel.get("KRingShift", False) and kernel["BufferLoad"]
+                   and tc in ("A", "B") and not kernel.get("_UseSgprForGRO", False))
+      if krTailJIT:
+        # Must be even-aligned since macros use b64 SGPR pairs.
+        krTmpS = self.sgprPool.checkOutAligned(10, 2, f"krTailJITTmpS{tc}", preventOverflow=False)
+        krTmpV = self.vgprPool.checkOutAligned(4, 2, f"krTailJITTmpV{tc}", self.states.preventVgprOverflowDuringNewTile)
+        imod.header.addComment0(f"KRS: tail JIT setup for {tc} offsets (setup once; apply before each load)")
+        imod.header.add(MacroInstruction(name="KRS_TAIL_OFFSET_SETUP", args=(krTmpS, krTmpV)))
+      else:
+        krTmpS = None
+        krTmpV = None
 
       directToLdsLoads = 0
       instOffset       = 0
@@ -9084,6 +9148,13 @@ class KernelWriterAssembly(KernelWriter):
                 useBuffer = not isTr
                 addr0Vgpr = offsetVgpr
 
+                # KRS: just-in-time patch for this offset register before issuing the load.
+                if krTailJIT:
+                  # offsetVgpr is "GlobalReadOffset{tc}+{graIdx}" in this path; map to macro symbol form.
+                  # For BufferLoad + !_UseSgprForGRO, graIdx indexes vgprGlobalReadOffset{tc}+graIdx.
+                  loadModule.add(MacroInstruction(name="KRS_TAIL_OFFSET_APPLY",
+                                                 args=(f"vgprGlobalReadOffset{tc} + {graIdx}", krTmpS, krTmpV)))
+
                 loadModule.add( self.chooseGlobalRead(useBuffer, \
                           bpl, destVgpr=destVgpr, \
                           addr0=vgpr(addr0Vgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
@@ -9111,6 +9182,11 @@ class KernelWriterAssembly(KernelWriter):
                           glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                           hi16=(kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()) and loopCnt%2==1, \
                           comment="G -> Reg %u_%u_%u_%u"%(para, sPara, perp, sPerp )))
+      # Release JIT temp regs after emitting all loads for this tensor.
+      if krTailJIT:
+        self.vgprPool.checkIn(krTmpV)
+        self.sgprPool.checkIn(krTmpS)
+
 
       if kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"]:
         if tP["is_sparse"]:
@@ -10681,6 +10757,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SMulI32(dst=sgpr(strideD1), src0=sgpr(strideD1), src1=sgpr("BInterleaveG"), comment="StrideD1 *= G"))
 
       module.add(labelSkip)
+      # BAddrInterleave: no further uses after this point; free the sgpr alias for cleaner asm/debug.
+      module.add(ValueSet(name="sgprBInterleaveG", value="UNDEF", format=-1))
 
     component = Component.ComputeStoreVgprs.find(self)
     if component:
