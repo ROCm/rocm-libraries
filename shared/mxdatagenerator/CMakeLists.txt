@@ -42,6 +42,7 @@ target_sources(mxDataGenerator
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e5m2_mxfp8.hpp>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e5m2_mxfp8_impl.hpp>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/packing.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/PreSwizzle.hpp>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/DataGenerator.hpp>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/bf16.hpp>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/bf16_impl.hpp>
@@ -64,6 +65,7 @@ target_sources(mxDataGenerator
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e5m2_mxfp8.hpp>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e5m2_mxfp8_impl.hpp>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/packing.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/PreSwizzle.hpp>
 )
 
 if(MXDATAGENERATOR_BUILD_TESTING)

@@ -54,9 +54,10 @@
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
-#include "client/PreSwizzle.hpp"
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
+
+#include <PreSwizzle.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -278,7 +279,7 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA = preSwizzle(hostScaleA, descScaleA, preSwizzleSize, preTileSize);
+                auto tmpScaleA = DGen::preSwizzle(hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
                 deviceScaleA   = make_shared_device(tmpScaleA);
             }
             else
@@ -320,7 +321,7 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB = preSwizzle(hostScaleB, descScaleB, preSwizzleSize, preTileSize);
+                auto tmpScaleB = DGen::preSwizzle(hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
                 deviceScaleB   = make_shared_device(tmpScaleB);
             }
             else
