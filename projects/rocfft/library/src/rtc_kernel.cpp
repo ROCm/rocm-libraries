@@ -169,6 +169,7 @@ std::shared_future<std::unique_ptr<RTCKernel>>
     return p.get_future();
 }
 
+#ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
 std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
     const RTCKernel::RTCGenerator& generator, const std::string& gpu_arch, std::string& kernel_name)
 {
@@ -251,3 +252,4 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
 
     return kernel_future;
 }
+#endif
