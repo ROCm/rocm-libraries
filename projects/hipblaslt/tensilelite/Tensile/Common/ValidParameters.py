@@ -323,6 +323,11 @@ validParameters = { # we need to make sure this matches develop
     # with runtime G chosen as the largest power-of-two factor of (N/MT1), capped by LVCB.
     # Requires SizeJ % MT1 == 0 at runtime; otherwise falls back to original mapping.
     "BAddrInterleave": [False, True],
+
+    # K ring-shift (restricted): apply a per-WG shift along the summation (K) dimension so that
+    # the B-side base K address for each workgroup is cacheline-aligned/congruent, while preserving
+    # correctness via full-loop ring wrap. Intended for TN/NN-like B (TLUB == False).
+    "KRingShift": [False, True],
     # Attempt to load directly from global memory into LDS.
     # Assembly only
     # Requires BufferLoad, assembler support for lds modifier on buffer

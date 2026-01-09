@@ -3223,6 +3223,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("remove stagger offsets for tail loop")
         module.add(self.removeStagger(kernel, tensorParametersA))
         module.add(self.removeStagger(kernel, tensorParametersB))
+        if kernel.get("KRingShift", False) and kernel["BufferLoad"]:
+          module.addComment1("KRS: apply reference tail offset macro")
+          module.add(self.kRingShiftTailApplyOffsetMacro(kernel))
 
       # if swapGlobalRoad is true, swap the order of global read (B->A)
       tensorParameters1st = tensorParametersA

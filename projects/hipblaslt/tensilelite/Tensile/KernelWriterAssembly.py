@@ -1242,6 +1242,9 @@ class KernelWriterAssembly(KernelWriter):
         else:
           offset = "s[\\sgprOffset%s]" % idxChars[i]
 
+        # KRingShift: do not mutate OffsetL here.
+        # The reference custom-kernel applies the shift later (as addr += WGOffset) inside the GLOBAL_OFFSET_* macro.
+
         # macro.addComment0("dim%s pendingOffset=%s offset=%s offsetIsVgpr=%s" \
         #    % (self.states.indexChars[indices[i]], pendingOffset, offset, offsetIsVgpr))
 
@@ -1339,6 +1342,12 @@ class KernelWriterAssembly(KernelWriter):
             comment="accumulate final pendingOffset"))
 
 
+      # KRingShift: match custom-kernel ordering by applying shift after full address calc (in elements),
+      # and before prepad/bpe scaling.
+      if kernel.get("KRingShift", False) and tc in ("A", "B"):
+        macro.add(VAddU32(dst=vgpr("Addr+0", isMacro=True), src0="v[\\vgprAddr+0]", src1=sgpr("KRingShift"),
+                         comment="KRS: KRingShift addr += shift"))
+
       if tP != None and kernel["BufferLoad"] and self.states.srdShiftLeft[tc]:
         macro.add(VAddU32(dst=vgpr("Addr+0", isMacro=True), \
             src0=hex(self.states.srdShiftLeft[tc]), \
@@ -1355,6 +1364,70 @@ class KernelWriterAssembly(KernelWriter):
             src="v[\\vgprAddr+0:\\vgprAddr+1]", \
             comment="offset *= bytes/element"))
       module.add(macro)
+
+    # KRingShift: emit a reference-style tail offset macro pair once (used right before tail global reads).
+    # Split into a one-time SETUP (hoist invariants across offsets) and per-offset APPLY.
+    if kernel.get("KRingShift", False) and kernel["BufferLoad"]:
+      module.addComment1("KRS: KRingShift tail offset macro (reference shape)")
+      module.add(TextBlock(
+        "/* KRS: KRingShift tail offset setup (hoist invariants across offsets) */\n"
+        ".macro KRS_TAIL_OFFSET_SETUP tmp_sgpr, tmp_vgpr\n"
+        "    // tmp_sgpr layout:\n"
+        "    //   +0: n        = LoopCounterL/8\n"
+        "    //   +1: m        = KRingShift/8\n"
+        "    //   +2: nMinusM  = n - m\n"
+        "    //   +3: oobS     = srdB+2+1\n"
+        "    //   +4: c3584    = 3584\n"
+        "    //   +5: deltaS   = (nMinusM<<4) + (2*shift)\n"
+        "    //   +6:+7: maskN      (lane < n)\n"
+        "    //   +8:+9: maskRange  (lane>=nMinusM && lane<n)\n"
+        "    // tmp_vgpr layout:\n"
+        "    //   +0: lane     = vgprSerial & 0x0F\n"
+        "    //   +1: oobV     = oobS\n"
+        "    //   +2: deltaV   = deltaS\n"
+        "    //   +3: scratch\n"
+        "    // KRS: n = LoopCounterL/8\n"
+        "    s_lshr_b32 s[\\tmp_sgpr+0], s[sgprLoopCounterL], 3\n"
+        "    // KRS: lane = vgprSerial & 0x0F\n"
+        "    v_and_b32 v[\\tmp_vgpr+0], 0x0F, v[vgprSerial]\n"
+        "    // KRS: oob = srdB+2+1 (used as OOB sentinel)\n"
+        "    s_add_u32 s[\\tmp_sgpr+3], s[sgprSrdB+2], 1\n"
+        "    v_mov_b32 v[\\tmp_vgpr+1], s[\\tmp_sgpr+3]\n"
+        "    // KRS: m = shift/8; nMinusM = n - m\n"
+        "    s_lshr_b32 s[\\tmp_sgpr+1], s[sgprKRingShift], 3\n"
+        "    s_sub_u32  s[\\tmp_sgpr+2], s[\\tmp_sgpr+0], s[\\tmp_sgpr+1]\n"
+        "    // KRS: mainLoopBytes = (SizeK & ~(DepthU-1)) * bpe (bytes).\n"
+        "    // Must be in SGPR (literal operand not supported for v_add_u32 in this path).\n"
+        "    // KRS: mainLoopElems = SizeK & maskDU\n"
+        f"    s_and_b32  s[\\tmp_sgpr+4], s[sgprSizesSum+{self.states.unrollIdx}], 0x{((~(int(kernel['DepthU'])-1)) & 0xFFFFFFFF):08x}\n"
+        "    // KRS: mainLoopBytes = mainLoopElems << log2(bpe)\n"
+        f"    s_lshl_b32 s[\\tmp_sgpr+4], s[\\tmp_sgpr+4], {int(log2(int(kernel['ProblemType']['DataTypeB'].numBytes())))}\n"
+        "    // KRS: deltaS = (nMinusM<<4) + (2*shift)\n"
+        "    s_lshl_b32 s[\\tmp_sgpr+5], s[\\tmp_sgpr+2], 4\n"
+        "    s_lshl_b32 s[\\tmp_sgpr+1], s[sgprKRingShift], 1\n"
+        "    s_add_u32  s[\\tmp_sgpr+5], s[\\tmp_sgpr+5], s[\\tmp_sgpr+1]\n"
+        "    v_mov_b32  v[\\tmp_vgpr+2], s[\\tmp_sgpr+5]\n"
+        "    // KRS: maskN = (lane < n)\n"
+        "    v_cmp_lt_u32 s[\\tmp_sgpr+6:\\tmp_sgpr+7], v[\\tmp_vgpr+0], s[\\tmp_sgpr+0]\n"
+        "    // KRS: maskRange = (lane >= nMinusM) && (lane < n)\n"
+        "    v_cmp_ge_u32 s[\\tmp_sgpr+8:\\tmp_sgpr+9], v[\\tmp_vgpr+0], s[\\tmp_sgpr+2]\n"
+        "    s_and_b64    s[\\tmp_sgpr+8:\\tmp_sgpr+9], s[\\tmp_sgpr+8:\\tmp_sgpr+9], s[\\tmp_sgpr+6:\\tmp_sgpr+7]\n"
+        ".endm\n"
+        "\n"
+        "/* KRS: KRingShift tail offset apply (per offset_reg) */\n"
+        ".macro KRS_TAIL_OFFSET_APPLY offset_reg, tmp_sgpr, tmp_vgpr\n"
+        "    // KRS: Step 3: Identify first n lanes and set others to OOB\n"
+        "    s_mov_b64 vcc, s[\\tmp_sgpr+6:\\tmp_sgpr+7]\n"
+        "    v_cndmask_b32 v[\\offset_reg], v[\\tmp_vgpr+1], v[\\offset_reg], vcc\n"
+        "    // KRS: Step 4: In the first n lanes, select lanes [n-m, n)\n"
+        "    s_mov_b64 vcc, s[\\tmp_sgpr+8:\\tmp_sgpr+9]\n"
+        "    v_add_u32 v[\\tmp_vgpr+3], v[\\offset_reg], s[\\tmp_sgpr+4]\n"
+        "    v_cndmask_b32 v[\\offset_reg], v[\\tmp_vgpr+3], v[\\offset_reg], vcc\n"
+        "    // KRS: Extra adjust (keep reference shape)\n"
+        "    v_sub_u32 v[\\tmp_vgpr+3], v[\\offset_reg], v[\\tmp_vgpr+2]\n"
+        "    v_cndmask_b32 v[\\offset_reg], v[\\offset_reg], v[\\tmp_vgpr+3], vcc\n"
+        ".endm\n"
+      ))
 
     if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
       module.add(PseudoRandomGenerator())
@@ -1626,6 +1699,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(label_EarlyStop)
         module.add(SEndpgm())
         module.add(label_nonEarlyStop)
+
     return module
 
   def defineAndResources(self, kernel, tPA, tPB, tPM):
@@ -1790,6 +1864,17 @@ class KernelWriterAssembly(KernelWriter):
           self.states.nonPostLoopSgpr.append("BInterleaveG")
         moduleRegInit.add(RegSet("s", "sgprBInterleaveG", sgprG))
         moduleRegInit.addModuleAsFlatItems(self.initBInterleaveG(kernel))
+
+      # K ring-shift (restricted) - compute per-WG shift once and reuse later.
+      if kernel.get("KRingShift", False):
+        moduleRegInit.addComment1("KRS: KRingShift define SGPR and init per-WG shift once")
+        # Use defineSgprIdx + explicit RegSet here to avoid interacting with freeSgprVarPool transitions.
+        sgprShift = self.defineSgprIdx("KRingShift", 1)
+        # Keep this SGPR live into post-loop (tail + store) - prevent endSummation from undefining it.
+        if "KRingShift" not in self.states.nonPostLoopSgpr:
+          self.states.nonPostLoopSgpr.append("KRingShift")
+        moduleRegInit.add(RegSet("s", "sgprKRingShift", sgprShift))
+        # IMPORTANT: WorkGroup1 may be remapped later (e.g., StreamK). Compute shift only after WG mapping is finalized.
 
     self.sgprPool.checkIn(sgprPackedArgs)
 
@@ -2520,6 +2605,68 @@ class KernelWriterAssembly(KernelWriter):
     module.add(labelDone)
     return module
 
+  def initKRingShift(self, kernel) -> Module:
+    """
+    Compute per-workgroup K ring-shift amount (in elements) for cacheline congruence.
+
+      shift = (-WorkGroup1 * (StrideB1J % cacheLineElements)) mod cacheLineElements
+
+    where:
+      cacheLineElements = vL1DCacheLineBytes / bpe
+
+    Stored in:
+      sgprKRingShift (elements)
+
+    When StrideB1J is cacheline-aligned, shift=0.
+    """
+    module = Module("initKRingShift")
+    module.addComment1("KRS: KRingShift init per-WG K shift (elements) for cacheline congruence")
+
+    # Default disabled: shift=0.
+    module.add(SMovB32(dst=sgpr("KRingShift"), src=0, comment="KRS: disabled (shift=0)"))
+
+    cacheLineBytes = int(self.states.archCaps.get("vL1DCacheLineBytes", 0) or 0)
+    if cacheLineBytes <= 0:
+      module.addComment0("KRingShift: no arch cacheline info; keep shift=0")
+      return module
+
+    # bpe of B elements (bytes/element)
+    # NOTE: Use ProblemType datatype rather than a state attribute (bpeB isn't a stable StateValues field).
+    bpe = int(kernel["ProblemType"]["DataTypeB"].numBytes())
+    if bpe <= 0 or (cacheLineBytes % bpe) != 0:
+      module.addComment0("KRingShift: cacheLineBytes%bpe!=0; keep shift=0")
+      return module
+
+    cacheLineElements = cacheLineBytes // bpe
+    # Require power-of-two for cheap modulo.
+    if cacheLineElements & (cacheLineElements - 1):
+      module.addComment0("KRingShift: cacheLineElements not pow2; keep shift=0")
+      return module
+
+    mask = cacheLineElements - 1
+
+    labelDone = Label(self.labels.getNameInc("KRingShift_done"), "")
+    labelDone.comment = "KRS: KRingShift done"
+    with self.allocTmpSgpr(2) as tS:
+      sRem = tS.idx
+      sTmp = tS.idx + 1
+
+      # rem = StrideB1J % cacheLineElements (pow2 => AND mask)
+      module.add(SAndB32(dst=sgpr(sRem), src0=sgpr("StrideB1J"), src1=mask, comment=f"rem = StrideB1J & {mask}"))
+      module.add(SCmpEQU32(src0=sgpr(sRem), src1=0, comment="KRS: StrideB1J cacheline-aligned?"))
+      module.add(SCBranchSCC1(labelName=labelDone.getLabelName(), comment="KRS: aligned => shift=0"))
+
+      # tmp = (WorkGroup1 * rem) & mask
+      module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("WorkGroup1"), src1=sgpr(sRem), comment="wg1*rem"))
+      module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=mask, comment="(wg1*rem) mod cacheLineElements"))
+
+      # shift = (-tmp) & mask
+      module.add(SSubU32(dst=sgpr("KRingShift"), src0=0, src1=sgpr(sTmp), comment="KRS: shift = -tmp"))
+      module.add(SAndB32(dst=sgpr("KRingShift"), src0=sgpr("KRingShift"), src1=mask, comment="KRS: shift %= cacheLineElements"))
+
+    module.add(labelDone)
+    return module
+
   ##############################################################################
   # Global Read Addresses: Tile Offsets A/B
   ##############################################################################
@@ -3011,6 +3158,11 @@ class KernelWriterAssembly(KernelWriter):
     tmp = self.vgprPool.checkOut(3, "tmp", self.states.preventVgprOverflowDuringNewTile)
     graIdx = 0
     swapPerpPara = (((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]) and (not tP["tlu"]) and tP["nrp"] > 1)
+
+    # KRingShift: compute per-WG shift as late as possible, right before emitting final GRO macros.
+    # This makes it easy to review in the generated .s (it will appear immediately before GLOBAL_OFFSET_A/B calls).
+    if kernel.get("KRingShift", False) and tc == "A":
+      module.addModuleAsFlatItems(self.initKRingShift(kernel))
 
     # both UseSgprForGRO and DTVA/B are enabled
     if ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]) and kernel["_UseSgprForGRO"]:
@@ -4820,6 +4972,24 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WrapU%s"%tc), comment="S - WrapU"))
       imod.add(SSubBU32(dst=sgpr(tmp+1), src0=sgpr(tmp+1), src1=sgpr("WrapU%s+1"%(tc)), comment="S - WrapU"))
 
+      # KRingShift: fold the "rebias by mainLoopBytes" into the existing (S - WrapU) increment.
+      # This removes the need for a separate SRD -= mainLoopBytes / limit += mainLoopBytes block.
+      # tmp:tmp+1 holds the 64-bit SRD byte increment (S - WrapU).
+      if kernel.get("KRingShift", False) and tc in ("A", "B") and kernel["BufferLoad"]:
+        depthU = int(kernel["DepthU"])
+        sizeK = "SizesSum+%u" % self.states.unrollIdx
+        bpe = int(kernel["ProblemType"]["DataType%s"%tc].numBytes())
+        maskDU = (~(depthU - 1)) & 0xFFFFFFFF
+        # Use tmp+2 as scratch for mainLoopBytes (safe: tmpIncSparse is recomputed later if needed).
+        imod.add(SAndB32(dst=sgpr(tmp+2), src0=sgpr(sizeK), src1=hex(maskDU), comment="KRS: mainLoopElems"))
+        if bpe > 0 and (bpe & (bpe - 1)) == 0:
+          imod.add(SLShiftLeftB32(dst=sgpr(tmp+2), src=sgpr(tmp+2), shiftHex=hex(log2(bpe)), comment="KRS: mainLoopBytes"))
+        else:
+          imod.add(SMulI32(dst=sgpr(tmp+2), src0=sgpr(tmp+2), src1=bpe, comment="KRS: mainLoopBytes"))
+        # incBytes -= mainLoopBytes (64-bit subtract with borrow into hi)
+        imod.add(SSubU32(dst=sgpr(tmp),   src0=sgpr(tmp),   src1=sgpr(tmp+2), comment="KRS: incBytes -= mainLoopBytes (lo)"))
+        imod.add(SSubBU32(dst=sgpr(tmp+1), src0=sgpr(tmp+1), src1=0,          comment="KRS: incBytes -= mainLoopBytes (hi)"))
+
       imod.add(self.incrementSrd(tP, sgpr(tmp), sgpr(tmp+1)))
 
       if kernel["ProblemType"]["Sparse"] and \
@@ -4846,6 +5016,34 @@ class KernelWriterAssembly(KernelWriter):
           imod.add(self.incrementSrd(tP["tpsMetadata"], sgpr(tmp), sgpr(tmp+1)))
 
     return imod
+
+  ##############################################################################
+  # KRingShift: apply reference-style tail offset macro to vgprGlobalReadOffsetA/B
+  # so tail global reads use the same macro/schedule as the original commit.
+  ##############################################################################
+  def kRingShiftTailApplyOffsetMacro(self, kernel):
+    module = Module("KRingShiftTailApplyOffsetMacro")
+    if not (self.states.inTailLoop and kernel.get("KRingShift", False) and kernel["BufferLoad"]):
+      return module
+
+    # Macros:
+    # - KRS_TAIL_OFFSET_SETUP uses tmp_sgpr..tmp_sgpr+9 and tmp_vgpr..tmp_vgpr+3
+    # - KRS_TAIL_OFFSET_APPLY uses tmp_vgpr+3 as scratch
+    # Must be even-aligned since we use b64 SGPR pairs inside the macro.
+    tmpS = self.sgprPool.checkOutAligned(10, 2, "krTailTmpS", preventOverflow=False)
+    tmpV = self.vgprPool.checkOutAligned(4, 2, "krTailTmpV", self.states.preventVgprOverflowDuringNewTile)
+
+    # Hoist all invariant computation (lane, n, masks, constants) once.
+    module.add(MacroInstruction(name="KRS_TAIL_OFFSET_SETUP", args=(tmpS, tmpV)))
+
+    for i in range(self.states.a.numVgprGlobalReadOffsets):
+      module.add(MacroInstruction(name="KRS_TAIL_OFFSET_APPLY", args=(f"vgprGlobalReadOffsetA + {i}", tmpS, tmpV)))
+    for i in range(self.states.b.numVgprGlobalReadOffsets):
+      module.add(MacroInstruction(name="KRS_TAIL_OFFSET_APPLY", args=(f"vgprGlobalReadOffsetB + {i}", tmpS, tmpV)))
+
+    self.vgprPool.checkIn(tmpV)
+    self.sgprPool.checkIn(tmpS)
+    return module
 
   ##############################################################################
   # Set parameters UNDEF in the macro module
@@ -6893,7 +7091,8 @@ class KernelWriterAssembly(KernelWriter):
             TailLoop_SkipZeroOutMask = Label((self.labels.getUniqueNamePrefix("TailLoop_SkipZeroOutMask")), comment="")
             shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr("SizeL"), src1=8-1, comment="if summation is multiple of 8, skip masking"))
             shiftK.add(SCmpEQU32(src0=sgpr(tmpSgprX1), src1=0))
-            shiftK.add(SCBranchSCC1(labelName=TailLoop_SkipZeroOutMask.getLabelName(), comment="skip mask"))
+            # KRS: Force skipping the mask (debug): always branch to TailLoop_SkipZeroOutMask.
+            shiftK.add(SBranch(labelName=TailLoop_SkipZeroOutMask.getLabelName(), comment="KRS: skip mask"))
             shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=numMIInput-1, comment="get inputs for edge thread"))
             shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=numMIInput, src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
             shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(shiftPerElement), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
@@ -7995,6 +8194,10 @@ class KernelWriterAssembly(KernelWriter):
       isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
       is16b = dataType.isHalf() or dataType.isBFloat16()
 
+      # KRingShift: use the reference macro form (CHECK_AND_SET_OFFSET_MOD) to patch vgprGlobalReadOffsetA/B
+      # before tail loads, so we do not remap addr0 per-load here.
+      krTailRemap = False
+
       directToLdsLoads = 0
       if doTailOpt == 2 and behavior == "LOAD":
           directToLdsLoads += preDirectToLdsLoads
@@ -8279,9 +8482,10 @@ class KernelWriterAssembly(KernelWriter):
                       if (numElementsPerLoad == 2 and r % numElementsPer4Bytes != 0) or \
                          (numElementsPerLoad != 2 and ((r + 1) % numElementsPer4Bytes != 0)):
                         module.addComment0("g2l=%u, load component %u"%(g2lIdx, r))
+                        addr0Vgpr = offsetVgpr
                         module.add(self.chooseGlobalRead(useBuffer, \
                                   bpl, destVgpr=loadVgpr, \
-                                  addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
+                                  addr0=vgpr(addr0Vgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                                   soffset=soffset, offset=offset, \
                                   glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                                   tr=isTr, hi16=hi16, \
@@ -8294,9 +8498,10 @@ class KernelWriterAssembly(KernelWriter):
                   else:
                     if (doTailOpt == 0) or (doTailOpt == 2 and behavior == "LOAD" and r >= rStart and r < rEnd):
 
+                      addr0Vgpr = offsetVgpr
                       module.add(self.chooseGlobalRead(useBuffer, \
                                 bpl, destVgpr=loadVgpr, \
-                                addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
+                                addr0=vgpr(addr0Vgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                                 soffset=soffset, offset=offset, \
                                 glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                                 tr=isTr, hi16=hi16, \
@@ -8759,6 +8964,10 @@ class KernelWriterAssembly(KernelWriter):
       isLds = True if kernel["DirectToLds%s"%tc] else False
       isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
 
+      # KRingShift: use the reference macro form (CHECK_AND_SET_OFFSET_MOD) to patch vgprGlobalReadOffsetA/B
+      # before tail loads, so we do not remap addr0 per-load here.
+      krTailRemap = False
+
       directToLdsLoads = 0
       instOffset       = 0
       prevLdsOffset    = 0
@@ -8873,9 +9082,11 @@ class KernelWriterAssembly(KernelWriter):
                   self.globalread_gpr_record.b.offset.append(soffset)
 
                 useBuffer = not isTr
+                addr0Vgpr = offsetVgpr
+
                 loadModule.add( self.chooseGlobalRead(useBuffer, \
                           bpl, destVgpr=destVgpr, \
-                          addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
+                          addr0=vgpr(addr0Vgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                           soffset=soffset, offset=instOffset, \
                           glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                           tr=isTr, hi16=isHigh16Bits , \
