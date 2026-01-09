@@ -99,18 +99,19 @@ int main(int argc, char* argv[])
 
         rocfft_field infield = nullptr;
         rocfft_field_create(&infield);
-        
+
         for(size_t idx = 0; idx < gpu_in.size(); ++idx)
         {
             const size_t inbrick_length1
                 = length[1] / gpu_in.size() + (idx < length[1] % gpu_in.size() ? 1 : 0);
             const size_t inbrick_lower1
                 = idx * (length[1] / gpu_in.size()) + std::min(idx, length[1] % gpu_in.size());
-            const size_t inbrick_upper1 = inbrick_lower1 + inbrick_length1;
-            std::vector<size_t> inbrick_lower          = {0, inbrick_lower1, 0};
-            std::vector<size_t> inbrick_upper          = {length[0], inbrick_upper1, 1};
-            std::vector<size_t> inbrick_stride = {1, length[0], inbrick_upper[1] - inbrick_lower[1]};
-            
+            const size_t        inbrick_upper1 = inbrick_lower1 + inbrick_length1;
+            std::vector<size_t> inbrick_lower  = {0, inbrick_lower1, 0};
+            std::vector<size_t> inbrick_upper  = {length[0], inbrick_upper1, 1};
+            std::vector<size_t> inbrick_stride
+                = {1, length[0], inbrick_upper[1] - inbrick_lower[1]};
+
             rocfft_brick inbrick = nullptr;
             rocfft_brick_create(&inbrick,
                                 inbrick_lower.data(),
@@ -170,7 +171,7 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "output data decomposition:\n";
-    std::vector<void*>               gpu_out(devices.size());
+    std::vector<void*> gpu_out(devices.size());
 
     // For the output, we store the output format so that we can view the output of the transform.
     std::vector<std::vector<size_t>> outbrick_lower(gpu_out.size());
@@ -186,8 +187,8 @@ int main(int argc, char* argv[])
                 = length[1] / gpu_out.size() + (idx < length[1] % gpu_in.size() ? 1 : 0);
             const size_t outbrick_lower1
                 = idx * (length[1] / gpu_out.size()) + std::min(idx, length[1] % gpu_out.size());
-            outbrick_lower[idx]   = {0, outbrick_lower1, 0};
-            outbrick_upper[idx]   = {length[0], outbrick_lower1 + outbrick_length1, 1};
+            outbrick_lower[idx]  = {0, outbrick_lower1, 0};
+            outbrick_upper[idx]  = {length[0], outbrick_lower1 + outbrick_length1, 1};
             outbrick_stride[idx] = {1, length[0], outbrick_upper[idx][1] - outbrick_lower[idx][1]};
 
             rocfft_brick outbrick = nullptr;
