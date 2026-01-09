@@ -40,8 +40,6 @@
 #  include _THRUST_STD_INCLUDE(iterator)
 #endif
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
-
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -337,7 +335,7 @@ THRUST_HOST_DEVICE void stable_merge_sort(
   RandomAccessIterator last,
   StrictWeakOrdering comp)
 {
-  NV_IF_TARGET(NV_IS_DEVICE,
+  _THRUST_IF_TARGET(_THRUST_IS_DEVICE,
                (
                  // avoid recursion in CUDA or HIP threads
                  stable_merge_sort_detail::iterative_stable_merge_sort(exec, first, last, comp);),
@@ -355,7 +353,7 @@ THRUST_HOST_DEVICE void stable_merge_sort_by_key(
   RandomAccessIterator2 first2,
   StrictWeakOrdering comp)
 {
-  NV_IF_TARGET(NV_IS_DEVICE,
+  _THRUST_IF_TARGET(_THRUST_IS_DEVICE,
                (
                  // avoid recursion in CUDA or HIP threads
                  stable_merge_sort_detail::iterative_stable_merge_sort_by_key(exec, first1, last1, first2, comp);),

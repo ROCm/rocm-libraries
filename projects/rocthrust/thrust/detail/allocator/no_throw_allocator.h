@@ -27,8 +27,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
-
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -52,8 +50,8 @@ public:
 
   THRUST_HOST_DEVICE void deallocate(typename super_t::pointer p, typename super_t::size_type n) noexcept
   {
-    NV_IF_TARGET(
-      NV_IS_HOST,
+    _THRUST_IF_TARGET(
+      _THRUST_IS_HOST,
       (try { super_t::deallocate(p, n); } // end try
        catch (...){
          // catch anything

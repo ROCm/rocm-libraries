@@ -336,10 +336,10 @@ struct get_agent_plan_impl<Agent, typelist<lowest_supported_sm_arch>>
 template <class Agent>
 THRUST_RUNTIME_FUNCTION typename get_plan<Agent>::type get_agent_plan([[maybe_unused]] int ptx_version)
 {
-  NV_IF_TARGET(NV_IS_DEVICE,
-               (using plan_type = typename get_plan<Agent>::type; using ptx_plan = typename Agent::ptx_plan;
-                return plan_type{ptx_plan{}};), // NV_IS_HOST:
-               (return get_agent_plan_impl<Agent, sm_list>::get(ptx_version);));
+  _THRUST_IF_TARGET(_THRUST_IS_DEVICE,
+                    (using plan_type = typename get_plan<Agent>::type; using ptx_plan = typename Agent::ptx_plan;
+                     return plan_type{ptx_plan{}};), // _THRUST_IS_HOST:
+                    (return get_agent_plan_impl<Agent, sm_list>::get(ptx_version);));
 }
 
 THRUST_RUNTIME_FUNCTION inline int get_sm_count()

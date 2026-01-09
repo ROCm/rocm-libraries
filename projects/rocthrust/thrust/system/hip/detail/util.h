@@ -37,7 +37,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
@@ -125,7 +124,7 @@ template <class Derived>
 THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& policy)
 {
   hipError_t result;
-  // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+  // Can't use #if inside _THRUST_IF_TARGET, use a temp macro to hoist the device
   // instructions out of the target logic.
 #if !defined(__HIP_DEVICE_COMPILE__)
 
@@ -137,8 +136,8 @@ THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& poli
 
 #endif
 
-  NV_IF_TARGET(
-    NV_IS_HOST, (result = hipStreamSynchronize(stream(policy));), ((void) (policy); THRUST_TEMP_DEVICE_CODE;));
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST, (result = hipStreamSynchronize(stream(policy));), ((void) (policy); THRUST_TEMP_DEVICE_CODE;));
 
 #undef THRUST_TEMP_DEVICE_CODE
 
@@ -264,12 +263,12 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
 #ifdef THRUST_RDC_ENABLED
   (void) hipGetLastError();
 #else
-  NV_IF_TARGET(NV_IS_HOST, ((void) hipGetLastError();));
+  _THRUST_IF_TARGET(_THRUST_IS_HOST, ((void) hipGetLastError();));
 #endif
 
   if (hipSuccess != status)
   {
-    // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+    // Can't use #if inside _THRUST_IF_TARGET, use a temp macro to hoist the device
     // instructions out of the target logic.
 #if defined(THRUST_RDC_ENABLED) || THRUST_HIP_PRINTF_ENABLED == 0
 
@@ -282,9 +281,9 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
 
 #endif
 
-    NV_IF_TARGET(NV_IS_HOST,
-                 (throw thrust::system_error(status, thrust::hip_category());),
-                 (THRUST_TEMP_DEVICE_CODE; ::internal::terminate();));
+    _THRUST_IF_TARGET(_THRUST_IS_HOST,
+                      (throw thrust::system_error(status, thrust::hip_category());),
+                      (THRUST_TEMP_DEVICE_CODE; ::internal::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
@@ -297,12 +296,12 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
 #ifdef THRUST_RDC_ENABLED
   (void) hipGetLastError();
 #else
-  NV_IF_TARGET(NV_IS_HOST, ((void) hipGetLastError();));
+  _THRUST_IF_TARGET(_THRUST_IS_HOST, ((void) hipGetLastError();));
 #endif
 
   if (hipSuccess != status)
   {
-    // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+    // Can't use #if inside _THRUST_IF_TARGET, use a temp macro to hoist the device
     // instructions out of the target logic.
 #if defined(THRUST_RDC_ENABLED) || THRUST_HIP_PRINTF_ENABLED == 0
 
@@ -315,9 +314,9 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
 
 #endif
 
-    NV_IF_TARGET(NV_IS_HOST,
-                 (throw thrust::system_error(status, thrust::hip_category(), msg);),
-                 (THRUST_TEMP_DEVICE_CODE; ::internal::terminate();));
+    _THRUST_IF_TARGET(_THRUST_IS_HOST,
+                      (throw thrust::system_error(status, thrust::hip_category(), msg);),
+                      (THRUST_TEMP_DEVICE_CODE; ::internal::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }

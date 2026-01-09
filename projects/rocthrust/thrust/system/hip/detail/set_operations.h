@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/detail/alignment.h>
 #  include <thrust/detail/mpl/math.h>
@@ -60,10 +60,11 @@
 #    include _THRUST_STD_INCLUDE(__algorithm/min.h)
 #  endif
 
-#  include <cstdint>
-
-// rocprim include
 #  include <rocprim/rocprim.hpp>
+
+#  include <rocprim/config.hpp>
+
+#  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 

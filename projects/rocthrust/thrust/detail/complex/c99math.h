@@ -154,7 +154,7 @@ THRUST_HOST_DEVICE inline float copysignf(float x, float y)
 #  if !defined(__CUDACC__) && !defined(_NVHPC_CUDA)
 
 // Simple approximation to log1p as Visual Studio is lacking one
-#    if THRUST_COMPILER(HIP) && defined(_MSC_VER) // fix HIP on Windows error
+#    if THRUST_HAS_HIP_COMPILER() && defined(_MSC_VER) // fix HIP on Windows error
 THRUST_HOST_DEVICE
 #    endif
 inline double
@@ -179,7 +179,7 @@ log1p(double x)
   }
 }
 
-#    if THRUST_COMPILER(HIP) && defined(_MSC_VER) // fix HIP on Windows error
+#    if THRUST_HAS_HIP_COMPILER() && defined(_MSC_VER) // fix HIP on Windows error
 THRUST_HOST_DEVICE
 #    endif
 inline float
@@ -204,8 +204,8 @@ log1pf(float x)
   }
 }
 
-// add !THRUST_COMPILER(HIP) to fix HIP on Windows error
-#    if _MSV_VER <= 1500 && !THRUST_COMPILER(HIP)
+// add !THRUST_HAS_HIP_COMPILER() to fix HIP on Windows error
+#    if _MSV_VER <= 1500 && !THRUST_HAS_HIP_COMPILER()
 #      include <complex>
 
 inline float hypotf(float x, float y)
@@ -218,7 +218,7 @@ inline double hypot(double x, double y)
   return _hypot(x, y);
 }
 
-#    endif // _MSC_VER <= 1500 && !THRUST_COMPILER(HIP)
+#    endif // _MSC_VER <= 1500 && !THRUST_HAS_HIP_COMPILER()
 
 #  endif // __CUDACC__
 

@@ -147,7 +147,7 @@ public:
   template <typename OtherElement>
   THRUST_HOST_DEVICE explicit pointer(OtherElement* ptr);
 
-#if THRUST_COMPILER(HIP) // Fixes hipcc linkage error
+#if THRUST_HAS_HIP_COMPILER() // Fixes hipcc linkage error
   THRUST_HOST_DEVICE explicit pointer(Element* ptr);
 #endif
 

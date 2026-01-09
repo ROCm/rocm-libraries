@@ -29,7 +29,6 @@
 
 #include <thrust/system/hip/config.h>
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/detail/malloc_and_free.h>
 #include <thrust/detail/malloc_and_free_fwd.h>
 #include <thrust/detail/raw_pointer_cast.h>
@@ -49,15 +48,15 @@ THRUST_HOST_DEVICE void* malloc(execution_policy<DerivedPolicy>&, std::size_t n)
 {
   void* result = 0;
 
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (hipError_t status = hipMalloc(&result, n);
 
      if (status != hipSuccess) {
        (void) hipGetLastError(); // Clear global HIP error state.
        throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
      }),
-    ( // NV_IS_DEVICE
+    ( // _THRUST_IS_DEVICE
       result = thrust::raw_pointer_cast(thrust::malloc(thrust::seq, n));));
 
   return result;
@@ -66,11 +65,12 @@ THRUST_HOST_DEVICE void* malloc(execution_policy<DerivedPolicy>&, std::size_t n)
 template <typename DerivedPolicy, typename Pointer>
 THRUST_HOST_DEVICE void free(execution_policy<DerivedPolicy>&, Pointer ptr)
 {
-  NV_IF_TARGET(NV_IS_HOST,
-               (hipError_t status = hipFree(thrust::raw_pointer_cast(ptr));
-                hip_rocprim::throw_on_error(status, "device free failed");),
-               ( // NV_IS_DEVICE
-                 thrust::free(thrust::seq, ptr);));
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
+    (hipError_t status = hipFree(thrust::raw_pointer_cast(ptr));
+     hip_rocprim::throw_on_error(status, "device free failed");),
+    ( // _THRUST_IS_DEVICE
+      thrust::free(thrust::seq, ptr);));
 } // end free()
 
 } // namespace hip_rocprim

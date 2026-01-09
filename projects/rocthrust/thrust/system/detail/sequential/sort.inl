@@ -34,8 +34,6 @@
 #include <thrust/system/detail/sequential/stable_merge_sort.h>
 #include <thrust/system/detail/sequential/stable_primitive_sort.h>
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
-
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
@@ -155,12 +153,12 @@ THRUST_HOST_DEVICE void stable_sort(
   StrictWeakOrdering comp)
 {
   // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA thread
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (using KeyType = thrust::detail::it_value_t<RandomAccessIterator>;
      sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
      sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);),
-    ( // NV_IS_DEVICE:
+    ( // _THRUST_IS_DEVICE:
       thrust::detail::false_type use_primitive_sort;
       sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);));
 }
@@ -177,12 +175,12 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
   StrictWeakOrdering comp)
 {
   // the compilation time of stable_primitive_sort_by_key is too expensive to use within a single CUDA thread
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
      sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
      sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);),
-    ( // NV_IS_DEVICE:
+    ( // _THRUST_IS_DEVICE:
       thrust::detail::false_type use_primitive_sort;
       sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);));
 }

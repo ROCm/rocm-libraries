@@ -35,8 +35,6 @@
 
 #include <stdexcept> // for std::runtime_error
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
-
 THRUST_NAMESPACE_BEGIN
 
 namespace detail

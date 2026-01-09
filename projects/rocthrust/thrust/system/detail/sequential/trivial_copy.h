@@ -30,7 +30,6 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/system/detail/sequential/general_copy.h>
 
 #include <cstring>
@@ -55,10 +54,10 @@ THRUST_HOST_DEVICE T* trivial_copy_n(const T* first, std::ptrdiff_t n, T* result
 
   T* return_value = nullptr;
 
-  NV_IF_TARGET(NV_IS_HOST,
-               (std::memmove(result, first, n * sizeof(T)); return_value = result + n;),
-               ( // NV_IS_DEVICE:
-                 return_value = thrust::system::detail::sequential::general_copy_n(first, n, result);));
+  _THRUST_IF_TARGET(_THRUST_IS_HOST,
+                    (std::memmove(result, first, n * sizeof(T)); return_value = result + n;),
+                    ( // _THRUST_IS_DEVICE:
+                      return_value = thrust::system::detail::sequential::general_copy_n(first, n, result);));
 
   return return_value;
 } // end trivial_copy_n()

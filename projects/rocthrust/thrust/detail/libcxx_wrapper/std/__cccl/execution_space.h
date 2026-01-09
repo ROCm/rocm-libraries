@@ -21,7 +21,7 @@
 
 #  include _THRUST_STD_INCLUDE(__cccl/execution_space.h)
 
-#  if _CCCL_COMPILER(HIP)
+#  if THRUST_HAS_HIP_COMPILER()
 #    undef _CCCL_HOST
 #    undef _CCCL_DEVICE
 #    undef _CCCL_HOST_DEVICE
@@ -37,7 +37,7 @@
 
 #else
 
-#  if THRUST_CUDA_COMPILATION() || THRUST_COMPILER(HIP)
+#  if THRUST_CUDA_COMPILATION() || THRUST_HAS_HIP_COMPILER()
 #    define THRUST_HOST        __host__
 #    define THRUST_DEVICE      __device__
 #    define THRUST_HOST_DEVICE __host__ __device__

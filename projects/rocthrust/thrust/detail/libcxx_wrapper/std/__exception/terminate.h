@@ -21,7 +21,6 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__exception/terminate.h)
 #else
-#  include <thrust/detail/libcxx_wrapper/nv/target.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/attributes.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/diagnostic.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/execution_space.h>
@@ -47,7 +46,7 @@ namespace detail
 
 THRUST_NORETURN inline THRUST_HOST_DEVICE void cccl_terminate() noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_HOST, (::std::exit(-1);), (__builtin_trap();))
+  _THRUST_IF_ELSE_TARGET(_THRUST_IS_HOST, (::std::exit(-1);), (__builtin_trap();))
   THRUST_UNREACHABLE();
 }
 

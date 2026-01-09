@@ -62,7 +62,7 @@
 #    define THRUST_NODISCARD
 #  endif // no nodiscard
 
-#  if THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#  if THRUST_COMPILER(CLANG)
 #    define THRUST_NODISCARD_FRIEND friend
 #  else
 #    define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend

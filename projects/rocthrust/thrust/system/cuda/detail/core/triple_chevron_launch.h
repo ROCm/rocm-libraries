@@ -181,7 +181,7 @@ struct _CCCL_VISIBILITY_HIDDEN triple_chevron
   template <class K, class... Args>
   THRUST_FUNCTION cudaError_t doit(K k, Args const&... args) const
   {
-    NV_IF_TARGET(NV_IS_HOST, (return doit_host(k, args...);), (return doit_device(k, args...);));
+    _THRUST_IF_TARGET(_THRUST_IS_HOST, (return doit_host(k, args...);), (return doit_device(k, args...);));
   }
 
 }; // struct triple_chevron

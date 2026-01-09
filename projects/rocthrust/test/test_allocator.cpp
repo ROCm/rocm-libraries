@@ -17,7 +17,6 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/system/cpp/vector.h>
 
@@ -134,7 +133,7 @@ struct my_allocator_with_custom_destroy
 
   THRUST_HOST_DEVICE void destroy(T*) noexcept
   {
-    NV_IF_TARGET(NV_IS_HOST, (g_state = true;));
+    _THRUST_IF_TARGET(_THRUST_IS_HOST, (g_state = true;));
   }
 
   value_type* allocate(std::ptrdiff_t n)

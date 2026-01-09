@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_COMPILER(HIP)
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/hip/detail/transform.h>

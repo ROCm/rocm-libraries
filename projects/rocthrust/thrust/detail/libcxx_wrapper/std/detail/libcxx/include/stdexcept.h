@@ -20,7 +20,6 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(detail/libcxx/include/stdexcept)
 #else
-#  include <thrust/detail/libcxx_wrapper/nv/target.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/attributes.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/exceptions.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/execution_space.h>
@@ -43,7 +42,7 @@ using _THRUST_STD::__throw_runtime_error;
 THRUST_NORETURN inline THRUST_HOST_DEVICE void __throw_runtime_error(const char* msg)
 {
 #  ifndef THRUST_NO_EXCEPTIONS
-  NV_IF_ELSE_TARGET(NV_IS_HOST, (throw ::std::runtime_error(msg);), ((void) msg; terminate();))
+  _THRUST_IF_ELSE_TARGET(_THRUST_IS_HOST, (throw ::std::runtime_error(msg);), ((void) msg; terminate();))
 #  else // ^^^ !THRUST_NO_EXCEPTIONS ^^^ / vvv THRUST_NO_EXCEPTIONS vvv
   (void) msg;
   terminate();
