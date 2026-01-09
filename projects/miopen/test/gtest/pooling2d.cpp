@@ -16,6 +16,8 @@
 #define TEST_GET_INPUT_TENSOR 0
 #endif
 
+using namespace pooling2d_gtest;
+
 std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 {
     // Cache results to avoid duplicate generation when called multiple times

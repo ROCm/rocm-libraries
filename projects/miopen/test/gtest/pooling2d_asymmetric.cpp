@@ -6,6 +6,8 @@
 #include <half/half.hpp>
 #include "pooling2d_common.hpp"
 
+using namespace pooling2d_gtest;
+
 std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
 {
     // Cache results to avoid duplicate generation when called multiple times
