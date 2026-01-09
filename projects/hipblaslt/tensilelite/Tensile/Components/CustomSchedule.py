@@ -3055,15 +3055,12 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
         syncs.add(                                                           48, vlcnt=7, barrier=True, comment="wait for previous set of global reads")
 
-        lra1   = [48,49,    52,53,54,55,56,57]
-        syncs.add(                          58, dscnt=0, comment="wait for LR before pack to complete")
-        pack_a1 = [                         i+59 for i in pack]
-        snops.extend([                        (60, S4), (63, S4), (66, S4),(69, S4)])
-
-        lrb1   = [     50,51,                58,59, 60,61,62,63]
-        syncs.add(                                                            70, dscnt=0, comment="wait for LR before pack to complete")
-        pack_b1 = [                                                           i+71 for i in pack]
-        snops.extend([                                                          (72, S4), (75, S4), (78, S4),(81, S4)])
+        lra1   = [48,49,  52,53,  56,57, 60,61]
+        lrb1   = [ 50,51,  54,55,  58,59, 62,63]
+        syncs.add(                 58, dscnt=2, comment="wait for the first half of LRs before pack ")
+        syncs.add(                                           70, dscnt=0, barrier=True, comment="wait for LR before pack to complete + barrier for GR")
+        pack_a1 =[                 i+59-pa[0] for i in pa] + [i+71-pa[0] for i in pa]
+        pack_b1 =[                 i+59-pa[0] for i in pb] + [i+71-pa[0] for i in pb]
 
     else:
         return False, None  
