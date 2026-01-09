@@ -68,7 +68,7 @@ if(ORIGAMI_ENABLE_PYTHON)
     )
     
     # Install Python test files to bin/origami/
-    rocm_install(
+    install(
         FILES 
             "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_test.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_grid_test.py"
@@ -77,7 +77,7 @@ if(ORIGAMI_ENABLE_PYTHON)
     )
 endif()
 
-rocm_install(
+install(
     FILES "${INSTALLED_CTEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
     COMPONENT tests
