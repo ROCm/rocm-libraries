@@ -306,15 +306,11 @@ void simpleGemm(hipblasLtHandle_t  handle,
             hipblasLtOrder_t orderA = HIPBLASLT_ORDER_COL16_4R16;
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                 matA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
-            hipblaslt_f8_fnuz* src;
-            hipblaslt_f8_fnuz* dst;
-            CHECK_HIP_ERROR(
-                hipMalloc(&src, m * k * sizeof(hipblaslt_f8_fnuz))); // Allocate memory on device
-            CHECK_HIP_ERROR(
-                hipMalloc(&dst, m * k * sizeof(hipblaslt_f8_fnuz))); // Allocate memory on device
-            CHECK_HIP_ERROR(hipMemcpy(src, d_a, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyDeviceToHost));
-            swizzleTensor(dst, src, m, k, true);
-            CHECK_HIP_ERROR(hipMemcpy(d_a, dst, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyHostToDevice));
+            std::vector<hipblaslt_f8_fnuz> src(m * k, 0);
+            std::vector<hipblaslt_f8_fnuz> dst(m * k, 0);
+            CHECK_HIP_ERROR(hipMemcpy(src.data(), d_a, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyDeviceToHost));
+            swizzleTensor(dst.data(), src.data(), m, k, true);
+            CHECK_HIP_ERROR(hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyHostToDevice));
         }
     }
     else
