@@ -21,8 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#ifndef HIPSPARSE_FLOAT16_H
-#define HIPSPARSE_FLOAT16_H
+#pragma once
 
 #if __cplusplus < 201103L
 
@@ -276,5 +275,3 @@ inline float operator/=(float a, hipsparseFloat16 b)
 }
 
 #endif
-
-#endif // HIPSPARSE_FLOAT16_H
