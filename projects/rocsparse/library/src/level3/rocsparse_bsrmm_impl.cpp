@@ -25,7 +25,8 @@
 #include "internal/level3/rocsparse_bsrmm.h"
 #include "rocsparse_bsrmm.hpp"
 #include "rocsparse_common.h"
-#include "rocsparse_csrmm.hpp"
+#include "rocsparse_csrmm_row_split.hpp"
+#include "rocsparse_csrmm_transpose.hpp"
 
 #include "rocsparse_common.hpp"
 #include "rocsparse_templates.hpp"
@@ -150,35 +151,71 @@ rocsparse_status rocsparse::bsrmm_template_dispatch(rocsparse_handle    handle,
         const J m   = mb;
         const J k   = kb;
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_template_dispatch(handle,
-                                                                     trans_A,
-                                                                     trans_B,
-                                                                     rocsparse_csrmm_alg_default,
-                                                                     m,
-                                                                     n,
-                                                                     k,
-                                                                     nnz,
-                                                                     batch_count_A,
-                                                                     offsets_batch_stride_A,
-                                                                     columns_values_batch_stride_A,
-                                                                     alpha,
-                                                                     descr,
-                                                                     bsr_val,
-                                                                     bsr_row_ptr,
-                                                                     bsr_col_ind,
-                                                                     dense_B,
-                                                                     ldb,
-                                                                     batch_count_B,
-                                                                     batch_stride_B,
-                                                                     order_B,
-                                                                     beta,
-                                                                     dense_C,
-                                                                     ldc,
-                                                                     batch_count_C,
-                                                                     batch_stride_C,
-                                                                     order_C,
-                                                                     nullptr,
-                                                                     false));
+        if(trans_A == rocsparse_operation_none)
+        {
+            RETURN_IF_ROCSPARSE_ERROR((
+                rocsparse::csrmm_row_split_template<T, I, J, A, B, C>(handle,
+                                                                      trans_A,
+                                                                      trans_B,
+                                                                      m,
+                                                                      n,
+                                                                      k,
+                                                                      nnz,
+                                                                      batch_count_A,
+                                                                      offsets_batch_stride_A,
+                                                                      columns_values_batch_stride_A,
+                                                                      alpha,
+                                                                      descr,
+                                                                      bsr_val,
+                                                                      bsr_row_ptr,
+                                                                      bsr_col_ind,
+                                                                      dense_B,
+                                                                      ldb,
+                                                                      batch_count_B,
+                                                                      batch_stride_B,
+                                                                      order_B,
+                                                                      beta,
+                                                                      dense_C,
+                                                                      ldc,
+                                                                      batch_count_C,
+                                                                      batch_stride_C,
+                                                                      order_C,
+                                                                      nullptr,
+                                                                      false)));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR((
+                rocsparse::csrmm_transpose_template<T, I, J, A, B, C>(handle,
+                                                                      trans_A,
+                                                                      trans_B,
+                                                                      m,
+                                                                      n,
+                                                                      k,
+                                                                      nnz,
+                                                                      batch_count_A,
+                                                                      offsets_batch_stride_A,
+                                                                      columns_values_batch_stride_A,
+                                                                      alpha,
+                                                                      descr,
+                                                                      bsr_val,
+                                                                      bsr_row_ptr,
+                                                                      bsr_col_ind,
+                                                                      dense_B,
+                                                                      ldb,
+                                                                      batch_count_B,
+                                                                      batch_stride_B,
+                                                                      order_B,
+                                                                      beta,
+                                                                      dense_C,
+                                                                      ldc,
+                                                                      batch_count_C,
+                                                                      batch_stride_C,
+                                                                      order_C,
+                                                                      nullptr,
+                                                                      false)));
+        }
+
         return rocsparse_status_success;
     }
 

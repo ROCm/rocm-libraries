@@ -30,64 +30,6 @@
 
 namespace rocsparse
 {
-    template <typename T, typename I, typename J, typename A>
-    rocsparse_status cscmm_buffer_size_template(rocsparse_handle          handle,
-                                                rocsparse_operation       trans_A,
-                                                rocsparse_csrmm_alg       alg,
-                                                int64_t                   m,
-                                                int64_t                   n,
-                                                int64_t                   k,
-                                                int64_t                   nnz,
-                                                const rocsparse_mat_descr descr,
-                                                const void*               csc_val,
-                                                const void*               csc_col_ptr,
-                                                const void*               csc_row_ind,
-                                                size_t*                   buffer_size);
-
-    template <typename I, typename J, typename A>
-    rocsparse_status cscmm_analysis_template(rocsparse_handle          handle,
-                                             rocsparse_operation       trans_A,
-                                             rocsparse_csrmm_alg       alg,
-                                             int64_t                   m,
-                                             int64_t                   n,
-                                             int64_t                   k,
-                                             int64_t                   nnz,
-                                             const rocsparse_mat_descr descr,
-                                             const void*               csc_val,
-                                             const void*               csc_col_ptr,
-                                             const void*               csc_row_ind,
-                                             void*                     temp_buffer);
-
-    template <typename T, typename I, typename J, typename A, typename B, typename C>
-    rocsparse_status cscmm_template(rocsparse_handle          handle,
-                                    rocsparse_operation       trans_A,
-                                    rocsparse_operation       trans_B,
-                                    rocsparse_csrmm_alg       alg,
-                                    int64_t                   m,
-                                    int64_t                   n,
-                                    int64_t                   k,
-                                    int64_t                   nnz,
-                                    int64_t                   batch_count_A,
-                                    int64_t                   offsets_batch_stride_A,
-                                    int64_t                   rows_values_batch_stride_A,
-                                    const void*               alpha,
-                                    const rocsparse_mat_descr descr,
-                                    const void*               csc_val,
-                                    const void*               csc_col_ptr,
-                                    const void*               csc_row_ind,
-                                    const void*               dense_B,
-                                    int64_t                   ldb,
-                                    int64_t                   batch_count_B,
-                                    int64_t                   batch_stride_B,
-                                    rocsparse_order           order_B,
-                                    const void*               beta,
-                                    void*                     dense_C,
-                                    int64_t                   ldc,
-                                    int64_t                   batch_count_C,
-                                    int64_t                   batch_stride_C,
-                                    rocsparse_order           order_C,
-                                    void*                     temp_buffer);
-
     rocsparse_status cscmm_buffer_size(rocsparse_handle          handle,
                                        rocsparse_operation       trans_A,
                                        rocsparse_csrmm_alg       alg,

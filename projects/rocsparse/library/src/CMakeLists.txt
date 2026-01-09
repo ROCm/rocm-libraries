@@ -371,18 +371,29 @@ set(rocsparse_source
   src/level3/coomm/segmented/coommnn_device_segmented_remainder_256_8_4_0.cpp
   src/level3/coomm/segmented/coommnn_device_segmented_remainder_256_8_4_1.cpp
 
-  src/level3/rocsparse_csrmm_template_row_split.cpp
-  src/level3/rocsparse_csrmm_template_nnz_split.cpp
-  src/level3/rocsparse_csrmm_template_merge.cpp
-  src/level3/rocsparse_csrmm_buffer_size_impl.cpp
-  src/level3/rocsparse_csrmm_analysis_impl.cpp
-  src/level3/rocsparse_csrmm_impl.cpp
-  src/level3/rocsparse_csrmm_buffer_size.cpp
-  src/level3/rocsparse_csrmm_analysis.cpp
+  src/level3/rocsparse_csrmm_row_split_kernel_dispatch.cpp
+  src/level3/rocsparse_csrmm_nnz_split_kernel_dispatch.cpp
+  src/level3/rocsparse_csrmm_merge_path_kernel_dispatch.cpp
+  src/level3/rocsparse_csrmm_transpose_kernel_dispatch.cpp
+  src/level3/rocsparse_csrmm_buffer_size_row_split_impl.cpp
+  src/level3/rocsparse_csrmm_buffer_size_nnz_split_impl.cpp
+  src/level3/rocsparse_csrmm_buffer_size_merge_path_impl.cpp
+  src/level3/rocsparse_csrmm_buffer_size_transpose_impl.cpp
+  src/level3/rocsparse_csrmm_analysis_row_split_impl.cpp
+  src/level3/rocsparse_csrmm_analysis_nnz_split_impl.cpp
+  src/level3/rocsparse_csrmm_analysis_merge_path_impl.cpp
+  src/level3/rocsparse_csrmm_analysis_transpose_impl.cpp
+  src/level3/rocsparse_csrmm_row_split_impl.cpp
+  src/level3/rocsparse_csrmm_nnz_split_impl.cpp
+  src/level3/rocsparse_csrmm_merge_path_impl.cpp
+  src/level3/rocsparse_csrmm_transpose_impl.cpp
+  src/level3/rocsparse_csrmm_row_split.cpp
+  src/level3/rocsparse_csrmm_nnz_split.cpp
+  src/level3/rocsparse_csrmm_merge_path.cpp
+  src/level3/rocsparse_csrmm_transpose.cpp
+  src/level3/rocsparse_csrmm_legacy_api.cpp
+  src/level3/rocsparse_csrmm_quickreturn.cpp
   src/level3/rocsparse_csrmm.cpp
-  src/level3/rocsparse_cscmm_impl.cpp
-  src/level3/rocsparse_cscmm_buffer_size.cpp
-  src/level3/rocsparse_cscmm_analysis.cpp
   src/level3/rocsparse_cscmm.cpp
   src/level3/rocsparse_coomm_buffer_size.cpp
   src/level3/rocsparse_coomm_analysis.cpp
