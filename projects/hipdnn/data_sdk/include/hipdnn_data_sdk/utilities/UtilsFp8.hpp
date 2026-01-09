@@ -3,6 +3,9 @@
 
 #pragma once
 
+// TMP
+#include <hip/amd_detail/amd_hip_fp16.h>
+#include <hip/amd_detail/amd_hip_mx_common.h>
 #include <hip/hip_fp8.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <string>
@@ -120,6 +123,109 @@ struct fmt::formatter<hip_fp8_e4m3> : fmt::formatter<float>
 {
     template <typename FormatContext>
     auto format(hip_fp8_e4m3 h, FormatContext& ctx) const
+    {
+        return fmt::formatter<float>::format(static_cast<float>(h), ctx);
+    }
+};
+
+#define HIPDNN_NAN_FP8_E8M0 hipdnn_sdk::utilities::fp8_e8m0::uchar_as_fp8_e8m0(hip_detail::e8m0_NaN)
+
+using hip_fp8_e8m0 = __hip_fp8_e8m0;
+
+inline __HOST_DEVICE__ hip_fp8_e8m0 operator""_fp8_e8m0(long double val)
+{
+    return hip_fp8_e8m0{static_cast<float>(val)};
+}
+
+inline __HOST_DEVICE__ bool operator==(hip_fp8_e8m0 a, hip_fp8_e8m0 b)
+{
+    return a.__x == b.__x;
+}
+
+inline __HOST_DEVICE__ bool operator!=(hip_fp8_e8m0 a, hip_fp8_e8m0 b)
+{
+    return a.__x != b.__x;
+}
+
+inline __HOST_DEVICE__ bool operator>(hip_fp8_e8m0 a, hip_fp8_e8m0 b)
+{
+    return a.__x > b.__x;
+}
+
+inline __HOST_DEVICE__ bool operator>=(hip_fp8_e8m0 a, hip_fp8_e8m0 b)
+{
+    return a.__x >= b.__x;
+}
+
+inline __HOST_DEVICE__ bool operator<(hip_fp8_e8m0 a, hip_fp8_e8m0 b)
+{
+    return a.__x < b.__x;
+}
+
+inline __HOST_DEVICE__ bool operator<=(hip_fp8_e8m0 a, hip_fp8_e8m0 b)
+{
+    return a.__x <= b.__x;
+}
+
+namespace hipdnn_sdk::utilities::fp8_e8m0
+{
+inline __HOST_DEVICE__ hip_fp8_e8m0 uchar_as_fp8_e8m0(const unsigned char a)
+{
+    hip_fp8_e8m0 val;
+    val.__x = a;
+    return val;
+}
+
+inline __HOST_DEVICE__ bool isnan(hip_fp8_e8m0 x)
+{
+    return x == HIPDNN_NAN_FP8_E8M0;
+}
+
+inline __HOST_DEVICE__ hip_fp8_e8m0 max(const hip_fp8_e8m0 a, const hip_fp8_e8m0 b)
+{
+    auto aNan = isnan(a);
+    auto bNan = isnan(b);
+
+    if(aNan || bNan)
+    {
+        if(aNan && bNan)
+        {
+            return HIPDNN_NAN_FP8_E8M0;
+        }
+
+        return aNan ? b : a;
+    }
+
+    return a >= b ? a : b;
+}
+
+} // namespace hipdnn_sdk::utilities::fp8_e8m0
+
+namespace std
+{
+inline __HOST_DEVICE__ hip_fp8_e8m0 fabs(hip_fp8_e8m0 x)
+{
+    return x;
+}
+inline __HOST_DEVICE__ hip_fp8_e8m0 abs(hip_fp8_e8m0 x)
+{
+    return fabs(x);
+}
+inline __HOST_DEVICE__ hip_fp8_e8m0 max(hip_fp8_e8m0 a, hip_fp8_e8m0 b)
+{
+    return hipdnn_sdk::utilities::fp8_e8m0::max(a, b);
+}
+inline __HOST_DEVICE__ bool isnan(hip_fp8_e8m0 x)
+{
+    return hipdnn_sdk::utilities::fp8_e8m0::isnan(x);
+}
+} // namespace std
+
+template <>
+struct fmt::formatter<hip_fp8_e8m0> : fmt::formatter<float>
+{
+    template <typename FormatContext>
+    auto format(hip_fp8_e8m0 h, FormatContext& ctx) const
     {
         return fmt::formatter<float>::format(static_cast<float>(h), ctx);
     }

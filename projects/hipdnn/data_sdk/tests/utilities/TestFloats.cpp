@@ -95,3 +95,48 @@ TEST(TestUtilsTestUtilsBfp8, Max)
     EXPECT_EQ(std::max(nan, b), 2.0_bfp8);
     EXPECT_EQ(std::max(nan, nan), nan);
 }
+
+TEST(TestUtilsFp8E8M0, BasicUsage)
+{
+    hip_fp8_e8m0 x = 1.0_fp8_e8m0;
+    EXPECT_EQ(x, 1.0_fp8_e8m0);
+}
+
+TEST(TestUtilsFp8E8M0, Fabs)
+{
+    hip_fp8_e8m0 a = 1.0_fp8_e8m0;
+    EXPECT_EQ(std::fabs(a), a);
+    EXPECT_EQ(std::abs(a), a);
+}
+
+TEST(TestUtilsFp8E8M0, Max)
+{
+    hip_fp8_e8m0 a = 1.0_fp8_e8m0;
+    hip_fp8_e8m0 b = 2.0_fp8_e8m0;
+    hip_fp8_e8m0 nan = HIPDNN_NAN_FP8_E8M0;
+    EXPECT_EQ(std::max(a, b), b);
+    EXPECT_EQ(std::max(b, a), b);
+    EXPECT_EQ(std::max(a, nan), a);
+    EXPECT_EQ(std::max(nan, b), b);
+    EXPECT_EQ(std::max(nan, nan), nan);
+}
+
+TEST(TestUtilsFp8E8M0, CmpOperators)
+{
+    hip_fp8_e8m0 a = 1.0_fp8_e8m0;
+    hip_fp8_e8m0 b = 2.0_fp8_e8m0;
+    EXPECT_LT(a, b);
+    EXPECT_GT(b, a);
+    EXPECT_LE(a, a);
+    EXPECT_GE(b, a);
+    EXPECT_NE(a, b);
+    EXPECT_EQ(a, a);
+}
+
+TEST(TestUtilsFp8E8M0, IsNan)
+{
+    hip_fp8_e8m0 a = 1.0_fp8_e8m0;
+    hip_fp8_e8m0 nan = HIPDNN_NAN_FP8_E8M0;
+    EXPECT_FALSE(std::isnan(a));
+    EXPECT_TRUE(std::isnan(nan));
+}

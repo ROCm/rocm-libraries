@@ -91,6 +91,7 @@ enum class DataType
     INT8 = 7,
     FP8_E4M3 = 8,
     FP8_E5M2 = 9,
+    FP8_E8M0 = 10,
 };
 typedef DataType DataType_t; // NOLINT(readability-identifier-naming)
 
@@ -139,6 +140,10 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::FP8_E5M2;
     }
+    else if constexpr(std::is_same_v<T, hip_fp8_e8m0>)
+    {
+        return DataType::FP8_E8M0;
+    }
     else
     {
         return DataType::NOT_SET;
@@ -180,6 +185,8 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP8_E4M3;
     case DataType::FP8_E5M2:
         return hipdnn_data_sdk::data_objects::DataType::FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return hipdnn_data_sdk::data_objects::DataType::FP8_E8M0;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -207,6 +214,8 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E4M3;
     case hipdnn_data_sdk::data_objects::DataType::FP8_E5M2:
         return hipdnn_frontend::DataType::FP8_E5M2;
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E8M0:
+        return hipdnn_frontend::DataType::FP8_E8M0;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -349,6 +358,8 @@ inline const char* to_string(const DataType& type)
         return "fp8_e4m3";
     case DataType::FP8_E5M2:
         return "fp8_e5m2";
+    case DataType::FP8_E8M0:
+        return "fp8_e8m0";
     default:
         return "unknown";
     }
