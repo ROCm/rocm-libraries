@@ -290,6 +290,37 @@ BenchmarkProblems:
           - Range: [[128], [160], [1], [1,1,64]]
           - Range: [[128], [160], [1], [32, 64, 256]]
         - BiasTypeArgs: ['s']
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 4, 2, 2]
+        - DepthU: [ 32 ]
+        - GlobalReadVectorWidthA: [4]
+        - LocalReadVectorWidth: [4]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [0]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - UseCustomMainLoopSchedule: [0]
+        - StreamK: [3]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - StaggerU: [0]
+        - ClusterLocalRead: [1]
+        - TransposeLDS: [1]
+        - LDSTrInst: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[256], [128], [1], [32, 64, 256]]
+          - Range: [[256], [128], [1], [1, 1, 64]]
+          - Range: [[256], [128], [1], [64, 64, 256]]
+        - BiasTypeArgs: ['s']
 
 ########################################
 # TF32 NN - standard
