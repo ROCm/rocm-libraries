@@ -78,17 +78,110 @@ namespace stinkytofu
     /// Pattern type enum - specifies what kind of pattern this is
     enum class PatternType
     {
-        Peephole // Peephole optimization pattern
+        Peephole, // Peephole optimization pattern (assembly IR)
+        HighLevelIR, // High-level IR optimization pattern
+        Intrinsic // High-level IR intrinsic definition
+    };
+
+    //===----------------------------------------------------------------------===//
+    // Intrinsic-specific structures
+    //===----------------------------------------------------------------------===//
+
+    /// Intrinsic argument
+    struct IntrinsicArgument
+    {
+        std::string name; // Argument name (e.g., "dest", "src")
+        std::string regType; // Register type (e.g., "vgpr", "sgpr")
+    };
+
+    /// Typed operand for intrinsic instructions
+    struct IntrinsicOperand
+    {
+        enum Type
+        {
+            Register, // Register reference (e.g., "src", "dest")
+            IntLiteral, // Integer literal (e.g., 123, -456)
+            FloatLiteral, // Float literal (e.g., 3.14, -2.5)
+            HexLiteral // Hex literal treated as float bits (e.g., 0x40ec7326)
+        };
+
+        Type        type;
+        std::string registerName; // For Register type
+        int64_t     intValue; // For IntLiteral type
+        double      floatValue; // For FloatLiteral and HexLiteral types
+
+        // Constructor for register
+        IntrinsicOperand(const std::string& name)
+            : type(Register)
+            , registerName(name)
+            , intValue(0)
+            , floatValue(0.0)
+        {
+        }
+
+        // Constructor for int literal
+        IntrinsicOperand(int64_t val)
+            : type(IntLiteral)
+            , intValue(val)
+            , floatValue(0.0)
+        {
+        }
+
+        // Constructor for float literal
+        IntrinsicOperand(double val)
+            : type(FloatLiteral)
+            , intValue(0)
+            , floatValue(val)
+        {
+        }
+
+        // Constructor for hex literal
+        static IntrinsicOperand hexLiteral(double val)
+        {
+            IntrinsicOperand op(0.0);
+            op.type       = HexLiteral;
+            op.floatValue = val;
+            return op;
+        }
+
+        // Default constructor
+        IntrinsicOperand()
+            : type(Register)
+            , intValue(0)
+            , floatValue(0.0)
+        {
+        }
+    };
+
+    /// High-level IR instruction in intrinsic body
+    struct IntrinsicInstruction
+    {
+        std::string destReg; // Destination register
+        std::string operation; // Operation name (e.g., "v_add_f32" or function name)
+        std::vector<IntrinsicOperand> operands; // Typed operands
+        std::vector<std::string>      operandStrings; // Legacy: kept for function call args
+
+        // Function call support
+        bool                                             isFunctionCall = false;
+        std::vector<std::pair<std::string, std::string>> funcCallArgs; // (argName, argValue) pairs
     };
 
     /// Represents a complete pattern definition.
     struct Pattern
     {
-        std::string              name;
-        PatternType              type; // Type of pattern (must be explicitly set)
+        std::string name;
+        PatternType type; // Type of pattern (must be explicitly set)
+
+        // Peephole pattern fields
         std::vector<MatchStmt>   match;
         std::vector<Constraint>  constraints;
         std::vector<RewriteStmt> rewrite;
+
+        // Intrinsic pattern fields
+        std::vector<IntrinsicArgument>    arguments;
+        std::vector<IntrinsicInstruction> body;
+        std::string                       comment;
+        bool                              pythonBinding = false;
     };
 
     //===----------------------------------------------------------------------===//
@@ -129,13 +222,17 @@ namespace stinkytofu
         bool                     hadError;
 
         // Parsing methods
-        Pattern                  parsePattern();
-        std::vector<MatchStmt>   parseMatchBlock();
-        MatchStmt                parseMatchStmt();
-        std::vector<Constraint>  parseConstraintsBlock();
-        Constraint               parseConstraint();
-        std::vector<RewriteStmt> parseRewriteBlock();
-        RewriteStmt              parseRewriteStmt();
+        Pattern                           parsePattern();
+        Pattern                           parseIntrinsic();
+        std::vector<MatchStmt>            parseMatchBlock();
+        MatchStmt                         parseMatchStmt();
+        std::vector<Constraint>           parseConstraintsBlock();
+        Constraint                        parseConstraint();
+        std::vector<RewriteStmt>          parseRewriteBlock();
+        RewriteStmt                       parseRewriteStmt();
+        std::vector<IntrinsicArgument>    parseArgumentsBlock();
+        std::vector<IntrinsicInstruction> parseIntrinsicBody();
+        IntrinsicInstruction              parseIntrinsicInstruction();
 
         // Utility methods
         void        skipNewlines();

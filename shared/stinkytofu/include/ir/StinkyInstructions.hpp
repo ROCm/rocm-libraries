@@ -64,7 +64,10 @@ namespace stinkytofu
          * @brief Get the logical name of this instruction (for lowering)
          * @return Logical name like "VAddF32", "DSLoadB64"
          */
-        virtual const char* getLogicalName() const = 0;
+        virtual const char* getLogicalName() const
+        {
+            return "IRInstruction";
+        }
 
         /**
          * @brief Check if this is a composite instruction that needs expansion

@@ -61,8 +61,8 @@ TEST(IRModuleTest, AddInstructions)
     StinkyRegister src0 = vgpr(1);
     StinkyRegister src1 = vgpr(2);
 
-    auto* inst1 = new VAddU32(dst, src0, src1);
-    auto* inst2 = new VMulF32(dst, src0, src1);
+    auto inst1 = std::make_shared<VAddU32>(dst, src0, src1);
+    auto inst2 = std::make_shared<VMulF32>(dst, src0, src1);
 
     module->add(inst1);
     module->add(inst2);
@@ -85,7 +85,7 @@ TEST(IRModuleTest, LowerToDifferentArchitectures)
     StinkyRegister src0 = vgpr(1);
     StinkyRegister src1 = vgpr(2);
 
-    module->add(new VAddU32(dst, src0, src1));
+    module->add(std::make_shared<VAddU32>(dst, src0, src1));
 
     // Lower to gfx942 using IRInstPassManager with factory functions
     IRInstPassManager pm942(GfxArchID::Gfx942);
@@ -121,7 +121,7 @@ TEST(IRModuleTest, CompositeInstructionLowering)
     StinkyRegister src0 = vgpr(2, 2);
     StinkyRegister src1 = vgpr(4, 2);
 
-    module->add(new VAddPKF32(dst, src0, src1));
+    module->add(std::make_shared<VAddPKF32>(dst, src0, src1));
 
     // Lower to gfx942 using IRInstPassManager with factory functions (should use v_pk_add_f32)
     IRInstPassManager pm(GfxArchID::Gfx942);

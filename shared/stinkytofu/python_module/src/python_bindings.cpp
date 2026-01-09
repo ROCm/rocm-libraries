@@ -22,6 +22,9 @@
  * ************************************************************************ */
 
 #include "ir/IRModule.hpp"
+#include "ir/IntrinsicCall.hpp"
+#include "ir/IntrinsicLibrary.hpp"
+#include "ir/IntrinsicRegistry.hpp"
 #include "ir/StinkyInstructions.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/passes/CompositeInstructionLoweringPass.hpp"
@@ -31,16 +34,18 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
+#include <nanobind/trampoline.h>
 #include <sstream>
 
 namespace nb = nanobind;
 using namespace stinkytofu;
 
-NB_MODULE(stinkytofu, m)
+NB_MODULE(_stinkytofu, m)
 {
-    m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation";
+    m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
 
     // ========================================================================
     // Register Types
@@ -207,7 +212,7 @@ NB_MODULE(stinkytofu, m)
         .def("add",
              &IRModule::add,
              nb::arg("instruction"),
-             "Add a high-level IR instruction to the module")
+             "Add a high-level IR instruction to the module (shared ownership)")
         .def("getName", &IRModule::getName, "Get the kernel name")
         .def(
             "dump",
@@ -219,120 +224,328 @@ NB_MODULE(stinkytofu, m)
             "Dump the IR module to a string");
 
     // ========================================================================
-    // IRInstruction Base Class
+    // IRInstruction Base Class (polymorphic with virtual functions)
     // ========================================================================
+    // Note: No trampoline needed. Trampolines are for Python subclasses that
+    // override virtual methods. We only create concrete C++ classes (VAddF32, etc.)
+    // that already implement all virtual methods, so no trampoline is needed.
+    // Rocisa uses trampolines because it allows Python subclassing of instructions.
     nb::class_<IRInstruction>(m, "IRInstruction")
         .def_rw("comment", &IRInstruction::comment, "Optional comment")
         .def("get_logical_name",
              &IRInstruction::getLogicalName,
              "Get the logical name of this instruction")
-        .def("is_composite",
-             &IRInstruction::isComposite,
-             "Check if this is a composite instruction");
+        .def(
+            "is_composite", &IRInstruction::isComposite, "Check if this is a composite instruction")
+        .def(
+            "dump",
+            [](const IRInstruction& inst) {
+                std::ostringstream oss;
+                inst.dump(oss);
+                return oss.str();
+            },
+            "Dump the instruction to a string");
 
     // ========================================================================
-    // TODO: Auto-generate Python bindings for all IR instructions
+    // Auto-generated Python bindings for all IR instructions (~273 classes)
     // ========================================================================
-    //
-    // For now, we'll manually expose a few key instructions as examples.
-    // Future work: Generate these bindings automatically from TableGen,
-    // similar to how we generate the C++ classes.
-    //
-    // Each instruction class needs:
-    // 1. Constructor bindings with proper argument names
-    // 2. Inheritance from IRInstruction
-    // 3. Documentation strings
-    //
-    // Example instruction classes to expose:
-    // - VAddF32, VAddF16, VAddU32, VAddI32
-    // - VMulF32, VMulF16, VMulU32, VMulI32
-    // - VFmaF32, VFmaF16
-    // - DSLoadB32, DSLoadB64, DSStoreB32, DSStoreB64
-    // - MFMA, MXMFMA, SMFMA
-    // - TensorLoadToLds
-    // - And ~273 more...
-    //
-    // ========================================================================
-
-    // Example: VAddF32
-    nb::class_<VAddF32, IRInstruction>(m, "VAddF32")
-        .def(nb::init<const StinkyRegister&,
-                      const StinkyRegister&,
-                      const StinkyRegister&,
-                      std::optional<DPPModifiers>,
-                      std::optional<SDWAModifiers>,
-                      const std::string&>(),
-             nb::arg("dest"),
-             nb::arg("src0"),
-             nb::arg("src1"),
-             nb::arg("dpp")     = std::nullopt,
-             nb::arg("sdwa")    = std::nullopt,
-             nb::arg("comment") = "",
-             "32-bit floating point add: dest = src0 + src1");
-
-    // Example: VMulF32
-    nb::class_<VMulF32, IRInstruction>(m, "VMulF32")
-        .def(nb::init<const StinkyRegister&,
-                      const StinkyRegister&,
-                      const StinkyRegister&,
-                      std::optional<DPPModifiers>,
-                      std::optional<SDWAModifiers>,
-                      const std::string&>(),
-             nb::arg("dest"),
-             nb::arg("src0"),
-             nb::arg("src1"),
-             nb::arg("dpp")     = std::nullopt,
-             nb::arg("sdwa")    = std::nullopt,
-             nb::arg("comment") = "",
-             "32-bit floating point multiply: dest = src0 * src1");
-
-    // Example: VFmaF32
-    nb::class_<VFmaF32, IRInstruction>(m, "VFmaF32")
-        .def(nb::init<const StinkyRegister&,
-                      const StinkyRegister&,
-                      const StinkyRegister&,
-                      const StinkyRegister&,
-                      std::optional<DPPModifiers>,
-                      std::optional<SDWAModifiers>,
-                      const std::string&>(),
-             nb::arg("dest"),
-             nb::arg("src0"),
-             nb::arg("src1"),
-             nb::arg("src2"),
-             nb::arg("dpp")     = std::nullopt,
-             nb::arg("sdwa")    = std::nullopt,
-             nb::arg("comment") = "",
-             "32-bit floating point fused multiply-add: dest = src0 * src1 + src2");
-
-    // Example: TensorLoadToLds
-    nb::class_<TensorLoadToLds, IRInstruction>(m, "TensorLoadToLds")
-        .def(nb::init<const StinkyRegister&,
-                      const StinkyRegister&,
-                      const StinkyRegister*,
-                      const StinkyRegister*,
-                      const std::string&>(),
-             nb::arg("group0"),
-             nb::arg("group1"),
-             nb::arg("group2")  = nullptr,
-             nb::arg("group3")  = nullptr,
-             nb::arg("comment") = "",
-             "Load tensor data to LDS (2-4 SGPR groups)");
+#include "PythonBindings_generated.inc"
 
     // ========================================================================
-    // Pass Manager and Lowering
+    // Special Instruction Classes (manually defined)
     // ========================================================================
-    // TODO: Expose IRInstPassManager for lowering IR to assembly
-    // TODO: Expose assembly emission (IRListModule::emitAssembly())
-    //
-    // Example future API:
-    //   module = IRModule("kernel")
-    //   module.add(VAddF32(vgpr(0), vgpr(1), vgpr(2)))
-    //
-    //   pm = PassManager(GfxArch.Gfx942)
-    //   pm.add_pass(CompositeInstructionLoweringPass())
-    //   pm.add_pass(ToStinkyAsmPass())
-    //   asm_module = pm.run(module)
-    //
-    //   asm_code = asm_module.emit_assembly()
+
+    // MFMA - Matrix Fused Multiply-Add
+    m.def(
+        "MFMA",
+        [](const std::string&            instType,
+           const std::string&            accType,
+           int                           m,
+           int                           n,
+           int                           k,
+           int                           blocks,
+           bool                          mfma1k,
+           const StinkyRegister&         acc,
+           const StinkyRegister&         a,
+           const StinkyRegister&         b,
+           std::optional<StinkyRegister> acc2,
+           bool                          neg,
+           const std::string&            comment) {
+            return std::shared_ptr<IRInstruction>(std::make_shared<MFMA>(instType,
+                                                                         accType,
+                                                                         m,
+                                                                         n,
+                                                                         k,
+                                                                         blocks,
+                                                                         mfma1k,
+                                                                         acc,
+                                                                         a,
+                                                                         b,
+                                                                         acc2 ? &(*acc2) : nullptr,
+                                                                         neg,
+                                                                         comment));
+        },
+        nb::arg("instType"),
+        nb::arg("accType"),
+        nb::arg("m"),
+        nb::arg("n"),
+        nb::arg("k"),
+        nb::arg("blocks"),
+        nb::arg("mfma1k"),
+        nb::arg("acc"),
+        nb::arg("a"),
+        nb::arg("b"),
+        nb::arg("acc2")    = std::nullopt,
+        nb::arg("neg")     = false,
+        nb::arg("comment") = "",
+        "Create an MFMA instruction");
+
+    // MXMFMA - Mixed-precision Matrix Fused Multiply-Add
+    m.def(
+        "MXMFMA",
+        [](const std::string&    instType,
+           const std::string&    accType,
+           const std::string&    mxScaleATypeStr,
+           const std::string&    mxScaleBTypeStr,
+           int                   m,
+           int                   n,
+           int                   k,
+           int                   block,
+           const StinkyRegister& acc,
+           const StinkyRegister& a,
+           const StinkyRegister& b,
+           const StinkyRegister& acc2,
+           const StinkyRegister& mxsa,
+           const StinkyRegister& mxsb,
+           bool                  reuseA,
+           bool                  reuseB,
+           const std::string&    comment) {
+            return std::shared_ptr<IRInstruction>(std::make_shared<MXMFMA>(instType,
+                                                                           accType,
+                                                                           mxScaleATypeStr,
+                                                                           mxScaleBTypeStr,
+                                                                           m,
+                                                                           n,
+                                                                           k,
+                                                                           block,
+                                                                           acc,
+                                                                           a,
+                                                                           b,
+                                                                           acc2,
+                                                                           mxsa,
+                                                                           mxsb,
+                                                                           reuseA,
+                                                                           reuseB,
+                                                                           comment));
+        },
+        nb::arg("instType"),
+        nb::arg("accType"),
+        nb::arg("mxScaleATypeStr"),
+        nb::arg("mxScaleBTypeStr"),
+        nb::arg("m"),
+        nb::arg("n"),
+        nb::arg("k"),
+        nb::arg("block"),
+        nb::arg("acc"),
+        nb::arg("a"),
+        nb::arg("b"),
+        nb::arg("acc2"),
+        nb::arg("mxsa"),
+        nb::arg("mxsb"),
+        nb::arg("reuseA")  = false,
+        nb::arg("reuseB")  = false,
+        nb::arg("comment") = "",
+        "Create an MXMFMA instruction");
+
+    // SMFMA - Sparse Matrix Fused Multiply-Add
+    m.def(
+        "SMFMA",
+        [](const std::string&    instType,
+           const std::string&    accType,
+           int                   m,
+           int                   n,
+           int                   k,
+           int                   blocks,
+           bool                  mfma1k,
+           const StinkyRegister& acc,
+           const StinkyRegister& a,
+           const StinkyRegister& b,
+           const StinkyRegister& metadata,
+           bool                  neg,
+           const std::string&    comment) {
+            return std::shared_ptr<IRInstruction>(std::make_shared<SMFMA>(
+                instType, accType, m, n, k, blocks, mfma1k, acc, a, b, metadata, neg, comment));
+        },
+        nb::arg("instType"),
+        nb::arg("accType"),
+        nb::arg("m"),
+        nb::arg("n"),
+        nb::arg("k"),
+        nb::arg("blocks"),
+        nb::arg("mfma1k"),
+        nb::arg("acc"),
+        nb::arg("a"),
+        nb::arg("b"),
+        nb::arg("metadata"),
+        nb::arg("neg")     = false,
+        nb::arg("comment") = "",
+        "Create an SMFMA instruction");
+
+    // TensorLoadToLds - Higher-level tensor load operation
+    m.def(
+        "TensorLoadToLds",
+        [](const StinkyRegister&         group0,
+           const StinkyRegister&         group1,
+           std::optional<StinkyRegister> group2,
+           std::optional<StinkyRegister> group3,
+           const std::string&            comment) {
+            return std::shared_ptr<IRInstruction>(
+                std::make_shared<TensorLoadToLds>(group0,
+                                                  group1,
+                                                  group2 ? &(*group2) : nullptr,
+                                                  group3 ? &(*group3) : nullptr,
+                                                  comment));
+        },
+        nb::arg("group0"),
+        nb::arg("group1"),
+        nb::arg("group2")  = std::nullopt,
+        nb::arg("group3")  = std::nullopt,
+        nb::arg("comment") = "",
+        "Create a TensorLoadToLds instruction");
+
+    // Label - Control flow label
+    m.def(
+        "Label",
+        [](const std::string& labelName) {
+            return std::shared_ptr<IRInstruction>(std::make_shared<Label>(labelName));
+        },
+        nb::arg("labelName"),
+        "Create a Label");
+
     // ========================================================================
+    // IntrinsicCall - Placeholder for intrinsic function calls
+    // ========================================================================
+    nb::class_<IntrinsicCall, IRInstruction>(m, "IntrinsicCall")
+        .def(nb::init<const std::string&, const std::vector<StinkyRegister>&>(),
+             nb::arg("name"),
+             nb::arg("args"),
+             "Create an intrinsic call (placeholder, expanded during optimization)")
+        .def("get_function_name", &IntrinsicCall::getFunctionName, "Get intrinsic name")
+        .def_rw("function_name", &IntrinsicCall::functionName, "Intrinsic function name");
+
+    // ========================================================================
+    // IntrinsicArgument - Intrinsic argument metadata
+    // ========================================================================
+    nb::class_<IntrinsicArgument>(m, "IntrinsicArgument")
+        .def_ro("name", &IntrinsicArgument::name, "Argument name")
+        .def_ro("reg_type", &IntrinsicArgument::regType, "Register type (vgpr, sgpr, etc.)");
+
+    // ========================================================================
+    // IntrinsicLibrary - Runtime library for intrinsic definitions
+    // ========================================================================
+    nb::class_<IntrinsicLibrary>(m, "IntrinsicLibrary")
+        .def_static("load",
+                    &IntrinsicLibrary::loadFromFile,
+                    nb::arg("path"),
+                    "Load intrinsic library from .st.bc file")
+        .def("has_intrinsic",
+             &IntrinsicLibrary::hasIntrinsic,
+             nb::arg("name"),
+             "Check if intrinsic exists")
+        .def("get_intrinsic_names",
+             &IntrinsicLibrary::getIntrinsicNames,
+             "Get list of all intrinsic names")
+        .def("get_arguments",
+             &IntrinsicLibrary::getArguments,
+             nb::arg("name"),
+             "Get arguments for an intrinsic")
+        .def("get_comment",
+             &IntrinsicLibrary::getComment,
+             nb::arg("name"),
+             "Get comment for an intrinsic")
+        .def("size", &IntrinsicLibrary::size, "Get number of intrinsics");
+
+    // ========================================================================
+    // IntrinsicRegistry - Singleton with automatic loading
+    // ========================================================================
+    nb::class_<IntrinsicRegistry>(m, "IntrinsicRegistry")
+        .def_static("instance",
+                    &IntrinsicRegistry::instance,
+                    nb::rv_policy::reference,
+                    "Get singleton instance (auto-loads intrinsics.st.bc)")
+        .def("is_initialized",
+             &IntrinsicRegistry::isInitialized,
+             "Check if intrinsics were loaded successfully")
+        .def("has_intrinsic",
+             &IntrinsicRegistry::hasIntrinsic,
+             nb::arg("name"),
+             "Check if intrinsic exists")
+        .def("get_intrinsic_names",
+             &IntrinsicRegistry::getIntrinsicNames,
+             "Get list of all intrinsic names")
+        .def("get_loaded_path",
+             &IntrinsicRegistry::getLoadedPath,
+             "Get path where intrinsics.st.bc was loaded from")
+        .def("get_library", &IntrinsicRegistry::getLibrary, "Get the underlying IntrinsicLibrary")
+        .def("reload",
+             &IntrinsicRegistry::reload,
+             nb::arg("path"),
+             "Reload intrinsics from a specific path");
+
+    // Intrinsic helper function - cleaner API with kwargs
+    // NOTE: This is a low-level function. Use the Python wrapper in __init__.py
+    // which provides validation and automatic argument reordering.
+    m.def(
+        "Intrinsic",
+        [](const std::string& name, nb::kwargs kwargs) {
+            // Convert kwargs to ordered vector of registers
+            // Note: Python dicts maintain insertion order (Python 3.7+)
+            std::vector<StinkyRegister> args;
+            args.reserve(kwargs.size());
+
+            for(auto item : kwargs)
+            {
+                auto value = item.second;
+
+                // Try to cast to StinkyRegister first
+                if(nb::isinstance<StinkyRegister>(value))
+                {
+                    args.push_back(nb::cast<StinkyRegister>(value));
+                }
+                // Handle int literals
+                else if(nb::isinstance<nb::int_>(value))
+                {
+                    args.push_back(StinkyRegister(nb::cast<int>(value)));
+                }
+                // Handle float literals
+                else if(nb::isinstance<nb::float_>(value))
+                {
+                    args.push_back(StinkyRegister(nb::cast<double>(value)));
+                }
+                // Handle string literals
+                else if(nb::isinstance<nb::str>(value))
+                {
+                    args.push_back(StinkyRegister(nb::cast<std::string>(value)));
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        "Intrinsic argument must be Register, int, float, or string");
+                }
+            }
+
+            return std::shared_ptr<IRInstruction>(std::make_shared<IntrinsicCall>(name, args));
+        },
+        "Create an intrinsic call with named arguments\n\n"
+        "Example:\n"
+        "    module.add(st.Intrinsic('ReluF32', dest=st.vgpr(0), src=st.vgpr(1), "
+        "temp=st.vgpr(2)))\n"
+        "    module.add(st.Intrinsic('ClampF32', dest=v0, src=v1, min_val=0.0, max_val=1.0, "
+        "temp=v2))\n\n"
+        "Arguments can be:\n"
+        "    - Register objects (st.vgpr(n), st.sgpr(n), etc.)\n"
+        "    - int literals (0, 1, 255, etc.)\n"
+        "    - float literals (0.0, 1.0, 3.14, etc.)\n"
+        "    - string literals (for special values)\n\n"
+        "The intrinsic will be expanded during optimization by IntrinsicExpansionPass.");
 }

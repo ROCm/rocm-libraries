@@ -126,18 +126,18 @@ namespace stinkytofu
         /**
          * @brief Add a single IR instruction to this module
          *
-         * The module takes ownership of the instruction.
+         * The module shares ownership of the instruction via shared_ptr.
          *
          * @param inst IR instruction to add
          * @return The same instruction (for chaining)
          */
-        IRInstruction* add(IRInstruction* inst);
+        std::shared_ptr<IRInstruction> add(std::shared_ptr<IRInstruction> inst);
 
         /**
          * @brief Get all IR instructions in this module
-         * @return Vector of IR instructions (non-owning pointers)
+         * @return Vector of IR instructions (shared ownership)
          */
-        const std::vector<IRInstruction*>& getInstructions() const;
+        const std::vector<std::shared_ptr<IRInstruction>>& getInstructions() const;
 
         /**
          * @brief Get number of instructions in this module

@@ -1538,3 +1538,67 @@ TEST_F(PeepholePassManagerTest, IntegrationWithPassManager)
 
     EXPECT_EQ(countInstructions(), 1);
 }
+
+// ============================================================================
+// Test: HexLiteral x FloatLiteral Constant Folding
+// ============================================================================
+
+TEST_F(PeepholeOptimizationPassTest, HexLiteralTimesFloatLiteral_MulMulFusion)
+{
+    // Test constant folding with hex literal (0x40ec7326) x float literal (2.0)
+    //
+    // Simulates the intrinsic flow:
+    //   Intrinsic level:
+    //     temp = v_mul_f32(src, 0x40ec7326)  // HexLiteral
+    //     dest = v_mul_f32(temp, 2.0)        // FloatLiteral
+    //
+    //   After lowering to Assembly IR:
+    //     temp = v_mul_f32(src, 7.3890562)   // Both become LiteralDouble
+    //     dest = v_mul_f32(temp, 2.0)
+    //
+    //   After peephole optimization (MUL+MUL fusion):
+    //     dest = v_mul_f32(src, 14.778112)   // ? Folded correctly
+    //                                         // ? But hex format lost
+    //
+    // 0x40ec7326 = 7.3890562 (e^2 in IEEE 754)
+    // 7.3890562 * 2.0 = 14.778112
+
+    // Create the pattern using LiteralDouble (simulates post-lowering state)
+    // In real flow, IntrinsicOperand::HexLiteral gets converted to StinkyRegister::LiteralDouble
+
+    // temp = v_mul_f32(src, 7.3890562)  // Originally HexLiteral 0x40ec7326
+    uint32_t hexBits  = 0x40ec7326;
+    float    hexFloat = *reinterpret_cast<float*>(&hexBits);
+    EXPECT_NEAR(hexFloat, 7.3890562f, 0.0001f) << "Verify hex literal value is e^2";
+
+    createVMulF32WithConst(0, hexFloat, 1); // v0 = 7.3890562 * v1
+
+    // dest = v_mul_f32(temp, 2.0)  // FloatLiteral
+    createVMulF32WithConst(2, 2.0f, 0); // v2 = 2.0 * v0
+
+    ASSERT_EQ(countInstructions(), 2);
+
+    runPass();
+
+    // After fusion: should fold constants
+    EXPECT_EQ(countInstructions(), 1);
+
+    auto& inst = *getIRList().begin();
+    auto* mul  = static_cast<StinkyInstruction*>(&inst);
+    ASSERT_NE(mul, nullptr);
+
+    EXPECT_EQ(mul->getUnifiedOpcode(), static_cast<uint16_t>(GFX::v_mul_f32));
+    EXPECT_EQ(mul->getDestRegs()[0].reg.idx, 2u); // Destination is v2
+    EXPECT_EQ(mul->getSrcRegs()[1].reg.idx, 1u); // Source is v1
+    EXPECT_EQ(mul->getSrcRegs()[0].dataType, StinkyRegister::Type::LiteralDouble);
+
+    // Verify constant folding: 7.3890562 * 2.0 = 14.778112
+    float expectedResult = hexFloat * 2.0f;
+    EXPECT_NEAR(expectedResult, 14.778112f, 0.0001f);
+    EXPECT_NEAR(mul->getSrcRegs()[0].literalDouble, expectedResult, 0.0001f)
+        << "Constant folding should compute: 7.3890562 * 2.0 = 14.778112";
+
+    // Note: Hex format is lost - result is stored as decimal LiteralDouble
+    // Original: 0x40ec7326 (hex) -> 7.3890562 (decimal) -> 14.778112 (decimal)
+    // Not: 0x40ec7326 (hex) -> 0x416c73de (result in hex format)
+}

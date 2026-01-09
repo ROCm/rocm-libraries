@@ -732,7 +732,6 @@ namespace stinkytofu
         // Temporary: Allow legacy IR creation code to access private fields
         // TODO: Migrate these to use setSrcRegs/setDestRegs, then remove
         friend class ToStinkyAsmPass;
-        friend class StinkyTofu; // For StinkyBuilder.cpp
 
     public:
         static bool classof(const IRBase* ir)

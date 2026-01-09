@@ -1,5 +1,5 @@
 # ************************************************************************
-# Copyright (C) 2025 Advanced Micro Devices, Inc.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -73,10 +73,19 @@ target_link_libraries(stinkytofu_python PRIVATE
     gfxisa
 )
 
-# Set output name to just "stinkytofu" (without the _python suffix)
+# Set output name to _stinkytofu (private module, loaded by __init__.py)
+# Place in stinkytofu/ subdirectory
 set_target_properties(stinkytofu_python PROPERTIES
-    OUTPUT_NAME stinkytofu
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+    OUTPUT_NAME _stinkytofu
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/stinkytofu
+)
+
+# Copy __init__.py to build directory for development
+add_custom_command(TARGET stinkytofu_python POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_CURRENT_SOURCE_DIR}/stinkytofu/__init__.py
+        ${CMAKE_BINARY_DIR}/lib/stinkytofu/__init__.py
+    COMMENT "Copying __init__.py to build directory"
 )
 
 # Enable RTTI and exceptions for the Python bindings
@@ -99,8 +108,15 @@ endif()
 # Installation (Optional)
 # ============================================================================
 
+# Install C++ module (_stinkytofu.so)
 install(TARGETS stinkytofu_python
-    LIBRARY DESTINATION ${Python_SITEARCH}
+    LIBRARY DESTINATION ${Python_SITEARCH}/stinkytofu
+    COMPONENT python_bindings
+)
+
+# Install Python wrapper (__init__.py)
+install(FILES stinkytofu/__init__.py
+    DESTINATION ${Python_SITEARCH}/stinkytofu
     COMPONENT python_bindings
 )
 

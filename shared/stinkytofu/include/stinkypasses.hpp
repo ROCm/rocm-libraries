@@ -29,6 +29,14 @@ namespace rocisa
 
 namespace stinkytofu
 {
+    // NOTE: This header assumes stinkytofu.hpp is already included.
+    // It defines factory functions for creating pass instances.
+    // Pass base classes (IRInstPass, Pass, etc.) are in stinkytofu.hpp.
+
+    // High-level IR pass factories
+    std::unique_ptr<IRInstTransformPass> createCompositeInstructionLoweringPass();
+    std::unique_ptr<IRInstToAsmPass>     createToStinkyAsmPass();
+
     struct WaitCntConfig;
 
     std::unique_ptr<Pass> createStinkyDAGSchedulerPass();

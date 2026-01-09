@@ -96,19 +96,27 @@ namespace stinkytofu
             if(lexer.isAtEnd())
                 break;
 
-            // Check for pattern type keywords (peephole, etc.)
+            // Check for pattern type keywords (peephole, intrinsic, etc.)
             if(lexer.peek().kind == TokenKind::KW_peephole)
             {
                 patterns.push_back(parsePattern());
                 if(hadError)
                 {
-                    break;
+                    hadError = false; // Continue parsing
+                }
+            }
+            else if(lexer.peek().kind == TokenKind::KW_intrinsic)
+            {
+                patterns.push_back(parseIntrinsic());
+                if(hadError)
+                {
+                    hadError = false; // Continue parsing
                 }
             }
             else
             {
-                error("Expected pattern type keyword (e.g., 'peephole')");
-                break;
+                // Skip unexpected tokens (like comments)
+                lexer.consume();
             }
         }
 
@@ -127,12 +135,17 @@ namespace stinkytofu
             lexer.consume(); // consume pattern type keyword
             skipNewlines();
         }
+        else if(lexer.peek().kind == TokenKind::KW_ir)
+        {
+            pattern.type = PatternType::HighLevelIR;
+            lexer.consume(); // consume 'ir' keyword
+            skipNewlines();
+        }
         else
         {
-            error("Expected pattern type keyword (e.g., 'peephole')");
+            error("Expected pattern type keyword (e.g., 'peephole' or 'ir')");
             return pattern;
         }
-        // Future: Add support for other pattern types (DAG, Global, etc.)
 
         // Now expect 'pattern' keyword
         if(lexer.peek().kind != TokenKind::KW_pattern)
@@ -584,6 +597,416 @@ namespace stinkytofu
     //===----------------------------------------------------------------------===//
     // Convenience Function
     //===----------------------------------------------------------------------===//
+
+    //===----------------------------------------------------------------------===//
+    // Intrinsic Pattern Parsing
+    //===----------------------------------------------------------------------===//
+
+    Pattern PatternParser::parseIntrinsic()
+    {
+        Pattern pattern;
+        pattern.type = PatternType::Intrinsic;
+
+        // Consume 'intrinsic' keyword
+        lexer.consume();
+        skipNewlines();
+
+        // Parse intrinsic name
+        if(lexer.peek().kind != TokenKind::Identifier)
+        {
+            error("Expected intrinsic name");
+            return pattern;
+        }
+        pattern.name = std::string(lexer.consume().text);
+        skipNewlines();
+
+        // Expect '{'
+        if(lexer.peek().kind != TokenKind::LeftBrace)
+        {
+            error("Expected '{' after intrinsic name");
+            return pattern;
+        }
+        lexer.consume();
+        skipNewlines();
+
+        // Parse intrinsic body (arguments, body, comment, python_binding)
+        while(lexer.peek().kind != TokenKind::RightBrace && !lexer.isAtEnd())
+        {
+            if(lexer.peek().kind == TokenKind::Newline)
+            {
+                skipNewlines();
+            }
+            else if(lexer.peek().kind == TokenKind::KW_arguments)
+            {
+                lexer.consume();
+                pattern.arguments = parseArgumentsBlock();
+            }
+            else if(lexer.peek().kind == TokenKind::KW_body)
+            {
+                lexer.consume();
+                pattern.body = parseIntrinsicBody();
+            }
+            else if(lexer.peek().kind == TokenKind::KW_comment)
+            {
+                lexer.consume();
+                skipNewlines();
+                if(lexer.peek().kind == TokenKind::QuotedString)
+                {
+                    pattern.comment = std::string(lexer.consume().text);
+                }
+                skipNewlines();
+            }
+            else if(lexer.peek().kind == TokenKind::KW_python_binding)
+            {
+                lexer.consume();
+                skipNewlines();
+                if(lexer.peek().kind == TokenKind::KW_true)
+                {
+                    pattern.pythonBinding = true;
+                    lexer.consume();
+                }
+                else if(lexer.peek().kind == TokenKind::KW_false)
+                {
+                    pattern.pythonBinding = false;
+                    lexer.consume();
+                }
+                skipNewlines();
+            }
+            else
+            {
+                // Unexpected token, consume it to avoid infinite loop
+                error("Unexpected token in intrinsic body: " + std::string(lexer.peek().text));
+                lexer.consume();
+            }
+        }
+
+        // Expect '}'
+        if(lexer.peek().kind != TokenKind::RightBrace)
+        {
+            error("Expected '}' at end of intrinsic");
+            return pattern;
+        }
+        lexer.consume();
+        skipNewlines();
+
+        return pattern;
+    }
+
+    std::vector<IntrinsicArgument> PatternParser::parseArgumentsBlock()
+    {
+        std::vector<IntrinsicArgument> args;
+        skipNewlines();
+
+        // Expect '{'
+        if(lexer.peek().kind != TokenKind::LeftBrace)
+        {
+            error("Expected '{' after 'arguments'");
+            return args;
+        }
+        lexer.consume();
+        skipNewlines();
+
+        // Parse argument list: name: type
+        while(lexer.peek().kind != TokenKind::RightBrace && !lexer.isAtEnd())
+        {
+            if(lexer.peek().kind == TokenKind::Newline)
+            {
+                skipNewlines();
+            }
+            else if(lexer.peek().kind == TokenKind::Identifier)
+            {
+                IntrinsicArgument arg;
+                arg.name = std::string(lexer.consume().text);
+                skipNewlines();
+
+                // Expect ':'
+                if(lexer.peek().kind == TokenKind::Colon)
+                {
+                    lexer.consume();
+                    skipNewlines();
+
+                    // Parse type
+                    if(lexer.peek().kind == TokenKind::Identifier)
+                    {
+                        arg.regType = std::string(lexer.consume().text);
+                        args.push_back(arg);
+                    }
+                }
+                skipNewlines();
+            }
+            else
+            {
+                // Unexpected token, consume it to avoid infinite loop
+                error("Unexpected token in arguments block: " + std::string(lexer.peek().text));
+                lexer.consume();
+            }
+        }
+
+        // Expect '}'
+        if(lexer.peek().kind == TokenKind::RightBrace)
+        {
+            lexer.consume();
+        }
+        skipNewlines();
+
+        return args;
+    }
+
+    std::vector<IntrinsicInstruction> PatternParser::parseIntrinsicBody()
+    {
+        std::vector<IntrinsicInstruction> instructions;
+        skipNewlines();
+
+        // Expect '{'
+        if(lexer.peek().kind != TokenKind::LeftBrace)
+        {
+            error("Expected '{' after 'body'");
+            return instructions;
+        }
+        lexer.consume();
+        skipNewlines();
+
+        // Parse instruction list
+        while(lexer.peek().kind != TokenKind::RightBrace && !lexer.isAtEnd())
+        {
+            if(lexer.peek().kind == TokenKind::Newline)
+            {
+                skipNewlines();
+            }
+            else if(lexer.peek().kind == TokenKind::Identifier
+                    || lexer.peek().kind == TokenKind::KW_call)
+            {
+                auto inst = parseIntrinsicInstruction();
+                if(!inst.operation.empty())
+                {
+                    instructions.push_back(inst);
+                }
+            }
+            else
+            {
+                // Unexpected token, consume it to avoid infinite loop
+                error("Unexpected token in body block: " + std::string(lexer.peek().text));
+                lexer.consume();
+            }
+        }
+
+        // Expect '}'
+        if(lexer.peek().kind == TokenKind::RightBrace)
+        {
+            lexer.consume();
+        }
+        skipNewlines();
+
+        return instructions;
+    }
+
+    IntrinsicInstruction PatternParser::parseIntrinsicInstruction()
+    {
+        IntrinsicInstruction inst;
+
+        // Check for function call: call FunctionName(arg1=val1, arg2=val2, ...)
+        if(lexer.peek().kind == TokenKind::KW_call)
+        {
+            lexer.consume(); // consume 'call'
+            skipNewlines();
+
+            inst.isFunctionCall = true;
+
+            // Parse function name
+            if(lexer.peek().kind != TokenKind::Identifier)
+            {
+                error("Expected function name after 'call'");
+                return inst;
+            }
+            inst.operation = std::string(lexer.consume().text);
+            skipNewlines();
+
+            // Expect '('
+            if(lexer.peek().kind != TokenKind::LeftParen)
+            {
+                error("Expected '(' after function name");
+                return inst;
+            }
+            lexer.consume();
+            skipNewlines();
+
+            // Parse named arguments: arg=value, arg=value, ...
+            while(lexer.peek().kind != TokenKind::RightParen && !lexer.isAtEnd())
+            {
+                if(lexer.peek().kind == TokenKind::Newline)
+                {
+                    skipNewlines();
+                }
+                else if(lexer.peek().kind == TokenKind::Identifier)
+                {
+                    std::string argName = std::string(lexer.consume().text);
+                    skipNewlines();
+
+                    // Expect '='
+                    if(lexer.peek().kind != TokenKind::Equal)
+                    {
+                        error("Expected '=' after argument name in function call");
+                        return inst;
+                    }
+                    lexer.consume();
+                    skipNewlines();
+
+                    // Parse argument value
+                    if(lexer.peek().kind == TokenKind::Identifier
+                       || lexer.peek().kind == TokenKind::FloatLiteral
+                       || lexer.peek().kind == TokenKind::IntegerLiteral)
+                    {
+                        std::string argValue = std::string(lexer.consume().text);
+                        inst.funcCallArgs.push_back({argName, argValue});
+                        skipNewlines();
+
+                        // Check for comma
+                        if(lexer.peek().kind == TokenKind::Comma)
+                        {
+                            lexer.consume();
+                            skipNewlines();
+                        }
+                    }
+                    else
+                    {
+                        error("Expected argument value in function call");
+                        return inst;
+                    }
+                }
+                else
+                {
+                    error("Unexpected token in function call arguments: "
+                          + std::string(lexer.peek().text));
+                    lexer.consume();
+                }
+            }
+
+            // Expect ')'
+            if(lexer.peek().kind == TokenKind::RightParen)
+            {
+                lexer.consume();
+            }
+            skipNewlines();
+
+            return inst;
+        }
+
+        // Normal instruction: dest = operation(arg1, arg2, ...)
+        // Parse destination register
+        inst.destReg = std::string(lexer.consume().text);
+        skipNewlines();
+
+        // Expect '='
+        if(lexer.peek().kind != TokenKind::Equal)
+        {
+            error("Expected '=' in intrinsic instruction");
+            return inst;
+        }
+        lexer.consume();
+        skipNewlines();
+
+        // Parse operation name
+        if(lexer.peek().kind != TokenKind::Identifier)
+        {
+            error("Expected operation name");
+            return inst;
+        }
+        inst.operation = std::string(lexer.consume().text);
+        skipNewlines();
+
+        // Expect '('
+        if(lexer.peek().kind != TokenKind::LeftParen)
+        {
+            error("Expected '(' after operation name");
+            return inst;
+        }
+        lexer.consume();
+        skipNewlines();
+
+        // Parse operands
+        while(lexer.peek().kind != TokenKind::RightParen && !lexer.isAtEnd())
+        {
+            if(lexer.peek().kind == TokenKind::Newline)
+            {
+                skipNewlines();
+            }
+            else if(lexer.peek().kind == TokenKind::Identifier)
+            {
+                // Register reference
+                inst.operands.push_back(IntrinsicOperand(std::string(lexer.consume().text)));
+                skipNewlines();
+
+                // Check for comma
+                if(lexer.peek().kind == TokenKind::Comma)
+                {
+                    lexer.consume();
+                    skipNewlines();
+                }
+            }
+            else if(lexer.peek().kind == TokenKind::HexLiteral)
+            {
+                // Hex literal - parse as uint32_t and reinterpret as float
+                std::string hexText = std::string(lexer.consume().text);
+                uint32_t    bits    = std::stoul(hexText, nullptr, 16);
+                float       value   = *reinterpret_cast<float*>(&bits);
+                inst.operands.push_back(IntrinsicOperand::hexLiteral(static_cast<double>(value)));
+                skipNewlines();
+
+                // Check for comma
+                if(lexer.peek().kind == TokenKind::Comma)
+                {
+                    lexer.consume();
+                    skipNewlines();
+                }
+            }
+            else if(lexer.peek().kind == TokenKind::IntegerLiteral)
+            {
+                // Integer literal
+                std::string intText = std::string(lexer.consume().text);
+                int64_t     value   = std::stoll(intText);
+                inst.operands.push_back(IntrinsicOperand(value));
+                skipNewlines();
+
+                // Check for comma
+                if(lexer.peek().kind == TokenKind::Comma)
+                {
+                    lexer.consume();
+                    skipNewlines();
+                }
+            }
+            else if(lexer.peek().kind == TokenKind::FloatLiteral)
+            {
+                // Float literal
+                std::string floatText = std::string(lexer.consume().text);
+                double      value     = std::stod(floatText);
+                inst.operands.push_back(IntrinsicOperand(value));
+                skipNewlines();
+
+                // Check for comma
+                if(lexer.peek().kind == TokenKind::Comma)
+                {
+                    lexer.consume();
+                    skipNewlines();
+                }
+            }
+            else
+            {
+                // Unexpected token, consume it to avoid infinite loop
+                error("Unexpected token in instruction operands: "
+                      + std::string(lexer.peek().text));
+                lexer.consume();
+            }
+        }
+
+        // Expect ')'
+        if(lexer.peek().kind == TokenKind::RightParen)
+        {
+            lexer.consume();
+        }
+        skipNewlines();
+
+        return inst;
+    }
 
     std::vector<Pattern> parsePatternFile(const std::string& filename)
     {

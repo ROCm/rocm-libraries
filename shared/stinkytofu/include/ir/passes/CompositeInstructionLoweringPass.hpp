@@ -86,8 +86,4 @@ namespace stinkytofu
         bool hasVMovB64(GfxArchID arch) const;
         bool hasVLShlOrB32(GfxArchID arch) const;
     };
-
-    /// Factory function to create CompositeInstructionLoweringPass
-    std::unique_ptr<IRInstTransformPass> createCompositeInstructionLoweringPass();
-
 } // namespace stinkytofu
