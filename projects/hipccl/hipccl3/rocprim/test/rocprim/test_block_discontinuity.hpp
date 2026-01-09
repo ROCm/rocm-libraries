@@ -41,10 +41,34 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeads)
     using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
-    static_for<0, 2, type, flag_type, flag_op_type_1, 0, block_size>::run();
-    static_for<2, 4, type, flag_type, flag_op_type_2, 0, block_size>::run();
-    static_for<4, 6, type, flag_type, flag_op_type_3, 0, block_size>::run();
-    static_for<6, n_items, type, flag_type, flag_op_type_4, 0, block_size>::run();
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size>::run();
 }
 
 typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagTails)
@@ -57,10 +81,34 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagTails)
     using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
-    static_for<0, 2, type, flag_type, flag_op_type_1, 1, block_size>::run();
-    static_for<2, 4, type, flag_type, flag_op_type_2, 1, block_size>::run();
-    static_for<4, 6, type, flag_type, flag_op_type_3, 1, block_size>::run();
-    static_for<6, n_items, type, flag_type, flag_op_type_4, 1, block_size>::run();
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size>::run();
 }
 
 typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeadsAndTails)
@@ -73,8 +121,32 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeadsAndTails)
     using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
-    static_for<0, 2, type, flag_type, flag_op_type_1, 2, block_size>::run();
-    static_for<2, 4, type, flag_type, flag_op_type_2, 2, block_size>::run();
-    static_for<4, 6, type, flag_type, flag_op_type_3, 2, block_size>::run();
-    static_for<6, n_items, type, flag_type, flag_op_type_4, 2, block_size>::run();
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size>::run();
 }
