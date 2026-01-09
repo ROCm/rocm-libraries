@@ -40,7 +40,6 @@ Documentation for rocThrust available at
 ### Removed
 
 * Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
-* Removed deprecated variable `test_member_constant`.
 
 ## rocThrust 4.2.0 for ROCm 7.2
 

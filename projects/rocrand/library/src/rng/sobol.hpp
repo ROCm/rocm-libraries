@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -169,11 +169,11 @@ struct generate_sobol_host
         __shared__
             Constant shared_vectors[vector_size];
 #else
-            // NVCC won't accept extern __shared__ Constant shared_bytes[];
-            // Thereby we must resort to aliasing.
-            extern __shared__
-            unsigned char shared_bytes[];
-            auto*         shared_vectors = reinterpret_cast<Constant*>(&shared_bytes[0]);
+                // NVCC won't accept extern __shared__ Constant shared_bytes[];
+                // Thereby we must resort to aliasing.
+                extern __shared__
+                unsigned char shared_bytes[];
+                auto*         shared_vectors = reinterpret_cast<Constant*>(&shared_bytes[0]);
 #endif
             if(thread_idx.x < vector_size)
             {
