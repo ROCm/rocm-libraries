@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -430,12 +430,25 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
     {
         for(I i = j; i < NB; i++)
         {
-            const auto col = j * PANEL_SIZE + tidy;
-            const auto row = i * PANEL_SIZE + tidx;
-            if(col < n && row < n && row >= col)
+            if(is_upper)
             {
-                const auto idx = col * lda + row;
-                Arg[arg_idx] = A[idx];
+                const auto col = i * PANEL_SIZE + tidy;
+                const auto row = j * PANEL_SIZE + tidx;
+                if(col < n && row < n && row <= col)
+                {
+                    const auto idx = col * lda + row;
+                    Arg[arg_idx] = A[idx];
+                }
+            }
+            else
+            {
+                const auto col = j * PANEL_SIZE + tidy;
+                const auto row = i * PANEL_SIZE + tidx;
+                if(col < n && row < n && row >= col)
+                {
+                    const auto idx = col * lda + row;
+                    Arg[arg_idx] = A[idx];
+                }
             }
 
             arg_idx++;
@@ -446,12 +459,22 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
     arg_idx = 0;
     for(I j = 0; j < NB; j++)
     {
-        // load panel to lds
+        // write panel to lds
         for(I i = 0; i < NB - j; i++)
         {
-            const auto row = i * PANEL_SIZE + tidx;
-            const auto idx = tidy * ldash + row;
-            Ash[idx] = Arg[arg_idx + i];
+            // write to lds as lower and compute as lower
+            if(is_upper)
+            {
+                const auto col = i * PANEL_SIZE + tidy;
+                const auto idx = tidx * ldash + col;
+                Ash[idx] = Arg[arg_idx + i];
+            }
+            else
+            {
+                const auto row = i * PANEL_SIZE + tidx;
+                const auto idx = tidy * ldash + row;
+                Ash[idx] = Arg[arg_idx + i];
+            }
         }
 
         __syncthreads();
@@ -530,23 +553,45 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
         {
             for(I i = k; i < NB; i++)
             {
-                const auto col = (k - j) * PANEL_SIZE + tidy;
-                const auto row = (i - j) * PANEL_SIZE + tidx;
-
-                for(I p = 0; p < PANEL_SIZE; p++)
+                if(is_upper)
                 {
-                    Arg[karg_idx + i - k] -= Ash[row + p * ldash] * conj(Ash[col + p * ldash]);
+                    const auto col = (i - j) * PANEL_SIZE + tidy;
+                    const auto row = (k - j) * PANEL_SIZE + tidx;
+
+                    for(I p = 0; p < PANEL_SIZE; p++)
+                    {
+                        Arg[karg_idx + i - k] -= conj(Ash[row + p * ldash]) * Ash[col + p * ldash];
+                    }
+                }
+                else
+                {
+                    const auto col = (k - j) * PANEL_SIZE + tidy;
+                    const auto row = (i - j) * PANEL_SIZE + tidx;
+
+                    for(I p = 0; p < PANEL_SIZE; p++)
+                    {
+                        Arg[karg_idx + i - k] -= Ash[row + p * ldash] * conj(Ash[col + p * ldash]);
+                    }
                 }
             }
             karg_idx += NB - k;
         }
 
-        // write panel back to registers
+        // load panel back to registers
         for(I i = 0; i < NB - j; i++)
         {
-            const auto row = i * PANEL_SIZE + tidx;
-            const auto idx = tidy * ldash + row;
-            Arg[arg_idx + i] = Ash[idx];
+            if(is_upper)
+            {
+                const auto col = i * PANEL_SIZE + tidy;
+                const auto idx = tidx * ldash + col;
+                Arg[arg_idx + i] = Ash[idx];
+            }
+            else
+            {
+                const auto row = i * PANEL_SIZE + tidx;
+                const auto idx = tidy * ldash + row;
+                Arg[arg_idx + i] = Ash[idx];
+            }
         }
         arg_idx += NB - j;
 
@@ -562,12 +607,25 @@ ROCSOLVER_KERNEL void potf2_register_kernel_small(const bool is_upper,
     {
         for(I i = j; i < NB; i++)
         {
-            const auto col = j * PANEL_SIZE + tidy;
-            const auto row = i * PANEL_SIZE + tidx;
-            if(col < n && row < n && row >= col)
+            if(is_upper)
             {
-                const auto idx = col * lda + row;
-                A[idx] = Arg[arg_idx];
+                const auto col = i * PANEL_SIZE + tidy;
+                const auto row = j * PANEL_SIZE + tidx;
+                if(col < n && row < n && row <= col)
+                {
+                    const auto idx = col * lda + row;
+                    A[idx] = Arg[arg_idx];
+                }
+            }
+            else
+            {
+                const auto col = j * PANEL_SIZE + tidy;
+                const auto row = i * PANEL_SIZE + tidx;
+                if(col < n && row < n && row >= col)
+                {
+                    const auto idx = col * lda + row;
+                    A[idx] = Arg[arg_idx];
+                }
             }
 
             arg_idx++;
