@@ -1055,18 +1055,18 @@ namespace TensileLite
         {
             defaultWGM = pAMDGPU->fixedWGM;
         }
-        if(pAMDGPU->fixedWGMXCC != std::numeric_limits<int>::max())
+        if(pAMDGPU->fixedWGMXCC != std::numeric_limits<size_t>::max())
         {
             defaultWGMXCC = pAMDGPU->fixedWGMXCC;
         }
-        if(pAMDGPU->fixedWGMXCCCHUNK != std::numeric_limits<int>::max())
+        if(pAMDGPU->fixedWGMXCCCHUNK != std::numeric_limits<size_t>::max())
         {
             defaultWGMXCCCHUNK = pAMDGPU->fixedWGMXCCCHUNK;
         }
 
         // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
         assert(std::fabs(defaultWGM) < 1024);
-        // WGMXCC should be in this range: [1, 2, 3, ..., 63]
+        // WGMXCC should be in this range: [0, 1, 2, 3, ..., 63]
         assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
         // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
         assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
