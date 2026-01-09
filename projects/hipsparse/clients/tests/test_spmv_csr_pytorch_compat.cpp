@@ -56,7 +56,7 @@ protected:
 };
 
 // Define the types to test
-using TestTypes = ::testing::Types<hipsparseBfloat16, _Float16, float, double>;
+using TestTypes = ::testing::Types<hipsparseBfloat16, hipsparseFloat16, float, double>;
 TYPED_TEST_SUITE(SpmvCsrPytorchCompat, TestTypes);
 
 // Main test: 100x100 matrix with 1000 nnz, int32 indices (matches PyTorch default)

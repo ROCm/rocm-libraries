@@ -44,6 +44,7 @@
 #include "unit.hpp"
 #include "utility.hpp"
 
+#include "hipsparse-float16.h"
 #include <float.h>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
@@ -72,7 +73,7 @@ struct hip_datatype<hipsparseBfloat16>
 };
 
 template <>
-struct hip_datatype<_Float16>
+struct hip_datatype<hipsparseFloat16>
 {
     static constexpr hipDataType value = HIP_R_16F;
 };
@@ -105,7 +106,7 @@ struct compute_datatype<hipsparseBfloat16>
 };
 
 template <>
-struct compute_datatype<_Float16>
+struct compute_datatype<hipsparseFloat16>
 {
     static constexpr hipDataType value = HIP_R_32F;
     using scalar_type                  = float;
@@ -124,7 +125,7 @@ struct tolerance_traits<hipsparseBfloat16>
 };
 
 template <>
-struct tolerance_traits<_Float16>
+struct tolerance_traits<hipsparseFloat16>
 {
     static constexpr float       atol = 2e-3f;
     static constexpr float       rtol = 1e-3f;
@@ -165,9 +166,9 @@ inline hipsparseBfloat16 from_float<hipsparseBfloat16>(float val)
 }
 
 template <>
-inline _Float16 from_float<_Float16>(float val)
+inline hipsparseFloat16 from_float<hipsparseFloat16>(float val)
 {
-    return _Float16(val);
+    return hipsparseFloat16(val);
 }
 
 template <typename T>
@@ -183,7 +184,7 @@ inline float to_float<hipsparseBfloat16>(hipsparseBfloat16 val)
 }
 
 template <>
-inline float to_float<_Float16>(_Float16 val)
+inline float to_float<hipsparseFloat16>(hipsparseFloat16 val)
 {
     return static_cast<float>(val);
 }
@@ -528,7 +529,7 @@ inline void testing_spmv_csr_bfloat16_pytorch_compat(int m, int n, int target_nn
 
 inline void testing_spmv_csr_float16_pytorch_compat(int m, int n, int target_nnz, bool use_int64)
 {
-    testing_spmv_csr_pytorch_compat<_Float16>(m, n, target_nnz, use_int64);
+    testing_spmv_csr_pytorch_compat<hipsparseFloat16>(m, n, target_nnz, use_int64);
 }
 
 inline void testing_spmv_csr_float32_pytorch_compat(int m, int n, int target_nnz, bool use_int64)
