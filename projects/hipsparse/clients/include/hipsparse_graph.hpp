@@ -26,8 +26,7 @@
  *  \brief hipsparse_graph.hpp exposes C++ templated hipSPARSE routine wrappers
  *  that determine if the routine is ran on a hipgraph context
  */
-#ifndef HIPSPARSE_GRAPH_HPP
-#define HIPSPARSE_GRAPH_HPP
+#pragma once
 
 #include <utility>
 #include <vector>
@@ -86,8 +85,6 @@ namespace testing
     */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     TESTING_COMPUTE_TEMPLATE(axpyi)
-    //TESTING_COMPUTE_TEMPLATE(doti)
-    //TESTING_COMPUTE_TEMPLATE(dotci)
     TESTING_COMPUTE_TEMPLATE(gthr)
     TESTING_COMPUTE_TEMPLATE(gthrz)
     TESTING_COMPUTE_TEMPLATE(roti)
@@ -124,5 +121,3 @@ namespace testing
     TESTING_TEMPLATE(SDDMM_preprocess)
 #endif
 }
-
-#endif

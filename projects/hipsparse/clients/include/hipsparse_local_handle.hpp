@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,22 @@
 #pragma once
 #ifndef HIPSPARSE_LOCAL_HANDLE_HPP
 #define HIPSPARSE_LOCAL_HANDLE_HPP
+
+// =============================================================================
+// DIAGNOSTIC: Check HIP NVIDIA platform configuration
+// =============================================================================
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma message("DEBUG: __HIP_PLATFORM_NVIDIA__ IS defined")
+#else
+#pragma message("DEBUG: __HIP_PLATFORM_NVIDIA__ is NOT defined")
+#endif
+
+#ifdef __HIPCC__
+#pragma message("DEBUG: __HIPCC__ IS defined")
+#else
+#pragma message("DEBUG: __HIPCC__ is NOT defined")
+#endif
+// =============================================================================
 
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>

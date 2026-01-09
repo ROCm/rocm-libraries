@@ -127,12 +127,12 @@ void testing_dotci(Arguments argus)
         // HIPSPARSE pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
         CHECK_HIPSPARSE_ERROR(
-            hipsparseXdotci<T>(handle, nnz, dx_val, dx_ind, dy, &hresult_1, idx_base));
+            hipsparseXdotci(handle, nnz, dx_val, dx_ind, dy, &hresult_1, idx_base));
 
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(
-            hipsparseXdotci<T>(handle, nnz, dx_val, dx_ind, dy, dresult_2, idx_base));
+            hipsparseXdotci(handle, nnz, dx_val, dx_ind, dy, dresult_2, idx_base));
 
         // copy output from device to CPU^
         CHECK_HIP_ERROR(hipMemcpy(&hresult_2, dresult_2, sizeof(T), hipMemcpyDeviceToHost));
@@ -162,7 +162,7 @@ void testing_dotci(Arguments argus)
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(
-                hipsparseXdotci<T>(handle, nnz, dx_val, dx_ind, dy, &hresult_1, idx_base));
+                hipsparseXdotci(handle, nnz, dx_val, dx_ind, dy, &hresult_1, idx_base));
             CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         }
 
@@ -172,7 +172,7 @@ void testing_dotci(Arguments argus)
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
             CHECK_HIPSPARSE_ERROR(
-                hipsparseXdotci<T>(handle, nnz, dx_val, dx_ind, dy, &hresult_1, idx_base));
+                hipsparseXdotci(handle, nnz, dx_val, dx_ind, dy, &hresult_1, idx_base));
             CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         }
 

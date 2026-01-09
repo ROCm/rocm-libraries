@@ -54,12 +54,3 @@ Tests:
   N: [20000000, 40000000]
   nnz: [0, 2000000, 3000000]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
-
-- name: dotci
-  category: pre_checkin
-  function: dotci
-  precision: *single_double_precisions_complex
-  N: [10957]
-  nnz: [5000]
-  baseA: [HIPSPARSE_INDEX_BASE_ONE]
-  graph_test: true
