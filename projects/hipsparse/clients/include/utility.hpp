@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -227,6 +227,24 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     return "<undefined HIPSPARSE_STATUS value>";
 }
 #endif
+
+// CHECK_GENERATE_MATRIX_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+#else
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
+    do                                                                                             \
+    {                                                                                              \
+        auto error = ERROR;                                                                        \
+        if(error != true)                                                                          \
+        {                                                                                          \
+            fprintf(                                                                               \
+                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
+    } while(0)
+#endif
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
 
 // CHECK_HIP_ERROR
 #ifdef GOOGLE_TEST
@@ -1245,6 +1263,11 @@ bool generate_csr_matrix(const std::string    filename,
             {
                 return true;
             }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
+            }
         }
         else if(extension == "mtx")
         {
@@ -1278,6 +1301,11 @@ bool generate_csr_matrix(const std::string    filename,
 
                     return true;
                 }
+            }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
             }
         }
     }
@@ -3757,14 +3785,14 @@ void host_coomm_batched(I                    M,
 }
 
 template <typename T>
-int csrilu0(int                  m,
-            const int*           ptr,
-            const int*           col,
-            T*                   val,
-            hipsparseIndexBase_t idx_base,
-            bool                 boost,
-            double               boost_tol,
-            T                    boost_val)
+int host_csrilu0(int                  m,
+                 const int*           ptr,
+                 const int*           col,
+                 T*                   val,
+                 hipsparseIndexBase_t idx_base,
+                 bool                 boost,
+                 double               boost_tol,
+                 T                    boost_val)
 {
     // pointer of upper part of each row
     std::vector<int> diag_offset(m);
@@ -3842,9 +3870,31 @@ int csrilu0(int                  m,
             // Structural zero digonal
             return ai + idx_base;
         }
+        else
+        {
+            // set diagonal pointer to diagonal element
+            diag_offset[ai] = j;
 
-        // set diagonal pointer to diagonal element
-        diag_offset[ai] = j;
+            if(boost)
+            {
+                if(testing_abs(val[j]) <= boost_tol)
+                {
+                    val[j] = boost_val;
+                }
+            }
+            else
+            {
+                const bool is_diag = (j >= 0) && (col[j] == (ai + idx_base));
+
+                const bool is_zero_diag = is_diag && (val[j] == make_DataType<T>(0));
+
+                // check for zero diagonal
+                if(is_zero_diag)
+                {
+                    return ai + idx_base;
+                }
+            }
+        }
 
         // clear nnz entries
         for(j = row_start; j < row_end; ++j)

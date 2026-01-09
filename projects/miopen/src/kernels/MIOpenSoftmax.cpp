@@ -129,9 +129,9 @@ __forceinline__ __device__ int get_index(int n, int i, int s, int s0, int s1, co
     }
     else if constexpr(USE_SOFTMAX_MODE_INSTANCE)
     {
-        auto i0 = i / (H * W);
-        auto i1 = (i % (H * W)) / W;
-        auto i2 = (i % (H * W)) % W;
+        auto i0 = i / (HEIGHT * WIDTH);
+        auto i1 = (i % (HEIGHT * WIDTH)) / WIDTH;
+        auto i2 = (i % (HEIGHT * WIDTH)) % WIDTH;
         idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
     }
     else
@@ -191,8 +191,8 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
         {
             auto n  = gid / SPATIAL_DIM; // nth image
             auto s  = gid % SPATIAL_DIM; // spatial dimension (h * w)
-            auto s0 = s / W;
-            auto s1 = s % W;
+            auto s0 = s / WIDTH;
+            auto s1 = s % WIDTH;
 
             FLOAT_ACCUM channel_max;
 
@@ -304,8 +304,8 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
         // Batch specific n and s
         const auto batch_n  = (NUM_BATCH * gid + batch) / SPATIAL_DIM; // nth image
         const auto batch_s  = (NUM_BATCH * gid + batch) % SPATIAL_DIM; // which spatial_dim/pixel
-        const auto batch_s0 = batch_s / W;
-        const auto batch_s1 = batch_s % W;
+        const auto batch_s0 = batch_s / WIDTH;
+        const auto batch_s1 = batch_s % WIDTH;
 
         if constexpr(!USE_SOFTMAX_FAST)
         {
@@ -438,8 +438,8 @@ __forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
         {
             auto n  = gid / SPATIAL_DIM; // nth image
             auto s  = gid % SPATIAL_DIM; // spatial dimension (H * W)
-            auto s0 = s / W;
-            auto s1 = s % W;
+            auto s0 = s / WIDTH;
+            auto s1 = s % WIDTH;
 
             // Compute dot product per channel
             // Iterate over all the channels one thread is supposed to loop over
@@ -493,8 +493,8 @@ __forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
         // Batch specific n and s
         const auto batch_n  = (NUM_BATCH * gid + batch) / SPATIAL_DIM; // nth image
         const auto batch_s  = (NUM_BATCH * gid + batch) % SPATIAL_DIM; // which spatial_dim/pixel
-        const auto batch_s0 = batch_s / W;
-        const auto batch_s1 = batch_s % W;
+        const auto batch_s0 = batch_s / WIDTH;
+        const auto batch_s1 = batch_s % WIDTH;
         FLOAT_ACCUM channel_dot = static_cast<FLOAT_ACCUM>(0);
 
         // stores all the values touched by one thread so that we do not have load

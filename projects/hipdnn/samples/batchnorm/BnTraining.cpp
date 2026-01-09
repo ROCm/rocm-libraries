@@ -87,29 +87,17 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     // Configure output tensors (always needed for BATCH_STATS_ONLY mode)
     y->set_output(true);
-    savedMean->set_output(true);
-    savedInvVariance->set_output(true);
+    savedMean->set_output(true).set_data_type(intermediateType);
+    savedInvVariance->set_output(true).set_data_type(intermediateType);
 
     if(config.useRunningStats)
     {
-        nextRunningMean->set_output(true);
-        nextRunningVariance->set_output(true);
+        nextRunningMean->set_output(true).set_data_type(intermediateType);
+        nextRunningVariance->set_output(true).set_data_type(intermediateType);
     }
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
+    HIPDNN_FE_CHECK(graph->build(handle));
+    std::cout << "Graph build successful.\n";
 
     // Allocate tensors for BATCH_STATS_ONLY mode
     // Note: epsilon is pass-by-value, no buffer allocation needed
@@ -132,18 +120,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // Note: momentum would also be pass-by-value like epsilon
 
     // Initialize tensors
-    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
-                                     static_cast<IntermediateType>(1.0f));
-    biasTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
-                                    static_cast<IntermediateType>(1.0f));
+    xTensor.fillWithRandomValues(static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f));
+    scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(-2.0f),
+                                     static_cast<IntermediateType>(2.0f));
+    biasTensor.fillWithRandomValues(static_cast<IntermediateType>(-2.0f),
+                                    static_cast<IntermediateType>(2.0f));
 
     if(config.useRunningStats)
     {
-        prevMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
-                                            static_cast<IntermediateType>(1.0f));
-        prevVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
-                                           static_cast<IntermediateType>(1.0f));
+        prevMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(-2.0f),
+                                            static_cast<IntermediateType>(2.0f));
+        prevVarTensor.fillWithRandomValues(static_cast<IntermediateType>(-2.0f),
+                                           static_cast<IntermediateType>(2.0f));
     }
 
     // Build variant pack with batch statistics

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,8 @@
 #include <hipsparse.h>
 #include <string>
 #include <typeinfo>
+
+#include <algorithm>
 
 using namespace hipsparse;
 using namespace hipsparse_test;
@@ -231,18 +233,18 @@ void testing_spmm_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz_A;
-    if(!generate_csr_matrix(filename,
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m,
                             nnz_A,
                             hcsr_row_ptr,
                             hcsr_col_ind,
                             hcsr_val,
-                            idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+                            idx_base));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val, hcsr_val.size(), 1);
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;
