@@ -2632,6 +2632,9 @@ class Solution(collections.abc.Mapping):
     # SwapGlobalReadOrder does not work with UnrollLoopSwapGlobalReadOrder
     if state["UnrollLoopSwapGlobalReadOrder"]:
       state["SwapGlobalReadOrder"] = False
+    # SwapGlobalReadOrder needs to be False for CMS (SwapGlobalReadOrder will be set later in CMS code)
+    if state["UseCustomMainLoopSchedule"]:
+      state["SwapGlobalReadOrder"] = False
 
     def checkLdsBlockSizePerPad(tc):
       """
