@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2021-2025 Advanced Micro Devices, Inc.
+# Copyright 2021-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)

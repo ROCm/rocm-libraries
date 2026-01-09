@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
