@@ -648,7 +648,7 @@ TEST(TestGraphSerialization, TernaryPointwiseSerialization)
 // Multi-Node Graph Tests
 //==============================================================================
 
-TEST(TestGraphSerialization, ConvReluFusionSerialization)
+TEST(TestGraphSerialization, ConvReluFusionDeepComparison)
 {
     Graph graph;
     graph.set_name("conv_relu_fusion_test");
@@ -674,9 +674,10 @@ TEST(TestGraphSerialization, ConvReluFusionSerialization)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
-TEST(TestGraphSerialization, ConvBiasReluFusionSerialization)
+TEST(TestGraphSerialization, ConvBiasReluFusionDeepComparison)
 {
     Graph graph;
     graph.set_name("conv_bias_relu_fusion_test");
@@ -709,6 +710,7 @@ TEST(TestGraphSerialization, ConvBiasReluFusionSerialization)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, ResidualBlockSerialization)
@@ -756,7 +758,7 @@ TEST(TestGraphSerialization, ResidualBlockSerialization)
     expectGraphsEqual(graph, restored);
 }
 
-TEST(TestGraphSerialization, BnTrainingActivFusion)
+TEST(TestGraphSerialization, BnTrainingActivFusionDeepComparison)
 {
     Graph graph;
     graph.set_name("bn_training_activ_fusion_test");
@@ -787,9 +789,10 @@ TEST(TestGraphSerialization, BnTrainingActivFusion)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
-TEST(TestGraphSerialization, BnInfDReluBnBwdFusion)
+TEST(TestGraphSerialization, BnInfDReluBnBwdFusionDeepComparison)
 {
     Graph graph;
     graph.set_name("bn_inf_drelu_bn_bwd_fusion_test");
@@ -824,6 +827,7 @@ TEST(TestGraphSerialization, BnInfDReluBnBwdFusion)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
+    expectGraphsEqualUnpacked(graph, restored);
 }
 
 //==============================================================================
@@ -915,19 +919,25 @@ TEST(TestGraphSerialization, ToFlatBufferReturnsValidBuffer)
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(x, pwAttrs);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(2);
 
     // Get flatbuffer (assigns UIDs if needed)
     auto buffer = graph.toFlatBuffer();
 
     // Verify buffer is valid
     EXPECT_NE(buffer.data(), nullptr);
-    EXPECT_GT(buffer.size(), 0);
+    EXPECT_GT(buffer.size(), 0u);
 
     // Verify we can read the flatbuffer
     auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
     EXPECT_NE(fbGraph, nullptr);
     EXPECT_STREQ(fbGraph->name()->c_str(), "flatbuffer_test");
+
+    // Verify round-trip produces identical graph
+    Graph restored;
+    restored.fromFlatBuffer(buffer);
+    expectGraphsEqual(graph, restored);
 }
 
 TEST(TestGraphSerialization, FromFlatBufferRestoresGraph)
@@ -1062,16 +1072,22 @@ TEST(TestGraphSerialization, SerializeOverloadReturnsDetachedBuffer)
     auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(x, pwAttrs);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(2);
 
-    // Use toFlatBuffer() that returns DetachedBuffer (assigns UIDs if needed)
+    // Use toFlatBuffer() that returns DetachedBuffer
     auto buffer = graph.toFlatBuffer();
     EXPECT_GT(buffer.size(), 0u);
 
-    // Verify it's equivalent to toFlatBuffer()
+    // Verify it's equivalent to calling toFlatBuffer() again
     auto directBuffer = graph.toFlatBuffer();
     EXPECT_EQ(buffer.size(), directBuffer.size());
     EXPECT_EQ(std::memcmp(buffer.data(), directBuffer.data(), buffer.size()), 0);
+
+    // Verify round-trip produces identical graph
+    Graph restored;
+    restored.fromFlatBuffer(buffer);
+    expectGraphsEqual(graph, restored);
 }
 
 TEST(TestGraphSerialization, DeserializeFromFlatBufferGraphObject)
@@ -1085,9 +1101,10 @@ TEST(TestGraphSerialization, DeserializeFromFlatBufferGraphObject)
     auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(x, pwAttrs);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(2);
 
-    // Serialize to buffer (assigns UIDs if needed)
+    // Serialize to buffer
     auto buffer = graph.toFlatBuffer();
     auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
 
@@ -1096,10 +1113,8 @@ TEST(TestGraphSerialization, DeserializeFromFlatBufferGraphObject)
     auto err = newGraph.deserialize(fbGraph);
     EXPECT_EQ(err.get_code(), ErrorCode::OK);
 
-    // Verify restoration
-    auto json = newGraph.toJson();
-    EXPECT_EQ(json["name"], "deserialize_graph_object_test");
-    EXPECT_EQ(json["nodes"].size(), 1u);
+    // Verify full round-trip correctness
+    expectGraphsEqual(graph, newGraph);
 }
 
 TEST(TestGraphSerialization, DeserializeFromDetachedBuffer)
@@ -1185,6 +1200,14 @@ TEST(TestGraphSerialization, ConstSerializeReturnsErrorWithoutUids)
     // Non-const serialize should succeed by assigning UIDs
     auto nonConstBuffer = graph.toFlatBuffer();
     EXPECT_GT(nonConstBuffer.size(), 0u);
+
+    // Verify UIDs were actually assigned
+    EXPECT_TRUE(x->has_uid()) << "Tensor should have UID after non-const serialize";
+
+    // Verify round-trip works after UID assignment
+    Graph restored;
+    restored.fromFlatBuffer(nonConstBuffer);
+    expectGraphsEqual(graph, restored);
 }
 
 TEST(TestGraphSerialization, NonConstSerializeAssignsUids)
@@ -1195,7 +1218,7 @@ TEST(TestGraphSerialization, NonConstSerializeAssignsUids)
     graph.set_io_data_type(DataType::FLOAT);
     graph.set_intermediate_data_type(DataType::FLOAT);
 
-    // Create tensor without UID
+    // Create input tensor without UID
     auto x = std::make_shared<TensorAttributes>();
     x->set_name("x");
     x->set_dim({1, 16});
@@ -1205,17 +1228,40 @@ TEST(TestGraphSerialization, NonConstSerializeAssignsUids)
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(x, pwAttrs);
+    auto y = graph.pointwise(x, pwAttrs);
 
-    // Verify UID is not set
+    // Verify UIDs are not set before serialization
     EXPECT_FALSE(x->has_uid());
+    EXPECT_FALSE(y->has_uid());
 
     // Non-const serialize should assign UIDs
     auto buffer = graph.toFlatBuffer();
     EXPECT_GT(buffer.size(), 0u);
 
-    // After non-const serialize, tensor should have UID
-    EXPECT_TRUE(x->has_uid());
+    // After non-const serialize, both tensors should have UIDs assigned
+    EXPECT_TRUE(x->has_uid()) << "Input tensor should have UID after serialize";
+    EXPECT_TRUE(y->has_uid()) << "Output tensor should have UID after serialize";
+    EXPECT_NE(x->get_uid(), y->get_uid()) << "UIDs should be unique";
+
+    // Verify the assigned UIDs are actually in the serialized buffer
+    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+    ASSERT_EQ(fbGraph->tensors()->size(), 2u);
+
+    std::set<int64_t> serializedUids;
+    for(size_t i = 0; i < fbGraph->tensors()->size(); ++i)
+    {
+        serializedUids.insert(
+            fbGraph->tensors()->Get(static_cast<flatbuffers::uoffset_t>(i))->uid());
+    }
+    EXPECT_TRUE(serializedUids.count(x->get_uid()))
+        << "Input tensor UID " << x->get_uid() << " not found in serialized buffer";
+    EXPECT_TRUE(serializedUids.count(y->get_uid()))
+        << "Output tensor UID " << y->get_uid() << " not found in serialized buffer";
+
+    // Verify round-trip preserves the assigned UIDs
+    Graph restored;
+    restored.fromFlatBuffer(buffer);
+    expectGraphsEqual(graph, restored);
 }
 
 TEST(TestGraphSerialization, ConstJsonSerializeReturnsErrorWithoutUids)
@@ -1246,6 +1292,14 @@ TEST(TestGraphSerialization, ConstJsonSerializeReturnsErrorWithoutUids)
     // Non-const toJson() should succeed
     auto nonConstJson = graph.toJson();
     EXPECT_EQ(nonConstJson["name"], "const_json_test");
+
+    // Verify UIDs were assigned
+    EXPECT_TRUE(x->has_uid()) << "Tensor should have UID after non-const serialize";
+
+    // Verify round-trip works
+    Graph restored;
+    restored.deserialize(nonConstJson);
+    expectGraphsEqual(graph, restored);
 }
 
 TEST(TestGraphSerialization, ConstBinarySerializeReturnsErrorWithoutUids)
@@ -1276,6 +1330,15 @@ TEST(TestGraphSerialization, ConstBinarySerializeReturnsErrorWithoutUids)
     // Non-const toBinary() should succeed
     auto nonConstData = graph.toBinary();
     EXPECT_GT(nonConstData.size(), 0u);
+
+    // Verify UIDs were assigned
+    EXPECT_TRUE(x->has_uid()) << "Tensor should have UID after non-const serialize";
+
+    // Verify round-trip works
+    Graph restored;
+    hipdnnHandle_t nullHandle = nullptr;
+    restored.deserialize(nullHandle, nonConstData);
+    expectGraphsEqual(graph, restored);
 }
 
 //==============================================================================
