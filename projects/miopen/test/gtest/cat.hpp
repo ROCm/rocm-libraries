@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -138,40 +138,10 @@ protected:
     void RunTest()
     {
         auto&& handle = get_handle();
-
-        cpu_cat_forward<T>(inputs, ref_output, dim);
         std::vector<miopen::TensorDescriptor*> inputDescs;
         std::vector<ConstData_t> inputData;
 
-        std::transform(inputs.begin(),
-                       inputs.end(),
-                       std::back_inserter(inputDescs),
-                       [](auto& input) { return &input.desc; });
-        std::transform(inputs_dev.begin(),
-                       inputs_dev.end(),
-                       std::back_inserter(inputData),
-                       [](auto& input_dev) { return input_dev.get(); });
-
-        miopenStatus_t status = miopen::CatForward(handle,
-                                                   inputDescs.size(),
-                                                   inputDescs.data(),
-                                                   inputData.data(),
-                                                   output.desc,
-                                                   output_dev.get(),
-                                                   dim);
-
-        EXPECT_EQ(status, miopenStatusSuccess);
-
-        output.data = handle.Read<T>(output_dev, output.data.size());
-    }
-
-    void RunTestSt()
-    {
-        auto&& handle = get_handle();
-
-        cpu_cat_forward_st<T>(inputs, ref_output, dim);
-        std::vector<miopen::TensorDescriptor*> inputDescs;
-        std::vector<ConstData_t> inputData;
+        cpu_cat_forward<T>(inputs, ref_output, dim, true);
 
         std::transform(inputs.begin(),
                        inputs.end(),
@@ -197,10 +167,11 @@ protected:
 
     void Verify()
     {
-        auto error = miopen::rms_range(ref_output, output);
-        EXPECT_TRUE(miopen::range_distance(ref_output) == miopen::range_distance(output));
-        EXPECT_TRUE(error == 0) << "Outputs do not match each other. Error:" << error;
+        const auto error = miopen::rms_range(ref_output, output);
+        EXPECT_EQ(miopen::range_distance(ref_output), miopen::range_distance(output));
+        EXPECT_FLOAT_EQ(error, 0) << "Outputs do not match each other. Error:" << error;
     }
+
     CatTestCase cat_config;
 
     std::vector<tensor<T>> inputs;
