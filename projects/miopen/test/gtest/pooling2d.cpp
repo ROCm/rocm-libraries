@@ -16,19 +16,18 @@
 #define TEST_GET_INPUT_TENSOR 0
 #endif
 
-
 std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 {
     // Cache results to avoid duplicate generation when called multiple times
     // (e.g., for both FP32 and FP16 test instantiations)
     static std::vector<Pooling2dTestCase> cached_test_cases;
     static bool cached = false;
-    
+
     if(cached)
     {
         return cached_test_cases;
     }
-    
+
     std::vector<Pooling2dTestCase> test_cases;
 
     // Dataset 0: Default dataset (various tensor sizes)
@@ -61,7 +60,7 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
                        {1, 2048, 11, 11},    // Shape 17
                        {1, 16, 4096, 4096}}; // Shape 18
 #endif
-    std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
+    std::vector<std::vector<int>> dataset0_lens = {{2, 2}, {3, 3}};
     // Note: Order matters for index type limits! CTest processes stride (2,2) before (1,1)
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
     std::vector<std::vector<int>> dataset0_pads         = {{0, 0}, {1, 1}};
@@ -94,8 +93,8 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 
     // Cache the results
     cached_test_cases = test_cases;
-    cached = true;
-    
+    cached            = true;
+
     return test_cases;
 }
 

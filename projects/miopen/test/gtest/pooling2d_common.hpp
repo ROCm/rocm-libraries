@@ -102,17 +102,18 @@ inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case, bool skip_
     auto idx_typ = test_case.index_type;
     auto idx_sz  = sizeof(uint8_t);
     int spt_dim  = static_cast<int>(test_case.input_dims.size()) - 2;
-    const bool skip_many_configs_with_non_int8_index = apply_index_type_limits; // dataset_id == 0 && full_set
+    const bool skip_many_configs_with_non_int8_index =
+        apply_index_type_limits;     // dataset_id == 0 && full_set
     const bool wide_dataset = false; // dataset_id == 2 && full_set (not applicable for Dataset 0)
-    const bool full_set = true; // Always true for Dataset 0
-    
+    const bool full_set     = true;  // Always true for Dataset 0
+
     // Match ctest run() order exactly:
     // 1. wsidx == 0 && spt_dim == 3 && max && full_set (not applicable for 2D)
     if(test_case.wsidx == 0 && spt_dim == 3 && test_case.mode == miopenPoolingMax && full_set)
     {
         return false;
     }
-    
+
     // 2. wsidx == 0 && spt_dim == 2 && max && wide_dataset
     // Note: wide_dataset is false for Dataset 0, so this check won't trigger for Dataset 0
     // But we keep it to match ctest structure exactly
@@ -120,15 +121,16 @@ inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case, bool skip_
     {
         return false;
     }
-    
+
     // 3. wsidx == 0 && average && full_set
     if(test_case.wsidx == 0 &&
-       (test_case.mode == miopenPoolingAverage || test_case.mode == miopenPoolingAverageInclusive) &&
+       (test_case.mode == miopenPoolingAverage ||
+        test_case.mode == miopenPoolingAverageInclusive) &&
        full_set)
     {
         return false;
     }
-    
+
     // 4. switch(idx_typ) - matches ctest exactly
     switch(idx_typ)
     {
@@ -204,13 +206,13 @@ inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case, bool skip_
         break;
     }
     }
-    
+
     // 5. spt_dim != 2 && spt_dim != 3
     if(spt_dim != 2 && spt_dim != 3)
     {
         return false;
     }
-    
+
     // 6. lens[i] > (input + 2*pads[i])
     // Convert test_case.input_dims to vector for GetLengths()
     std::vector<int> in_shape_vec(test_case.input_dims.begin(), test_case.input_dims.end());
@@ -224,20 +226,22 @@ inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case, bool skip_
             return false;
         }
     }
-    
+
     // 7. Memory check (matching ctest exactly)
     if(full_set)
     {
         try
         {
-            auto output_desc = miopen::PoolingDescriptor(
-                test_case.mode, miopenPaddingDefault, lens_vec, 
-                std::vector<int>(test_case.strides.begin(), test_case.strides.end()), pads_vec)
-                .GetForwardOutputTensor(input_desc);
-            size_t total_mem =
-                3 * input_desc.GetNumBytes() + output_desc.GetNumBytes() +
-                idx_sz * output_desc.GetElementSize();
-            
+            auto output_desc = miopen::PoolingDescriptor(test_case.mode,
+                                                         miopenPaddingDefault,
+                                                         lens_vec,
+                                                         std::vector<int>(test_case.strides.begin(),
+                                                                          test_case.strides.end()),
+                                                         pads_vec)
+                                   .GetForwardOutputTensor(input_desc);
+            size_t total_mem = 3 * input_desc.GetNumBytes() + output_desc.GetNumBytes() +
+                               idx_sz * output_desc.GetElementSize();
+
             size_t device_mem = get_handle().GetGlobalMemorySize();
             if(total_mem >= device_mem)
             {
@@ -249,7 +253,7 @@ inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case, bool skip_
             // Skip memory check if handle not available
         }
     }
-    
+
     return true;
 }
 
@@ -270,8 +274,8 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                                  bool apply_index_type_limits = true)
 {
     // Match ctest order exactly: index_type -> mode -> lens -> strides -> pads -> wsidx
-    // This matches the order parameters are added in pooling_driver (base class adds index_type, mode first,
-    // then derived class adds lens, strides, pads, wsidx)
+    // This matches the order parameters are added in pooling_driver (base class adds index_type,
+    // mode first, then derived class adds lens, strides, pads, wsidx)
     for(const auto& index_type : index_types)
     {
         for(const auto& mode : modes)
@@ -292,8 +296,9 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                                 index_type,
                                 mode,
                                 wsidx};
-                            
-                            if(ShouldIncludeTestCase(test_case, skip_wide_check, apply_index_type_limits))
+
+                            if(ShouldIncludeTestCase(
+                                   test_case, skip_wide_check, apply_index_type_limits))
                             {
                                 test_cases.push_back(test_case);
                             }

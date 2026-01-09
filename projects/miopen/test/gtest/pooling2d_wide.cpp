@@ -11,12 +11,12 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
     // Cache results to avoid duplicate generation when called multiple times
     static std::vector<Pooling2dTestCase> cached_test_cases;
     static bool cached = false;
-    
+
     if(cached)
     {
         return cached_test_cases;
     }
-    
+
     std::vector<Pooling2dTestCase> test_cases;
 
     // Dataset 2: Wide window configurations
@@ -52,14 +52,14 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
                              modes,
                              wsidx_values,
                              test_cases,
-                             false, // skip_wide_check=false for Dataset 2 (wide window)
+                             false,  // skip_wide_check=false for Dataset 2 (wide window)
                              false); // apply_index_type_limits=false for Dataset 2
     }
 
     // Cache the results
     cached_test_cases = test_cases;
-    cached = true;
-    
+    cached            = true;
+
     return test_cases;
 }
 
@@ -80,4 +80,3 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_WidePooling2d_FP16,
                          testing::ValuesIn(GetPooling2dWideTestCases()),
                          GetPooling2dTestCaseName);
-
