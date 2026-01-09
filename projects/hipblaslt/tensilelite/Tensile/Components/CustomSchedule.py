@@ -2276,7 +2276,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Begininng of a iteration. Wait for prior local read.") ,
             5,  SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for all LRA0. Skip 1*LRB0.") ,
-            17, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before GRA and PackB0. Wait for all prior LRA0 for GRA and all LRB0 for PackB0.") ,
+            17, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackB0. Wait for all prior LRB0 for PackB0.") ,
             17, SBarrier(comment="GRA") ,
             32, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before GRB. Wait for all prior LRB0.") ,
             32, SBarrier(comment="GRB") ,
