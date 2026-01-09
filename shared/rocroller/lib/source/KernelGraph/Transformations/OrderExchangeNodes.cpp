@@ -109,7 +109,8 @@ namespace rocRoller::KernelGraph
                 return hasOutputMultiplies;
             };
 
-            auto groupedExchangeNodes = NodeScheduling::getGroupedNodes(rv, exchangeWithConnectedMultiply);
+            auto groupedExchangeNodes
+                = NodeScheduling::getGroupedNodes(rv, exchangeWithConnectedMultiply);
             for(auto& [parent, nodes] : groupedExchangeNodes)
             {
                 OrderMultiplyNodesDetail::ExchangeOrder comp{rv};

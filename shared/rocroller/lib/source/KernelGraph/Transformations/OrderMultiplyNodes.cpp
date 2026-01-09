@@ -304,7 +304,6 @@ namespace rocRoller::KernelGraph
             return a < b;
         }
 
-
         void BestNodeOrder::populateCache(auto range) const
         {
             for(auto x : range)
