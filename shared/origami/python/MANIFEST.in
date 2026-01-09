@@ -1,6 +1,0 @@
-include ../README.md
-include ../LICENSE.md
-recursive-include ../include *.hpp
-recursive-include ../src *.cpp
-recursive-include src *.py *.cpp
-
