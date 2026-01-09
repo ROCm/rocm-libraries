@@ -465,7 +465,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   endif()
   message(STATUS "=====================================")
 
-  if ( DEFINED BLIS_INCLUDE_DIR )
+  if ( BLIS_INCLUDE_DIR )
     set( BLIS_CPP ../common/blis_interface.cpp )
   endif()
 
