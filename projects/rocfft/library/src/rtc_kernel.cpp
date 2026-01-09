@@ -39,6 +39,14 @@ std::map<RTCKernel::rtc_module_key, RTCKernel::rtc_module_t> RTCKernel::active_m
 std::mutex                                                   RTCKernel::active_modules_mutex;
 #endif
 
+int RTCKernel::get_current_hip_device()
+{
+    int device = hipInvalidDeviceId;
+    if(hipGetDevice(&device) != hipSuccess || device == hipInvalidDeviceId)
+        throw std::runtime_error("hipGetDevice failed");
+    return device;
+}
+
 RTCKernel::RTCKernel(const std::string&                       kernel_name,
                      std::shared_future<hipModule_wrapper_t>& module,
                      dim3                                     gridDim,
@@ -46,11 +54,9 @@ RTCKernel::RTCKernel(const std::string&                       kernel_name,
     : gridDim(gridDim)
     , blockDim(blockDim)
     , kernel_name(kernel_name)
+    , deviceId(get_current_hip_device())
     , module(module)
 {
-    if(hipGetDevice(&deviceId) != hipSuccess || deviceId == hipInvalidDeviceId)
-        throw std::runtime_error("hipGetDevice failed");
-
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     // if we're only compiling, no need to actually load the code objects
     if(rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1")

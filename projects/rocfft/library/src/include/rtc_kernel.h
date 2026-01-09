@@ -182,16 +182,16 @@ struct RTCKernel
     dim3 gridDim;
     dim3 blockDim;
 
-    std::string kernel_name;
-    int         deviceId = hipInvalidDeviceId;
+    const std::string kernel_name;
+    const int         deviceId = hipInvalidDeviceId;
 
 protected:
     // Hang on to the module that was used to construct this kernel, to
     // ensure that the module lives long enough.  Normally we'd expect
     // the module to be kept alive by the active_modules map below, but
     // it's possible to have standalone RTCKernels too.
-    std::shared_future<hipModule_wrapper_t> module;
-    hipFunction_t                           kernel = nullptr;
+    const std::shared_future<hipModule_wrapper_t> module;
+    hipFunction_t                                 kernel = nullptr;
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     struct RTCGenerator
@@ -255,6 +255,8 @@ protected:
     static std::map<rtc_module_key, rtc_module_t> active_modules;
     static std::mutex                             active_modules_mutex;
 #endif
+
+    static int get_current_hip_device();
 };
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
