@@ -13,6 +13,7 @@
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [Example: MIOpen Legacy Plugin](#example-miopen-legacy-plugin)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -412,3 +413,78 @@ At a high level, it:
 - **Main Plugin**: [`MiopenLegacyPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp) - Entry point and plugin registration
 - **Engine Manager**: [`EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp) - Manages MIOpen engines
 - **MIOpen Engine**: [`MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp) - Implements graph execution using MIOpen kernels
+
+## Troubleshooting
+
+### Plugin Loading Failures
+
+When a plugin fails to load or initialize, hipDNN logs an error and continues loading other plugins. Common issues include:
+
+#### Plugin Handle Creation Fails
+
+If you see errors like "Failed to create handle for plugin 'PluginName'", this typically indicates:
+- Missing dependencies that the plugin requires at runtime
+- GPU initialization failures (e.g., no compatible device found)
+- Plugin internal initialization errors
+
+**Solution**: Check that all plugin dependencies are satisfied and a compatible GPU device is available.
+
+#### Null Handle Returned
+
+If you see "Plugin 'PluginName' returned null handle", the plugin's `hipdnnEnginePluginCreate` function returned a null pointer without throwing an exception.
+
+**Solution**: Review the plugin's handle creation logic to ensure it either returns a valid handle or throws an exception with a meaningful error message.
+
+### Symbol Collisions Between Plugins
+
+#### Symptoms
+
+When multiple plugins are loaded and one or more plugins don't properly hide their symbols, you may encounter:
+
+- Handle collision errors: "Plugin 'PluginName' returned a handle that collides with another plugin"
+- Unexpected behavior where one plugin's functions are called instead of another's
+- Crashes or undefined behavior during plugin operations
+
+This occurs because dynamically loaded shared libraries can inadvertently share symbols, causing one plugin's function to override another's.
+
+#### Example Error Log
+
+```
+[ERROR] Plugin 'my_plugin' returned a handle that collides with another plugin.
+        This may indicate a symbol collision between plugins.
+        Ensure all plugins are built with -fvisibility=hidden.
+```
+
+#### Solution
+
+All plugins **must** be built with symbol visibility hidden to prevent symbol collisions:
+
+1. **CMake Configuration**: Add the following to your plugin's CMakeLists.txt:
+   ```cmake
+   set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+   set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+   ```
+
+2. **Compiler Flags**: Alternatively, add `-fvisibility=hidden` to your compiler flags:
+   ```cmake
+   target_compile_options(your_plugin PRIVATE -fvisibility=hidden)
+   ```
+
+3. **Explicit Symbol Export**: Only export the required plugin API symbols. The plugin SDK macros handle this automatically when visibility is hidden by default.
+
+#### Verification
+
+To verify your plugin has proper symbol visibility:
+
+```bash
+# List exported symbols (should only show plugin API functions)
+nm -gD your_plugin.so | grep " T "
+
+# Expected output should only contain:
+# hipdnnEnginePluginCreate
+# hipdnnEnginePluginDestroy
+# hipdnnEnginePluginGetAllEngineIds
+# ... (other plugin API functions)
+```
+
+If you see many internal symbols exported, your visibility settings are incorrect.
