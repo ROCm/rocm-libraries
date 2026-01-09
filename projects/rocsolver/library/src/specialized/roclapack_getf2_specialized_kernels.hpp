@@ -99,7 +99,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         else if(myinfo == 0)
             myinfo = k + 1;
 
-        // synchronize across warps before overwriting common
+        // synchronize across waves before overwriting common
         __syncthreads();
 
         // swap rows (lazy swaping)
