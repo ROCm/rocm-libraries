@@ -67,6 +67,11 @@ static fs::path ComputeUserCachePath()
     /// use exactly that path.
     const auto& custom = env::value(MIOPEN_CUSTOM_CACHE_DIR);
 
+    if(!custom.empty())
+    {
+        std::cout << "Using MIOPEN_CUSTOM_CACHE_DIR=" << custom << "\n";
+    }
+
     const std::string cache_dir = !custom.empty() ? custom : MIOPEN_CACHE_DIR;
     const std::string version   = std::to_string(MIOPEN_VERSION_MAJOR)       //
                                 + "." + std::to_string(MIOPEN_VERSION_MINOR) //
@@ -77,7 +82,10 @@ static fs::path ComputeUserCachePath()
     /// \ref nfs-detection
     if(GetFilesystemChecker().IsNetworkedFilesystem(p) &&
        custom.empty()) // Only if env variable isn't set
+    {
+        std::cout << "Falling back to tmp directory\n";
         p = fs::temp_directory_path() / ".cache" / "miopen" / version;
+    }
 #endif
 
     if(!fs::exists(p) && !MIOPEN_DISABLE_USERDB)

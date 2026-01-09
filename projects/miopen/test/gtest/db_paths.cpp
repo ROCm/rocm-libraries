@@ -79,6 +79,23 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
     // Scenario 1: Local filesystem, no environment variable set
     EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
+    // Diagnostic logging
+    const auto temp_dir = fs::temp_directory_path();
+    std::cout << "\n=== UserDbPath_LocalFS_NoEnvVar Diagnostics ===" << std::endl;
+    std::cout << "fs::temp_directory_path() = '" << temp_dir.string() << "'" << std::endl;
+
+#if MIOPEN_BUILD_DEV
+    std::cout << "MIOPEN_BUILD_DEV = 1 (defined)" << std::endl;
+#else
+    std::cout << "MIOPEN_BUILD_DEV = 0 (not defined)" << std::endl;
+#endif
+
+    const auto cache_path = miopen::GetCachePath(false);
+    std::cout << "Returned cache_path = '" << cache_path.string() << "'" << std::endl;
+    std::cout << "PathContains(cache_path, temp_dir) = "
+              << (PathContains(cache_path, temp_dir.string()) ? "true" : "false") << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
     const auto& user_db_path = miopen::GetUserDbPath();
 
     if(user_db_path.empty())
