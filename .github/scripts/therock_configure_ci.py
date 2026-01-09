@@ -27,8 +27,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SKIPPABLE_PATH_PATTERNS = [
     "docs/*",
     ".gitignore",
+    "*.txt",
     "*.md",
+    "*.rtf",
     "*.rst",
+    "*/.markdownlint-ci2.yaml",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
     "projects/*/docs/*",
     "projects/*/.gitignore",
     "projects/*/*.md",
