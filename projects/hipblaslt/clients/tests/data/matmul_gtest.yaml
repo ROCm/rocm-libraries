@@ -2307,6 +2307,31 @@ Tests:
   requested_solution_num: 3
   gpu_arch: '950'
 
+# MX datatypes with pre-swizzle for swizzle tile {32, 8} (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT)
+# Tests the preSwizzleScale functionality
+# Uses 16x16x128 MI instruction (subTileK = 128/32 = 4)
+# Requires workgroup tile 128x128x256 for swizzle tile {32, 8} compatibility (WGT.k >= 256)
+- name: matmul_mx_preswizzle_32x8_large
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f6_r, b_type: f6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [4096]
+  N: [4096]
+  K: [16384]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  algo_method: [2]
+  solution_index: -2138831864  # Workgroup tile size = 128x128x256
+  gpu_arch: '950'
+
 - name: matmul_relu_clamp_useE
   category: pre_checkin
   function:

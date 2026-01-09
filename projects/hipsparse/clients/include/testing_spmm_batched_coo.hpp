@@ -216,18 +216,15 @@ void testing_spmm_batched_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz_A;
-    if(!generate_csr_matrix(filename,
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m,
                             nnz_A,
                             hrow_ptr,
                             hcol_ind,
                             hval,
-                            idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+                            idx_base));
 
     std::vector<I> hrow_ind(nnz_A);
 

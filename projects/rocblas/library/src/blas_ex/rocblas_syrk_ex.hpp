@@ -26,7 +26,30 @@
 #include "handle.hpp"
 #include "logging.hpp"
 
-template <typename T>
+template <bool HERM = false>
+inline bool rocblas_internal_syrk_herk_ex_use_gemm(rocblas_datatype compute_type)
+{
+    if(!HERM)
+    {
+        if(compute_type == rocblas_datatype_f32_r)
+            return true;
+        else
+            return false;
+    }
+    else
+        return false;
+}
+
+template <typename Tex, bool HERM = false>
+inline constexpr bool rocblas_internal_syrk_herk_ex_use_gemm()
+{
+    if(!HERM)
+        return (sizeof(Tex) < 8);
+    else
+        return false;
+}
+
+template <bool HERM = false>
 inline size_t rocblas_internal_syrk_herk_ex_workspace(rocblas_handle handle,
                                                       rocblas_int    n,
                                                       rocblas_int    k,
@@ -34,9 +57,12 @@ inline size_t rocblas_internal_syrk_herk_ex_workspace(rocblas_handle handle,
 {
     size_t size = 1;
 
-    //Allocating workspace memory when for high precision compute and result C
-    if(n > 0 && batch_count > 0)
-        size = int64_t(n) * (n) * sizeof(T) * batch_count;
+    if(!HERM)
+    {
+        //Allocating workspace memory for C temp see use_gemm cases for types (type float >= required)
+        if(n > 0 && batch_count > 0)
+            size = int64_t(n) * (n) * sizeof(float) * batch_count; // float as only compute f32_r
+    }
 
     return size;
 }
