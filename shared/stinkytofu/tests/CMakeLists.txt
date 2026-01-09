@@ -32,6 +32,7 @@ set(UNIT_TEST_FILES
     unit/PassManagerTest.cpp
     unit/IRBuilderTest.cpp
     unit/IRModuleTest.cpp
+    unit/IRToAsmPipelineTest.cpp
     unit/IntrusiveListTest.cpp
     unit/ConfigurableWaitCntPassTest.cpp
     unit/StinkyAsmEmitterTest.cpp
@@ -42,7 +43,8 @@ set(UNIT_TEST_FILES
     unit/DuplicateEliminationPassTest.cpp
     unit/DelayAluInsertionPassTest.cpp
     unit/OptimizationPipelineTest.cpp
-    unit/OperationRegistryTest.cpp
+    unit/IntrinsicFlowTest.cpp
+    unit/HexLiteralTest.cpp
 )
 list(TRANSFORM UNIT_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 

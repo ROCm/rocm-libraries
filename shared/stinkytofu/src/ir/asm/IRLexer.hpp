@@ -55,6 +55,8 @@ namespace stinkytofu
 
         // Pattern keywords (for pattern definition files)
         KW_peephole, // 'peephole' (pattern type)
+        KW_ir, // 'ir' (high-level IR pattern type)
+        KW_intrinsic, // 'intrinsic' (intrinsic definition)
         KW_pattern, // 'pattern'
         KW_match, // 'match'
         KW_constraints, // 'constraints'
@@ -62,6 +64,13 @@ namespace stinkytofu
         KW_replace, // 'replace'
         KW_remove, // 'remove'
         KW_with, // 'with'
+        KW_arguments, // 'arguments'
+        KW_body, // 'body'
+        KW_comment, // 'comment'
+        KW_python_binding, // 'python_binding'
+        KW_call, // 'call' (function call in intrinsic)
+        KW_true, // 'true'
+        KW_false, // 'false'
 
         // Invalid token
         Unknown

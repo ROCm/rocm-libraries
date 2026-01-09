@@ -42,8 +42,12 @@ namespace stinkytofu
             return result;
         }
 
-        // Start with the input IR instructions
-        std::vector<IRInstruction*> currentIR = module->getInstructions();
+        // Start with the input IR instructions (convert shared_ptr to raw pointers for pass processing)
+        std::vector<IRInstruction*> currentIR;
+        for(const auto& inst : module->getInstructions())
+        {
+            currentIR.push_back(inst.get());
+        }
 
         // Run all IR transformation passes
         for(auto& pass : passes)

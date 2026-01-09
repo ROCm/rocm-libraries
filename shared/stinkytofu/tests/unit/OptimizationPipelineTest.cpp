@@ -22,7 +22,6 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "ir/StinkyIR.hpp"
 #include "ir/asm/OptimizationPipeline.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"

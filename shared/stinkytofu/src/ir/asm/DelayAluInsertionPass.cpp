@@ -22,7 +22,6 @@
  * ************************************************************************ */
 #include "ir/asm/DelayAluInsertionPass.hpp"
 #include "ErrorHandling.hpp"
-#include "StinkyBuilder.hpp"
 #include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyModifiers.hpp"

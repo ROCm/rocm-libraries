@@ -71,7 +71,4 @@ namespace stinkytofu
         std::vector<StinkyInstruction*> lower(IRInstruction* irInst, GfxArchID arch) override;
     };
 
-    /// Factory function to create ToStinkyAsmPass
-    std::unique_ptr<IRInstToAsmPass> createToStinkyAsmPass();
-
 } // namespace stinkytofu

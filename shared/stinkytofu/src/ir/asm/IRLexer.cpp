@@ -322,6 +322,10 @@ namespace stinkytofu
         // This is a simple string comparison - efficient enough for a small set of keywords
         if(text == "peephole")
             return TokenKind::KW_peephole;
+        if(text == "ir")
+            return TokenKind::KW_ir;
+        if(text == "intrinsic")
+            return TokenKind::KW_intrinsic;
         if(text == "pattern")
             return TokenKind::KW_pattern;
         if(text == "match")
@@ -336,6 +340,20 @@ namespace stinkytofu
             return TokenKind::KW_remove;
         if(text == "with")
             return TokenKind::KW_with;
+        if(text == "arguments")
+            return TokenKind::KW_arguments;
+        if(text == "body")
+            return TokenKind::KW_body;
+        if(text == "comment")
+            return TokenKind::KW_comment;
+        if(text == "python_binding")
+            return TokenKind::KW_python_binding;
+        if(text == "call")
+            return TokenKind::KW_call;
+        if(text == "true")
+            return TokenKind::KW_true;
+        if(text == "false")
+            return TokenKind::KW_false;
 
         // Not a keyword, return as identifier
         return TokenKind::Identifier;

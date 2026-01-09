@@ -60,12 +60,13 @@ configure_file(include/Config.h.in include/Config/Config.h)
 # => MSVC: /GR- /EHs-c-
 set(STINKYTOFU_SOURCE_FILES
     stinkytofu.cpp
-    StinkyBuilder.cpp
-    ir/StinkyIR.cpp
     ir/IRModule.cpp
-    ir/Operation.cpp
-    ir/operations/Activation.cpp
+    ir/IRSerializer.cpp
+    ir/IntrinsicLibrary.cpp
+    ir/IntrinsicRegistry.cpp
+    ir/IntrinsicPatternConverter.cpp
     ir/passes/PassManager.cpp
+    # ir/passes/IntrinsicExpansionPass.cpp  # TODO: Fix API compatibility
     ir/passes/ToStinkyAsmPass.cpp
     ir/passes/CompositeInstructionLoweringPass.cpp
     ir/asm/CFGBuilderPass.cpp
@@ -112,6 +113,7 @@ endif()
 add_subdirectory(hardware)
 add_subdirectory(tools/tablegen)
 add_subdirectory(tools/stinkytofu-opt)
+# Note: intrinsic-compiler is added later after libstinkytofu is built
 
 # Option to build unit tests
 option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ON)
@@ -148,6 +150,13 @@ target_include_directories(stinkytofu
 # Make stinkytofu depend on the generated ISA definition files from tablegen
 # This ensures the build order is: gfxisa -> tablegen -> run tablegen -> stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
+
+##===----------------------------------------------------------------------===##
+# Intrinsic Compiler Tool
+##===----------------------------------------------------------------------===##
+# Add intrinsic-compiler subdirectory AFTER stinkytofu library is built
+# This tool compiles Intrinsics.def to intrinsics.st.bc
+add_subdirectory(tools/intrinsic-compiler)
 
 ##===----------------------------------------------------------------------===##
 # Install targets

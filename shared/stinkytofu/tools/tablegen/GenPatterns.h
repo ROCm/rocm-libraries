@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,16 +42,16 @@ namespace stinkytofu
     public:
         explicit PatternCodeGen(const std::string& outputDir);
 
-        // Generate C++ matcher code for all patterns
-        bool generateMatchers(const std::vector<Pattern>& patterns);
+        // Generate C++ matcher code for patterns of a specific type
+        bool generateMatchers(const std::vector<Pattern>& patterns, PatternType type);
 
     private:
         std::string outputDir;
 
         // Code generation helpers
-        std::string generateMatcherClass(const Pattern& pattern);
-        std::string generateMatchFunction(const Pattern& pattern);
-        std::string generateHeader();
+        std::string generateMatcherClass(const Pattern& pattern, PatternType type);
+        std::string generateMatchFunction(const Pattern& pattern, PatternType type);
+        std::string generateHeader(PatternType type);
         std::string generateFooter(const std::vector<Pattern>& patterns);
 
         // Utility

@@ -23,7 +23,6 @@
 
 #pragma once
 
-#include "StinkyBuilder.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu
@@ -99,25 +98,6 @@ namespace stinkytofu
             reg.dataType      = StinkyRegister::Type::LiteralDouble;
             reg.literalDouble = value;
             return reg;
-        }
-
-        /**
-     * @brief Helper to create v_wmma_f32_16x16x32_bf16 instruction
-     *
-     * Wraps the complex createMFMA API for the common WMMA case used in tests.
-     */
-        inline StinkyInstruction* createWMMA_f32_16x16x32_bf16(
-            StinkyTofu& builder, IRList& irList, int destReg, int src0Reg, int src1Reg)
-        {
-            auto acc    = agpr(destReg, 8);
-            auto result = builder.createMFMA(
-                "bf16", "f32", 16, 16, 32, 1, false, acc, vgpr(src0Reg, 8), vgpr(src1Reg, 8), &acc);
-
-            if(!result)
-            {
-                return nullptr;
-            }
-            return addToIRList(irList, std::move(*result));
         }
 
     } // namespace test

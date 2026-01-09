@@ -29,8 +29,8 @@ namespace stinkytofu
 {
     struct IRModule::Impl
     {
-        std::string                 name;
-        std::vector<IRInstruction*> instructions;
+        std::string                                 name;
+        std::vector<std::shared_ptr<IRInstruction>> instructions;
 
         Impl(const std::string& name)
             : name(name)
@@ -39,11 +39,7 @@ namespace stinkytofu
 
         ~Impl()
         {
-            // Delete all owned instructions
-            for(auto* inst : instructions)
-            {
-                delete inst;
-            }
+            // shared_ptr will automatically handle cleanup
         }
     };
 
@@ -62,7 +58,7 @@ namespace stinkytofu
         return pImpl->name;
     }
 
-    IRInstruction* IRModule::add(IRInstruction* inst)
+    std::shared_ptr<IRInstruction> IRModule::add(std::shared_ptr<IRInstruction> inst)
     {
         if(inst)
         {
@@ -71,7 +67,7 @@ namespace stinkytofu
         return inst;
     }
 
-    const std::vector<IRInstruction*>& IRModule::getInstructions() const
+    const std::vector<std::shared_ptr<IRInstruction>>& IRModule::getInstructions() const
     {
         return pImpl->instructions;
     }

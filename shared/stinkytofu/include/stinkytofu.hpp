@@ -552,6 +552,94 @@ namespace stinkytofu
     {
     };
 
+    //----------------------------------------------------------------------
+    // High-Level IR Pass Infrastructure
+    //----------------------------------------------------------------------
+
+    // Forward declaration for IR instruction type
+    class IRInstruction;
+    class StinkyInstruction;
+
+    /**
+     * @brief Base class for all high-level IR passes
+     *
+     * IRInstPass operates on IRInstruction (high-level IR) as opposed to
+     * Pass which operates on StinkyInstruction (assembly IR).
+     *
+     * Passes can be composed into pipelines using IRInstPassManager for
+     * optimization and lowering sequences.
+     *
+     * Naming convention:
+     * - IRInstPass - operates on IRInstruction (high-level IR)
+     * - Pass       - operates on StinkyInstruction (assembly IR)
+     */
+    class IRInstPass
+    {
+    public:
+        virtual ~IRInstPass() = default;
+
+        /**
+         * @brief Get the name of this pass (for debugging/logging)
+         */
+        virtual const char* getName() const = 0;
+
+        /**
+         * @brief Check if this pass produces assembly instructions
+         *
+         * Most passes produce IRInstruction*, but the final lowering pass
+         * (ToStinkyAsmPass) produces StinkyInstruction*.
+         */
+        virtual bool producesAsm() const
+        {
+            return false;
+        }
+    };
+
+    /**
+     * @brief Pass that transforms IRInstructions to other IRInstructions
+     *
+     * Example: CompositeInstructionLoweringPass expands VAddPKF32 -> VAddF32
+     */
+    class IRInstTransformPass : public IRInstPass
+    {
+    public:
+        /**
+         * @brief Transform an IR instruction
+         * @param irInst Input IR instruction
+         * @param arch Target architecture for capability queries
+         * @return Vector of output IR instructions (may be 0, 1, or many)
+         */
+        virtual std::vector<IRInstruction*> transform(IRInstruction* irInst, GfxArchID arch) = 0;
+
+        bool producesAsm() const override
+        {
+            return false;
+        }
+    };
+
+    /**
+     * @brief Pass that converts IRInstructions to assembly instructions
+     *
+     * This is the final lowering pass in the pipeline.
+     * Example: ToStinkyAsmPass converts VAddF32 (IRInstruction) -> v_add_f32 (StinkyInstruction)
+     */
+    class IRInstToAsmPass : public IRInstPass
+    {
+    public:
+        /**
+         * @brief Lower an IR instruction to assembly
+         * @param irInst Input IR instruction
+         * @param arch Target architecture for mnemonic mapping
+         * @return Vector of output assembly instructions (typically 1)
+         */
+        virtual std::vector<StinkyInstruction*> lower(IRInstruction* irInst, GfxArchID arch) = 0;
+
+        bool producesAsm() const override
+        {
+            return true;
+        }
+    };
+
     // AnalysisManager manages analysis passes and their results.
     //
     // It runs analysis passes on demand, and each pass caches its own result.
