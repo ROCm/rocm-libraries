@@ -32,8 +32,11 @@
 
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
+#include "../../../util_type.hpp"
 
 #include <cub/device/device_reduce.cuh> // IWYU pragma: export
+
+#include <iterator>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -103,9 +106,18 @@ public:
                              InputIteratorT       d_in,
                              ExtremumOutIteratorT d_min_out,
                              IndexOutIteratorT    d_index_out,
-                             std::int64_t         num_items,
+                             int                  num_items,
                              hipStream_t          stream = 0)
     {
+
+        using value_type = ::hipcub::detail::it_value_t<InputIteratorT>;
+        using index_type = int64_t;
+        using pair_type  = ::cub::KeyValuePair<index_type, value_type>;
+
+        static_cast<void>(sizeof(pair_type));
+        static_cast<void>(sizeof(index_type));
+        static_cast<void>(sizeof(value_type));
+
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMin(d_temp_storage,
                                                                   temp_storage_bytes,
                                                                   d_in,
@@ -130,13 +142,23 @@ public:
                              NumItemsT       num_items,
                              hipStream_t     stream = 0)
     {
+        using value_type = ::hipcub::detail::it_value_t<InputIteratorT>;
+        using index_type = int64_t;
+        using pair_type  = ::hipcub::KeyValuePair<index_type, value_type>;
+
+        pair_type* out_pair = reinterpret_cast<pair_type*>(d_out);
+
+        value_type* d_min_out   = &(out_pair->value);
+        index_type* d_index_out = &(out_pair->key);
+
         _CCCL_SUPPRESS_DEPRECATED_PUSH
-        return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMin(d_temp_storage,
-                                                                  temp_storage_bytes,
-                                                                  d_in,
-                                                                  d_out,
-                                                                  num_items,
-                                                                  stream));
+        return ArgMin(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_min_out,
+                      d_index_out,
+                      static_cast<index_type>(num_items),
+                      stream);
         _CCCL_SUPPRESS_DEPRECATED_POP
     }
 
@@ -163,9 +185,17 @@ public:
                              InputIteratorT       d_in,
                              ExtremumOutIteratorT d_max_out,
                              IndexOutIteratorT    d_index_out,
-                             std::int64_t         num_items,
+                             int                  num_items,
                              hipStream_t          stream = 0)
     {
+        using value_type = ::hipcub::detail::it_value_t<InputIteratorT>;
+        using index_type = int64_t;
+        using pair_type  = ::cub::KeyValuePair<index_type, value_type>;
+
+        static_cast<void>(sizeof(pair_type));
+        static_cast<void>(sizeof(index_type));
+        static_cast<void>(sizeof(value_type));
+
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMax(d_temp_storage,
                                                                   temp_storage_bytes,
                                                                   d_in,
@@ -176,13 +206,11 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    HIPCUB_DEPRECATED_BECAUSE(
-        "CUB has superseded this interface in favor of the ArgMax interface "
-        "that takes two separate "
-        "iterators: one iterator to which the extremum is written and another "
-        "iterator to which the "
-        "index of the found extremum is written. ")
-    HIPCUB_RUNTIME_FUNCTION
+    HIPCUB_DEPRECATED_BECAUSE("CUB has superseded this interface in favor of the ArgMax interface "
+                              "that takes two separate iterators: one iterator to which the "
+                              "extremum is written and another "
+                              "iterator to which the index of the found extremum is written. ")
+HIPCUB_RUNTIME_FUNCTION
     static hipError_t ArgMax(void*           d_temp_storage,
                              size_t&         temp_storage_bytes,
                              InputIteratorT  d_in,
@@ -190,13 +218,24 @@ public:
                              NumItemsT       num_items,
                              hipStream_t     stream = 0)
     {
+
+        using value_type = ::hipcub::detail::it_value_t<InputIteratorT>;
+        using index_type = int64_t;
+        using pair_type  = ::hipcub::KeyValuePair<index_type, value_type>;
+
+        pair_type* out_pair = reinterpret_cast<pair_type*>(d_out);
+
+        value_type* d_max_out   = &(out_pair->value);
+        index_type* d_index_out = &(out_pair->key);
+
         _CCCL_SUPPRESS_DEPRECATED_PUSH
-        return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMax(d_temp_storage,
-                                                                  temp_storage_bytes,
-                                                                  d_in,
-                                                                  d_out,
-                                                                  num_items,
-                                                                  stream));
+        return ArgMax(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_max_out,
+                      d_index_out,
+                      static_cast<index_type>(num_items),
+                      stream);
         _CCCL_SUPPRESS_DEPRECATED_POP
     }
 
@@ -258,6 +297,42 @@ public:
                                                                        num_items,
                                                                        stream));
     }
+
+private:
+    template<typename ScalarOutputIt, typename T>
+    struct value_only_pair_output_iterator
+    {
+        ScalarOutputIt out;
+        using value_type = ::cub::KeyValuePair<int, T>;
+        HIPCUB_HOST_DEVICE
+        value_only_pair_output_iterator(ScalarOutputIt o)
+            : out(o)
+        {}
+        HIPCUB_HOST_DEVICE
+        value_only_pair_output_iterator& operator*()
+        {
+            return *this;
+        }
+        HIPCUB_HOST_DEVICE
+        value_only_pair_output_iterator& operator=(value_type const& p)
+        {
+            *out = p.value;
+            return *this;
+        }
+        HIPCUB_HOST_DEVICE
+        value_only_pair_output_iterator& operator++()
+        {
+            ++out;
+            return *this;
+        }
+        HIPCUB_HOST_DEVICE
+        value_only_pair_output_iterator operator++(int)
+        {
+            value_only_pair_output_iterator tmp = *this;
+            ++out;
+            return tmp;
+        }
+    };
 };
 
 END_HIPCUB_NAMESPACE
