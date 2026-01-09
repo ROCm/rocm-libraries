@@ -1466,7 +1466,7 @@ namespace rocRoller
             if(maybeParentLDS)
                 ldsTag = *maybeParentLDS;
 
-            int rv;
+            int rv = 0;
 
             auto flattenedSizes = [&](std::vector<int> const& tags) -> std::vector<uint> {
                 std::vector<uint> sizes;

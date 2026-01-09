@@ -181,8 +181,8 @@ namespace rocRoller
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 bool storeLDSD = true;
 
-                std::pair<uint, uint> padLDSA = {0u, 0u};
-                std::pair<uint, uint> padLDSB = {0u, 0u};
+                std::pair<int, int> padLDSA = {0, 0};
+                std::pair<int, int> padLDSB = {0, 0};
 
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;

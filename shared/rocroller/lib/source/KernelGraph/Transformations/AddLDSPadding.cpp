@@ -37,7 +37,7 @@ Padding is added to flat LDS buffers.  For each `LDS` node, upstream
 
 Recall that `Join` and `Split` edges honour the `stride` attribute of
 upstream/downstream nodes.  Padding is accomplished by updating the
-`stride` attributes of the upstream/downsteam nodes.
+`stride` attributes of the upstream/downstream nodes.
 
 In particular, the slow strides are set to the fast size plus a
 padding value, and the fast strides are set to 1.
@@ -88,10 +88,6 @@ Note that the size of the LDS allocation is computed in `getNumLDSElements()`.
 This LDS padding strategy is well-suited for direct-to-lds loads; as
 the assumption is that writes into LDS are contiguous across the
 workitems within a workgroup.
-
-To support more general LDS padding, where there could be padding
-between workitems, the fast dimension needs to be decomposed into
-another set of fast/slow coordinates.  This it not currently done.
 
 */
 
