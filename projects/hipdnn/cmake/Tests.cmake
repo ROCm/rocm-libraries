@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     return()
 endif()
 
@@ -13,28 +13,8 @@ find_package(Python3 COMPONENTS Interpreter)
 
 findandcheckllvmsymbolizer()
 
-# Set executable prefix based on platform
-if(WIN32)
-    set(EXEC_PREFIX "")
-else()
-    set(EXEC_PREFIX "./")
-endif()
-
-set(CHECK_COMMAND_GLOBAL "" CACHE INTERNAL "Accumulated check commands" FORCE)
-set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated check depends" FORCE)
-set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated check executable paths" FORCE)
-
-# Global collections for unit tests
-set(UNIT_CHECK_COMMAND_GLOBAL "" CACHE INTERNAL "Accumulated unit check commands" FORCE)
-set(UNIT_CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated unit check depends" FORCE)
-
-# Global collections for integration tests
-set(INTEGRATION_CHECK_COMMAND_GLOBAL "" CACHE INTERNAL "Accumulated integration check commands"
-                                              FORCE
-)
-set(INTEGRATION_CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated integration check depends"
-                                              FORCE
-)
+set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
+set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
 
 # Builds the test environment list with optional code coverage support
 # ~~~
@@ -98,86 +78,6 @@ function(_create_test_name_validation_target_internal)
     endif() # Python3_FOUND
 endfunction() # _create_test_name_validation_target_internal
 
-# Generic internal function to append tests to check targets
-function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STATUS_MESSAGE)
-    if(STATUS_MESSAGE)
-        message(STATUS "${STATUS_MESSAGE}: ${TARGET} in working directory: ${WORKING_DIR}")
-    endif()
-
-    if("${TEST_TYPE}" STREQUAL "UNIT")
-        set(COMMAND_VAR "UNIT_CHECK_COMMAND_GLOBAL")
-        set(DEPENDS_VAR "UNIT_CHECK_DEPENDS_GLOBAL")
-        set(CACHE_DESC "Accumulated unit check targets")
-    elseif("${TEST_TYPE}" STREQUAL "INTEGRATION")
-        set(COMMAND_VAR "INTEGRATION_CHECK_COMMAND_GLOBAL")
-        set(DEPENDS_VAR "INTEGRATION_CHECK_DEPENDS_GLOBAL")
-        set(CACHE_DESC "Accumulated integration check targets")
-    else()
-        set(COMMAND_VAR "CHECK_COMMAND_GLOBAL")
-        set(DEPENDS_VAR "CHECK_DEPENDS_GLOBAL")
-        set(CACHE_DESC "Accumulated check targets")
-    endif()
-
-    # Build environment list properly
-    _build_test_environment_list_internal(ENVIRONMENT_LIST)
-
-    set(NEW_COMMAND "")
-    if("${${COMMAND_VAR}}" STREQUAL "")
-        set(NEW_COMMAND ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST}
-                        ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/${TARGET}
-        )
-    else()
-        set(NEW_COMMAND && ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST}
-                        ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/${TARGET}
-        )
-    endif()
-
-    set(${COMMAND_VAR} ${${COMMAND_VAR}} ${NEW_COMMAND} CACHE INTERNAL "${CACHE_DESC}" FORCE)
-    set(${DEPENDS_VAR} ${${DEPENDS_VAR}} ${TARGET}
-        CACHE INTERNAL "Accumulated ${TEST_TYPE} check depends" FORCE
-    )
-
-    # Track the binary paths for test name validation
-    set(EXECUTABLE_PATH "${CMAKE_INSTALL_BINDIR}/${TARGET}")
-    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} ${EXECUTABLE_PATH}
-        CACHE INTERNAL "Accumulated check executable paths" FORCE
-    )
-endfunction() # _append_test_to_check_target_internal
-
-# Generic internal function to finalize DIY check targets
-function(_finalize_check_target_internal TARGET_NAME COMMAND_VAR DEPENDS_VAR)
-    add_custom_target(
-        ${TARGET_NAME}
-        COMMAND ${${COMMAND_VAR}}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        DEPENDS ${${DEPENDS_VAR}}
-        VERBATIM
-        COMMENT "Running ${TARGET_NAME}"
-        USES_TERMINAL
-    )
-    message(VERBOSE "Created ${TARGET_NAME} target")
-endfunction() # _finalize_check_target_internal
-
-# Internal function to finalize the DIY unclassified check-old target
-function(_finalize_unclassified_check_target_internal)
-    _finalize_check_target_internal("check-old" "CHECK_COMMAND_GLOBAL" "CHECK_DEPENDS_GLOBAL")
-endfunction() # _finalize_unclassified_check_target_internal
-
-# Internal function to finalize the DIY unit-check-old target
-function(_finalize_unit_check_target_internal)
-    _finalize_check_target_internal(
-        "unit-check-old" "UNIT_CHECK_COMMAND_GLOBAL" "UNIT_CHECK_DEPENDS_GLOBAL"
-    )
-endfunction() # _finalize_unit_check_target_internal
-
-# Internal function to finalize the DIY integration-check-old target
-function(_finalize_integration_check_target_internal)
-    _finalize_check_target_internal(
-        "integration-check-old" "INTEGRATION_CHECK_COMMAND_GLOBAL"
-        "INTEGRATION_CHECK_DEPENDS_GLOBAL"
-    )
-endfunction() # _finalize_integration_check_target_internal
-
 enable_testing() # Cmake wont discover or run tests without this line
 
 # Internal helper function to create a ctest target
@@ -214,7 +114,7 @@ function(_add_ctest_target_internal TARGET_NAME LABEL VERBOSE COMMENT)
     message(VERBOSE "Created ${TARGET_NAME} target")
 endfunction() # _add_ctest_target_internal
 
-# Internal helper function to create the (new) check targets for running tests via ctest
+# Internal helper function to create the check targets for running tests via ctest
 function(_create_ctest_targets_internal)
     # cmake-format: off
     # Build test environment once for all ctest targets
@@ -238,12 +138,6 @@ function(finalize_test_targets)
 
     _create_ctest_targets_internal()
 
-    _finalize_unclassified_check_target_internal()
-    _finalize_unit_check_target_internal()
-    _finalize_integration_check_target_internal()
-
-    add_dependencies(check-old validate_test_names)
-
     # cmake-format: off
     # Create alias test targets without '_ctest' in the name
     # Regular targets (without --verbose)
@@ -259,35 +153,36 @@ function(finalize_test_targets)
     # cmake-format: on
 endfunction() # finalize_test_targets
 
-# Internal (old) DIY function to add a test target (assumes the test executable is a gtest
-# executable) Still needed for collecting list of test executables in HIPDNN_TEST_TARGETS and
-# setting test-type labels. TODO: Deprecate this funcion and remove manual test collection once new
-# ctest-based method is proven.
-function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
-    if("${APPEND_FUNCTION_SUFFIX}" STREQUAL "test")
-        _append_test_to_check_target_internal(
-            ${TARGET} ${WORKING_DIR} "" "Appending unclassified check target"
-        )
-    elseif("${APPEND_FUNCTION_SUFFIX}" STREQUAL "unit_test")
-        _append_test_to_check_target_internal(
-            ${TARGET} ${WORKING_DIR} "UNIT" "Appending unit check target"
-        )
-        _append_test_to_check_target_internal(${TARGET} ${WORKING_DIR} "" "")
-    elseif("${APPEND_FUNCTION_SUFFIX}" STREQUAL "integration_test")
-        _append_test_to_check_target_internal(
-            ${TARGET} ${WORKING_DIR} "INTEGRATION" "Appending integration check target"
-        )
-        _append_test_to_check_target_internal(${TARGET} ${WORKING_DIR} "" "")
-    else()
-        message(FATAL_ERROR "Unknown test type suffix: ${APPEND_FUNCTION_SUFFIX}")
-    endif()
+# ~~~
+# Internal helper function to record, configure, and register a ctest test target. Assumes that the
+# test target is a gtest executable, setting up:
+# - Test name validation tracking (adds to global dependency and executable path lists)
+# - RPATH settings for relocatable test executables
+# - Installation rules for test binaries
+# - CTest registration with appropriate labels (e.g. unit / integration test labels)
+# Parameters:
+#   APPEND_FUNCTION_SUFFIX - Label to apply to the test (e.g., "unit_test", "integration_test", "test")
+#   TARGET - Name of the test executable target (must already exist)
+#   WORKING_DIR - Working directory for test execution
+# ~~~
+function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
+    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} in working directory: ${WORKING_DIR}")
 
-    set_target_properties(
-        ${TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+    # Track the dependencies for test name validation
+    set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
+        CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
+    )
+    # Track the binary paths for test name validation
+    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET}"
+        CACHE INTERNAL "Accumulated global check executable paths" FORCE
     )
 
     # Track this test target for later use in generating installed CTestTestfile.cmake
     set_property(GLOBAL APPEND PROPERTY HIPDNN_TEST_TARGETS ${TARGET})
+
+    set_target_properties(
+        ${TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+    )
 
     # Make test executables relocatable so they can find libraries when build directory is moved
     # Include both the main lib directory and the engine plugin directories
@@ -309,17 +204,17 @@ endfunction() # _add_gtest_target_internal
 
 # Adds a generic test target
 function(add_unclassified_test_target TARGET WORKING_DIR)
-    _add_gtest_target_internal(test ${TARGET} ${WORKING_DIR})
+    _add_test_target_internal(test ${TARGET} ${WORKING_DIR})
 endfunction() # add_unclassified_test_target
 
 # Adds a unit test target
 function(add_unit_test_target TARGET WORKING_DIR)
-    _add_gtest_target_internal(unit_test ${TARGET} ${WORKING_DIR})
+    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR})
 endfunction() # add_unit_test_target
 
 # Adds an integration test target
 function(add_integration_test_target TARGET WORKING_DIR)
-    _add_gtest_target_internal(integration_test ${TARGET} ${WORKING_DIR})
+    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR})
 endfunction() # add_integration_test_target
 
 # Install CTest configuration files for direct test execution This should be called once at the end

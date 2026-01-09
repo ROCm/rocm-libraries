@@ -100,17 +100,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     activatedY->set_output(true);
 
     // Configure output tensors for batch statistics
-    savedMean->set_output(true);
-    savedMean->set_data_type(intermediateType);
-
-    savedInvVariance->set_output(true);
-    savedInvVariance->set_data_type(intermediateType);
+    savedMean->set_output(true).set_data_type(intermediateType);
+    savedInvVariance->set_output(true).set_data_type(intermediateType);
 
     // Configure running statistics output tensors
     if(config.useRunningStats)
     {
-        nextRunningMean->set_output(true);
-        nextRunningVariance->set_output(true);
+        nextRunningMean->set_output(true).set_data_type(intermediateType);
+        nextRunningVariance->set_output(true).set_data_type(intermediateType);
     }
 
     HIPDNN_FE_CHECK(graph->build(handle));

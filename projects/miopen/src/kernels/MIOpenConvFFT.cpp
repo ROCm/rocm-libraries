@@ -2331,117 +2331,131 @@ __forceinline__ __device__ void FwdPass2(unsigned int me,
                                          unsigned int inOffset,
                                          unsigned int outOffset,
                                          float2 const* bufIn,
-                                         float2* bufOut)
+                                         float2* bufOut,
+                                         bool isActiveThread = true)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
-    R0 = bufIn[inOffset + (me + 0) * 17];
-    R1 = bufIn[inOffset + (me + 4) * 17];
-    R2 = bufIn[inOffset + (me + 8) * 17];
-    R3 = bufIn[inOffset + (me + 12) * 17];
-    R4 = bufIn[inOffset + (me + 16) * 17];
-    R5 = bufIn[inOffset + (me + 20) * 17];
-    R6 = bufIn[inOffset + (me + 24) * 17];
-    R7 = bufIn[inOffset + (me + 28) * 17];
+    if(isActiveThread)
+    {
+        R0 = bufIn[inOffset + (me + 0) * 17];
+        R1 = bufIn[inOffset + (me + 4) * 17];
+        R2 = bufIn[inOffset + (me + 8) * 17];
+        R3 = bufIn[inOffset + (me + 12) * 17];
+        R4 = bufIn[inOffset + (me + 16) * 17];
+        R5 = bufIn[inOffset + (me + 20) * 17];
+        R6 = bufIn[inOffset + (me + 24) * 17];
+        R7 = bufIn[inOffset + (me + 28) * 17];
 
-    FwdRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
+        FwdRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
+    }
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 8 + 0) * 17] = R0;
-    bufOut[outOffset + (me * 8 + 1) * 17] = R1;
-    bufOut[outOffset + (me * 8 + 2) * 17] = R2;
-    bufOut[outOffset + (me * 8 + 3) * 17] = R3;
-    bufOut[outOffset + (me * 8 + 4) * 17] = R4;
-    bufOut[outOffset + (me * 8 + 5) * 17] = R5;
-    bufOut[outOffset + (me * 8 + 6) * 17] = R6;
-    bufOut[outOffset + (me * 8 + 7) * 17] = R7;
+    if(isActiveThread)
+    {
+        bufOut[outOffset + (me * 8 + 0) * 17] = R0;
+        bufOut[outOffset + (me * 8 + 1) * 17] = R1;
+        bufOut[outOffset + (me * 8 + 2) * 17] = R2;
+        bufOut[outOffset + (me * 8 + 3) * 17] = R3;
+        bufOut[outOffset + (me * 8 + 4) * 17] = R4;
+        bufOut[outOffset + (me * 8 + 5) * 17] = R5;
+        bufOut[outOffset + (me * 8 + 6) * 17] = R6;
+        bufOut[outOffset + (me * 8 + 7) * 17] = R7;
+    }
 }
 
 __forceinline__ __device__ void FwdPass3(unsigned int me,
                                          unsigned int inOffset,
                                          unsigned int outOffset,
                                          float2 const* bufIn,
-                                         float2* bufOut)
+                                         float2* bufOut,
+                                         bool isActiveThread = true)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
-    R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
-    R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
-    R1 = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
-    R5 = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
-    R2 = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
-    R6 = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
-    R3 = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
-    R7 = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
-
+    if(isActiveThread)
     {
-        float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
-        float TR, TI;
-        TR   = (W.x * R1.x) - (W.y * R1.y);
-        TI   = (W.y * R1.x) + (W.x * R1.y);
-        R1.x = TR;
-        R1.y = TI;
-    }
+        R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
+        R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
+        R1 = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
+        R5 = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
+        R2 = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
+        R6 = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
+        R3 = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
+        R7 = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
-        float TR, TI;
-        TR   = (W.x * R2.x) - (W.y * R2.y);
-        TI   = (W.y * R2.x) + (W.x * R2.y);
-        R2.x = TR;
-        R2.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
+            float TR, TI;
+            TR   = (W.x * R1.x) - (W.y * R1.y);
+            TI   = (W.y * R1.x) + (W.x * R1.y);
+            R1.x = TR;
+            R1.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
-        float TR, TI;
-        TR   = (W.x * R3.x) - (W.y * R3.y);
-        TI   = (W.y * R3.x) + (W.x * R3.y);
-        R3.x = TR;
-        R3.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
+            float TR, TI;
+            TR   = (W.x * R2.x) - (W.y * R2.y);
+            TI   = (W.y * R2.x) + (W.x * R2.y);
+            R2.x = TR;
+            R2.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
-        float TR, TI;
-        TR   = (W.x * R5.x) - (W.y * R5.y);
-        TI   = (W.y * R5.x) + (W.x * R5.y);
-        R5.x = TR;
-        R5.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
+            float TR, TI;
+            TR   = (W.x * R3.x) - (W.y * R3.y);
+            TI   = (W.y * R3.x) + (W.x * R3.y);
+            R3.x = TR;
+            R3.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
-        float TR, TI;
-        TR   = (W.x * R6.x) - (W.y * R6.y);
-        TI   = (W.y * R6.x) + (W.x * R6.y);
-        R6.x = TR;
-        R6.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
+            float TR, TI;
+            TR   = (W.x * R5.x) - (W.y * R5.y);
+            TI   = (W.y * R5.x) + (W.x * R5.y);
+            R5.x = TR;
+            R5.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
-        float TR, TI;
-        TR   = (W.x * R7.x) - (W.y * R7.y);
-        TI   = (W.y * R7.x) + (W.x * R7.y);
-        R7.x = TR;
-        R7.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
+            float TR, TI;
+            TR   = (W.x * R6.x) - (W.y * R6.y);
+            TI   = (W.y * R6.x) + (W.x * R6.y);
+            R6.x = TR;
+            R6.y = TI;
+        }
 
-    FwdRad4B1(R0, R1, R2, R3);
-    FwdRad4B1(R4, R5, R6, R7);
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
+            float TR, TI;
+            TR   = (W.x * R7.x) - (W.y * R7.y);
+            TI   = (W.y * R7.x) + (W.x * R7.y);
+            R7.x = TR;
+            R7.y = TI;
+        }
+
+        FwdRad4B1(R0, R1, R2, R3);
+        FwdRad4B1(R4, R5, R6, R7);
+    }
 
     __syncthreads();
 
-    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0;
-    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4;
-    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1;
-    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5;
-    bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2;
-    bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6;
-    bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3;
-    bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7;
+    if(isActiveThread)
+    {
+        bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0;
+        bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4;
+        bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1;
+        bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5;
+        bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2;
+        bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6;
+        bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3;
+        bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7;
+    }
 }
 
 __forceinline__ __device__ void FwdPass4(unsigned int me,
@@ -2503,15 +2517,9 @@ extern "C" __global__
     FwdPass3(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
 
-    if(me < 4)
-    {
-        FwdPass2(me % 4, 16, 16, lds, lds);
-    }
+    FwdPass2(me % 4, 16, 16, lds, lds, me < 4);
     __syncthreads();
-    if(me < 4)
-    {
-        FwdPass3(me % 4, 16, 16, lds, lds);
-    }
+    FwdPass3(me % 4, 16, 16, lds, lds, me < 4);
     __syncthreads();
 
     FwdPass4(me, 0, 0, lds, lwbOut);
@@ -2553,15 +2561,9 @@ extern "C" __global__
     FwdPass3(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
 
-    if(me < 4)
-    {
-        FwdPass2(me % 4, 16, 16, lds, lds);
-    }
+    FwdPass2(me % 4, 16, 16, lds, lds, me < 4);
     __syncthreads();
-    if(me < 4)
-    {
-        FwdPass3(me % 4, 16, 16, lds, lds);
-    }
+    FwdPass3(me % 4, 16, 16, lds, lds, me < 4);
     __syncthreads();
 
     FwdPass4(me, 0, 0, lds, lwbOut);
@@ -2766,117 +2768,131 @@ __forceinline__ __device__ void InvPass0(unsigned int me,
                                          unsigned int inOffset,
                                          unsigned int outOffset,
                                          float2 const* bufIn,
-                                         float2* bufOut)
+                                         float2* bufOut,
+                                         bool isActiveThread = true)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
-    R0 = bufIn[inOffset + (me + 0) * 17];
-    R1 = bufIn[inOffset + (me + 4) * 17];
-    R2 = bufIn[inOffset + (me + 8) * 17];
-    R3 = bufIn[inOffset + (me + 12) * 17];
-    R4 = bufIn[inOffset + (me + 16) * 17];
-    R5 = bufIn[inOffset + (me + 20) * 17];
-    R6 = bufIn[inOffset + (me + 24) * 17];
-    R7 = bufIn[inOffset + (me + 28) * 17];
+    if(isActiveThread)
+    {
+        R0 = bufIn[inOffset + (me + 0) * 17];
+        R1 = bufIn[inOffset + (me + 4) * 17];
+        R2 = bufIn[inOffset + (me + 8) * 17];
+        R3 = bufIn[inOffset + (me + 12) * 17];
+        R4 = bufIn[inOffset + (me + 16) * 17];
+        R5 = bufIn[inOffset + (me + 20) * 17];
+        R6 = bufIn[inOffset + (me + 24) * 17];
+        R7 = bufIn[inOffset + (me + 28) * 17];
 
-    InvRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
+        InvRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
+    }
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 8 + 0) * 17] = R0;
-    bufOut[outOffset + (me * 8 + 1) * 17] = R1;
-    bufOut[outOffset + (me * 8 + 2) * 17] = R2;
-    bufOut[outOffset + (me * 8 + 3) * 17] = R3;
-    bufOut[outOffset + (me * 8 + 4) * 17] = R4;
-    bufOut[outOffset + (me * 8 + 5) * 17] = R5;
-    bufOut[outOffset + (me * 8 + 6) * 17] = R6;
-    bufOut[outOffset + (me * 8 + 7) * 17] = R7;
+    if(isActiveThread)
+    {
+        bufOut[outOffset + (me * 8 + 0) * 17] = R0;
+        bufOut[outOffset + (me * 8 + 1) * 17] = R1;
+        bufOut[outOffset + (me * 8 + 2) * 17] = R2;
+        bufOut[outOffset + (me * 8 + 3) * 17] = R3;
+        bufOut[outOffset + (me * 8 + 4) * 17] = R4;
+        bufOut[outOffset + (me * 8 + 5) * 17] = R5;
+        bufOut[outOffset + (me * 8 + 6) * 17] = R6;
+        bufOut[outOffset + (me * 8 + 7) * 17] = R7;
+    }
 }
 
 __forceinline__ __device__ void InvPass1(unsigned int me,
                                          unsigned int inOffset,
                                          unsigned int outOffset,
                                          float2 const* bufIn,
-                                         float2* bufOut)
+                                         float2* bufOut,
+                                         bool isActiveThread = true)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
-    R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
-    R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
-    R1 = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
-    R5 = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
-    R2 = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
-    R6 = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
-    R3 = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
-    R7 = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
-
+    if(isActiveThread)
     {
-        float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
-        float TR, TI;
-        TR   = (W.x * R1.x) + (W.y * R1.y);
-        TI   = -(W.y * R1.x) + (W.x * R1.y);
-        R1.x = TR;
-        R1.y = TI;
-    }
+        R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
+        R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
+        R1 = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
+        R5 = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
+        R2 = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
+        R6 = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
+        R3 = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
+        R7 = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
-        float TR, TI;
-        TR   = (W.x * R2.x) + (W.y * R2.y);
-        TI   = -(W.y * R2.x) + (W.x * R2.y);
-        R2.x = TR;
-        R2.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
+            float TR, TI;
+            TR   = (W.x * R1.x) + (W.y * R1.y);
+            TI   = -(W.y * R1.x) + (W.x * R1.y);
+            R1.x = TR;
+            R1.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
-        float TR, TI;
-        TR   = (W.x * R3.x) + (W.y * R3.y);
-        TI   = -(W.y * R3.x) + (W.x * R3.y);
-        R3.x = TR;
-        R3.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
+            float TR, TI;
+            TR   = (W.x * R2.x) + (W.y * R2.y);
+            TI   = -(W.y * R2.x) + (W.x * R2.y);
+            R2.x = TR;
+            R2.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
-        float TR, TI;
-        TR   = (W.x * R5.x) + (W.y * R5.y);
-        TI   = -(W.y * R5.x) + (W.x * R5.y);
-        R5.x = TR;
-        R5.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
+            float TR, TI;
+            TR   = (W.x * R3.x) + (W.y * R3.y);
+            TI   = -(W.y * R3.x) + (W.x * R3.y);
+            R3.x = TR;
+            R3.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
-        float TR, TI;
-        TR   = (W.x * R6.x) + (W.y * R6.y);
-        TI   = -(W.y * R6.x) + (W.x * R6.y);
-        R6.x = TR;
-        R6.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
+            float TR, TI;
+            TR   = (W.x * R5.x) + (W.y * R5.y);
+            TI   = -(W.y * R5.x) + (W.x * R5.y);
+            R5.x = TR;
+            R5.y = TI;
+        }
 
-    {
-        float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
-        float TR, TI;
-        TR   = (W.x * R7.x) + (W.y * R7.y);
-        TI   = -(W.y * R7.x) + (W.x * R7.y);
-        R7.x = TR;
-        R7.y = TI;
-    }
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
+            float TR, TI;
+            TR   = (W.x * R6.x) + (W.y * R6.y);
+            TI   = -(W.y * R6.x) + (W.x * R6.y);
+            R6.x = TR;
+            R6.y = TI;
+        }
 
-    InvRad4B1(R0, R1, R2, R3);
-    InvRad4B1(R4, R5, R6, R7);
+        {
+            float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
+            float TR, TI;
+            TR   = (W.x * R7.x) + (W.y * R7.y);
+            TI   = -(W.y * R7.x) + (W.x * R7.y);
+            R7.x = TR;
+            R7.y = TI;
+        }
+
+        InvRad4B1(R0, R1, R2, R3);
+        InvRad4B1(R4, R5, R6, R7);
+    }
 
     __syncthreads();
 
-    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0 * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4 * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1 * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5 * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2 * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6 * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3 * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7 * 3.1250000000000000e-02f;
+    if(isActiveThread)
+    {
+        bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0 * 3.1250000000000000e-02f;
+        bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4 * 3.1250000000000000e-02f;
+        bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1 * 3.1250000000000000e-02f;
+        bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5 * 3.1250000000000000e-02f;
+        bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2 * 3.1250000000000000e-02f;
+        bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6 * 3.1250000000000000e-02f;
+        bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3 * 3.1250000000000000e-02f;
+        bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7 * 3.1250000000000000e-02f;
+    }
 }
 
 __forceinline__ __device__ void InvPass1b(unsigned int me,
@@ -3112,15 +3128,9 @@ extern "C" __global__
     InvPass1(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
 
-    if(me < 4)
-    {
-        InvPass0(me % 4, 16, 16, lds, lds);
-    }
+    InvPass0(me % 4, 16, 16, lds, lds, me < 4);
     __syncthreads();
-    if(me < 4)
-    {
-        InvPass1(me % 4, 16, 16, lds, lds);
-    }
+    InvPass1(me % 4, 16, 16, lds, lds, me < 4);
     __syncthreads();
 
     InvPass1b(me % 4, (me / 4) * 34, (me / 4) * 32, lds, lds);

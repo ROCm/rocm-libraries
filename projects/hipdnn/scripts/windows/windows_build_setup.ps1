@@ -10,7 +10,7 @@ param(
     [switch]$SkipPrerequisites = $false,
     [switch]$SkipWindowsConfig = $false,
     [switch]$SkipToolchainDownload = $false,
-    [switch]$SkipEnvironmentVariables = $false,
+    [switch]$SkipEnvironmentVariables = $false
 )
 
 # Script configuration
