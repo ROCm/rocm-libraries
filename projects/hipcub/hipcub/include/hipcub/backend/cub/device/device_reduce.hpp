@@ -164,7 +164,7 @@ public:
                              ExtremumOutIteratorT d_max_out,
                              IndexOutIteratorT    d_index_out,
                              std::int64_t         num_items,
-                             hipError_t           stream = 0)
+                             hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMax(d_temp_storage,
                                                                   temp_storage_bytes,
