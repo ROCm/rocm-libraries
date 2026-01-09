@@ -142,13 +142,26 @@ For more information on GPU hardware specifications, check out [ROCm documentati
 
 ### Build and Install Origami (Python)
 
-Origami provides Python bindings that allow you to use Origami's functionality directly from Python. Install directly from the rocm-libraries repository without cloning:
+Origami provides Python bindings that allow you to use Origami's functionality directly from Python.
+
+Install directly from the rocm-libraries repository (this could take some time due to the size of the rocm-libraries repo):
 
 ```bash
 pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
 ```
 
-If you have cloned the repository:
+To efficiently install directly from the rocm-libraries repository use do the following:
+
+```bash
+TEMP_DIR=$(mktemp -d)
+git clone --no-checkout --filter=blob:none --sparse https://github.com/ROCm/rocm-libraries.git $TEMP_DIR
+git -C $TEMP_DIR sparse-checkout set shared/origami
+git -C $TEMP_DIR checkout develop
+pip install $TEMP_DIR/shared/origami/python -v
+rm -rf $TEMP_DIR
+```
+
+If you have already cloned the repository:
 
 ```bash
 cd shared/origami/python
