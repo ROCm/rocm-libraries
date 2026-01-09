@@ -213,7 +213,7 @@ string(REGEX REPLACE ".cpp" ".yaml" ROCSPARSE_TEST_YAMLS "${ROCSPARSE_TEST_SOURC
 add_custom_command(
     OUTPUT "${ROCSPARSE_TEST_DATA}"
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/clients/common/rocsparse_gentest.py
-            -m ${PROJECT_BINARY_DIR}/matrices
+            -m ${CMAKE_MATRICES_DIR}
             -I ${PROJECT_SOURCE_DIR}/clients/include
             rocsparse_test.yaml
             -o "${ROCSPARSE_TEST_DATA}"
@@ -226,7 +226,7 @@ add_custom_command(
 )
 
 add_custom_target(rocsparse-test-data DEPENDS "${ROCSPARSE_TEST_DATA}")
-add_dependencies(rocsparse-test rocsparse-test-data rocsparse-common)
+add_dependencies(rocsparse-test rocsparse-test-data)
 
 rocm_install(TARGETS rocsparse-test COMPONENT tests DESTINATION "${CMAKE_INSTALL_BINDIR}")
 rocm_install(FILES ${ROCSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/rocsparse/test" COMPONENT tests)

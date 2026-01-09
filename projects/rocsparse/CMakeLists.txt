@@ -29,7 +29,7 @@ endif()
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
 include(fetch_rocm_cmake)
-include(rocsparse_supported_architectures.cmake)
+include(rocsparse_supported_architectures)
 include(rocsparse_target_configure_sanitizers)
 include(CMakeDependentOption)
 include(CMakePackageConfigHelpers)
@@ -53,9 +53,9 @@ endif()
 # --- Build Options ---
 
 option(ROCSPARSE_BUILD_SHARED_LIBS "Build rocSPARSE as a shared library" ON)
-option(ROCSPARSE_BUILD_TESTING "Build tests (requires googletest)" OFF)
-option(ROCSPARSE_ENABLE_BENCHMARKS "Build benchmarks" OFF)
-option(ROCSPARSE_ENABLE_SAMPLES "Build examples" OFF)
+option(ROCSPARSE_BUILD_TESTING "Build tests (requires googletest)" ON)
+option(ROCSPARSE_ENABLE_BENCHMARKS "Build benchmarks" ON)
+option(ROCSPARSE_ENABLE_SAMPLES "Build examples" ON)
 option(ROCSPARSE_BUILD_DOCS "Build documentation" OFF)
 
 # Optional features
@@ -260,14 +260,7 @@ rocm_install(
     RUNTIME COMPONENT "runtime"
 )
 
-rocm_install(
-    DIRECTORY "${PROJECT_SOURCE_DIR}/library/include/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocsparse"
-    COMPONENT "devel"
-    FILES_MATCHING PATTERN "*.h"
-)
-
-# Install generated headers (rocsparse-version.h, rocsparse-export.h)
+# Install public headers (excluding internal headers)
 rocm_install(
     DIRECTORY "${PROJECT_BINARY_DIR}/include/rocsparse/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocsparse"

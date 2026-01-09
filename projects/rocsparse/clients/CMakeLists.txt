@@ -1,7 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Set C++ standard for all client targets (required for HIP/amdclang)
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 17)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Set directory-level runtime output for all client executables
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging")
 
 add_subdirectory(tools)
@@ -15,26 +23,20 @@ if(ROCSPARSE_ENABLE_BENCHMARKS)
 endif()
 
 if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
-
-add_subdirectory(testings)
-add_subdirectory(common)
-
-if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
-    # Build custom matrices if they don't exist
+    # Download/setup test matrices BEFORE processing tests subdirectory
+    # This ensures CMAKE_MATRICES_DIR is set when tests/CMakeLists.txt is processed
+    # Matrices go in BUILD tree (not source tree) to avoid polluting source
     if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
-        set(CMAKE_MATRICES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/matrices CACHE STRING "Matrices directory")
+        set(CMAKE_MATRICES_DIR ${CMAKE_CURRENT_BINARY_DIR}/matrices CACHE STRING "Matrices directory")
         file(MAKE_DIRECTORY ${CMAKE_MATRICES_DIR})
 
         set(CONVERT_SOURCE ${PROJECT_SOURCE_DIR}/deps/convert.cpp CACHE STRING "Convert tool mtx2csr")
         include(${PROJECT_SOURCE_DIR}/cmake/ClientMatrices.cmake)
     else()
-        if(NOT CMAKE_MATRICES_DIR STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/matrices")
-            message(STATUS "Copying matrix files from ${CMAKE_MATRICES_DIR} to ${CMAKE_CURRENT_SOURCE_DIR}/matrices")
+        if(NOT CMAKE_MATRICES_DIR STREQUAL "${CMAKE_CURRENT_BINARY_DIR}/matrices")
+            message(STATUS "Copying matrix files from ${CMAKE_MATRICES_DIR} to ${CMAKE_CURRENT_BINARY_DIR}/matrices")
             execute_process(
-                COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_MATRICES_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/matrices
+                COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_MATRICES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/matrices
                 RESULT_VARIABLE STATUS
             )
             if(STATUS AND NOT STATUS EQUAL 0)
@@ -80,6 +82,10 @@ if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
     set(ROCSPARSE_GENTEST "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_gentest.py")
     configure_file(common/rocsparse_gentest.py "${ROCSPARSE_GENTEST}" COPYONLY)
 
+    # Now process tests subdirectory - CMAKE_MATRICES_DIR is now set
+    enable_testing()
+    add_subdirectory(tests)
+
     rocm_install(
         FILES "${ROCSPARSE_COMMON}" "${ROCSPARSE_TEMPLATE}" "${ROCSPARSE_SMOKE}"
         COMPONENT clients-common
@@ -104,3 +110,6 @@ if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/rocsparse/test"
     )
 endif()
+
+add_subdirectory(testings)
+add_subdirectory(common)

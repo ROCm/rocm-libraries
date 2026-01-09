@@ -11,6 +11,9 @@ generate_export_header(rocsparse
     EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-export.h"
 )
 
+# Copy public headers to build tree to support #include <rocsparse/rocsparse.h>
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/include/" DESTINATION "${PROJECT_BINARY_DIR}/include/rocsparse")
+
 add_subdirectory(src)
 
 if(ROCSPARSE_ENABLE_FORTRAN)
@@ -31,8 +34,11 @@ target_include_directories(rocsparse
         ${CMAKE_CURRENT_SOURCE_DIR}/src/include
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+        # TODO: The include pattern should always prefix "rocsparse/",
+        #       at which point this can be removed.
         $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/rocsparse>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rocsparse>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 if(ROCSPARSE_ENABLE_MEMSTAT)

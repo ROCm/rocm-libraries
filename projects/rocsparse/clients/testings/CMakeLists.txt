@@ -158,6 +158,10 @@ if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING OR ROCSPARSE_ENABLE_BENCHMARKS)
         target_link_libraries(rocsparse-test-bench-common PRIVATE OpenMP::OpenMP_CXX)
     endif()
 
+    if(ROCSPARSE_ENABLE_ROCBLAS AND rocblas_FOUND)
+        target_compile_definitions(rocsparse-test-bench-common PRIVATE ROCSPARSE_WITH_ROCBLAS)
+    endif()
+
     if(ROCSPARSE_ENABLE_MEMSTAT)
         target_compile_definitions(rocsparse-test-bench-common PRIVATE ROCSPARSE_WITH_MEMSTAT)
     endif()
