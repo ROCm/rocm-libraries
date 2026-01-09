@@ -39,6 +39,7 @@
 #include <rocRoller/Utilities/Comparison.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
@@ -106,6 +107,24 @@ namespace rocRoller
             return std::visit(rocRoller::overloaded{[](Node const&) { return "Node"; },
                                                     [](Edge const&) { return "Edge"; }},
                               el);
+        }
+
+        inline std::string truncate(std::string const& s)
+        {
+            auto const maxLen = Settings::Get(Settings::GraphNodeLabelMaxLength);
+
+            if(maxLen == 0 || s.size() <= maxLen)
+            {
+                return s;
+            }
+
+            constexpr std::size_t ellipsisLen = 3;
+            if(maxLen <= ellipsisLen)
+            {
+                return s.substr(0, maxLen);
+            }
+
+            return s.substr(0, maxLen - ellipsisLen) + "...";
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -849,12 +868,12 @@ namespace rocRoller
                 if(getElementType(pair.second) == ElementType::Node)
                 {
                     auto x = std::get<Node>(pair.second);
-                    msg << toString(x) << "(" << pair.first << ")\"";
+                    msg << truncate(toString(x)) << "(" << pair.first << ")\"";
                 }
                 else
                 {
                     auto x = std::get<Edge>(pair.second);
-                    msg << toString(x) << "(" << pair.first << ")\",shape=box";
+                    msg << truncate(toString(x)) << "(" << pair.first << ")\",shape=box";
                 }
                 msg << "];" << std::endl;
             }
@@ -920,7 +939,7 @@ namespace rocRoller
                 {
                     auto x = std::get<Node>(pair.second);
                     msg << '"' << prefix << pair.first << '"' << "[label=\"";
-                    msg << toString(x) << "(" << pair.first << ")\"";
+                    msg << truncate(toString(x)) << "(" << pair.first << ")\"";
                     msg << "];" << std::endl;
                 }
                 else
@@ -929,7 +948,7 @@ namespace rocRoller
                     if(edgePredicate(x))
                     {
                         msg << '"' << prefix << pair.first << '"' << "[label=\"";
-                        msg << toString(x) << "(" << pair.first << ")\",shape=box";
+                        msg << truncate(toString(x)) << "(" << pair.first << ")\",shape=box";
                         msg << "];" << std::endl;
                     }
                 }
