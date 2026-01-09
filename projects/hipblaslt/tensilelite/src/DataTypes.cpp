@@ -239,6 +239,36 @@ namespace TensileLite
         registerTypeInfo<BFloat8Float8>();
         registerTypeInfo<Float8BFloat8_fnuz>();
         registerTypeInfo<BFloat8Float8_fnuz>();
+        // MX (Microscaling) types for gfx950
+        registerTypeInfo<Float6>();
+        registerTypeInfo<BFloat6>();
+        registerTypeInfo<Float4>();
+        registerTypeInfo<E8M0>();
+        registerTypeInfo<E5M3>();
+        // Mixed precision MX types for gfx950 (MI350) - 25 combinations total
+        // FP8 (E4M3) combinations
+        registerTypeInfo<Float8Float6>();
+        registerTypeInfo<Float8BFloat6>();
+        registerTypeInfo<Float8Float4>();
+        // BF8 (E5M2) combinations
+        registerTypeInfo<BFloat8Float6>();
+        registerTypeInfo<BFloat8BFloat6>();
+        registerTypeInfo<BFloat8Float4>();
+        // FP6 (E2M3) combinations
+        registerTypeInfo<Float6Float8>();
+        registerTypeInfo<Float6BFloat8>();
+        registerTypeInfo<Float6BFloat6>();
+        registerTypeInfo<Float6Float4>();
+        // BF6 (E3M2) combinations
+        registerTypeInfo<BFloat6Float8>();
+        registerTypeInfo<BFloat6BFloat8>();
+        registerTypeInfo<BFloat6Float6>();
+        registerTypeInfo<BFloat6Float4>();
+        // FP4 (E2M1) combinations
+        registerTypeInfo<Float4Float8>();
+        registerTypeInfo<Float4BFloat8>();
+        registerTypeInfo<Float4Float6>();
+        registerTypeInfo<Float4BFloat6>();
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()

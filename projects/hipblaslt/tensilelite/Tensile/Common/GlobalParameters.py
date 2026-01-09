@@ -327,10 +327,14 @@ defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
+    {"LdsPadMXSA": [0]},  # MX scale pad for A
     {"LdsPadB": [-1]},
+    {"LdsPadMXSB": [0]},  # MX scale pad for B
     {"LdsPadMetadata": [0]},
     {"LdsBlockSizePerPadA": [-1]},
+    {"LdsBlockSizePerPadMXSA": [0]},  # MX scale block size for A
     {"LdsBlockSizePerPadB": [-1]},
+    {"LdsBlockSizePerPadMXSB": [0]},  # MX scale block size for B
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"MaxOccupancy": [40]},
@@ -362,6 +366,8 @@ defaultBenchmarkCommonParameters = [
     {"BufferStore": [True]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
+    {"DirectToVgprMXSA": [False]},  # MX scale direct to VGPR for A
+    {"DirectToVgprMXSB": [False]},  # MX scale direct to VGPR for B
     {"DirectToVgprSparseMetadata": [False]},
     {"DirectToLds": [False]},
     {"UseSgprForGRO": [-1]},
@@ -395,7 +401,9 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
+    {"NonTemporalMXSA": [0]},  # MX scale non-temporal for A
     {"NonTemporalB": [0]},
+    {"NonTemporalMXSB": [0]},  # MX scale non-temporal for B
     {"NonTemporalWS": [0]},
     {"NonTemporalMetadata": [0]},
     {"NonTemporal": [-1]},

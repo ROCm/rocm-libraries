@@ -38,6 +38,10 @@
 #endif
 
 #include "hipblaslt_float8.h"
+// Note: F6/F4 types require ROCm functions that may not be available for all architectures
+// #include "hipblaslt_bfloat6.h"
+// #include "hipblaslt_float6.h"
+// #include "hipblaslt_float4.h"
 #include <float.h>
 
 // Generic API

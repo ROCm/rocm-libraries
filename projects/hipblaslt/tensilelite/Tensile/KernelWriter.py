@@ -174,10 +174,14 @@ class StateValues:
   numVgprBufferPackB: int                = 0
   numVgprBufferPackMetadata: int         = 0
   lrvwTileA: int                         = 0
+  lrvwTileMXSA: int                      = 0  # MX scale for A - gfx950
   lrvwTileB: int                         = 0
+  lrvwTileMXSB: int                      = 0  # MX scale for B - gfx950
   lrvwTileMetadata: int                         = 0 # For Sparse Metadat
   lrvwUnrollA: int                       = 0
+  lrvwUnrollMXSA: int                    = 0  # MX scale for A - gfx950
   lrvwUnrollB: int                       = 0
+  lrvwUnrollMXSB: int                    = 0  # MX scale for B - gfx950
   lrvwUnrollMetadata: int                       = 0 # For Sparse Metadat
 
   numMfmaPerIter: int                    = 0
@@ -186,10 +190,14 @@ class StateValues:
   numReadsIterCoalescedB: int            = 0
   numReadsIterCoalescedMetadata: int     = 0
   numIterPerCoalescedReadA: int          = 0
+  numIterPerCoalescedReadMXSA: int       = 0  # MX scale for A - gfx950
   numIterPerCoalescedReadB: int          = 0
+  numIterPerCoalescedReadMXSB: int       = 0  # MX scale for B - gfx950
   numIterPerCoalescedReadMetadata: int   = 0
   numReadsPerUnrollA: int                = 0
+  numReadsPerUnrollMXSA: int             = 0  # MX scale for A - gfx950
   numReadsPerUnrollB: int                = 0
+  numReadsPerUnrollMXSB: int             = 0  # MX scale for B - gfx950
   numReadsPerUnrollMetadata: int         = 0
 
   # KernelWriterAssembly
@@ -208,6 +216,8 @@ class StateValues:
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
+  mxsa: ABMatrixInfo                     = field(default_factory=ABMatrixInfo)  # MX scale for A - gfx950
+  mxsb: ABMatrixInfo                     = field(default_factory=ABMatrixInfo)  # MX scale for B - gfx950
   c: MatrixInfo                          = field(default_factory=MatrixInfo)
   d: MatrixInfo                          = field(default_factory=MatrixInfo)
   e: MatrixInfo                          = field(default_factory=MatrixInfo)
@@ -262,10 +272,14 @@ class StateValues:
   freeSgprVarPool: set                   = field(init=False)
 
   numReadsPerIterA: int                  = 0
+  numReadsPerIterMXSA: int               = 0  # MX scale for A - gfx950
   numReadsPerIterB: int                  = 0
+  numReadsPerIterMXSB: int               = 0  # MX scale for B - gfx950
   numReadsPerIterMetadata: int           = 0
   localReadDoCntA: int                   = 0
+  localReadDoCntMXSA: int                = 0  # MX scale for A - gfx950
   localReadDoCntB: int                   = 0
+  localReadDoCntMXSB: int                = 0  # MX scale for B - gfx950
   localReadDoCntMetadata: int            = 0
   savedLocalReadDoCntA: int              = 0
   savedLocalReadDoCntB: int              = 0
@@ -3970,8 +3984,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["HighPrecisionAccumulate"] and \
        not (kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16() or \
           kernel["ProblemType"]["DataType"].isInt8x4() or kernel["ProblemType"]["DataType"].isInt8() or \
-          kernel["ProblemType"]["DataType"].is8bitFloat()):
-        print("HighPrecisionAccumulate only valid when DataType is half, bf16, Int8x4, Int8, fp8, bf8. Forcing HPA to False")
+          kernel["ProblemType"]["DataType"].is8bitFloat() or \
+          kernel["ProblemType"]["DataType"].isMXFloat() or kernel["ProblemType"]["DataType"].isMixedMXFloat()):
+        print("HighPrecisionAccumulate only valid when DataType is half, bf16, Int8x4, Int8, fp8, bf8, f6, f4. Forcing HPA to False")
         kernel["ProblemType"]["HighPrecisionAccumulate"] = False
 
     assert self.states.bpeAB == tensorParametersA["bpe"]
@@ -4123,6 +4138,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.b.numVgprValu = self.states.b.numVgprValuPerBlock * valuBlocksB
       if self.states.lrvwTileB > 1 and tensorParametersB["bpe"] < 4 and not (kernel["UsePLRPack"] and self.states.numItersPLR):
         self.states.b.numVgprValu = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"]
+
+      # MX Scale VGPR initialization for MI350 (gfx950)
+      # MX Scale uses 1 VGPR per scale value (E8M0 format = 8 bits stored in 32-bit register)
+      if kernel["ProblemType"]["MXBlockA"]:
+        # Each MX scale block covers 32 K elements (MI350 block size)
+        # MIWaveTileMXSA = number of scale values per wave tile
+        miWaveTileMXSA = kernel.get("MIWaveTileMXSA", kernel["MIWaveTileA"])
+        miInputPerThreadMXSA = kernel.get("MIInputPerThreadMXSA", 1)
+        self.states.mxsa.numVgprValuPerBlock = miWaveTileMXSA * miInputPerThreadMXSA // self.states.bpr
+        if self.states.mxsa.numVgprValuPerBlock == 0:
+          self.states.mxsa.numVgprValuPerBlock = 1  # Minimum 1 VGPR for scale
+        self.states.mxsa.numVgprValu = self.states.mxsa.numVgprValuPerBlock * valuBlocksA
+        lrvwTileMXSA = getattr(self.states, 'lrvwTileMXSA', 1)
+        if lrvwTileMXSA > 1:
+          self.states.mxsa.numVgprValu = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"]
+
+      if kernel["ProblemType"]["MXBlockB"]:
+        # Each MX scale block covers 32 K elements (MI350 block size)
+        miWaveTileMXSB = kernel.get("MIWaveTileMXSB", kernel["MIWaveTileB"])
+        miInputPerThreadMXSB = kernel.get("MIInputPerThreadMXSB", 1)
+        self.states.mxsb.numVgprValuPerBlock = miWaveTileMXSB * miInputPerThreadMXSB // self.states.bpr
+        if self.states.mxsb.numVgprValuPerBlock == 0:
+          self.states.mxsb.numVgprValuPerBlock = 1  # Minimum 1 VGPR for scale
+        self.states.mxsb.numVgprValu = self.states.mxsb.numVgprValuPerBlock * valuBlocksB
+        lrvwTileMXSB = getattr(self.states, 'lrvwTileMXSB', 1)
+        if lrvwTileMXSB > 1:
+          self.states.mxsb.numVgprValu = self.states.mxsb.numVgprValuPerBlock * kernel["InnerUnroll"]
 
     else: # mac instruction
       valuBlocksA = (1 + kernel["PrefetchLocalRead"]) * kernel["InnerUnroll"]
@@ -4359,6 +4401,41 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numVgprGlobalReadIncsA = 0
       numVgprGlobalReadIncsB = 0
 
+    # MX Scale global read offsets for MI350 (gfx950)
+    if kernel["ProblemType"]["MXBlockA"]:
+      numGlobalReadsMXSA = kernel["NumLoadsCoalescedMXSA"] \
+          * kernel["NumLoadsPerpendicularMXSA"] * kernel["GlobalReadVectorWidthMXSA"]
+      numGlobalReadInstructionsMXSA = int(numGlobalReadsMXSA / \
+          (tensorParametersMXSA["globalReadInstruction"].blockWidth * 4)) if "tensorParametersMXSA" in dir() else 1
+
+      if kernel["BufferLoad"]:
+        self.states.mxsa.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSA * self.states.rpgo)
+      else:
+        numVgprGlobalReadAddressesMXSA = numGlobalReadInstructionsMXSA * self.states.rpga
+
+      if self.states.globalReadIncsUseVgpr:
+        numVgprGlobalReadIncsMXSA = kernel["ProblemType"]["NumIndicesSummation"] \
+            * self.states.rpga
+      else:
+        numVgprGlobalReadIncsMXSA = 0
+
+    if kernel["ProblemType"]["MXBlockB"]:
+      numGlobalReadsMXSB = kernel["NumLoadsCoalescedMXSB"] \
+          * kernel["NumLoadsPerpendicularMXSB"] * kernel["GlobalReadVectorWidthMXSB"]
+      numGlobalReadInstructionsMXSB = int(numGlobalReadsMXSB / \
+          (tensorParametersMXSB["globalReadInstruction"].blockWidth * 4)) if "tensorParametersMXSB" in dir() else 1
+
+      if kernel["BufferLoad"]:
+        self.states.mxsb.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSB * self.states.rpgo)
+      else:
+        numVgprGlobalReadAddressesMXSB = numGlobalReadInstructionsMXSB * self.states.rpga
+
+      if self.states.globalReadIncsUseVgpr:
+        numVgprGlobalReadIncsMXSB = kernel["ProblemType"]["NumIndicesSummation"] \
+            * self.states.rpga
+      else:
+        numVgprGlobalReadIncsMXSB = 0
+
     if tensorParametersM is not None:
       numGlobalReadsMetadata = kernel["NumLoadsCoalescedMetadata"] \
           * kernel["NumLoadsPerpendicularMetadata"] * kernel["GlobalReadVectorWidthMetadata"]
@@ -4453,6 +4530,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.a.numVgprGlobalReadOffsets
       self.startVgprGlobalReadOffsetB = vgprIdx
       vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.b.numVgprGlobalReadOffsets
+      # MX Scale VGPR global read offsets for MI350 (gfx950)
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.startVgprGlobalReadOffsetMXSA = vgprIdx
+        vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.mxsa.numVgprGlobalReadOffsets
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.startVgprGlobalReadOffsetMXSB = vgprIdx
+        vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.mxsb.numVgprGlobalReadOffsets
       if kernel["ProblemType"]["Sparse"]:
         self.startVgprGlobalReadOffsetMetadata = vgprIdx
         if kernel["DirectToVgprSparseMetadata"]:
@@ -4633,6 +4717,57 @@ class KernelWriter(metaclass=abc.ABCMeta):
           vgprIdx = self.states.m.startVgprValu  \
               + max(self.states.m.numVgprValu + numVgprValuPackMetadata, self.states.m.numVgprG2LAllocated)
 
+    # MX Scale VGPR allocation for MI350 (gfx950)
+    if kernel["ProblemType"]["MXBlockA"]:
+      # Alignment for MX Scale VGPRs
+      vgprIdx = ((vgprIdx+1)//2)*2
+      self.states.mxsa.startVgprValu = vgprIdx
+      vgprIdx += self.states.mxsa.numVgprValu
+      numVgprValuPackMXSA = 0
+      if not kernel.get("UnrollMajorLDSMXSA", kernel.get("UnrollMajorLDSA", False)):
+        self.states.mxsa.startVgprValuPack = vgprIdx
+        lrvwTileMXSA = getattr(self.states, 'lrvwTileMXSA', 1)
+        if lrvwTileMXSA > 1:
+          # Calculate pack VGPRs for MX Scale A
+          miWaveTileMXSA = kernel.get("MIWaveTileMXSA", kernel["MIWaveTileA"])
+          vectorWidthMXSA = kernel.get("VectorWidthMXSA", 1)
+          miInputPerThreadMXSA = kernel.get("MIInputPerThreadMXSA", 1)
+          numVgprValuPackMXSA = ceil(vectorWidthMXSA / self.states.bpr) * miWaveTileMXSA // max(vectorWidthMXSA, 1) * kernel["InnerUnroll"] * self.states.numVgprBuffer * miInputPerThreadMXSA
+        else:
+          numVgprBufferPackMXSA = getattr(self.states, 'numVgprBufferPackMXSA', 1)
+          numVgprValuPackMXSA = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"] * numVgprBufferPackMXSA * 3  # (4 - 1) for E8M0
+      vgprIdx += numVgprValuPackMXSA
+      self.states.mxsa.startVgprG2L = None
+      if not kernel["PrefetchGlobalRead"]:
+        self.states.mxsa.startVgprG2L = self.states.mxsa.startVgprValu
+        numVgprG2LAllocatedMXSA = getattr(self.states.mxsa, 'numVgprG2LAllocated', 0)
+        vgprIdx = self.states.mxsa.startVgprValu + max(self.states.mxsa.numVgprValu + numVgprValuPackMXSA, numVgprG2LAllocatedMXSA)
+
+    if kernel["ProblemType"]["MXBlockB"]:
+      # Alignment for MX Scale VGPRs
+      vgprIdx = ((vgprIdx+1)//2)*2
+      self.states.mxsb.startVgprValu = vgprIdx
+      vgprIdx += self.states.mxsb.numVgprValu
+      numVgprValuPackMXSB = 0
+      if not kernel.get("UnrollMajorLDSMXSB", kernel.get("UnrollMajorLDSB", False)):
+        self.states.mxsb.startVgprValuPack = vgprIdx
+        lrvwTileMXSB = getattr(self.states, 'lrvwTileMXSB', 1)
+        if lrvwTileMXSB > 1:
+          # Calculate pack VGPRs for MX Scale B
+          miWaveTileMXSB = kernel.get("MIWaveTileMXSB", kernel["MIWaveTileB"])
+          vectorWidthMXSB = kernel.get("VectorWidthMXSB", 1)
+          miInputPerThreadMXSB = kernel.get("MIInputPerThreadMXSB", 1)
+          numVgprValuPackMXSB = ceil(vectorWidthMXSB / self.states.bpr) * miWaveTileMXSB // max(vectorWidthMXSB, 1) * kernel["InnerUnroll"] * self.states.numVgprBuffer * miInputPerThreadMXSB
+        else:
+          numVgprBufferPackMXSB = getattr(self.states, 'numVgprBufferPackMXSB', 1)
+          numVgprValuPackMXSB = self.states.mxsb.numVgprValuPerBlock * kernel["InnerUnroll"] * numVgprBufferPackMXSB * 3  # (4 - 1) for E8M0
+      vgprIdx += numVgprValuPackMXSB
+      self.states.mxsb.startVgprG2L = None
+      if not kernel["PrefetchGlobalRead"]:
+        self.states.mxsb.startVgprG2L = self.states.mxsb.startVgprValu
+        numVgprG2LAllocatedMXSB = getattr(self.states.mxsb, 'numVgprG2LAllocated', 0)
+        vgprIdx = self.states.mxsb.startVgprValu + max(self.states.mxsb.numVgprValu + numVgprValuPackMXSB, numVgprG2LAllocatedMXSB)
+
     # Registers allocated above this point can be used as temps during setup
     # Registers above here are reserved in initC, near the end of the setup
     # code
@@ -4663,6 +4798,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # TODO: alignment hack, figure out a better solution
         vgprIdx = ((vgprIdx+1)//2)*2
         self.states.m.startVgprG2L = vgprIdx; vgprIdx += self.states.m.numVgprG2LAllocated
+
+    # MX Scale G2L VGPR allocation for MI350 (gfx950)
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.startVgprG2L is None:
+        numVgprG2LAllocatedMXSA = getattr(self.states.mxsa, 'numVgprG2LAllocated', 0)
+        if numVgprG2LAllocatedMXSA > 0:
+          vgprIdx = ((vgprIdx+1)//2)*2
+          self.states.mxsa.startVgprG2L = vgprIdx
+          vgprIdx += numVgprG2LAllocatedMXSA
+
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.startVgprG2L is None:
+        numVgprG2LAllocatedMXSB = getattr(self.states.mxsb, 'numVgprG2LAllocated', 0)
+        if numVgprG2LAllocatedMXSB > 0:
+          vgprIdx = ((vgprIdx+1)//2)*2
+          self.states.mxsb.startVgprG2L = vgprIdx
+          vgprIdx += numVgprG2LAllocatedMXSB
 
     # GlobalRead, LocalWrite, LocalRead, G2L can be reclaimed, extend the "lastVgprForReads" value
     self.states.lastVgprForReads = vgprIdx
@@ -4801,10 +4953,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.globalReadIncsUseVgpr:
       self.states.a.numSgprGlobalReadIncs = 0
       self.states.b.numSgprGlobalReadIncs = 0
+      # MX Scale global read increments for MI350 (gfx950)
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.mxsa.numSgprGlobalReadIncs = 0
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.states.mxsb.numSgprGlobalReadIncs = 0
       self.states.m.numSgprGlobalReadIncs = 0
     else:
       self.states.a.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
       self.states.b.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
+      # MX Scale global read increments for MI350 (gfx950)
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.mxsa.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.states.mxsb.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
       self.states.m.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
 
     ########################################

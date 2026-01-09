@@ -54,6 +54,36 @@ namespace rocisa
         BFloat8,
         Float8BFloat8,
         BFloat8Float8,
+        // MX types for gfx950 (MI350)
+        Float6,
+        BFloat6,
+        Float4,
+        E8M0,       // MX scale data type for gfx950 (E8M0 format)
+        E5M3,       // MX scale data type for gfx1250 only
+        // Mixed precision MX types (A type x B type) - 25 combinations total
+        // FP8 (E4M3) combinations
+        Float8Float6,       // FP8 x FP6
+        Float8BFloat6,      // FP8 x BF6
+        Float8Float4,       // FP8 x FP4
+        // BF8 (E5M2) combinations
+        BFloat8Float6,      // BF8 x FP6
+        BFloat8BFloat6,     // BF8 x BF6
+        BFloat8Float4,      // BF8 x FP4
+        // FP6 (E2M3) combinations
+        Float6Float8,       // FP6 x FP8
+        Float6BFloat8,      // FP6 x BF8
+        Float6BFloat6,      // FP6 x BF6
+        Float6Float4,       // FP6 x FP4
+        // BF6 (E3M2) combinations
+        BFloat6Float8,      // BF6 x FP8
+        BFloat6BFloat8,     // BF6 x BF8
+        BFloat6Float6,      // BF6 x FP6
+        BFloat6Float4,      // BF6 x FP4
+        // FP4 (E2M1) combinations
+        Float4Float8,       // FP4 x FP8
+        Float4BFloat8,      // FP4 x BF8
+        Float4Float6,       // FP4 x FP6
+        Float4BFloat6,      // FP4 x BF6
         Count,
         None = Count
     };
@@ -99,6 +129,36 @@ namespace rocisa
         case DataType::Float8BFloat8:
             return 1;
         case DataType::BFloat8Float8:
+            return 1;
+        case DataType::Float6:
+            return 1;
+        case DataType::BFloat6:
+            return 1;
+        case DataType::Float4:
+            return 1;
+        case DataType::E8M0:
+            return 1;
+        case DataType::E5M3:
+            return 1;
+        // Mixed precision MX types - all return 1 byte per element
+        case DataType::Float8Float6:
+        case DataType::Float8BFloat6:
+        case DataType::Float8Float4:
+        case DataType::BFloat8Float6:
+        case DataType::BFloat8BFloat6:
+        case DataType::BFloat8Float4:
+        case DataType::Float6Float8:
+        case DataType::Float6BFloat8:
+        case DataType::Float6BFloat6:
+        case DataType::Float6Float4:
+        case DataType::BFloat6Float8:
+        case DataType::BFloat6BFloat8:
+        case DataType::BFloat6Float6:
+        case DataType::BFloat6Float4:
+        case DataType::Float4Float8:
+        case DataType::Float4BFloat8:
+        case DataType::Float4Float6:
+        case DataType::Float4BFloat6:
             return 1;
         default:
             return -1; // Invalid type
@@ -147,6 +207,53 @@ namespace rocisa
             return "Float8BFloat8";
         case DataType::BFloat8Float8:
             return "BFloat8Float8";
+        case DataType::Float6:
+            return "Float6";
+        case DataType::BFloat6:
+            return "BFloat6";
+        case DataType::Float4:
+            return "Float4";
+        case DataType::E8M0:
+            return "E8M0";
+        case DataType::E5M3:
+            return "E5M3";
+        // Mixed precision MX types (A type x B type)
+        case DataType::Float8Float6:
+            return "Float8Float6";
+        case DataType::Float8BFloat6:
+            return "Float8BFloat6";
+        case DataType::Float8Float4:
+            return "Float8Float4";
+        case DataType::BFloat8Float6:
+            return "BFloat8Float6";
+        case DataType::BFloat8BFloat6:
+            return "BFloat8BFloat6";
+        case DataType::BFloat8Float4:
+            return "BFloat8Float4";
+        case DataType::Float6Float8:
+            return "Float6Float8";
+        case DataType::Float6BFloat8:
+            return "Float6BFloat8";
+        case DataType::Float6BFloat6:
+            return "Float6BFloat6";
+        case DataType::Float6Float4:
+            return "Float6Float4";
+        case DataType::BFloat6Float8:
+            return "BFloat6Float8";
+        case DataType::BFloat6BFloat8:
+            return "BFloat6BFloat8";
+        case DataType::BFloat6Float6:
+            return "BFloat6Float6";
+        case DataType::BFloat6Float4:
+            return "BFloat6Float4";
+        case DataType::Float4Float8:
+            return "Float4Float8";
+        case DataType::Float4BFloat8:
+            return "Float4BFloat8";
+        case DataType::Float4Float6:
+            return "Float4Float6";
+        case DataType::Float4BFloat6:
+            return "Float4BFloat6";
         default:
             return "Invalid";
         }
@@ -201,7 +308,31 @@ namespace rocisa
         INST_TR16_B128  = 38,
         INST_CVT        = 39,
         INST_MACRO      = 40,
-        INST_NOTYPE     = 41
+        INST_NOTYPE     = 41,
+        // MX F6/F4 types for gfx950 (MI350)
+        INST_F6         = 42,
+        INST_BF6        = 43,
+        INST_F4         = 44,
+        INST_F6_B6      = 45,
+        INST_B6_F6      = 46,
+        INST_F8_F4      = 47,
+        INST_F4_F8      = 48,
+        INST_F6_F4      = 49,
+        INST_F4_F6      = 50,
+        INST_F8_F6      = 51,
+        INST_F6_F8      = 52,
+        INST_F8_B6      = 53,
+        INST_B6_F8      = 54,
+        INST_B8_F4      = 55,
+        INST_F4_B8      = 56,
+        INST_B6_F4      = 57,
+        INST_F4_B6      = 58,
+        INST_B8_F6      = 59,
+        INST_F6_B8      = 60,
+        INST_B8_B6      = 61,
+        INST_B6_B8      = 62,
+        INST_E8         = 63,
+        INST_E5M3       = 64
     };
 
     enum class SelectBit : int

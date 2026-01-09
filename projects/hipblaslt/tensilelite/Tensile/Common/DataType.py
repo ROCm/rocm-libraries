@@ -219,6 +219,220 @@ class DataType:
             'hip': 'ERROR',
             'isComplex': False,
         },
+        # MX types for gfx950 (MI350)
+        {
+            'enum': DataTypeEnum.Float6,
+            'char': 'F6',
+            'nameAbbrev': 'f6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat6,
+            'char': 'B6',
+            'nameAbbrev': 'bf6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float4,
+            'char': 'F4',
+            'nameAbbrev': 'f4',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.E8M0,
+            'char': 'E8M0',
+            'nameAbbrev': 'e8m0',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.E5M3,
+            'char': 'E5M3',
+            'nameAbbrev': 'e5m3',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        # Mixed precision MX types (A type x B type) for gfx950 (MI350)
+        # Order must match enum.hpp: Float8Float6(24), Float8BFloat6(25), Float8Float4(26),
+        # BFloat8Float6(27), BFloat8BFloat6(28), BFloat8Float4(29), Float6Float8(30),
+        # Float6BFloat8(31), Float6BFloat6(32), Float6Float4(33), BFloat6Float8(34),
+        # BFloat6BFloat8(35), BFloat6Float6(36), BFloat6Float4(37), Float4Float8(38),
+        # Float4BFloat8(39), Float4Float6(40), Float4BFloat6(41)
+        {
+            'enum': DataTypeEnum.Float8Float6,  # 24
+            'char': 'F8F6',
+            'nameAbbrev': 'fp8_fp6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float8BFloat6,  # 25
+            'char': 'F8B6',
+            'nameAbbrev': 'fp8_bf6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float8Float4,  # 26
+            'char': 'F8F4',
+            'nameAbbrev': 'fp8_fp4',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat8Float6,  # 27
+            'char': 'B8F6',
+            'nameAbbrev': 'bf8_fp6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat8BFloat6,  # 28
+            'char': 'B8B6',
+            'nameAbbrev': 'bf8_bf6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat8Float4,  # 29
+            'char': 'B8F4',
+            'nameAbbrev': 'bf8_fp4',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float6Float8,  # 30
+            'char': 'F6F8',
+            'nameAbbrev': 'fp6_fp8',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float6BFloat8,  # 31
+            'char': 'F6B8',
+            'nameAbbrev': 'fp6_bf8',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float6BFloat6,  # 32
+            'char': 'F6B6',
+            'nameAbbrev': 'fp6_bf6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float6Float4,  # 33
+            'char': 'F6F4',
+            'nameAbbrev': 'fp6_fp4',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat6Float8,  # 34
+            'char': 'B6F8',
+            'nameAbbrev': 'bf6_fp8',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat6BFloat8,  # 35
+            'char': 'B6B8',
+            'nameAbbrev': 'bf6_bf8',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat6Float6,  # 36
+            'char': 'B6F6',
+            'nameAbbrev': 'bf6_fp6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.BFloat6Float4,  # 37
+            'char': 'B6F4',
+            'nameAbbrev': 'bf6_fp4',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float4Float8,  # 38
+            'char': 'F4F8',
+            'nameAbbrev': 'fp4_fp8',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float4BFloat8,  # 39
+            'char': 'F4B8',
+            'nameAbbrev': 'fp4_bf8',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float4Float6,  # 40
+            'char': 'F4F6',
+            'nameAbbrev': 'fp4_fp6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
+        {
+            'enum': DataTypeEnum.Float4BFloat6,  # 41
+            'char': 'F4B6',
+            'nameAbbrev': 'fp4_bf6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
+        },
     ]
     lookup = {}
 
@@ -379,6 +593,89 @@ class DataType:
                 or self.value == DataTypeEnum.Float8BFloat8.value \
                 or self.value == DataTypeEnum.BFloat8_fnuz.value \
                 or self.value == DataTypeEnum.Float8BFloat8_fnuz.value)
+    # MX types for gfx950 (MI350)
+    def isFloat6(self):
+        return self.value == DataTypeEnum.Float6.value
+    def isBFloat6(self):
+        return self.value == DataTypeEnum.BFloat6.value
+    def isFloat4(self):
+        return self.value == DataTypeEnum.Float4.value
+    def isE8M0(self):
+        return self.value == DataTypeEnum.E8M0.value
+    def isE5M3(self):
+        return self.value == DataTypeEnum.E5M3.value
+    def is6bitFloat(self):
+        """Check if this is 6-bit float type (Float6 or BFloat6)"""
+        return (self.value == DataTypeEnum.Float6.value \
+                or self.value == DataTypeEnum.BFloat6.value)
+    def isMXFloat(self):
+        """Check if this is any MX F6/F4 type for gfx950 (MI350)"""
+        return (self.value == DataTypeEnum.Float6.value \
+                or self.value == DataTypeEnum.BFloat6.value \
+                or self.value == DataTypeEnum.Float4.value)
+    def isMixedMXFloat(self):
+        """Check if this is a mixed precision MX type - all 20 A!=B combinations"""
+        return (
+            # FP8 (E4M3) combinations with other types
+            self.value == DataTypeEnum.Float8Float6.value or
+            self.value == DataTypeEnum.Float8BFloat6.value or
+            self.value == DataTypeEnum.Float8Float4.value or
+            # BF8 (E5M2) combinations with other types
+            self.value == DataTypeEnum.BFloat8Float6.value or
+            self.value == DataTypeEnum.BFloat8BFloat6.value or
+            self.value == DataTypeEnum.BFloat8Float4.value or
+            # FP6 (E2M3) combinations with other types
+            self.value == DataTypeEnum.Float6Float8.value or
+            self.value == DataTypeEnum.Float6BFloat8.value or
+            self.value == DataTypeEnum.Float6BFloat6.value or
+            self.value == DataTypeEnum.Float6Float4.value or
+            # BF6 (E3M2) combinations with other types
+            self.value == DataTypeEnum.BFloat6Float8.value or
+            self.value == DataTypeEnum.BFloat6BFloat8.value or
+            self.value == DataTypeEnum.BFloat6Float6.value or
+            self.value == DataTypeEnum.BFloat6Float4.value or
+            # FP4 (E2M1) combinations with other types
+            self.value == DataTypeEnum.Float4Float8.value or
+            self.value == DataTypeEnum.Float4BFloat8.value or
+            self.value == DataTypeEnum.Float4Float6.value or
+            self.value == DataTypeEnum.Float4BFloat6.value
+        )
+    def getMXTypeA(self):
+        """Get the A matrix type for mixed precision MX types"""
+        typeMap = {
+            DataTypeEnum.Float8.value: 'F8', DataTypeEnum.BFloat8.value: 'B8',
+            DataTypeEnum.Float6.value: 'F6', DataTypeEnum.BFloat6.value: 'B6',
+            DataTypeEnum.Float4.value: 'F4',
+            DataTypeEnum.Float8Float6.value: 'F8', DataTypeEnum.Float8BFloat6.value: 'F8',
+            DataTypeEnum.Float8Float4.value: 'F8',
+            DataTypeEnum.BFloat8Float6.value: 'B8', DataTypeEnum.BFloat8BFloat6.value: 'B8',
+            DataTypeEnum.BFloat8Float4.value: 'B8',
+            DataTypeEnum.Float6Float8.value: 'F6', DataTypeEnum.Float6BFloat8.value: 'F6',
+            DataTypeEnum.Float6BFloat6.value: 'F6', DataTypeEnum.Float6Float4.value: 'F6',
+            DataTypeEnum.BFloat6Float8.value: 'B6', DataTypeEnum.BFloat6BFloat8.value: 'B6',
+            DataTypeEnum.BFloat6Float6.value: 'B6', DataTypeEnum.BFloat6Float4.value: 'B6',
+            DataTypeEnum.Float4Float8.value: 'F4', DataTypeEnum.Float4BFloat8.value: 'F4',
+            DataTypeEnum.Float4Float6.value: 'F4', DataTypeEnum.Float4BFloat6.value: 'F4',
+        }
+        return typeMap.get(self.value, None)
+    def getMXTypeB(self):
+        """Get the B matrix type for mixed precision MX types"""
+        typeMap = {
+            DataTypeEnum.Float8.value: 'F8', DataTypeEnum.BFloat8.value: 'B8',
+            DataTypeEnum.Float6.value: 'F6', DataTypeEnum.BFloat6.value: 'B6',
+            DataTypeEnum.Float4.value: 'F4',
+            DataTypeEnum.Float8Float6.value: 'F6', DataTypeEnum.Float8BFloat6.value: 'B6',
+            DataTypeEnum.Float8Float4.value: 'F4',
+            DataTypeEnum.BFloat8Float6.value: 'F6', DataTypeEnum.BFloat8BFloat6.value: 'B6',
+            DataTypeEnum.BFloat8Float4.value: 'F4',
+            DataTypeEnum.Float6Float8.value: 'F8', DataTypeEnum.Float6BFloat8.value: 'B8',
+            DataTypeEnum.Float6BFloat6.value: 'B6', DataTypeEnum.Float6Float4.value: 'F4',
+            DataTypeEnum.BFloat6Float8.value: 'F8', DataTypeEnum.BFloat6BFloat8.value: 'B8',
+            DataTypeEnum.BFloat6Float6.value: 'F6', DataTypeEnum.BFloat6Float4.value: 'F4',
+            DataTypeEnum.Float4Float8.value: 'F8', DataTypeEnum.Float4BFloat8.value: 'B8',
+            DataTypeEnum.Float4Float6.value: 'F6', DataTypeEnum.Float4BFloat6.value: 'B6',
+        }
+        return typeMap.get(self.value, None)
     def isNone(self):
         return self.value == None
 

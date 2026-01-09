@@ -46,10 +46,16 @@ class LocalReadVALU(LocalRead):
 
         if tc == "A":
             writer.states.localReadDoCntA += 1
+        elif tc == "MXSA":
+            writer.states.localReadDoCntMXSA += 1
         elif tc == "Metadata":
             writer.states.localReadDoCntMetadata += 1
-        else:
+        elif tc == "B":
             writer.states.localReadDoCntB += 1
+        elif tc == "MXSB":
+            writer.states.localReadDoCntMXSB += 1
+        else:
+            raise Exception(f"unsupport tc {tc}")
 
         tile01            = tP["tile01Idx"]
         imod              = Module("LocalReadDo%s_I%s"%(tc,iui))
@@ -213,10 +219,16 @@ class LocalReadMFMA(LocalRead):
         tc = tP["tensorChar"]
         if tc == "A":
             writer.states.localReadDoCntA += 1
+        elif tc == "MXSA":
+            writer.states.localReadDoCntMXSA += 1
         elif tc == "Metadata":
             writer.states.localReadDoCntMetadata += 1
-        else:
+        elif tc == "B":
             writer.states.localReadDoCntB += 1
+        elif tc == "MXSB":
+            writer.states.localReadDoCntMXSB += 1
+        else:
+            raise Exception(f"unsupport tc {tc}")
         tile01           = tP["tile01Idx"]
         instruction      = tP["localReadInstruction"]
         bpr              = 4 # bytes/register
@@ -250,8 +262,12 @@ class LocalReadMFMA(LocalRead):
         tmpvgprFP32 = []
         if tc == 'A':
             lrvwTile = writer.states.lrvwTileA
+        elif tc == "MXSA":
+            lrvwTile = writer.states.lrvwTileMXSA
         elif tc == 'B':
             lrvwTile = writer.states.lrvwTileB
+        elif tc == "MXSB":
+            lrvwTile = writer.states.lrvwTileMXSB
         elif tc == "Metadata":
             lrvwTile = writer.states.lrvwTileMetadata
         else:

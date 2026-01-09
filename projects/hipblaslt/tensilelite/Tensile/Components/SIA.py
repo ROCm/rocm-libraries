@@ -225,16 +225,42 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     for iui in range(kernel["InnerUnroll"]):
         # ds_read[A][0]
         calculateLatencyLeft(writer.states.numReadsPerUnrollA, tensorParametersA["localReadInstruction"].blockWidth, tensorParametersA["localReadInstruction"].issueLatency)
+        # ds_read[MXSA][0] - MX Scale for A (MI350/gfx950)
+        if kernel["ProblemType"]["MXBlockA"] and hasattr(tensorParametersA.get("MX", {}), "get"):
+            tpMXSA = tensorParametersA.get("MX", {})
+            if tpMXSA and "localReadInstruction" in tpMXSA:
+                numReadsPerUnrollMXSA = getattr(writer.states, 'numReadsPerUnrollMXSA', 0)
+                calculateLatencyLeft(numReadsPerUnrollMXSA, tpMXSA["localReadInstruction"].blockWidth, tpMXSA["localReadInstruction"].issueLatency)
         # ds_read[M][0]
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             calculateLatencyLeft(writer.states.numReadsPerUnrollMetadata, tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
+        # ds_read[MXSB][0] - MX Scale for B (MI350/gfx950)
+        if kernel["ProblemType"]["MXBlockB"] and hasattr(tensorParametersB.get("MX", {}), "get"):
+            tpMXSB = tensorParametersB.get("MX", {})
+            if tpMXSB and "localReadInstruction" in tpMXSB:
+                numReadsPerUnrollMXSB = getattr(writer.states, 'numReadsPerUnrollMXSB', 0)
+                calculateLatencyLeft(numReadsPerUnrollMXSB, tpMXSB["localReadInstruction"].blockWidth, tpMXSB["localReadInstruction"].issueLatency)
         # ds_read[B][0]
         calculateLatencyLeft(writer.states.numReadsPerUnrollB, tensorParametersB["localReadInstruction"].blockWidth, tensorParametersB["localReadInstruction"].issueLatency)
         # ds_read[A][1:]
         calculateLatencyLeft((writer.states.numReadsPerIterA//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollA), tensorParametersA["localReadInstruction"].blockWidth, tensorParametersA["localReadInstruction"].issueLatency)
+        # ds_read[MXSA][1:] - MX Scale for A (MI350/gfx950)
+        if kernel["ProblemType"]["MXBlockA"] and hasattr(tensorParametersA.get("MX", {}), "get"):
+            tpMXSA = tensorParametersA.get("MX", {})
+            if tpMXSA and "localReadInstruction" in tpMXSA:
+                numReadsPerIterMXSA = getattr(writer.states, 'numReadsPerIterMXSA', 0)
+                numReadsPerUnrollMXSA = getattr(writer.states, 'numReadsPerUnrollMXSA', 0)
+                calculateLatencyLeft((numReadsPerIterMXSA//kernel["InnerUnroll"] - numReadsPerUnrollMXSA), tpMXSA["localReadInstruction"].blockWidth, tpMXSA["localReadInstruction"].issueLatency)
         # ds_read[M][1:]
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             calculateLatencyLeft((writer.states.numReadsPerIterMetadata//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMetadata), tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
+        # ds_read[MXSB][1:] - MX Scale for B (MI350/gfx950)
+        if kernel["ProblemType"]["MXBlockB"] and hasattr(tensorParametersB.get("MX", {}), "get"):
+            tpMXSB = tensorParametersB.get("MX", {})
+            if tpMXSB and "localReadInstruction" in tpMXSB:
+                numReadsPerIterMXSB = getattr(writer.states, 'numReadsPerIterMXSB', 0)
+                numReadsPerUnrollMXSB = getattr(writer.states, 'numReadsPerUnrollMXSB', 0)
+                calculateLatencyLeft((numReadsPerIterMXSB//kernel["InnerUnroll"] - numReadsPerUnrollMXSB), tpMXSB["localReadInstruction"].blockWidth, tpMXSB["localReadInstruction"].issueLatency)
         # get the latency before B[:1]
         if isLocalReadsOpt:
             tmpLatencyLeft = latencyLeft
@@ -458,8 +484,20 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     # put everything in the header:
     writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
+    # MX Scale A global read (MI350/gfx950)
+    if kernel["ProblemType"]["MXBlockA"]:
+        if hasattr(writer.codes, 'dtlsM0UpdateMXSA'):
+            writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
+        if hasattr(writer.codes, 'globalReadMXSA'):
+            writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
     writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
+    # MX Scale B global read (MI350/gfx950)
+    if kernel["ProblemType"]["MXBlockB"]:
+        if hasattr(writer.codes, 'dtlsM0UpdateMXSB'):
+            writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
+        if hasattr(writer.codes, 'globalReadMXSB'):
+            writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
     writer.codes.unrollLoopHeader.add(globalReadIncACode)
     writer.codes.unrollLoopHeader.add(globalReadIncBCode)
     # Dummy
@@ -469,7 +507,13 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
 
 def prepareGRInstToSched(writer, kernel, isNGLL):
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadA.header)
+    # MX Scale A header (MI350/gfx950)
+    if kernel["ProblemType"]["MXBlockA"] and hasattr(writer.codes, 'globalReadMXSA'):
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadB.header)
+    # MX Scale B header (MI350/gfx950)
+    if kernel["ProblemType"]["MXBlockB"] and hasattr(writer.codes, 'globalReadMXSB'):
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB.header)
 
     # Add all loads from middle as individual schedulable items
     # when using PGR2, put global read instruction right after corresponding localWrite instruction

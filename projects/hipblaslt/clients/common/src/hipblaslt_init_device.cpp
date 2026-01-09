@@ -324,13 +324,15 @@ void hipblaslt_init_device(ABC_dims                 abc,
             abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
         break;
     case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
-        hipblaslt_cerr << "hip device initialization does NOT support FP6 yet" << std::endl;
+        // Note: F6/F4 device initialization requires ROCm functions specific to gfx1250
+        // For gfx950, use mxDataGenerator with ROCROLLER enabled
+        hipblaslt_cerr << "hip device initialization does NOT support FP6 yet (use ROCROLLER)" << std::endl;
         break;
     case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
-        hipblaslt_cerr << "hip device initialization does NOT support BF6 yet" << std::endl;
+        hipblaslt_cerr << "hip device initialization does NOT support BF6 yet (use ROCROLLER)" << std::endl;
         break;
     case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
-        hipblaslt_cerr << "hip device initialization does NOT support FP4 yet" << std::endl;
+        hipblaslt_cerr << "hip device initialization does NOT support FP4 yet (use ROCROLLER)" << std::endl;
         break;
     default:
         hipblaslt_cerr << "Error type in hipblaslt_init_device" << std::endl;

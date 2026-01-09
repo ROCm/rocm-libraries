@@ -469,6 +469,13 @@ _defaultProblemType = {
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
     "SwizzleTensorB": False,
+    "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
+    "MetadataLayout": 0,
+    # MX Block - Microscaling support for gfx950 (MI350)
+    "MXBlockA": 0,
+    "MXBlockB": 0,
+    "DataTypeMXSA": "E8",
+    "DataTypeMXSB": "E8",
 }
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
@@ -537,7 +544,104 @@ _validGEMMTypes = [
     ("B8N", "F8N", "S"),
     ("F8B8N", "F8N", "S"),
     ("B8F8N", "F8N", "S"),
+    # MX F6/F4 types for gfx950 (MI350)
+    ("F4", "S", "S"),
+    ("F6", "S", "S"),
+    ("B6", "S", "S"),
+    ("F4", "F8", "S"),
+    ("F6", "F8", "S"),
+    ("B6", "F8", "S"),
+    ("F4", "B8", "S"),
+    ("F6", "B8", "S"),
+    ("B6", "B8", "S"),
+    ("F4", "H", "S"),
+    ("F6", "H", "S"),
+    ("B6", "H", "S"),
+    ("F4", "B", "S"),
+    ("F6", "B", "S"),
+    ("B6", "B", "S"),
+    # MX mixed-precision types
+    ("F8F6", "S", "S"),
+    ("F6F8", "S", "S"),
+    ("F8F4", "S", "S"),
+    ("F4F8", "S", "S"),
+    ("F6F4", "S", "S"),
+    ("F4F6", "S", "S"),
+    ("B8F6", "S", "S"),
+    ("F6B8", "S", "S"),
+    ("B8F4", "S", "S"),
+    ("F4B8", "S", "S"),
+    ("B6F4", "S", "S"),
+    ("F4B6", "S", "S"),
+    ("B6F6", "S", "S"),
+    ("F6B6", "S", "S"),
 ]
+
+# Valid MX GEMM types for gfx950 (MI350) - v_mfma_scale_xxx_f8f6f4 instruction
+_validMXGEMMTypes = [
+    ("F8", "S", "S"),
+    ("F8B8", "S", "S"),
+    ("B8", "S", "S"),
+    ("B8F8", "S", "S"),
+    ("F6", "S", "S"),
+    ("F6B6", "S", "S"),
+    ("B6", "S", "S"),
+    ("B6F6", "S", "S"),
+    ("F4", "S", "S"),
+    ("F8", "H", "S"),
+    ("F8B8", "H", "S"),
+    ("B8", "H", "S"),
+    ("B8F8", "H", "S"),
+    ("F6", "H", "S"),
+    ("F6B6", "H", "S"),
+    ("B6", "H", "S"),
+    ("B6F6", "H", "S"),
+    ("F4", "H", "S"),
+    ("F8", "B", "S"),
+    ("F8B8", "B", "S"),
+    ("B8", "B", "S"),
+    ("B8F8", "B", "S"),
+    ("F6", "B", "S"),
+    ("F6B6", "B", "S"),
+    ("B6", "B", "S"),
+    ("B6F6", "B", "S"),
+    ("F4", "B", "S"),
+    ("F8", "F8", "S"),
+    ("F8B8", "F8", "S"),
+    ("B8", "F8", "S"),
+    ("B8F8", "F8", "S"),
+    ("F6", "F8", "S"),
+    ("F6B6", "F8", "S"),
+    ("B6", "F8", "S"),
+    ("B6F6", "F8", "S"),
+    ("F4", "F8", "S"),
+    ("F8", "B8", "S"),
+    ("F8B8", "B8", "S"),
+    ("B8", "B8", "S"),
+    ("B8F8", "B8", "S"),
+    ("F6", "B8", "S"),
+    ("F6B6", "B8", "S"),
+    ("B6", "B8", "S"),
+    ("B6F6", "B8", "S"),
+    # Mixed precision MX types
+    ("F8F6", "S", "S"),
+    ("F6F8", "S", "S"),
+    ("F8F4", "S", "S"),
+    ("F4F8", "S", "S"),
+    ("F6F4", "S", "S"),
+    ("F4F6", "S", "S"),
+    ("B8F6", "S", "S"),
+    ("F6B8", "S", "S"),
+    ("B8F4", "S", "S"),
+    ("F4B8", "S", "S"),
+    ("B6F4", "S", "S"),
+    ("F4B6", "S", "S"),
+]
+
+# Valid MX block sizes for gfx950 (MI350)
+# MI350 only supports block size 32 (unlike MI450 which uses 16)
+# One scale value applies to 32 elements along the K dimension
+_validMXGEMMBlock = [32]
 
 
 # All HPA types are listed here (HPA=T). The name of the library logic files for these types is:
@@ -621,6 +725,17 @@ def problemTypeToEnum(problemType):
   if "DataTypeMetadata" in problemType:
       problemType["DataTypeMetadata"] = \
           problemType["DataTypeMetadata"].value
+  # MX Scale data types for gfx950 (MI350)
+  if "DataTypeMXSA" in problemType:
+      problemType["DataTypeMXSA"] = \
+          problemType["DataTypeMXSA"].value
+  else:
+      problemType["DataTypeMXSA"] = DataTypeEnum.E8M0
+  if "DataTypeMXSB" in problemType:
+      problemType["DataTypeMXSB"] = \
+          problemType["DataTypeMXSB"].value
+  else:
+      problemType["DataTypeMXSB"] = DataTypeEnum.E8M0
 
 class ProblemType(Mapping):
   ########################################
@@ -690,6 +805,17 @@ class ProblemType(Mapping):
         self["F32XdlMathOp"] = DataType(config["F32XdlMathOp"])
     else:
         self["F32XdlMathOp"] = DataType(DataTypeEnum.Float)
+
+    # MX Scale data types for gfx950 (MI350) - v_mfma_scale_xxx_f8f6f4 instruction
+    if "DataTypeMXSA" in config:
+      self["DataTypeMXSA"] = DataType(config["DataTypeMXSA"])
+    else:
+      self["DataTypeMXSA"] = DataType(DataTypeEnum.E8M0)
+
+    if "DataTypeMXSB" in config:
+      self["DataTypeMXSB"] = DataType(config["DataTypeMXSB"])
+    else:
+      self["DataTypeMXSB"] = DataType(DataTypeEnum.E8M0)
 
     # Modifying ComputeDataType for HHH+HPA: if (HHH+HPA), convert it to HHS_BH by setting ComputeDataType to S.
     if self["ComputeDataType"].isHalf() and self["DataType"].isHalf() and self["HighPrecisionAccumulate"]:
@@ -830,6 +956,21 @@ class ProblemType(Mapping):
     if gemmType not in _validGEMMTypes:
       raise Exception("This typed-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet."%(gemmType[0], gemmType[1], gemmType[2]))
 
+    # Check MX GEMM type validity for gfx950 (MI350)
+    if self["MXBlockA"] or self["MXBlockB"]:
+      if gemmType not in _validMXGEMMTypes:
+        raise Exception("This typed-MX-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet." % (gemmType[0], gemmType[1], gemmType[2]))
+      if self["MXBlockA"] == 0:
+        if self["MXBlockB"] not in _validMXGEMMBlock:
+          raise Exception("MXShape is not supported")
+      elif self["MXBlockB"] == 0:
+        if self["MXBlockA"] not in _validMXGEMMBlock:
+          raise Exception("MXShape is not supported")
+      elif (self["MXBlockA"] != self["MXBlockB"]):
+        raise Exception("MXShape is not supported")
+      elif (self["MXBlockA"] not in _validMXGEMMBlock):
+        raise Exception("MXShape is not supported")
+
   ########################################
   def initGEMM(self):
     sumIdx = 3 if self["Batched"] else 2
@@ -855,6 +996,12 @@ class ProblemType(Mapping):
     self["IndexAssignmentsLD"][0] = self["NumIndicesC"] + 1
     for i in range(1, len(self["IndexAssignmentsLD"])):
       self["IndexAssignmentsLD"][i] = self["IndexAssignmentsLD"][i-1] + 1
+
+    # MX scale index assignments for gfx950 (MI350)
+    if self["MXBlockA"]:
+      self["IndexAssignmentsMXSA"] = deepcopy(self["IndexAssignmentsA"])
+    if self["MXBlockB"]:
+      self["IndexAssignmentsMXSB"] = deepcopy(self["IndexAssignmentsB"])
 
   ########################################
   def isGEMM(self):
@@ -925,6 +1072,17 @@ class ProblemType(Mapping):
       if state["IndexAssignmentsB"][i] == state["IndexUnroll"]:
         state["IndexUnrollB"] = i
         break
+    # MX scale unroll index for gfx950 (MI350)
+    if state["MXBlockA"]:
+      for i in range(0, len(state["IndexAssignmentsMXSA"])):
+        if state["IndexAssignmentsMXSA"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSA"] = i
+          break
+    if state["MXBlockB"]:
+      for i in range(0, len(state["IndexAssignmentsMXSB"])):
+        if state["IndexAssignmentsMXSB"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSB"] = i
+          break
     for i in range(0, len(state["IndexAssignmentsMetadata"])):
       if state["IndexAssignmentsMetadata"][i] == state["IndexUnroll"]:
         state["IndexUnrollM"] = i
@@ -938,7 +1096,12 @@ class ProblemType(Mapping):
     else:
       dimList = state["IndicesFree"]
     state["Index01A"] = [i for i in state["IndexAssignmentsA"] if i in dimList][0]
+    # MX scale Index01 for gfx950 (MI350)
+    if state["MXBlockA"]:
+      state["Index01MXSA"] = [i for i in state["IndexAssignmentsMXSA"] if i in dimList][0]
     state["Index01B"] = [i for i in state["IndexAssignmentsB"] if i in dimList][0]
+    if state["MXBlockB"]:
+      state["Index01MXSB"] = [i for i in state["IndexAssignmentsMXSB"] if i in dimList][0]
     #print2("Index01A: %u" % state["Index01A"])
     #print2("Index01B: %u" % state["Index01B"])
     # Store code is optimized for 0 as the fastest-moving in memory
@@ -964,7 +1127,12 @@ class ProblemType(Mapping):
     unrollIdxA = state["IndexAssignmentsA"].index(state["IndexUnroll"])
     unrollIdxB = state["IndexAssignmentsB"].index(state["IndexUnroll"])
     state["TLUA"] = strideIdxA < unrollIdxA
+    # MX scale TLU for gfx950 (MI350)
+    if state["MXBlockA"]:
+      state["TLUMXSA"] = state["TLUA"]
     state["TLUB"] = strideIdxB < unrollIdxB
+    if state["MXBlockB"]:
+      state["TLUMXSB"] = state["TLUB"]
     #state["TLUB"] = True # hack
 
     if printIndexAssignmentInfo:
@@ -1018,6 +1186,13 @@ class ProblemType(Mapping):
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
+
+    # MX scale naming for gfx950 (MI350)
+    if self["MXBlockA"]:
+      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + str(self["MXBlockA"]))
+
+    if self["MXBlockB"]:
+      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
 
     if self["SwizzleTensorA"]:
       name.append("STA")

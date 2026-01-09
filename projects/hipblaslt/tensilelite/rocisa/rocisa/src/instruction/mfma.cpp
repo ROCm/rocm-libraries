@@ -62,6 +62,54 @@ namespace rocisa
             return DataType::Float8BFloat8;
         case InstType::INST_BF8_F8:
             return DataType::BFloat8Float8;
+        // MX F6/F4 types for gfx950 (MI350)
+        case InstType::INST_F6:
+            return DataType::Float6;
+        case InstType::INST_BF6:
+            return DataType::BFloat6;
+        case InstType::INST_F4:
+            return DataType::Float4;
+        // FP8 mixed combinations
+        case InstType::INST_F8_F6:
+            return DataType::Float8Float6;
+        case InstType::INST_F8_B6:
+            return DataType::Float8BFloat6;
+        case InstType::INST_F8_F4:
+            return DataType::Float8Float4;
+        // BF8 mixed combinations
+        case InstType::INST_B8_F6:
+            return DataType::BFloat8Float6;
+        case InstType::INST_B8_B6:
+            return DataType::BFloat8BFloat6;
+        case InstType::INST_B8_F4:
+            return DataType::BFloat8Float4;
+        // FP6 mixed combinations
+        case InstType::INST_F6_F8:
+            return DataType::Float6Float8;
+        case InstType::INST_F6_B8:
+            return DataType::Float6BFloat8;
+        case InstType::INST_F6_B6:
+            return DataType::Float6BFloat6;
+        case InstType::INST_F6_F4:
+            return DataType::Float6Float4;
+        // BF6 mixed combinations
+        case InstType::INST_B6_F8:
+            return DataType::BFloat6Float8;
+        case InstType::INST_B6_B8:
+            return DataType::BFloat6BFloat8;
+        case InstType::INST_B6_F6:
+            return DataType::BFloat6Float6;
+        case InstType::INST_B6_F4:
+            return DataType::BFloat6Float4;
+        // FP4 mixed combinations
+        case InstType::INST_F4_F8:
+            return DataType::Float4Float8;
+        case InstType::INST_F4_B8:
+            return DataType::Float4BFloat8;
+        case InstType::INST_F4_F6:
+            return DataType::Float4Float6;
+        case InstType::INST_F4_B6:
+            return DataType::Float4BFloat6;
         default:
             throw std::runtime_error("Unknown instruction type");
         }
@@ -159,5 +207,51 @@ void mfma_inst(nb::module_ m_mfma)
         .def("__str__", &rocisa::SMFMAInstruction::toString)
         .def("__deepcopy__", [](const rocisa::SMFMAInstruction& self, const nb::dict&) {
             return new rocisa::SMFMAInstruction(self);
+        });
+
+    // MXScaleMFMAInstruction for gfx950 (MI350) MX Scale operations
+    // Uses v_mfma_scale_f32_MxNxK_f8f6f4 instruction
+    nb::class_<rocisa::MXScaleMFMAInstruction, rocisa::Instruction>(m_mfma, "MXScaleMFMAInstruction")
+        .def(nb::init<rocisa::InstType,
+                      rocisa::InstType,
+                      const std::vector<int>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      rocisa::InstType,
+                      rocisa::InstType,
+                      bool,
+                      const std::string&>(),
+             nb::arg("instType"),
+             nb::arg("accType"),
+             nb::arg("variant"),
+             nb::arg("acc"),
+             nb::arg("a"),
+             nb::arg("b"),
+             nb::arg("acc2"),
+             nb::arg("scaleA"),
+             nb::arg("scaleB"),
+             nb::arg("instTypeA")   = rocisa::InstType::INST_F8,
+             nb::arg("instTypeB")   = rocisa::InstType::INST_F8,
+             nb::arg("enableScale") = true,
+             nb::arg("comment")     = "")
+        .def_rw("a", &rocisa::MXScaleMFMAInstruction::a)
+        .def_rw("b", &rocisa::MXScaleMFMAInstruction::b)
+        .def_rw("acc", &rocisa::MXScaleMFMAInstruction::acc)
+        .def_rw("acc2", &rocisa::MXScaleMFMAInstruction::acc2)
+        .def_rw("scaleA", &rocisa::MXScaleMFMAInstruction::scaleA)
+        .def_rw("scaleB", &rocisa::MXScaleMFMAInstruction::scaleB)
+        .def_rw("instTypeA", &rocisa::MXScaleMFMAInstruction::instTypeA)
+        .def_rw("instTypeB", &rocisa::MXScaleMFMAInstruction::instTypeB)
+        .def_rw("enableScale", &rocisa::MXScaleMFMAInstruction::enableScale)
+        .def("getParams", &rocisa::MXScaleMFMAInstruction::getParams)
+        .def("getIssueLatency", &rocisa::MXScaleMFMAInstruction::getIssueLatency)
+        .def_static("getDataFormatCode", &rocisa::MXScaleMFMAInstruction::getDataFormatCode)
+        .def("__str__", &rocisa::MXScaleMFMAInstruction::toString)
+        .def("__deepcopy__", [](const rocisa::MXScaleMFMAInstruction& self, const nb::dict&) {
+            return new rocisa::MXScaleMFMAInstruction(self);
         });
 }

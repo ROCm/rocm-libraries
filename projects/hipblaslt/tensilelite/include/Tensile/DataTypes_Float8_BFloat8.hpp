@@ -398,6 +398,13 @@ typedef struct BFloat8Float8{ uint8_t data;} BFloat8Float8;
 typedef struct Float8BFloat8_fnuz{ uint8_t data;} Float8BFloat8_fnuz;
 typedef struct BFloat8Float8_fnuz{ uint8_t data;} BFloat8Float8_fnuz;
 
+// MX (Microscaling) types - placeholder definitions for gfx950
+typedef struct Float6{ uint8_t data;} Float6;
+typedef struct BFloat6{ uint8_t data;} BFloat6;
+typedef struct Float4{ uint8_t data;} Float4;
+typedef struct E8M0{ uint8_t data;} E8M0;  // MX scale data type for gfx950
+typedef struct E5M3{ uint8_t data;} E5M3;
+
 
 namespace std
 {

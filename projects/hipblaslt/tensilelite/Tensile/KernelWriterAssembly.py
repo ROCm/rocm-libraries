@@ -48,7 +48,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   DSLoadB16, DSLoadB32, DSLoadB64, DSLoadU16, DSStoreB128, DSStoreB16, DSStoreB32, \
   DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, FlatLoadB64, \
   FlatLoadD16B16, FlatLoadD16HIB16, FlatStoreB128, FlatStoreB32, FlatStoreB64, \
-  FlatStoreD16B16, FlatStoreD16HIB16, MFMAInstruction, MUBUFReadInstruction, \
+  FlatStoreD16B16, FlatStoreD16HIB16, MFMAInstruction, MXScaleMFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, \
   SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCmpEQI32, \
@@ -572,6 +572,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("SrdB", 4, 4))
       self.addSgprVarToPool("SrdA")
       self.addSgprVarToPool("SrdB")
+      # MX Scale SRDs for MI350 (gfx950)
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.defineSgpr("SrdMXSA", 4, 4))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.defineSgpr("SrdMXSB", 4, 4))
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("SrdMetadata", 4, 4))
 
@@ -580,6 +585,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("ShadowLimitB", 2, 2))
       self.addSgprVarToPool("ShadowLimitA")
       self.addSgprVarToPool("ShadowLimitB")
+      # MX Scale shadow limits for MI350 (gfx950)
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("ShadowLimitMetadata", 2, 2))
 
@@ -590,6 +600,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("StaggerUIterDTV", 1))  # stagger loop iterations, used for various iter counts in the code
     module.add(self.defineSgpr("WrapUA", 2))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
     module.add(self.defineSgpr("WrapUB", 2))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
+    # MX Scale WrapU for MI350 (gfx950)
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.add(self.defineSgpr("WrapUMXSA", 2))  # Bytes to add to SrdMXSA to reset address
+    if kernel["ProblemType"]["MXBlockB"]:
+      module.add(self.defineSgpr("WrapUMXSB", 2))  # Bytes to add to SrdMXSB to reset address
     if kernel["ProblemType"]["Sparse"]:
       module.add(self.defineSgpr("WrapUMetadata", 2))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
     self.addSgprVarToPool("WrapUA")
@@ -598,6 +613,11 @@ class KernelWriterAssembly(KernelWriter):
 
     module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
     module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
+    # MX Scale GlobalReadIncs for MI350 (gfx950)
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.add(self.defineSgpr("GlobalReadIncsMXSA", self.states.mxsa.numSgprGlobalReadIncs))
+    if kernel["ProblemType"]["MXBlockB"]:
+      module.add(self.defineSgpr("GlobalReadIncsMXSB", self.states.mxsb.numSgprGlobalReadIncs))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(self.defineSgpr("GlobalReadIncsMetadata", self.states.m.numSgprGlobalReadIncs))
     self.addSgprVarToPool("GlobalReadIncsA")
@@ -656,6 +676,17 @@ class KernelWriterAssembly(KernelWriter):
       numberOfSgpr = self.states.b.numVgprGlobalReadOffsets if needFirstSgprOffset else (self.states.b.numVgprGlobalReadOffsets-1)
       if numberOfSgpr > 0:
         module.add(self.defineSgpr("ScalarGlobalReadOffsetB", numberOfSgpr))
+
+      # MX Scale ScalarGlobalReadOffset for MI350 (gfx950)
+      if kernel["ProblemType"]["MXBlockA"]:
+        numberOfSgpr = self.states.mxsa.numVgprGlobalReadOffsets - 1
+        if numberOfSgpr > 0:
+          module.add(self.defineSgpr("ScalarGlobalReadOffsetMXSA", numberOfSgpr))
+
+      if kernel["ProblemType"]["MXBlockB"]:
+        numberOfSgpr = self.states.mxsb.numVgprGlobalReadOffsets - 1
+        if numberOfSgpr > 0:
+          module.add(self.defineSgpr("ScalarGlobalReadOffsetMXSB", numberOfSgpr))
 
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         needFirstSgprOffset = kernel["DirectToLdsMetadata"] and kernel["UseInstOffsetForGRO"]
@@ -736,6 +767,14 @@ class KernelWriterAssembly(KernelWriter):
     moduleVgprMacroValuMPack = Module("VALUMetadata Pack Vgpr Macro")
     moduleVgprMacroG2LA = Module("G2LA Vgpr Macro")
     moduleVgprMacroG2LB = Module("G2LB Vgpr Macro")
+    # MX Scale VGPR Macros for MI350 (gfx950)
+    moduleVgprMacroMXS = Module("VALU/G2L MXS Vgpr Macro")
+    moduleVgprMacroValuMXSA = Module("VALUMXSA Vgpr Macro")
+    moduleVgprMacroValuMXSB = Module("VALUMXSB Vgpr Macro")
+    moduleVgprMacroValuMXSAPack = Module("VALUMXSA Pack Vgpr Macro")
+    moduleVgprMacroValuMXSBPack = Module("VALUMXSB Pack Vgpr Macro")
+    moduleVgprMacroG2LMXSA = Module("G2LMXSA Vgpr Macro")
+    moduleVgprMacroG2LMXSB = Module("G2LMXSB Vgpr Macro")
     module.add(RegSet("v", "vgprBase", self.states.startVgpr))
     if self.states.a.numVgprValu > 0: # Do not generate vgprValuA if numVgprValuA is 0
       numBiFactor = numBi
@@ -860,6 +899,44 @@ class KernelWriterAssembly(KernelWriter):
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
                 ri += self.states.m.numVgprValuPerBlock
+
+    # MX Scale VGPR macro definitions for MI350 (gfx950)
+    if kernel["ProblemType"]["MXBlockA"]:
+      ri = 0
+      if hasattr(self.states.mxsa, 'numVgprValu') and self.states.mxsa.numVgprValu > 0:
+        numBiFactor = numBi
+        if hasattr(self.states.mxsa, 'startVgprValu'):
+          moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprBase", self.states.mxsa.startVgprValu - self.states.startVgpr))
+          for bi in range(0, numBiFactor):
+            for iui in range(0, kernel["InnerUnroll"]):
+              moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
+              if hasattr(self.states.mxsa, 'numVgprValuPerBlock'):
+                ri += self.states.mxsa.numVgprValuPerBlock
+              else:
+                ri += 1  # Default: 1 VGPR per MX scale value
+
+    if kernel["ProblemType"]["MXBlockB"]:
+      ri = 0
+      if hasattr(self.states.mxsb, 'numVgprValu') and self.states.mxsb.numVgprValu > 0:
+        numBiFactor = numBi
+        if hasattr(self.states.mxsb, 'startVgprValu'):
+          moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprBase", self.states.mxsb.startVgprValu - self.states.startVgpr))
+          for bi in range(0, numBiFactor):
+            for iui in range(0, kernel["InnerUnroll"]):
+              moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
+              if hasattr(self.states.mxsb, 'numVgprValuPerBlock'):
+                ri += self.states.mxsb.numVgprValuPerBlock
+              else:
+                ri += 1  # Default: 1 VGPR per MX scale value
+
+    # Store MX Scale modules for later use
+    self.moduleVgprMacroMXS = moduleVgprMacroMXS
+    self.moduleVgprMacroValuMXSA = moduleVgprMacroValuMXSA
+    self.moduleVgprMacroValuMXSB = moduleVgprMacroValuMXSB
+    self.moduleVgprMacroValuMXSAPack = moduleVgprMacroValuMXSAPack
+    self.moduleVgprMacroValuMXSBPack = moduleVgprMacroValuMXSBPack
+    self.moduleVgprMacroG2LMXSA = moduleVgprMacroG2LMXSA
+    self.moduleVgprMacroG2LMXSB = moduleVgprMacroG2LMXSB
 
     if not kernel["LocalWriteUseSgprA"] and self.states.a.numVgprLocalWriteAddr > 0:
       module.add(RegSet("v", "vgprLocalWriteAddrA", \
@@ -996,6 +1073,14 @@ class KernelWriterAssembly(KernelWriter):
     module.add(self.moduleVgprMacroValuMPack)
     module.add(self.moduleVgprMacroG2LA)
     module.add(self.moduleVgprMacroG2LB)
+    # MX Scale VGPR macros for gfx950 MX F8/F6/F4
+    module.add(self.moduleVgprMacroMXS)
+    module.add(self.moduleVgprMacroValuMXSA)
+    module.add(self.moduleVgprMacroValuMXSB)
+    module.add(self.moduleVgprMacroValuMXSAPack)
+    module.add(self.moduleVgprMacroValuMXSBPack)
+    module.add(self.moduleVgprMacroG2LMXSA)
+    module.add(self.moduleVgprMacroG2LMXSB)
 
     ########################################
     # SGPR Macros
@@ -7136,6 +7221,93 @@ class KernelWriterAssembly(KernelWriter):
                                         acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                         a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
                                         comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+              # MX Scale MFMA for MI350 (gfx950) - v_mfma_scale_f32_MxNxK_f8f6f4
+              elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+                # Get MX Scale data type from kernel
+                dataType = kernel["ProblemType"]["DataType"]
+                if dataType.isFloat8() or dataType.isBFloat8():
+                  instTypeA = InstType.INST_F8 if dataType.isFloat8() else InstType.INST_BF8
+                  instTypeB = InstType.INST_F8 if dataType.isFloat8() else InstType.INST_BF8
+                elif dataType.isFloat6():
+                  instTypeA = InstType.INST_F6
+                  instTypeB = InstType.INST_F6
+                elif dataType.isBFloat6():
+                  instTypeA = InstType.INST_BF6
+                  instTypeB = InstType.INST_BF6
+                elif dataType.isFloat4():
+                  instTypeA = InstType.INST_F4
+                  instTypeB = InstType.INST_F4
+                else:
+                  instTypeA = InstType.INST_F8
+                  instTypeB = InstType.INST_F8
+
+                # Get scale value sources - need to read from MX scale value registers
+                scaleAStr = vgpr("ValuMXSA_X%u_I%u"%(unrollIdx % kernel["LoopIters"], 0))
+                scaleBStr = vgpr("ValuMXSB_X%u_I%u"%(unrollIdx % kernel["LoopIters"], 0))
+
+                imod.add(MXScaleMFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, \
+                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
+                                       scaleA=scaleAStr, scaleB=scaleBStr, \
+                                       instTypeA=instTypeA, instTypeB=instTypeB, enableScale=True, \
+                                       comment="MX scale MFMA: %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+              # MX MFMA without scale for MI350 (gfx950) - v_mfma_f32_MxNxK_f8f6f4 with cbsz/blgp
+              # This is for MX types (F6/F4) when MXBlockA/MXBlockB are not set (no scale operands)
+              # For gfx950, also use this path for 8bitFloat types to get 2x performance vs standard FP8 MFMA
+              elif kernel["ProblemType"]["DataType"].isMXFloat() or kernel["ProblemType"]["DataType"].isMixedMXFloat() or \
+                   (kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["ISA"][:2] == (9, 5) and kernel["MatrixInstK"] >= 64):
+                # Get MX data type from kernel for cbsz/blgp modifiers
+                # Use helper functions to map DataType to InstType for A and B matrices
+                dataType = kernel["ProblemType"]["DataType"]
+                # Map type string to InstType
+                typeToInstType = {
+                    'F8': InstType.INST_F8, 'B8': InstType.INST_BF8,
+                    'F6': InstType.INST_F6, 'B6': InstType.INST_BF6,
+                    'F4': InstType.INST_F4
+                }
+                # Get A and B types from DataType helper functions
+                typeA = dataType.getMXTypeA()
+                typeB = dataType.getMXTypeB()
+                if typeA and typeB:
+                  instTypeA = typeToInstType.get(typeA, InstType.INST_F8)
+                  instTypeB = typeToInstType.get(typeB, InstType.INST_F8)
+                else:
+                  # Fallback for basic types
+                  if dataType.isFloat6():
+                    instTypeA = InstType.INST_F6
+                    instTypeB = InstType.INST_F6
+                  elif dataType.isBFloat6():
+                    instTypeA = InstType.INST_BF6
+                    instTypeB = InstType.INST_BF6
+                  elif dataType.isFloat4():
+                    instTypeA = InstType.INST_F4
+                    instTypeB = InstType.INST_F4
+                  elif dataType.isFloat8():
+                    instTypeA = InstType.INST_F8
+                    instTypeB = InstType.INST_F8
+                  elif dataType.isBFloat8():
+                    instTypeA = InstType.INST_BF8
+                    instTypeB = InstType.INST_BF8
+                  elif dataType.isFloat8BFloat8():
+                    instTypeA = InstType.INST_F8
+                    instTypeB = InstType.INST_BF8
+                  elif dataType.isBFloat8Float8():
+                    instTypeA = InstType.INST_BF8
+                    instTypeB = InstType.INST_F8
+                  else:
+                    instTypeA = InstType.INST_F8
+                    instTypeB = InstType.INST_F8
+
+                # Use MXScaleMFMAInstruction with enableScale=False for v_mfma_f32_xxx_f8f6f4
+                # For enableScale=False, we need to pass placeholder registers for scaleA/scaleB
+                # (they won't be used in instruction output but are needed for constructor)
+                dummyScaleReg = sgpr(0)  # Placeholder, not used when enableScale=False
+                imod.add(MXScaleMFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, \
+                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
+                                       scaleA=dummyScaleReg, scaleB=dummyScaleReg, \
+                                       instTypeA=instTypeA, instTypeB=instTypeB, enableScale=False, \
+                                       comment="gfx950 MX MFMA (no scale): %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
@@ -7972,6 +8144,17 @@ class KernelWriterAssembly(KernelWriter):
                             tmpVgprPool.append(self.vgprPool.checkOut(1, 'destVgprHi'))
                             destVgprHi = tmpVgprPool[-1]
                   regIdx = r // 2
+                elif dataType.isFloat4():
+                  # Float4: 4 bits per element, 8 elements per 32-bit VGPR
+                  # gfx950 MX block size is 32, so pack 8 F4 elements per load
+                  numElementsPerLoad = 8
+                  regIdx = r // 8
+                elif dataType.is6bitFloat():
+                  # Float6/BFloat6: 6 bits per element
+                  # For gfx950, 16 elements of 6-bit = 96 bits (3 VGPRs)
+                  # Similar to gfx1250 handling
+                  numElementsPerLoad = 16
+                  regIdx = r // 4
                 elif dataType.isInt8x4() or dataType.isSingle():
                   # Only supported for buffer loads since it has OOB checks
                   if kernel["BufferLoad"]:
@@ -8089,6 +8272,16 @@ class KernelWriterAssembly(KernelWriter):
                       hi8  = (loopCnt%4) %2 if tP["glvw"]==1 else (r%4) %2
                       hi16 = False if tP["glvw"]==1 else (r%4)//2
                       comment="load one buffer value"
+
+                  # MX type handling: skip elements for packed loads
+                  if (dataType.isFloat4()) and not tP["isM"]:
+                    if numElementsPerLoad==8:
+                      # Pack 8 FP4 elements into a single load dword
+                      r += numElementsPerLoad-1 # skip next (numElementsPerLoad-1) element since we loaded dword here
+                      comment = "Load 8 elements for Float4 in single VGPR."
+                  if dataType.is6bitFloat() and not tP["isM"]:
+                    r += numElementsPerLoad-1
+                    comment = f"Load {numElementsPerLoad} elements for 6 bits"
 
                   useBuffer = not isTr
                   bpl = numElementsPerLoad*(tP["bpeGR"] if not tP["isM"] else tP["bpe"]) # bytesPerLoad

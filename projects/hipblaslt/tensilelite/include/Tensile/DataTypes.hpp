@@ -291,6 +291,139 @@ namespace TensileLite
     {
     };
 
+    // MX (Microscaling) types for gfx950
+    template <>
+    struct TypeInfo<Float6> : public BaseTypeInfo<Float6, rocisa::DataType::Float6, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<BFloat6>
+        : public BaseTypeInfo<BFloat6, rocisa::DataType::BFloat6, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Float4> : public BaseTypeInfo<Float4, rocisa::DataType::Float4, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E8M0> : public BaseTypeInfo<E8M0, rocisa::DataType::E8M0, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E5M3> : public BaseTypeInfo<E5M3, rocisa::DataType::E5M3, 1, false, false>
+    {
+    };
+
+    // Mixed precision MX types for gfx950 (MI350)
+    // These are marker types for A-type x B-type mixed precision - 25 combinations total
+    // FP8 (E4M3) combinations
+    typedef struct Float8Float6{ uint8_t data;} Float8Float6;    // FP8 x FP6
+    typedef struct Float8BFloat6{ uint8_t data;} Float8BFloat6;  // FP8 x BF6
+    typedef struct Float8Float4{ uint8_t data;} Float8Float4;    // FP8 x FP4
+    // BF8 (E5M2) combinations
+    typedef struct BFloat8Float6{ uint8_t data;} BFloat8Float6;  // BF8 x FP6
+    typedef struct BFloat8BFloat6{ uint8_t data;} BFloat8BFloat6;// BF8 x BF6
+    typedef struct BFloat8Float4{ uint8_t data;} BFloat8Float4;  // BF8 x FP4
+    // FP6 (E2M3) combinations
+    typedef struct Float6Float8{ uint8_t data;} Float6Float8;    // FP6 x FP8
+    typedef struct Float6BFloat8{ uint8_t data;} Float6BFloat8;  // FP6 x BF8
+    typedef struct Float6BFloat6{ uint8_t data;} Float6BFloat6;  // FP6 x BF6
+    typedef struct Float6Float4{ uint8_t data;} Float6Float4;    // FP6 x FP4
+    // BF6 (E3M2) combinations
+    typedef struct BFloat6Float8{ uint8_t data;} BFloat6Float8;  // BF6 x FP8
+    typedef struct BFloat6BFloat8{ uint8_t data;} BFloat6BFloat8;// BF6 x BF8
+    typedef struct BFloat6Float6{ uint8_t data;} BFloat6Float6;  // BF6 x FP6
+    typedef struct BFloat6Float4{ uint8_t data;} BFloat6Float4;  // BF6 x FP4
+    // FP4 (E2M1) combinations
+    typedef struct Float4Float8{ uint8_t data;} Float4Float8;    // FP4 x FP8
+    typedef struct Float4BFloat8{ uint8_t data;} Float4BFloat8;  // FP4 x BF8
+    typedef struct Float4Float6{ uint8_t data;} Float4Float6;    // FP4 x FP6
+    typedef struct Float4BFloat6{ uint8_t data;} Float4BFloat6;  // FP4 x BF6
+
+    template <>
+    struct TypeInfo<Float8Float6> : public BaseTypeInfo<Float8Float6, rocisa::DataType::Float8Float6, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Float8Float4> : public BaseTypeInfo<Float8Float4, rocisa::DataType::Float8Float4, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Float6Float4> : public BaseTypeInfo<Float6Float4, rocisa::DataType::Float6Float4, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Float6Float8> : public BaseTypeInfo<Float6Float8, rocisa::DataType::Float6Float8, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Float4Float8> : public BaseTypeInfo<Float4Float8, rocisa::DataType::Float4Float8, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Float4Float6> : public BaseTypeInfo<Float4Float6, rocisa::DataType::Float4Float6, 1, false, false>
+    {
+    };
+
+    // Additional MX mixed precision types for gfx950 (MI350) - 25 combinations total
+    template <>
+    struct TypeInfo<Float8BFloat6> : public BaseTypeInfo<Float8BFloat6, rocisa::DataType::Float8BFloat6, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<BFloat8Float6> : public BaseTypeInfo<BFloat8Float6, rocisa::DataType::BFloat8Float6, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<BFloat8BFloat6> : public BaseTypeInfo<BFloat8BFloat6, rocisa::DataType::BFloat8BFloat6, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<BFloat8Float4> : public BaseTypeInfo<BFloat8Float4, rocisa::DataType::BFloat8Float4, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<Float6BFloat8> : public BaseTypeInfo<Float6BFloat8, rocisa::DataType::Float6BFloat8, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<Float6BFloat6> : public BaseTypeInfo<Float6BFloat6, rocisa::DataType::Float6BFloat6, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<BFloat6Float8> : public BaseTypeInfo<BFloat6Float8, rocisa::DataType::BFloat6Float8, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<BFloat6BFloat8> : public BaseTypeInfo<BFloat6BFloat8, rocisa::DataType::BFloat6BFloat8, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<BFloat6Float6> : public BaseTypeInfo<BFloat6Float6, rocisa::DataType::BFloat6Float6, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<BFloat6Float4> : public BaseTypeInfo<BFloat6Float4, rocisa::DataType::BFloat6Float4, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<Float4BFloat8> : public BaseTypeInfo<Float4BFloat8, rocisa::DataType::Float4BFloat8, 1, false, false>
+    {
+    };
+    template <>
+    struct TypeInfo<Float4BFloat6> : public BaseTypeInfo<Float4BFloat6, rocisa::DataType::Float4BFloat6, 1, false, false>
+    {
+    };
+
     // Variant for constants
     using ConstantVariant = std::variant<float,
                                          double,
