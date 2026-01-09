@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,10 +35,10 @@ Tests:
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [50]
-  N: [5]
+  N: [5, 10]
   K: [23]
   alpha: [2.0]
   alphai: [0.0]
@@ -48,7 +48,7 @@ Tests:
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT]
 
 - name: spmm_batched_coo

@@ -114,7 +114,7 @@ target_include_directories(
 )
 
 # Automatically generate the flatbuffer headers from the schema files during build
-if(HIP_DNN_GENERATE_SDK_HEADERS)
+if(HIPDNN_GENERATE_SDK_HEADERS)
     set(SCHEMA_FILES
         schemas/batchnorm_attributes.fbs
         schemas/batchnorm_backward_attributes.fbs
