@@ -44,7 +44,7 @@ typedef struct {
     hipdnnBackendKnobType_t type;  // Enumerated knob type
     int64_t minimum_value;         // Minimum valid value
     int64_t maximum_value;         // Maximum valid value
-    int64_t stride;                // Step size between valid values
+    int64_t step;                // Step size between valid values
 } hipdnnBackendKnobInfo_t;
 ```
 
@@ -162,7 +162,7 @@ union KnobConstraint {
 table IntConstraint {
     min_value: int64;
     max_value: int64;
-    stride: int64 = 1;            // Step size (default 1)
+    step: int64 = 1;            // Step size (default 1)
     valid_values: [int64];        // Optional: explicit list of valid values
 }
 
