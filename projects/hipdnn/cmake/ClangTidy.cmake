@@ -66,43 +66,17 @@ function(add_clang_tidy_custom_target)
             VERBATIM
         )
 
-        # TODO: Create mechanism to collect this list automatically (eg. maybe switch from .cpp to
-        # .hip extensions or scan for all files that have the HIP language property set).
-        set(HIP_LANGUAGE_SOURCE_FILES_REGEXP "EnginePlugin1\.cpp")
-
         # Target for running tidy on all C++ language files (no HIP args)
         add_custom_target(
             tidy-cxx
             COMMAND
                 ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
                 -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -source-filter
-                "^(?!.*(_deps/|${HIP_LANGUAGE_SOURCE_FILES_REGEXP})).*" -quiet -j ${CLANG_TIDY_JOBS}
+                "^(?!.*(_deps/)).*" -quiet -j ${CLANG_TIDY_JOBS}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             COMMENT "Running clang-tidy on C++ files (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
         )
-
-        # Target for running tidy on the list of HIP files (using HIP args)
-        if(HIP_LANGUAGE_SOURCE_FILES_REGEXP)
-            if(NOT CLANG_TIDY_HIP_ARGS)
-                message(
-                    ${_not_found_log_level}
-                    "tidy args for HIP language files are not set, tidy is disabled for HIP language files."
-                )
-            else()
-                add_custom_target(
-                    tidy-hip
-                    COMMAND
-                        ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
-                        -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -source-filter
-                        ".*(${HIP_LANGUAGE_SOURCE_FILES_REGEXP})$" -quiet -j ${CLANG_TIDY_JOBS}
-                        ${CLANG_TIDY_HIP_ARGS}
-                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-                    COMMENT "Running clang-tidy on HIP files (${CLANG_TIDY_JOBS} parallel jobs)..."
-                    VERBATIM
-                )
-            endif()
-        endif()
     else()
         message(${_not_found_log_level}
                 "run-clang-tidy-20 not found. The 'tidy' targets will not be available."

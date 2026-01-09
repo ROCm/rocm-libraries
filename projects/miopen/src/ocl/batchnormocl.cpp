@@ -43,6 +43,7 @@
 #include <miopen/batchnorm/problem_description.hpp>
 #include <miopen/find_solution.hpp>
 
+#include <algorithm>
 #include <chrono>
 
 namespace miopen {
@@ -169,19 +170,20 @@ void BatchNormForwardTraining(const Handle& handle,
     const auto resultsave    = resultSaveMean != nullptr && resultSaveInvVariance != nullptr;
     const auto resultrunning = resultRunningMean != nullptr && resultRunningVariance != nullptr;
 
-    const auto problem = batchnorm::ProblemDescription{bn_mode,
-                                                       xDesc,
-                                                       yDesc,
-                                                       scaleDesc,
-                                                       biasDesc,
-                                                       savedMeanDesc,
-                                                       savedVarianceDesc,
-                                                       expAvgFactor,
-                                                       epsilon,
-                                                       resultsave,
-                                                       resultrunning,
-                                                       size_t(0.6f * handle.GetMaxComputeUnits()),
-                                                       activDesc};
+    const auto problem = batchnorm::ProblemDescription{
+        bn_mode,
+        xDesc,
+        yDesc,
+        scaleDesc,
+        biasDesc,
+        savedMeanDesc,
+        savedVarianceDesc,
+        expAvgFactor,
+        epsilon,
+        resultsave,
+        resultrunning,
+        std::max(size_t(1), size_t(0.6f * handle.GetMaxComputeUnits())),
+        activDesc};
 
     const auto algo = bn_mode == miopenBNSpatial
                           ? AlgorithmName{"miopenBatchNormForwardTrainingSpatial"}
@@ -427,18 +429,19 @@ void BatchNormBackward(const Handle& handle,
 
     const auto useSaved = savedMean != nullptr && savedInvVariance != nullptr;
 
-    const auto problem = batchnorm::ProblemDescription{bn_mode,
-                                                       xDesc,
-                                                       dyDesc,
-                                                       dxDesc,
-                                                       scaleDesc,
-                                                       biasDesc,
-                                                       savedMeanDesc,
-                                                       savedVarianceDesc,
-                                                       epsilon,
-                                                       useSaved,
-                                                       size_t(0.6f * handle.GetMaxComputeUnits()),
-                                                       activDesc};
+    const auto problem = batchnorm::ProblemDescription{
+        bn_mode,
+        xDesc,
+        dyDesc,
+        dxDesc,
+        scaleDesc,
+        biasDesc,
+        savedMeanDesc,
+        savedVarianceDesc,
+        epsilon,
+        useSaved,
+        std::max(size_t(1), size_t(0.6f * handle.GetMaxComputeUnits())),
+        activDesc};
 
     const auto algo = bn_mode == miopenBNSpatial
                           ? AlgorithmName{"miopenBatchNormBackwardPropSpatial"}
