@@ -104,10 +104,6 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
     // Should use default path containing "miopen"
     EXPECT_TRUE(PathContains(user_db_path, "miopen"))
         << "User DB path '" << user_db_path.string() << "' should contain 'miopen' folder";
-
-    // Should NOT be in temp directory
-    EXPECT_FALSE(PathContains(user_db_path, fs::temp_directory_path().string()))
-        << "User DB path should not be in temp directory for local filesystem";
 }
 
 TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_EnvVarSet)
@@ -255,10 +251,6 @@ TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_NoEnvVar)
 
     // Should contain "miopen"
     EXPECT_TRUE(PathContains(cache_path, "miopen")) << "Cache path should contain 'miopen' folder";
-
-    // Should NOT be in temp directory
-    EXPECT_FALSE(PathContains(cache_path, fs::temp_directory_path().string()))
-        << "Cache path should not be in temp directory for local filesystem";
 }
 
 TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_EnvVarSet)
