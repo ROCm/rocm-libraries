@@ -424,8 +424,10 @@ namespace rocRoller
                 std::tie(contiguousBytes, paddingBytes) = m_params->padLDS.at(info.layoutType);
                 if(contiguousBytes == -1)
                 {
-                    contiguousBytes = info.loadInstructionByteWidth * info.loadLaneWidth;
-                    // TODO For direct-to-lds, this is correct.
+                    Throw<FatalError>("Automatic padding not implemented yet.");
+                    // Note: For direct-to-lds, this is correct:
+                    //
+                    //     contiguousBytes = info.loadInstructionByteWidth * info.loadLaneWidth;
                     //
                     // For other loads, this makes blocks as wide as a
                     // wave will load, which might not be optimal.  It
@@ -433,9 +435,7 @@ namespace rocRoller
                 }
                 if(paddingBytes == -1)
                 {
-                    paddingBytes = computeDefaultLDSPaddingElements(graph, info, m_context)
-                                   * DataTypeInfo::Get(info.dataType).elementBits / 8u;
-                    // TODO This isn't right
+                    Throw<FatalError>("Automatic padding not implemented yet.");
                 }
                 return {contiguousBytes, paddingBytes};
             }

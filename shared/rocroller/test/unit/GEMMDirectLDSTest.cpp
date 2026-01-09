@@ -241,8 +241,8 @@ namespace GEMMTests
 
         // This kernel uses 32bit buffer_load instructions; and
         // therefore each workgroup loads 1024 bytes per instruction
-        gemm.padA = {-1, 64};
-        gemm.padB = {-1, 96};
+        gemm.padA = {1024, 64};
+        gemm.padB = {1024, 96};
         basicGEMM<float>(gemm);
 
         auto instructions    = m_context->instructions()->toString();
