@@ -171,12 +171,15 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            using config = wrapped_scan_by_key_config<Config, key_type, AccType>;
+            using Selector = scan_by_key_config_selector<key_type, AccType>;
 
             detail::target_arch target_arch;
             ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            const scan_by_key_config_params params
-                = dispatch_target_arch<config, false>(target_arch);
+            detail::gpu target_gpu;
+            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+            const target current_target(target_arch, target_gpu);
+            const auto   params = get_config<Selector>(Config{}, current_target);
 
             using wrapped_type     = ::rocprim::tuple<AccType, bool>;
             using scan_state_type  = detail::lookback_scan_state<wrapped_type, use_sleepy_scan>;
@@ -336,12 +339,13 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                         last_keys_of_each_block,
                         ordered_bid);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    device_scan_by_key_kernel,
-                                                                    dim3(scan_blocks),
-                                                                    dim3(block_size),
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(
+                    execute_launch_plan<Config, Selector>(current_target,
+                                                          device_scan_by_key_kernel,
+                                                          dim3(scan_blocks),
+                                                          dim3(block_size),
+                                                          0,
+                                                          stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
                                                             current_size,
                                                             start);

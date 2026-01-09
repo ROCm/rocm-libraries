@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/backend/BackendWrapper.hpp>
 #include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
@@ -20,6 +21,7 @@
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
@@ -943,6 +945,35 @@ public:
             std::make_shared<PointwiseNode>(std::move(attributes), graph_attributes));
 
         return out0;
+    }
+
+    std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
+                                             std::shared_ptr<TensorAttributes> b,
+                                             MatmulAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Matmul_" + std::to_string(_sub_nodes.size()));
+        }
+        if(a->get_name().empty())
+        {
+            a->set_name(attributes.get_name() + "::A");
+        }
+        if(b->get_name().empty())
+        {
+            b->set_name(attributes.get_name() + "::B");
+        }
+
+        auto c = outputTensor(attributes.get_name() + "::C");
+
+        attributes.set_a(std::move(a));
+        attributes.set_b(std::move(b));
+        attributes.set_c(c);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MatmulNode>(std::move(attributes), graph_attributes));
+
+        return c;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

@@ -89,6 +89,8 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::MatmulAttributes);
         default:
             throw std::invalid_argument("Node attributes type is not recognized");
         }
