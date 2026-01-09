@@ -491,6 +491,10 @@ private:
                 {
                     auto attr = BatchnormAttributes::fromFlatBuffer(
                         fbNode->attributes_as_BatchnormAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(
                         std::make_shared<BatchnormNode>(std::move(attr), graph_attributes));
                     break;
@@ -499,6 +503,10 @@ private:
                 {
                     auto attr = BatchnormBackwardAttributes::fromFlatBuffer(
                         fbNode->attributes_as_BatchnormBackwardAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(
                         std::make_shared<BatchnormBackwardNode>(std::move(attr), graph_attributes));
                     break;
@@ -507,6 +515,10 @@ private:
                 {
                     auto attr = BatchnormInferenceAttributes::fromFlatBuffer(
                         fbNode->attributes_as_BatchnormInferenceAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNode>(
                         std::move(attr), graph_attributes));
                     break;
@@ -516,6 +528,10 @@ private:
                 {
                     auto attr = BatchnormInferenceAttributesVarianceExt::fromFlatBuffer(
                         fbNode->attributes_as_BatchnormInferenceAttributesVarianceExt(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
                         std::move(attr), graph_attributes));
                     break;
@@ -524,6 +540,10 @@ private:
                 {
                     auto attr = ConvFpropAttributes::fromFlatBuffer(
                         fbNode->attributes_as_ConvolutionFwdAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(
                         std::make_shared<ConvolutionFpropNode>(std::move(attr), graph_attributes));
                     break;
@@ -532,6 +552,10 @@ private:
                 {
                     auto attr = ConvDgradAttributes::fromFlatBuffer(
                         fbNode->attributes_as_ConvolutionBwdAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(
                         std::make_shared<ConvolutionDgradNode>(std::move(attr), graph_attributes));
                     break;
@@ -540,6 +564,10 @@ private:
                 {
                     auto attr = ConvWgradAttributes::fromFlatBuffer(
                         fbNode->attributes_as_ConvolutionWrwAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(
                         std::make_shared<ConvolutionWgradNode>(std::move(attr), graph_attributes));
                     break;
@@ -548,8 +576,24 @@ private:
                 {
                     auto attr = PointwiseAttributes::fromFlatBuffer(
                         fbNode->attributes_as_PointwiseAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
                     _sub_nodes.emplace_back(
                         std::make_shared<PointwiseNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+                {
+                    auto attr = MatmulAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_MatmulAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -866,10 +910,16 @@ public:
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
     /// Serialize to JSON (const version)
     /// Returns error if tensor UIDs are not set
+    ///
+    /// Flow: Frontend → FlatBuffer binary → JSON
+    /// GetGraph() is zero-copy (just a pointer into the buffer), so the only
+    /// serialization cost is buildFlatbufferOperationGraphConst(). This keeps
+    /// JSON serialization logic centralized in data_sdk.
     Error serialize(nlohmann::json& j) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
         auto buffer = buildFlatbufferOperationGraphConst();
+        // GetGraph returns a pointer view into buffer (zero-copy, no unpacking)
         auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
 
         j = *sdkGraph;
