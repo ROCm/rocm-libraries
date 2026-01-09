@@ -275,12 +275,12 @@ namespace
                                         rocblas_stride d_st_or_of,
                                         rocblas_int    batch_count)
     {
-        int     thx   = threadIdx.x; // thread's m position in C
-        int     thy   = threadIdx.y; // thread's n position in C
-        int64_t idt   = int64_t(DIM_M) * thy + thx; // thread's number
-        int     blx   = blockIdx.x; // block's m position
-        int     bly   = blockIdx.y; // block's n position
-        int     batch = blockIdx.z; // block's matrix in the batch
+        int      thx   = threadIdx.x; // thread's m position in C
+        int      thy   = threadIdx.y; // thread's n position in C
+        int64_t  idt   = int64_t(DIM_M) * thy + thx; // thread's number
+        int      blx   = blockIdx.x; // block's m position
+        int      bly   = blockIdx.y; // block's n position
+        uint32_t batch = blockIdx.z; // block's matrix in the batch
 
 #if DEVICE_GRID_YZ_16BIT
         DEVICE_GRID_SETUP
@@ -460,12 +460,12 @@ namespace
                                 rocblas_stride d_st_or_of,
                                 rocblas_int    batch_count)
     {
-        int     thx   = threadIdx.x; // thread's m position in C
-        int     thy   = threadIdx.y; // thread's n position in C
-        int64_t idt   = int64_t(DIM_M) * thy + thx; // thread's number
-        int     blx   = blockIdx.x; // block's m position
-        int     bly   = blockIdx.y; // block's n position
-        int     batch = blockIdx.z; // block's matrix in the batch
+        int      thx   = threadIdx.x; // thread's m position in C
+        int      thy   = threadIdx.y; // thread's n position in C
+        int64_t  idt   = int64_t(DIM_M) * thy + thx; // thread's number
+        int      blx   = blockIdx.x; // block's m position
+        int      bly   = blockIdx.y; // block's n position
+        uint32_t batch = blockIdx.z; // block's matrix in the batch
 
 #if DEVICE_GRID_YZ_16BIT
         DEVICE_GRID_SETUP
