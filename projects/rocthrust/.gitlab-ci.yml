@@ -297,9 +297,7 @@ test:doc:
             BUILD_VERSION: 17
   script:
     - cd $CI_PROJECT_DIR/build
-    - cmake
-      -D CMAKE_PREFIX_PATH=/opt/rocm
-      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - ./generate_resource_spec resources.json
     - cat ./resources.json
     # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
     # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
