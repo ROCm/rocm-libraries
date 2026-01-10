@@ -677,21 +677,31 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
             constexpr unsigned int unrollHint =
                 mio_bn_config::hw > mio_bn_config::loop_unroll_max_hw ? 1 : 2;
 
-            static_unroll_count<unsigned int, 0, mio_bn_config::n_elements, 1, unrollHint>{
-                [&](unsigned int n) { // apply normalization
-                    index = index_base + n * MIO_BN_CHW;
-                    value = *((const FpLsType*)(in + index));
-                    inhat = cast<FpPrecLsType>(value);
-                    inhat = (inhat - mean) * invVariance;
-                    inhat = miopen::fma(
-                        cast<FpPrecLsType>(pvt_scale), inhat, cast<FpPrecLsType>(pvt_bias));
+            // This method of unrolling is used as opposed to
+            // the struct static_unroll_count due to a bug where
+            // the kernel writes a tensor for the output twice bigger
+            // than it should be, and it repeats values equal to the number of channels
+            // in the examined test cases that were failing.
 
-                    value = cast<FpLsType>(miopen::batchnorm::activation_op(
-                        inhat, cast<FpPrecLsType>(alpha), cast<FpPrecLsType>(beta)));
+#if(MIO_BN_HW > MIO_BN_LOOP_UNROLL_MAXHW)
+            for(unsigned int n = 0; n < MIO_BN_N_ELEMENTS; n++)
+#else
+#pragma unroll(2)
+            for(unsigned int n = 0; n < MIO_BN_N_ELEMENTS; n++)
+#endif
+            {
+                index = index_base + n * MIO_BN_CHW;
+                value = *((const FpLsType*)(in + index));
+                inhat = cast<FpPrecLsType>(value);
+                inhat = (inhat - mean) * invVariance;
+                inhat =
+                    miopen::fma(cast<FpPrecLsType>(pvt_scale), inhat, cast<FpPrecLsType>(pvt_bias));
 
-                    *((FpLsType*)(out + index)) = value;
-                } // end for(n)
-            };
+                value = cast<FpLsType>(miopen::batchnorm::activation_op(
+                    inhat, cast<FpPrecLsType>(alpha), cast<FpPrecLsType>(beta)));
+
+                *((FpLsType*)(out + index)) = value;
+            } // end for(n)
 
         } // end if(inImgIndex)
     }     // end spatial norm
