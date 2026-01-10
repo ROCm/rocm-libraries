@@ -74,14 +74,21 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   )
   if(GPU_TEST_TARGETS)
     foreach(GPU_TARGET IN LISTS GPU_TEST_TARGETS)
-      add_relative_test("${GPU_TARGET}-${TEST_NAME}" ${TEST_TARGET})
+      add_relative_test("${GPU_TARGET}-${TEST_NAME}" ${TEST_TARGET} ${GPU_TARGET})
+      # note: the set_tests_properties call below will set the test properties in the build directory.
+      # They also need to be set in the install directory. This is done in the call to add_relative_test (above),
+      # by writing to the install_CTestTestfile.cmake file used in the install).
       set_tests_properties("${GPU_TARGET}-${TEST_NAME}"
           PROPERTIES
               RESOURCE_GROUPS "1,${GPU_TARGET}:1"
       )
     endforeach()
   else()
-      add_relative_test(${TEST_NAME} ${TEST_TARGET})
+      add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+              RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
+      )
   endif()
 
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
