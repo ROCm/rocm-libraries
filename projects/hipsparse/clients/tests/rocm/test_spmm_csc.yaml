@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,9 +37,9 @@ Tests:
   function: spmm_csc
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [50]
-  N: [5]
-  K: [84]
+  M: [89]
+  N: [11, 18]
+  K: [72]
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
@@ -52,7 +52,7 @@ Tests:
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
              HIPSPARSE_SPMM_CSR_ALG2]
-
+             
 - name: spmm_csc
   category: pre_checkin
   function: spmm_csc
@@ -78,7 +78,7 @@ Tests:
              nos5]
 
 - name: spmm_csc
-  category: pre_checkin
+  category: nightly
   function: spmm_csc
   indextype: *i64
   precision: *double_only_precisions

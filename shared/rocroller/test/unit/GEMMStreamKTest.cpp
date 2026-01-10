@@ -31,6 +31,8 @@
 
 #include "GEMMTestBase.hpp"
 
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
+
 namespace GEMMTests
 {
     using namespace rocRoller;
@@ -75,9 +77,10 @@ namespace GEMMTests
 
     TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMM)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
+            GTEST_SKIP() << "Skipping StreamKMultipleFixupsTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
         }
 
         auto [problemConfig, mode, loadPathA, loadPathB, storeLDSD] = std::get<1>(GetParam());
@@ -126,10 +129,10 @@ namespace GEMMTests
 
     TEST_P(StreamKWGMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
-            GTEST_SKIP()
-                << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test: CDNA1 not supported";
+            GTEST_SKIP() << "Skipping StreamKWGMTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
         }
 
         GEMMProblem gemm;
@@ -158,9 +161,10 @@ namespace GEMMTests
 
     TEST_P(StreamKTestGPU, GPU_BasicGEMM)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
+            GTEST_SKIP() << "Skipping StreamKTestGPU on architecture "
+                         << m_context->targetArchitecture().target().toString();
         }
 
         auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero, prefetchConfig]

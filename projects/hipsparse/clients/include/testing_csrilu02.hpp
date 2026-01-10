@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -287,14 +287,14 @@ void testing_csrilu02(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(result2.data(), dval2, sizeof(T) * nnz, hipMemcpyDeviceToHost));
 
         // Host csrilu02
-        int position_gold = csrilu0(m,
-                                    hcsr_row_ptr.data(),
-                                    hcsr_col_ind.data(),
-                                    hcsr_val.data(),
-                                    idx_base,
-                                    boost,
-                                    boost_tol,
-                                    boost_val);
+        int position_gold = host_csrilu0(m,
+                                         hcsr_row_ptr.data(),
+                                         hcsr_col_ind.data(),
+                                         hcsr_val.data(),
+                                         idx_base,
+                                         boost,
+                                         boost_tol,
+                                         boost_val);
 
         unit_check_general(1, 1, 1, &position_gold, &hposition_1);
         unit_check_general(1, 1, 1, &position_gold, &hposition_2);
