@@ -288,6 +288,25 @@ const char* hipblasOperation_to_string(hipblasOperation_t op)
     }
 }
 
+const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::ScalingFormat type)
+{
+    switch(type)
+    {
+    case RocblasltContractionProblem::ScalingFormat::None:
+        return "None";
+    case RocblasltContractionProblem::ScalingFormat::Scalar:
+        return "Scalar";
+    case RocblasltContractionProblem::ScalingFormat::Vector:
+        return "Vector";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+        return "Block_32_UE8M0";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return "Block_32_UE8M0_32_8_EXT";
+    default:
+        return "Invalid";
+    }
+}
+
 const char* rocblaslt_layer_mode2string(rocblaslt_layer_mode layer_mode)
 {
     switch(layer_mode)
