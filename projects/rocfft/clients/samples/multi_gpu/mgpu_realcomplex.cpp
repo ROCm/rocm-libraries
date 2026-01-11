@@ -41,12 +41,23 @@ int main(int argc, char* argv[])
     // Gpu device ids:
     std::vector<size_t> devices = {0, 1};
 
+    // Is the transform in-place or out-of-place:
+    bool inplace = false;
+    // FIXME: actually use this.
+    
     // Command-line options:
     CLI::App app{"rocfft sample command line options"};
     app.add_option("--length", length, "2-D FFT size (eg: --length 256 256)");
     app.add_option(
         "--devices", devices, "List of devices to use separated by spaces (eg: --devices 1 3)");
-
+    app.add_flag("-o, --notInPlace", "")->each([&](const std::string&) {
+        inplace = false;
+    });
+    app.add_flag("-i, --inPlace", "")->each([&](const std::string&) {
+        inplace = true;
+    });
+    
+    
     try
     {
         app.parse(argc, argv);
@@ -175,7 +186,7 @@ int main(int argc, char* argv[])
     std::vector<size_t> outlength = length;
     outlength[0] = outlength[0] / 2 + 1;
     
-    // For the output, we store the output format so that we can view the output of the transform.
+    // For the output, we store the format so that we can view the output of the transform.
     std::vector<std::vector<size_t>> outbrick_lower(gpu_out.size());
     std::vector<std::vector<size_t>> outbrick_upper(gpu_out.size());
     std::vector<std::vector<size_t>> outbrick_stride(gpu_out.size());
@@ -191,7 +202,7 @@ int main(int argc, char* argv[])
                 = idx * (outlength[1] / gpu_out.size()) + std::min(idx, outlength[1] % gpu_out.size());
             outbrick_lower[idx]   = {0, outbrick_lower1, 0};
             outbrick_upper[idx]   = {outlength[0], outbrick_lower1 + outbrick_length1, 1};
-            outbrick_stride[idx] = {1, length[0], outbrick_upper[idx][1] - outbrick_lower[idx][1]};
+            outbrick_stride[idx] = {1, outlength[0], outbrick_upper[idx][1] - outbrick_lower[idx][1]};
 
             rocfft_brick outbrick = nullptr;
             rocfft_brick_create(&outbrick,
