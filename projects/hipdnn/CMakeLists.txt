@@ -101,13 +101,45 @@ install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
         DESTINATION ${HIPDNN_TEST_REFERENCE_INSTALL_DIR}
 )
 
-option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
-option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
-option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
-option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from schema during build"
-       ON
-)
-option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
+# Migrate HIP_DNN_BUILD_BACKEND -> HIPDNN_BUILD_BACKEND
+if(DEFINED HIP_DNN_BUILD_BACKEND)
+    set(HIPDNN_BUILD_BACKEND ${HIP_DNN_BUILD_BACKEND} CACHE BOOL "Build the backend code" FORCE)
+    unset(HIP_DNN_BUILD_BACKEND CACHE)
+    message(DEPRECATION "HIP_DNN_BUILD_BACKEND has been renamed to HIPDNN_BUILD_BACKEND. Please update your build scripts to use -DHIPDNN_BUILD_BACKEND instead.")
+endif()
+option(HIPDNN_BUILD_BACKEND "Build the backend code" ON)
+
+# Migrate HIP_DNN_BUILD_FRONTEND -> HIPDNN_BUILD_FRONTEND
+if(DEFINED HIP_DNN_BUILD_FRONTEND)
+    set(HIPDNN_BUILD_FRONTEND ${HIP_DNN_BUILD_FRONTEND} CACHE BOOL "Build the frontend code" FORCE)
+    unset(HIP_DNN_BUILD_FRONTEND CACHE)
+    message(DEPRECATION "HIP_DNN_BUILD_FRONTEND has been renamed to HIPDNN_BUILD_FRONTEND. Please update your build scripts to use -DHIPDNN_BUILD_FRONTEND instead.")
+endif()
+option(HIPDNN_BUILD_FRONTEND "Build the frontend code" ON)
+
+# Migrate HIP_DNN_BUILD_PLUGINS -> HIPDNN_BUILD_PLUGINS
+if(DEFINED HIP_DNN_BUILD_PLUGINS)
+    set(HIPDNN_BUILD_PLUGINS ${HIP_DNN_BUILD_PLUGINS} CACHE BOOL "Builds the plugins as part of the main cmake" FORCE)
+    unset(HIP_DNN_BUILD_PLUGINS CACHE)
+    message(DEPRECATION "HIP_DNN_BUILD_PLUGINS has been renamed to HIPDNN_BUILD_PLUGINS. Please update your build scripts to use -DHIPDNN_BUILD_PLUGINS instead.")
+endif()
+option(HIPDNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
+
+# Migrate HIP_DNN_GENERATE_SDK_HEADERS -> HIPDNN_GENERATE_SDK_HEADERS
+if(DEFINED HIP_DNN_GENERATE_SDK_HEADERS)
+    set(HIPDNN_GENERATE_SDK_HEADERS ${HIP_DNN_GENERATE_SDK_HEADERS} CACHE BOOL "Automatically generates sdk headers from schema during build" FORCE)
+    unset(HIP_DNN_GENERATE_SDK_HEADERS CACHE)
+    message(DEPRECATION "HIP_DNN_GENERATE_SDK_HEADERS has been renamed to HIPDNN_GENERATE_SDK_HEADERS. Please update your build scripts to use -DHIPDNN_GENERATE_SDK_HEADERS instead.")
+endif()
+option(HIPDNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from schema during build" ON)
+
+# Migrate HIP_DNN_SKIP_TESTS -> HIPDNN_SKIP_TESTS
+if(DEFINED HIP_DNN_SKIP_TESTS)
+    set(HIPDNN_SKIP_TESTS ${HIP_DNN_SKIP_TESTS} CACHE BOOL "Skips building all tests" FORCE)
+    unset(HIP_DNN_SKIP_TESTS CACHE)
+    message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
+endif()
+option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
@@ -170,11 +202,11 @@ add_link_options(${EXTRA_LINK_OPTIONS})
 
 add_subdirectory(data_sdk)
 
-if(HIP_DNN_BUILD_BACKEND)
+if(HIPDNN_BUILD_BACKEND)
     add_subdirectory(backend)
 endif()
 
-if(HIP_DNN_BUILD_FRONTEND)
+if(HIPDNN_BUILD_FRONTEND)
     add_subdirectory(frontend)
 endif()
 
@@ -183,12 +215,12 @@ add_subdirectory(plugin_sdk)
 
 add_subdirectory(tests)
 
-if(HIP_DNN_BUILD_PLUGINS)
+if(HIPDNN_BUILD_PLUGINS)
     file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
     add_subdirectory(plugins)
 endif()
 
-if(NOT HIP_DNN_SKIP_TESTS)
+if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
     finalize_test_targets()
@@ -200,7 +232,7 @@ add_clang_tidy_custom_target()
 if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
-    if(HIP_DNN_BUILD_PLUGINS)
+    if(HIPDNN_BUILD_PLUGINS)
         set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT
             -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object
             ./${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests
@@ -270,10 +302,10 @@ if(HIPDNN_ENABLE_COVERAGE)
         # cmake-format: on
     endfunction()
 
-    if(HIP_DNN_SKIP_TESTS)
+    if(HIPDNN_SKIP_TESTS)
         message(
             WARNING
-                "\nThe code coverage targets depend on test targets but test targets don't exist because HIP_DNN_SKIP_TESTS is enabled."
+                "\nThe code coverage targets depend on test targets but test targets don't exist because HIPDNN_SKIP_TESTS is enabled."
         )
     else()
         add_custom_coverage_target(code_coverage check) # code_coverage depends on 'check'
@@ -293,6 +325,6 @@ if(HIPDNN_ENABLE_COVERAGE)
 
 endif()
 
-if(NOT HIP_DNN_SKIP_TESTS)
+if(NOT HIPDNN_SKIP_TESTS)
     install_hipdnn_ctest_files()
 endif()
