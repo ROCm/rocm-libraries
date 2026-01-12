@@ -69,6 +69,7 @@ set(STINKYTOFU_SOURCE_FILES
     # ir/passes/IntrinsicExpansionPass.cpp  # TODO: Fix API compatibility
     ir/passes/ToStinkyAsmPass.cpp
     ir/passes/CompositeInstructionLoweringPass.cpp
+    ir/passes/HighLevelPeepholePass.cpp
     ir/asm/CFGBuilderPass.cpp
     ir/asm/PeepholeOptimizationPass.cpp
     ir/asm/DeadCodeEliminationPass.cpp
@@ -135,7 +136,15 @@ if(STINKYTOFU_BUILD_PYTHON)
 endif()
 
 # Now create stinkytofu library which depends on tablegen_generated
-add_library(stinkytofu SHARED "${STINKYTOFU_SOURCE_FILES}")
+# Add generated source files
+set(STINKYTOFU_GENERATED_SOURCES
+    "${TABLEGEN_OUTPUT_DIR}/ir/IROpcode.cpp"
+)
+
+# Mark generated files so CMake knows they will be created during build
+set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
+
+add_library(stinkytofu SHARED "${STINKYTOFU_SOURCE_FILES}" "${STINKYTOFU_GENERATED_SOURCES}")
 target_include_directories(stinkytofu
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"

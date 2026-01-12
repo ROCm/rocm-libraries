@@ -30,17 +30,20 @@
  *
  * Pipeline:
  *   1. Parse Intrinsics.def (high-level IR syntax)
- *   2. Convert to IRModule (high-level IR)
- *   3. Run optimization passes (peephole, DCE, etc.)
- *   4. Serialize to intrinsics.st.bc
+ *   2. Convert to IRModule (high-level IR, with function inlining)
+ *   3. Run high-level IR peephole optimization
+ *   4. Convert back to pattern format
+ *   5. Serialize to intrinsics.st.bc
+ *   6. Verify round-trip conversion
  *
  * Usage:
- *   intrinsic-compiler <input.def> <output.st.bc>
+ *   intrinsic-compiler [--verbose|-v] <input.def> <output.st.bc>
  */
 
 #include "ir/IRSerializer.hpp"
 #include "ir/IntrinsicPatternConverter.hpp"
 #include "ir/asm/PatternParser.hpp"
+#include "ir/passes/HighLevelPeepholePass.hpp"
 #include <iostream>
 #include <string>
 
@@ -166,11 +169,37 @@ int main(int argc, char** argv)
         std::cout << "\n";
     }
 
-    // Step 3: Optimization (TODO: implement later)
+    // Step 3: High-Level IR Optimization
+    if(verbose)
+        std::cout << "Step 3: Running high-level IR peephole optimization...\n";
+
+    HighLevelPeepholePass peepholePass;
+    int                   totalOptimizations = 0;
+
+    for(auto& irModule : irModules)
+    {
+        if(verbose)
+            std::cout << "  Optimizing " << irModule.name << "...\n";
+
+        bool changed  = peepholePass.run(*irModule.module);
+        int  optCount = peepholePass.getOptimizationCount();
+
+        if(changed && verbose)
+        {
+            std::cout << "    Applied " << optCount << " optimization(s)\n";
+        }
+
+        totalOptimizations += optCount;
+    }
+
     if(verbose)
     {
-        std::cout << "Step 3: Optimization (skipped for now - will add passes later)\n";
-        std::cout << "  Future: Constant folding, DCE, CSE, etc.\n\n";
+        std::cout << "  Total optimizations: " << totalOptimizations << "\n";
+        if(totalOptimizations > 0)
+        {
+            std::cout << "  Applied optimizations: constant folding, instruction fusion\n";
+        }
+        std::cout << "\n";
     }
 
     // Step 4: Convert IR -> Text (for serialization)

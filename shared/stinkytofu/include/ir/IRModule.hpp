@@ -134,10 +134,23 @@ namespace stinkytofu
         std::shared_ptr<IRInstruction> add(std::shared_ptr<IRInstruction> inst);
 
         /**
-         * @brief Get all IR instructions in this module
+         * @brief Get all IR instructions in this module (const version)
          * @return Vector of IR instructions (shared ownership)
          */
         const std::vector<std::shared_ptr<IRInstruction>>& getInstructions() const;
+
+        /**
+         * @brief Get all IR instructions in this module (non-const version)
+         * @return Vector of IR instructions (shared ownership)
+         */
+        std::vector<std::shared_ptr<IRInstruction>>& getMutableInstructions();
+
+        /**
+         * @brief Remove an instruction from the module
+         * @param inst Pointer to the instruction to remove
+         * @return true if instruction was found and removed, false otherwise
+         */
+        bool removeInstruction(IRInstruction* inst);
 
         /**
          * @brief Get number of instructions in this module
