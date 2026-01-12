@@ -3299,70 +3299,99 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
 def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
     #'PackA0': [[-1, -1, -1, -1,-1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7]], # 50
     #'PackB0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6]], # 40
+    kernel["MfmaInitCVgprs"] = True
+
+    n_mfma = 120
+    optSchedule = dict()
+    nglshift = nllshift = 0
+
+    syncs = SyncSchedule()
+    syncCode = []
+    snops: list[tuple[int, SNop]] = []
+    snopCode = []
+    S4 = SNop(4)
+    gr_inc_step = 0
+
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        print("Using CMS!!!!!!!!!!!!")
-        kernel["MfmaInitCVgprs"] = True
+        kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
-        # kernel["UseMFMAF32XEmulation"] = True
-        numMfma = 120
-        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-        # return None, False 
+
+        grinca = [0,1,2,3,4,5,6,7,8]
+        grincb = [9,10,12,13,14,15,16,17,18]
+        lrsa   = [58]
+        lrsb   = [58]
+        lwsa   = [118]
+        lwsb   = [118]
+
+        pack_a = [0,0,0,0, 1,1,   2,2,2,2,
+                  3,3,3,3, 4,4,   5,5,5,5,
+                  6,6,6,6, 7,7,   8,8,8,8,
+                  9,9,9,9, 10,10, 11,11,11,11
+                  ]
+        pack_b = [0,0,0,0, 1,1,   2,2,2,2,
+                  3,3,3,3, 4,4,   5,5,5,5,
+                  6,6,6,6, 7,7,   8,8,8,8,
+                  9,9,9,9, 10,10, 11,11,11,11,
+                  12,12,12,12, 13,13, 14,14,14,14
+                  ]
+        lra0   = [0,1,2,3,4,5,6,7]
+        syncs.add(                 12, dscnt=4, comment="wait for LRA0 before pack to complete")
+        pack_a0 = [                i+13 for i in pack_a]
+        snops.extend([               (14, S4), (17, S4), (20, S4), (23, S4)])
+
+        lrb0   = [               8,9,10,11,12,13,14,15,16,17]
+        syncs.add(                                                   23, dscnt=0, barrier=True, comment="wait for LRB0 before pack to complete + barrier for GR")
+        pack_b0 = [                                                  i+28 for i in pack_b]
+        snops.extend([                                                 (29, S4), (32, S4), (35, S4), (38, S4), (41, S4)])
+
+        gra    = [                                    24,28,32,36, 44,48,52,56] # one index for two instructions
+        grb    = [                                                             66,70,74,78, 88,92,96,100, 110,114] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                                                            59, vlcnt=8, barrier=True, comment="wait for previous set of global reads")
+
+        lra1   = [60,61,62,63,64,65,66,67]
+        syncs.add(                          72, dscnt=4, comment="wait for LRA1 before pack to complete")
+        pack_a1 = [                         i+73 for i in pack_a]
+        snops.extend([                        (74, S4), (77, S4), (80, S4),(83, S4)])
+
+        lrb1   = [                        68,69,70,71,72,73,74,75,76,77]
+        syncs.add(                                                            83, dscnt=0, comment="wait for LRB1 before pack to complete")
+        pack_b1 = [                                                           i+88 for i in pack_b]
+        snops.extend([                                                          (89, S4), (92, S4), (95, S4), (98, S4), (101, S4)])
+
         optSchedule = {
-            'SYNC': [[-1, 4, 26, 26, 59, 96, 96]], # 7                                                   #26    
-            'PackA0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]], # 120
-            'PackB0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]], # 96
-            'SNOP': [[-1, 0, 1, 2, 3, 4, 5, 6, 7, 59, 60, 61, 62, 63, 64, 65, 66, 67]], # 18
-            'LRA0': [[0, 1, 4, 5, 6, 7, 8, 9, 10, 11]], # 10
-            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]], # 9
-            'LRB0': [[2, 3, 12, 13, 14, 15, 16, 17]], # 8
-            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]], # 9
-            'GRA': [[26, 26, 30, 30, 34, 34, 38, 38, 42, 42, 46, 46, 50, 50, 54, 54, 58, 58, 62, 62]], # 20
-            'LRSA': [[58]], # 1
-            'LRSB': [[58]], # 1
-            'PackA1': [[59, 59, 59, 59, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 61, 61, 61, 61, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 63, 63, 63, 63, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 65, 65, 65, 65, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67]], # 120
-            'PackB1': [[59, 59, 59, 59, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 61, 61, 61, 61, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 63, 63, 63, 63, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 65, 65, 65, 65, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66]], # 96
-            'GRB': [[66, 66, 70, 70, 74, 74, 78, 78, 82, 82, 86, 86, 90, 90, 94, 94]], # 16
-            'LWSA': [[94]], # 1
-            'LWSB': [[94]], # 1
-            'LRA1': [[97, 98, 101, 102, 103, 104, 105, 106, 107, 108]], # 10
-            'LRB1': [[99, 100, 109, 110, 111, 112, 113, 114]], # 8
-            'LCC': [[119, 119]], # 2
+            'SYNC':   [syncs.get_indicies()],
+            'GRIncB': [grinca],
+            'GRIncA': [grincb],
+            'LRB0':   [lra0],
+            'LRA0':   [lrb0],
+            'PackB0': [pack_a0],
+            'PackA0': [pack_b0],
+            'GRB':    [duplicate_list_items(gra, 2, gr_inc_step)],
+            'GRA':    [duplicate_list_items(grb, 2, gr_inc_step)],
+            'LRSB':   [lrsa],
+            'LRSA':   [lrsb],
+            'LWSB':   [lwsa],
+            'LWSA':   [lwsb],
+            'LRB1':   [lra1],
+            'LRA1':   [lrb1],
+            'PackA1': [pack_b1],
+            'PackB1': [pack_a1],
+            'LCC':    [[n_mfma-2, n_mfma-1]],
         }
 
-        syncCode = [
-            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=6 newLW=0 newLR=6 for iteration == 0"),
-            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-            SWaitCnt(dscnt=-1, vlcnt=18, vscnt=-1, comment="wait for previous set of global reads"),
-            SBarrier(comment="")
-        ]
+        syncCode = syncs.get_code()
+        nglshift = nllshift = num_gr
+        if snops:
+            optSchedule['SNOP'] = [ [s[0] for s in snops] ]
+            snopCode = [s[1] for s in snops]
 
-        snopCode = [
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction"),
-            SNop(0, comment="// VALU packing writes to be consumed by matrix instruction")
-        ]
-        numMfma = 120
-        
-        opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+        opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
         return True, opt1
+
+    else:
+        return False, None
 
 
 @RegisterSchedule(
