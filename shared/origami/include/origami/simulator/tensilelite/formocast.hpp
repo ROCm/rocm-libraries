@@ -32,7 +32,7 @@
 #include <unordered_map>
 #include <string>
 
-namespace Tensilelite
+namespace origami
 {
     // Forward declarations
     class Formocast;

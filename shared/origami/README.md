@@ -229,7 +229,7 @@ cmake -S . -B build/ \
 cmake --build build/ --parallel
 
 # Run tests
-ctest --output-on-failure
+cd build && ctest --output-on-failure
 ```
 
 > [!NOTE]

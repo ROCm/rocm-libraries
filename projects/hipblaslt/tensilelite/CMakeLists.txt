@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-add_subdirectory(formocast)
 add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
@@ -49,7 +48,6 @@ if(TENSILELITE_ENABLE_HOST)
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
             roc::origami
-            formocast::formocast
         PRIVATE
             hip::device
     )

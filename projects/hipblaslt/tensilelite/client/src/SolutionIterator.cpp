@@ -31,8 +31,7 @@
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 
-#include <formocast_simulator.hpp>
-#include <origami/formocast_predict.hpp>
+#include <origami/simulator/tensilelite/formocast_simulator.hpp>
 
 namespace TensileLite
 {
@@ -160,10 +159,10 @@ namespace TensileLite
             return true;
         }
 
-        static Tensilelite::Formocast::ProblemInfo getProblemInfo(ContractionSolution&    solution,
+        static origami::Formocast::ProblemInfo getProblemInfo(ContractionSolution&    solution,
                                                            ContractionProblemGemm& problem)
         {
-            Tensilelite::Formocast::ProblemInfo problemInfo;
+            origami::Formocast::ProblemInfo problemInfo;
             problemInfo.M = solution.calculateDimensionM(problem);
             problemInfo.N = solution.calculateDimensionN(problem);
             problemInfo.NumBatches = solution.calculateNumBatches(problem);
@@ -179,27 +178,63 @@ namespace TensileLite
             problemInfo.swizzleTensorA = problem.swizzleTensorA();
             problemInfo.swizzleTensorB = problem.swizzleTensorB();
 
-            problemInfo.dataType = datatypeToFormocastDatatype(problem.computeInputType());
+            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             return problemInfo;
         }
 
-        static Tensilelite::HardwareArchitecture getHardware(Hardware const& hardware)
+        static origami::hardware_t::architecture_t getHardware(Hardware const& hardware)
         {
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
             auto origamiHardware = hipAMDGPU->analyticalHardware;
 
-            // Convert origami architecture to Tensilelite::HardwareArchitecture
-            switch(origamiHardware->arch)
-            {
-            case origami::hardware_t::architecture_t::gfx950:
-                return Tensilelite::HardwareArchitecture::gfx950;
-            case origami::hardware_t::architecture_t::gfx942:
-                return Tensilelite::HardwareArchitecture::gfx942;
-            case origami::hardware_t::architecture_t::gfx1201:
-                return Tensilelite::HardwareArchitecture::gfx1201;
-            default:
-                return Tensilelite::HardwareArchitecture::Unknown;
-            }
+            return origamiHardware->arch;
+        }
+
+        static origami::Formocast::SizeMapping getSizeMapping(ContractionSolution&    solution,
+                                                              ContractionProblemGemm& problem,
+                                                              Hardware const&         hardware)
+        {
+            auto sizeMapping = solution.getSizeMapping();
+            origami::Formocast::SizeMapping sm;
+
+            sm.waveNum = sizeMapping.waveNum;
+
+            sm.macroTile[0] = sizeMapping.macroTile.x;
+            sm.macroTile[1] = sizeMapping.macroTile.y;
+            sm.matrixInstruction = sizeMapping.matrixInstruction;
+
+            sm.grvwA = sizeMapping.grvwA;
+            sm.grvwB = sizeMapping.grvwB;
+            sm.gwvwC = sizeMapping.gwvwC;
+            sm.gwvwD = sizeMapping.gwvwD;
+
+            sm.depthU             = sizeMapping.depthU;
+            sm.globalSplitU       = solution.calculateAutoGSU(problem, &hardware);
+
+            sm.workGroupMapping   = sizeMapping.workGroupMapping;
+            sm.globalAccumulation = sizeMapping.globalAccumulation;
+
+            sm.workGroupMappingXCC                    = sizeMapping.workGroupMappingXCC;
+            sm.workGroupMappingXCCGroup               = sizeMapping.workGroupMappingXCCGroup;
+            sm.globalSplitUCoalesced                  = sizeMapping.globalSplitUCoalesced;
+            sm.globalSplitUWorkGroupMappingRoundRobin = sizeMapping.globalSplitUWorkGroupMappingRoundRobin;
+
+            sm.CUOccupancy            = sizeMapping.CUOccupancy;
+            sm.PrefetchGlobalRead     = sizeMapping.PrefetchGlobalRead;
+            sm.MathClocksUnrolledLoop = sizeMapping.MathClocksUnrolledLoop;
+
+            sm.DirectToVgprA      = sizeMapping.DirectToVgprA;
+            sm.DirectToVgprB      = sizeMapping.DirectToVgprB;
+            sm.NumLoadsCoalescedA = sizeMapping.NumLoadsCoalescedA;
+            sm.NumLoadsCoalescedB = sizeMapping.NumLoadsCoalescedB;
+            sm.VectorWidthA       = sizeMapping.VectorWidthA;
+            sm.VectorWidthB       = sizeMapping.VectorWidthB;
+            sm.LocalSplitU        = sizeMapping.LocalSplitU;
+            sm.DirectToLdsA       = sizeMapping.DirectToLdsA;
+            sm.DirectToLdsB       = sizeMapping.DirectToLdsB;
+
+            sm.waveGroup = sizeMapping.waveGroup;
+            return sm;
         }
 
         bool SolutionIterator::runCurrentSolution()
@@ -268,8 +303,8 @@ namespace TensileLite
             else
             {
                 std::vector<std::pair<int,double>>   performance;
-                std::vector<origami::TieBreakerInfo> tbInfo(m_lastSolutionIdx + 1);
-                Tensilelite::Formocast formocast;
+                std::vector<origami::Formocast::TieBreakerInfo> tbInfo(m_lastSolutionIdx + 1);
+                origami::Formocast formocast;
                 for (int i = m_firstSolutionIdx; i <= m_lastSolutionIdx; i++)
                 {
                     auto iter = m_library->solutions.find(i);
@@ -280,29 +315,15 @@ namespace TensileLite
                         {
                             if(!checkSolution(*solution, *gemmProblem, false))
                                 continue;
-                            Tensilelite::Formocast::ProblemInfo problemInfo = getProblemInfo(*solution, *gemmProblem);
-                            auto sizeMapping = solution->getSizeMapping();
-                            sizeMapping.globalSplitU = solution->calculateAutoGSU(*gemmProblem, m_hardware.get());
+                            origami::Formocast::ProblemInfo problemInfo = getProblemInfo(*solution, *gemmProblem);
+                            auto sizeMapping = getSizeMapping(*solution, *gemmProblem, *m_hardware);
                             auto hwInfo = getHardware(*m_hardware);
                             formocast.setProblem(problemInfo);
                             formocast.setSolution(sizeMapping);
                             formocast.setHardware(hwInfo);
-                            auto metrics = formocast.calculateIntermediateMetrics();
-                            
-                            // Use origami::derivePerformanceProjection instead of formocast.calculateFinalPerformance
-                            origami::IntermediatePerformanceMetrics origamiMetrics = TensileLite::convertIntermediateMetrics(metrics);
-                            origami::ProblemInfo origamiProblem = TensileLite::convertProblemInfo(problemInfo);
-                            origami::ConfigMapping origamiConfigMapping = TensileLite::convertSizeMapping(sizeMapping);
-                            
-                            // Get hardware architecture from hardware
-                            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(m_hardware.get());
-                            origami::hardware_t::architecture_t origamiArch = hipAMDGPU->analyticalHardware->arch;
-                            origami::TieBreakerInfo origamiTbInfo;
-                            
-                            origami::PredictedPerformance predPerf = origami::derivePerformanceProjection(
-                                origamiMetrics, origamiProblem, origamiConfigMapping, origamiArch, origamiTbInfo);
-                            
-                            tbInfo[i] = origamiTbInfo;
+                            const auto& metrics = formocast.calculateIntermediateMetrics();
+                            origami::Formocast::PredictedPerformance predPerf = formocast.calculateFinalPerformance(metrics);
+                            tbInfo[i] = formocast.getTieBreakerInfo();
                             performance.push_back(std::pair(i,predPerf.microSeconds));
                             m_hitrate[i] = predPerf.hitRate;
                         }
@@ -551,7 +572,7 @@ namespace TensileLite
             }
             else
             {
-                Tensilelite::Formocast formocast;
+                origami::Formocast formocast;
                 std::vector<std::pair<int,double>> performance;
                 for (int i = 0; i < m_solutions.size(); i++)
                 {
@@ -559,28 +580,14 @@ namespace TensileLite
                     {
                         if(!checkSolution(*m_solutions[i], *gemmProblem, false))
                             continue;
-                        Tensilelite::Formocast::ProblemInfo problemInfo = getProblemInfo(*m_solutions[i], *gemmProblem);
-                        auto sizeMapping = m_solutions[i]->getSizeMapping();
-                        sizeMapping.globalSplitU = m_solutions[i]->calculateAutoGSU(*gemmProblem, m_hardware.get());
+                        origami::Formocast::ProblemInfo problemInfo = getProblemInfo(*m_solutions[i], *gemmProblem);
+                        auto sizeMapping = getSizeMapping(*m_solutions[i], *gemmProblem, *m_hardware);
                         auto hwInfo = getHardware(*m_hardware);
                         formocast.setProblem(problemInfo);
                         formocast.setSolution(sizeMapping);
                         formocast.setHardware(hwInfo);
                         auto metrics = formocast.calculateIntermediateMetrics();
-                        
-                        // Use origami::derivePerformanceProjection instead of formocast.calculateFinalPerformance
-                        origami::IntermediatePerformanceMetrics origamiMetrics = TensileLite::convertIntermediateMetrics(metrics);
-                        origami::ProblemInfo origamiProblem = TensileLite::convertProblemInfo(problemInfo);
-                        origami::ConfigMapping origamiConfigMapping = TensileLite::convertSizeMapping(sizeMapping);
-                        
-                        // Get hardware architecture from hardware
-                        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(m_hardware.get());
-                        origami::hardware_t::architecture_t origamiArch = hipAMDGPU->analyticalHardware->arch;
-                        origami::TieBreakerInfo origamiTbInfo;
-                        
-                        origami::PredictedPerformance predPerf = origami::derivePerformanceProjection(
-                            origamiMetrics, origamiProblem, origamiConfigMapping, origamiArch, origamiTbInfo);
-                        
+                        origami::Formocast::PredictedPerformance predPerf = formocast.calculateFinalPerformance(metrics);
                         performance.push_back(std::pair(i,predPerf.microSeconds));
                         m_hitrate[i] = predPerf.hitRate;
                     }

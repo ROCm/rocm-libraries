@@ -30,7 +30,7 @@
 #include <cstdint>
 #include <stdexcept>
 
-namespace Tensilelite
+namespace origami
 {
     namespace Utils
     {

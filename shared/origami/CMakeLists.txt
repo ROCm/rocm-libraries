@@ -70,11 +70,13 @@ target_compile_features(origami-headers INTERFACE cxx_std_17)
 
 target_include_directories(
     origami-headers INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite>
                               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_sources(
     origami-headers
-    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/formocast_predict.hpp>
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp>
@@ -87,7 +89,8 @@ target_link_libraries(origami PUBLIC roc::origami-headers)
 
 target_sources(
     origami
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_predict.cpp"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"

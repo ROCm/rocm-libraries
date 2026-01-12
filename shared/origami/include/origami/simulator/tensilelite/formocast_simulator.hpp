@@ -13,37 +13,53 @@
 #include <iostream>
 #include <unordered_map>
 #include <formocast.hpp>
-#include <Tensile/SizeMapping.hpp>
+#include "origami/types.hpp"
+#include "origami/hardware.hpp"
 
-namespace Tensilelite
+namespace origami
 {
-    // Hardware architecture enum
-    enum class HardwareArchitecture
-    {
-        gfx950,
-        gfx942,
-        gfx1201,
-        Unknown
-    };
-
-    // Data type enum
-    enum class DataType
-    {
-        Float,
-        Half,
-        BFloat16,
-        TF32,
-        Int8,
-        Int32,
-        Double,
-        Unknown
-    };
-
     class Formocast
     {
     public:
-        // Use SizeMapping from ContractionSolution instead of duplicating the definition
-        using SizeMapping = TensileLite::SizeMapping;
+        struct SizeMapping
+        {
+            size_t waveNum;
+
+            std::array<int, 3> macroTile;
+            std::array<int, 4> matrixInstruction;
+            size_t             grvwA = 1;
+            size_t             grvwB = 1;
+            size_t             gwvwC = 1;
+            size_t             gwvwD = 1;
+
+            size_t  depthU             = 0;
+            int16_t globalSplitU       = 0;
+
+            int     workGroupMapping   = 0;
+            int     globalAccumulation = 0;
+
+            int  workGroupMappingXCC                    = 0;
+            int  workGroupMappingXCCGroup               = 0;
+            bool globalSplitUCoalesced                  = false;
+            bool globalSplitUWorkGroupMappingRoundRobin = false;
+
+            int CUOccupancy            = 0;
+            int PrefetchGlobalRead     = 2;
+            int MathClocksUnrolledLoop = 0;
+
+            bool DirectToVgprA = false;
+            bool DirectToVgprB = false;
+            int NumLoadsCoalescedA = 0;
+            int NumLoadsCoalescedB = 0;
+            int VectorWidthA = 1;
+            int VectorWidthB = 1;
+            int LocalSplitU = 1;
+
+            std::array<int, 2> waveGroup;
+
+            bool DirectToLdsA = false;
+            bool DirectToLdsB = false;
+        };
 
         struct PredictedPerformance
         {
@@ -97,11 +113,11 @@ namespace Tensilelite
             uint32_t LocalReadConflictMultiplierB128;
             uint32_t LocalReadConflictMultiplierB64;
             uint32_t LocalReadConflictMultiplierB32;
-            HardwareArchitecture architecture;
+            hardware_t::architecture_t architecture;
 
             void print() const {
                 std::cout << "HardwareConstants:" << std::endl;
-                std::cout << "  architecture:         " << (architecture == HardwareArchitecture::gfx950 ? "gfx950" : architecture == HardwareArchitecture::gfx942 ? "gfx942" : architecture == HardwareArchitecture::gfx1201 ? "gfx1201" : "Unknown") << std::endl;
+                std::cout << "  architecture:         " << (architecture == hardware_t::architecture_t::gfx950 ? "gfx950" : architecture == hardware_t::architecture_t::gfx942 ? "gfx942" : architecture == hardware_t::architecture_t::gfx1201 ? "gfx1201" : "Unknown") << std::endl;
                 std::cout << "  L1CacheCapacity:      " << L1CacheCapacity << std::endl;
                 std::cout << "  L2CacheCapacity:      " << L2CacheCapacity << std::endl;
                 std::cout << "  L3CacheCapacity:      " << L3CacheCapacity << std::endl;
@@ -222,7 +238,7 @@ namespace Tensilelite
             bool transB;
             bool swizzleTensorA;
             bool swizzleTensorB;
-            DataType dataType;
+            data_type_t dataType;
         };
 
         // Structure to hold intermediate calculation results
@@ -259,8 +275,8 @@ namespace Tensilelite
 
         void setProblem(ProblemInfo p);
         void setSolution(SizeMapping sm);
-        void setHardware(HardwareArchitecture arch);
-        HardwareConstants getHardwareConstants(const HardwareArchitecture arch) const;
+        void setHardware(hardware_t::architecture_t arch);
+        HardwareConstants getHardwareConstants(const hardware_t::architecture_t arch) const;
         void calculateStorePerformance(double M,
                                        double N,
                                        double NumBatches,
@@ -377,4 +393,4 @@ namespace Tensilelite
         double mt0_b, double mt1_b, double du_b, int svw_b
     );
 
-} // namespace Tensilelite
+} // namespace origami
