@@ -220,7 +220,8 @@ std::vector<float> generateData(T                           dgen,
                                 int                         elementsPerMXBlock,
                                 bool                        isTranspose,
                                 bool                        isMatrixA,
-                                std::vector<size_t> const&  preSwizzleTile)
+                                std::vector<size_t> const&  preSwizzleTile,
+                                std::vector<size_t> const&  preTile)
 {
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
@@ -242,7 +243,7 @@ std::vector<float> generateData(T                           dgen,
         size_t scaleRows = sizes[0] / elementsPerMXBlock; // K / blockSize
         size_t scaleCols = sizes[1]; // M or N
 
-        scaleBytes = DGen::preSwizzleScale(scaleBytes, scaleRows, scaleCols, preSwizzleTile);
+        scaleBytes = DGen::preSwizzle(scaleBytes, {scaleRows, scaleCols}, preSwizzleTile, preTile);
     }
 #endif
 
@@ -308,6 +309,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                    DGen::index_t              stride,
                                    bool                       isTranspose,
                                    const std::vector<size_t>& preSwizzleTile,
+                                   const std::vector<size_t>& preTile,
                                    int const                  scaleBlockRowSize,
                                    int const                  scaleBlockColSize,
                                    bool                       isMatrixA,
@@ -349,7 +351,8 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile);
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -364,7 +367,8 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile);
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3_EXT)
     {
@@ -379,7 +383,8 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile);
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2_EXT)
     {
@@ -394,7 +399,8 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile);
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
     {
@@ -409,7 +415,8 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile);
+                                                                  preSwizzleTile,
+                                                                  preTile);
     }
     else
     {

@@ -1891,6 +1891,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             // TODO: mxDataGenerator can only generate data on CPU. Using
             //       GPU to generate data might be more efficient and avoid
             //       unnecessary hipMemCpy when CPU verification is not needed.
+
+            // preTile for A: {tileK, tileM} - swap from preTileSizeForScaleA which returns {tileM, tileK}
+            auto preTileATmp = preTileSizeForScaleA(arg.scaleA);
+            auto preTileA = (preTileATmp.size() == 2) ? std::vector<size_t>{preTileATmp[1], preTileATmp[0]} : std::vector<size_t>{};
             refA.emplace_back(generateMXInput(TiA,
                                               hA[i].buf(),
                                               hScaleA[i].buf(),
@@ -1899,6 +1903,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               lda[i],
                                               transA == HIPBLAS_OP_T,
                                               preSwizzleSizeForScale(arg.scaleA),
+                                              preTileA,
                                               blockSize(arg.scaleA),
                                               1,
                                               true,
@@ -1944,6 +1949,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             // TODO: mxDataGenerator can only generate data on CPU. Using
             //       GPU to generate data might be more efficient and avoid
             //       unnecessary hipMemCpy when CPU verification is not needed.
+            // preTile for B: {tileK, tileN}
+            auto preTileB = preTileSizeForScaleB(arg.scaleB);
             refB.emplace_back(generateMXInput(TiB,
                                               hB[i].buf(),
                                               hScaleB[i].buf(),
@@ -1952,6 +1959,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               ldb[i],
                                               transB == HIPBLAS_OP_T,
                                               preSwizzleSizeForScale(arg.scaleB),
+                                              preTileB,
                                               1,
                                               blockSize(arg.scaleB),
                                               false,
