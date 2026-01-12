@@ -31,6 +31,7 @@ Documentation for hipFFT is available at
 ### Changed
 
 * Moved library to C++20 standard.
+* Removed Boost as a dependency for clients and samples.
 
 ### Resolved issues
 

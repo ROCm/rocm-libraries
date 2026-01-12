@@ -25,6 +25,7 @@
 #include "hipfft/hipfftXt.h"
 #include "rocfft/rocfft.h"
 #include <algorithm>
+#include <cstring> // std::memset
 #include <memory>
 #include <sstream>
 #include <string>
@@ -51,7 +52,7 @@
         auto code = ret;              \
         if(code != HIPFFT_SUCCESS)    \
         {                             \
-            return ret;               \
+            return code;              \
         }                             \
     }
 
@@ -59,7 +60,8 @@
 // maintain a count of how many got created, and clean up the plans
 // if some failed.
 template <typename... Params>
-void ROC_FFT_CHECK_PLAN_CREATE(rocfft_plan& plan, unsigned int& plans_created, Params&&... params)
+static void
+    ROC_FFT_CHECK_PLAN_CREATE(rocfft_plan& plan, unsigned int& plans_created, Params&&... params)
 {
     if(rocfft_plan_create(&plan, std::forward<Params>(params)...) == rocfft_status_success)
     {
@@ -268,7 +270,7 @@ struct hipfftHandle_t
 {
     hipfftIOType type;
 
-    // Due to hipExec** compatibility to cuFFT, we have to reserve all 4 types
+    // Due to hipfftExec** compatibility to cuFFT, we have to reserve all 4 types
     // rocfft handle separately here.
     rocfft_plan ip_forward = nullptr;
     rocfft_plan op_forward = nullptr;
@@ -408,15 +410,15 @@ catch(...)
 }
 
 // note: rm_lengths arg is in row-major order
-hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
-                                     size_t                     dim,
-                                     size_t*                    rm_lengths,
-                                     hipfftIOType               iotype,
-                                     size_t                     number_of_transforms,
-                                     hipfft_ionembed_t<size_t>* user_ionembed,
-                                     size_t                     user_idist,
-                                     size_t                     user_odist,
-                                     size_t*                    workSize)
+static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
+                                            size_t                     dim,
+                                            size_t*                    rm_lengths,
+                                            hipfftIOType               iotype,
+                                            size_t                     number_of_transforms,
+                                            hipfft_ionembed_t<size_t>* user_ionembed,
+                                            size_t                     user_idist,
+                                            size_t                     user_odist,
+                                            size_t*                    workSize)
 {
     // magic static to handle rocfft setup/cleanup
     struct rocfft_initializer
@@ -431,6 +433,12 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     };
     static rocfft_initializer init;
+
+    if(!plan || plan->initialized())
+    {
+        // plan initialization can be done only once in the plan's lifetime
+        return HIPFFT_INVALID_PLAN;
+    }
 
     rocfft_plan_description ip_forward_desc = nullptr;
     rocfft_plan_description op_forward_desc = nullptr;
@@ -861,18 +869,18 @@ catch(...)
 }
 
 template <typename T>
-hipfftResult hipfftMakePlanMany_internal(hipfftHandle plan,
-                                         int          rank,
-                                         T*           n,
-                                         T*           inembed,
-                                         T            istride,
-                                         T            idist,
-                                         T*           onembed,
-                                         T            ostride,
-                                         T            odist,
-                                         hipfftIOType type,
-                                         T            batch,
-                                         size_t*      workSize)
+static hipfftResult hipfftMakePlanMany_internal(hipfftHandle plan,
+                                                int          rank,
+                                                T*           n,
+                                                T*           inembed,
+                                                T            istride,
+                                                T            idist,
+                                                T*           onembed,
+                                                T            ostride,
+                                                T            odist,
+                                                hipfftIOType type,
+                                                T            batch,
+                                                size_t*      workSize)
 {
     if((inembed != nullptr && onembed == nullptr) || (inembed == nullptr && onembed != nullptr)
        || (rank < 0) || (istride < 0) || (idist < 0) || (ostride < 0) || (odist < 0)
@@ -883,11 +891,11 @@ hipfftResult hipfftMakePlanMany_internal(hipfftHandle plan,
     {
         if(ptr == nullptr)
             continue;
-        if(std::any_of(ptr, ptr + rank, [](T val) { return val < 0; }))
+        if(std::any_of(ptr, ptr + rank, [](T val) { return val <= 0; }))
             return HIPFFT_INVALID_SIZE;
     }
 
-    if(batch < 0)
+    if(batch <= 0)
         return HIPFFT_INVALID_SIZE;
 
     std::vector<size_t>       lengths(n, n + rank);
@@ -962,6 +970,8 @@ catch(...)
 hipfftResult hipfftEstimate1d(int nx, hipfftType type, int batch, size_t* workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     hipfftHandle plan = nullptr;
     hipfftResult ret  = hipfftGetSize1d(plan, nx, type, batch, workSize);
     return ret;
@@ -974,6 +984,8 @@ catch(...)
 hipfftResult hipfftEstimate2d(int nx, int ny, hipfftType type, size_t* workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     hipfftHandle plan = nullptr;
     hipfftResult ret  = hipfftGetSize2d(plan, nx, ny, type, workSize);
     return ret;
@@ -986,6 +998,8 @@ catch(...)
 hipfftResult hipfftEstimate3d(int nx, int ny, int nz, hipfftType type, size_t* workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     hipfftHandle plan = nullptr;
     hipfftResult ret  = hipfftGetSize3d(plan, nx, ny, nz, type, workSize);
     return ret;
@@ -1008,6 +1022,8 @@ hipfftResult hipfftEstimateMany(int        rank,
                                 size_t*    workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     hipfftHandle plan = nullptr;
     hipfftResult ret  = hipfftGetSizeMany(
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize);
@@ -1022,6 +1038,8 @@ hipfftResult
     hipfftGetSize1d(hipfftHandle plan, int nx, hipfftType type, int batch, size_t* workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     if(nx < 0 || batch < 0)
     {
         return HIPFFT_INVALID_SIZE;
@@ -1043,6 +1061,8 @@ catch(...)
 hipfftResult hipfftGetSize2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     if(nx < 0 || ny < 0)
     {
         return HIPFFT_INVALID_SIZE;
@@ -1065,6 +1085,8 @@ hipfftResult
     hipfftGetSize3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType type, size_t* workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     if(nx < 0 || ny < 0 || nz < 0)
     {
         return HIPFFT_INVALID_SIZE;
@@ -1097,7 +1119,7 @@ hipfftResult hipfftGetSizeMany(hipfftHandle plan,
                                size_t*      workSize)
 try
 {
-    if(workSize == nullptr)
+    if(!workSize)
         return HIPFFT_INVALID_VALUE;
     hipfftHandle p = nullptr;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
@@ -1127,7 +1149,7 @@ hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
                                  size_t*        workSize)
 try
 {
-    if(workSize == nullptr)
+    if(!workSize)
         return HIPFFT_INVALID_VALUE;
     hipfftHandle p = nullptr;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
@@ -1146,6 +1168,10 @@ catch(...)
 hipfftResult hipfftGetSize(hipfftHandle plan, size_t* workSize)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
+    if(!plan || !plan->initialized())
+        return HIPFFT_INVALID_PLAN;
     *workSize = plan->workBufferSize;
     return HIPFFT_SUCCESS;
 }
@@ -1157,8 +1183,9 @@ catch(...)
 hipfftResult hipfftSetAutoAllocation(hipfftHandle plan, int autoAllocate)
 try
 {
-    if(plan != nullptr)
-        plan->autoAllocate = bool(autoAllocate);
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+    plan->autoAllocate = bool(autoAllocate);
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1169,6 +1196,9 @@ catch(...)
 hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea)
 try
 {
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+
     if(plan->workBuffer && plan->workBufferNeedsFree)
     {
         if(hipFree(plan->workBuffer) != hipSuccess)
@@ -1180,6 +1210,7 @@ try
         ROC_FFT_CHECK_INVALID_VALUE(
             rocfft_execution_info_set_work_buffer(plan->info, workArea, plan->workBufferSize));
     }
+    plan->autoAllocate = false;
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1190,13 +1221,26 @@ catch(...)
 // Find the specific plan to execute - check placement and direction
 static rocfft_plan get_exec_plan(const hipfftHandle plan, const bool inplace, const int direction)
 {
-    switch(direction)
+    if(!plan || !plan->initialized())
+        throw HIPFFT_INVALID_PLAN;
+
+    // NOTE: direction is IGNORED by hipFFT in case of plans for real transforms
+    if(plan->type.is_real_to_complex())
     {
-    case HIPFFT_FORWARD:
         return inplace ? plan->ip_forward : plan->op_forward;
-    case HIPFFT_BACKWARD:
+    }
+    else if(plan->type.is_complex_to_real())
+    {
         return inplace ? plan->ip_inverse : plan->op_inverse;
     }
+    else
+    {
+        if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
+            throw HIPFFT_INVALID_VALUE;
+        return inplace ? (direction == HIPFFT_FORWARD ? plan->ip_forward : plan->ip_inverse)
+                       : (direction == HIPFFT_FORWARD ? plan->op_forward : plan->op_inverse);
+    }
+
     return nullptr;
 }
 
@@ -1206,11 +1250,11 @@ static hipfftResult hipfftExec(const rocfft_plan&           rplan,
                                void*                        odata)
 {
     if(!rplan)
-        return HIPFFT_EXEC_FAILED;
+        return HIPFFT_INVALID_PLAN;
     if(!idata || !odata)
-        return HIPFFT_EXEC_FAILED;
-    void*      in[1]  = {(void*)idata};
-    void*      out[1] = {(void*)odata};
+        return HIPFFT_INVALID_VALUE;
+    void*      in[1]  = {idata};
+    void*      out[1] = {odata};
     const auto ret    = rocfft_execute(rplan, in, out, rinfo);
     return ret == rocfft_status_success ? HIPFFT_SUCCESS : HIPFFT_EXEC_FAILED;
 }
@@ -1229,10 +1273,18 @@ static hipfftResult hipfftExecBackward(hipfftHandle plan, void* idata, void* oda
     return hipfftExec(rplan, plan->info, idata, odata);
 }
 
+template <rocfft_precision_e prec>
+static inline bool is_ready_for_execution(const hipfftHandle_t* plan)
+{
+    return plan != nullptr && plan->initialized() && plan->type.precision() == prec;
+}
+
 hipfftResult
     hipfftExecC2C(hipfftHandle plan, hipfftComplex* idata, hipfftComplex* odata, int direction)
 try
 {
+    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+        return HIPFFT_INVALID_PLAN;
     switch(direction)
     {
     case HIPFFT_FORWARD:
@@ -1240,7 +1292,7 @@ try
     case HIPFFT_BACKWARD:
         return hipfftExecBackward(plan, idata, odata);
     }
-    return HIPFFT_EXEC_FAILED;
+    return HIPFFT_INVALID_VALUE;
 }
 catch(...)
 {
@@ -1250,6 +1302,8 @@ catch(...)
 hipfftResult hipfftExecR2C(hipfftHandle plan, hipfftReal* idata, hipfftComplex* odata)
 try
 {
+    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+        return HIPFFT_INVALID_PLAN;
     return hipfftExecForward(plan, idata, odata);
 }
 catch(...)
@@ -1260,6 +1314,8 @@ catch(...)
 hipfftResult hipfftExecC2R(hipfftHandle plan, hipfftComplex* idata, hipfftReal* odata)
 try
 {
+    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+        return HIPFFT_INVALID_PLAN;
     return hipfftExecBackward(plan, idata, odata);
 }
 catch(...)
@@ -1273,6 +1329,8 @@ hipfftResult hipfftExecZ2Z(hipfftHandle         plan,
                            int                  direction)
 try
 {
+    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+        return HIPFFT_INVALID_PLAN;
     switch(direction)
     {
     case HIPFFT_FORWARD:
@@ -1280,7 +1338,7 @@ try
     case HIPFFT_BACKWARD:
         return hipfftExecBackward(plan, idata, odata);
     }
-    return HIPFFT_EXEC_FAILED;
+    return HIPFFT_INVALID_VALUE;
 }
 catch(...)
 {
@@ -1290,6 +1348,8 @@ catch(...)
 hipfftResult hipfftExecD2Z(hipfftHandle plan, hipfftDoubleReal* idata, hipfftDoubleComplex* odata)
 try
 {
+    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+        return HIPFFT_INVALID_PLAN;
     return hipfftExecForward(plan, idata, odata);
 }
 catch(...)
@@ -1300,6 +1360,8 @@ catch(...)
 hipfftResult hipfftExecZ2D(hipfftHandle plan, hipfftDoubleComplex* idata, hipfftDoubleReal* odata)
 try
 {
+    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+        return HIPFFT_INVALID_PLAN;
     return hipfftExecBackward(plan, idata, odata);
 }
 catch(...)
@@ -1310,6 +1372,8 @@ catch(...)
 hipfftResult hipfftSetStream(hipfftHandle plan, hipStream_t stream)
 try
 {
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
     ROC_FFT_CHECK_INVALID_VALUE(rocfft_execution_info_set_stream(plan->info, stream));
     return HIPFFT_SUCCESS;
 }
@@ -1627,18 +1691,7 @@ hipfftResult hipfftXtExec(hipfftHandle plan, void* input, void* output, int dire
 try
 {
     bool        inplace  = input == output;
-    rocfft_plan plan_ptr = nullptr;
-    if(plan->type.is_real_to_complex() || direction == HIPFFT_FORWARD)
-    {
-        plan_ptr = inplace ? plan->ip_forward : plan->op_forward;
-    }
-    else if(plan->type.is_complex_to_real() || direction == HIPFFT_BACKWARD)
-    {
-        plan_ptr = inplace ? plan->ip_inverse : plan->op_inverse;
-    }
-    if(!plan_ptr)
-        return HIPFFT_INTERNAL_ERROR;
-
+    rocfft_plan plan_ptr = get_exec_plan(plan, inplace, direction);
     return hipfftExec(plan_ptr, plan->info, input, output);
 }
 catch(...)
@@ -1649,7 +1702,15 @@ catch(...)
 hipfftResult hipfftXtSetGPUs(hipfftHandle plan, int count, int* gpus)
 try
 {
-    if(count <= 0)
+    if(count <= 0 || !gpus)
+        return HIPFFT_INVALID_VALUE;
+    if(!plan || plan->initialized())
+        return HIPFFT_INVALID_PLAN;
+    int dev_count = 0;
+    if(hipGetDeviceCount(&dev_count) != HIP_SUCCESS || dev_count <= 0)
+        return HIPFFT_INTERNAL_ERROR;
+    if(std::any_of(
+           gpus, gpus + count, [=](int gpu_id) { return gpu_id < 0 || gpu_id >= dev_count; }))
         return HIPFFT_INVALID_VALUE;
 
     // we know how many bricks we will have, but we haven't been told
@@ -1707,11 +1768,13 @@ static size_t hipDataType_bytes(hipDataType t, size_t numElems)
 hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** desc, hipfftXtSubFormat format)
 try
 {
-    if(!plan || !desc)
+    if(!plan || !plan->initialized())
+        return HIPFFT_INVALID_PLAN;
+    if(!desc)
         return HIPFFT_INVALID_VALUE;
 
     auto lib_desc = std::make_unique<hipLibXtDesc>();
-    memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
+    std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
 
     lib_desc->version       = 0;
     lib_desc->library       = HIPLIB_FORMAT_HIPFFT;
@@ -1719,7 +1782,7 @@ try
     lib_desc->libDescriptor = nullptr;
 
     auto xt_desc = std::make_unique<hipXtDesc>();
-    memset(xt_desc.get(), 0, sizeof(hipXtDesc));
+    std::memset(xt_desc.get(), 0, sizeof(hipXtDesc));
     xt_desc->version = 0;
 
     std::vector<hipfft_brick>* bricks           = nullptr;
@@ -1773,7 +1836,6 @@ catch(...)
 // easily map a XtMemcpy to a 2DMemcpy.
 static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
                                      std::vector<size_t>& brick_stride,
-
                                      std::vector<size_t>& field_stride)
 {
     // go backwards from slowest to fastest dims
@@ -1801,7 +1863,9 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
 try
 {
-    if(!plan || !dest || !src)
+    if(!plan || !plan->initialized())
+        return HIPFFT_INVALID_PLAN;
+    if(!dest || !src || dest == src)
         return HIPFFT_INVALID_VALUE;
 
     // get pointer into buf, at the index pointed to by lower
@@ -1981,9 +2045,9 @@ static hipfftResult hipfftXtExecDescriptorBase(const rocfft_plan&           rpla
                                                hipLibXtDesc*                output)
 {
     if(!rplan)
-        return HIPFFT_EXEC_FAILED;
+        return HIPFFT_INVALID_PLAN;
     if(!input || !output)
-        return HIPFFT_EXEC_FAILED;
+        return HIPFFT_INVALID_VALUE;
 
     const auto ret
         = rocfft_execute(rplan, input->descriptor->data, output->descriptor->data, rinfo);
@@ -1996,7 +2060,7 @@ hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                        int           direction)
 try
 {
-    if(!plan)
+    if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
 
     const bool inplace = input == output;
@@ -2012,7 +2076,7 @@ catch(...)
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 try
 {
-    if(!plan)
+    if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
 
     const bool inplace = input == output;
@@ -2028,7 +2092,7 @@ catch(...)
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 try
 {
-    if(!plan)
+    if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
 
     const bool inplace = input == output;
@@ -2047,7 +2111,7 @@ hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                        int           direction)
 try
 {
-    if(!plan)
+    if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
 
     const bool inplace = input == output;
@@ -2063,7 +2127,7 @@ catch(...)
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 try
 {
-    if(!plan)
+    if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
 
     const bool inplace = input == output;
@@ -2079,7 +2143,7 @@ catch(...)
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 try
 {
-    if(!plan)
+    if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
 
     const bool inplace = input == output;
@@ -2098,9 +2162,9 @@ hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
                                     int           direction)
 try
 {
-    if(!plan)
+    // any precision
+    if(!plan || !plan->initialized())
         return HIPFFT_INVALID_PLAN;
-
     const bool inplace = input == output;
     const auto rplan   = get_exec_plan(plan, inplace, direction);
 

@@ -187,12 +187,17 @@ namespace TensileLite
         using ParamsCache  = CacheMap<std::pair<int32_t, int32_t>, Problem>;
 
         /**
-         * Indicate a solution is equally or estimatedly matched.
+         * Indicate a solution's matching type
          */
         enum class MatchingTag
         {
-            Equal,
-            Estimated
+            Equal,        // EqualityMatching
+            Range,        // RangeMatching
+            FreeSize,     // FreeSizeMatching
+            GridBased,    // GridBasedMatching
+            Prediction,   // PredictionMatching
+            Experimental, // ExperimentalStreamK or ExperimentalMLP
+            Others,       // Default
         };
 
         static std::string Type()
@@ -217,12 +222,21 @@ namespace TensileLite
         {
             return kernelName;
         }
+
         virtual bool isFallbackForHW(Hardware const&) const;
 
         bool isStreamK() const
         {
             return sizeMapping.streamK > 0;
         }
+
+        /**
+         * @brief Returns the string representation of the solution's matching type.
+         *
+         * This tag is used to identify or categorize the solution for matching purposes.
+         * @return A string representing the matching type of the solution.
+         */
+        virtual std::string matchingTag() const;
 
         //! Estimates based on problem size, solution tile, and  machine hardware
         //! charz:
@@ -565,7 +579,7 @@ namespace TensileLite
         int32_t               libraryLogicIndex = -1;
         std::map<int, double> ideals;
         LinearModel           linearModel;
-        MatchingTag           tag{MatchingTag::Estimated};
+        MatchingTag           tag{MatchingTag::Others};
 
         uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
