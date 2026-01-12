@@ -74,8 +74,8 @@ public:
 
     void hipsparseStreamBeginCapture()
     {
-// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by 
-// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE 
+// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by
+// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE
 // with g++/clang, these graph APIs cannot be called from hipSPARSE.
 #if(!defined(CUDART_VERSION))
         if(!(this->graph_testing))
@@ -100,8 +100,8 @@ public:
 
     void hipsparseStreamEndCapture(int runs = 1)
     {
-// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by 
-// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE 
+// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by
+// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE
 // with g++/clang, these graph APIs cannot be called from hipSPARSE.
 #if(!defined(CUDART_VERSION))
         if(!(this->graph_testing))
