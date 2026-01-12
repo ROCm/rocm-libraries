@@ -88,14 +88,6 @@ endif()
 
 # Find HIP
 find_package(hip REQUIRED)
-if(NOT hip_FOUND)
-    message(FATAL_ERROR 
-        "HIP not found. Please ensure:\n"
-        "  1. ROCM_PATH is set correctly (current: ${ROCM_PATH})\n"
-        "  2. HIP is installed in ${ROCM_PATH}\n"
-        "  3. CMAKE_PREFIX_PATH includes ${ROCM_PATH}")
-endif()
-message(STATUS "Found HIP: ${hip_VERSION}")
 
 # Fetch nanobind
 include(FetchContent)
