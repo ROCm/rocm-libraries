@@ -116,22 +116,34 @@ TEST(TestMigratableMemory, MigrateToDevice)
 {
     SKIP_IF_NO_DEVICES();
 
+    std::cout << "Creating MigratableMemory\n";
     MigratableMemory<float> memory(10);
 
+    std::cout << "Checking empty\n";
     EXPECT_FALSE(memory.empty());
+
+    std::cout << "Checking count\n";
     EXPECT_EQ(memory.count(), 10);
+
+    std::cout << "Checking location\n";
     EXPECT_EQ(memory.location(), MemoryLocation::HOST);
 
+    std::cout << "Initializing buffer\n";
     initBuffer(memory.hostData(), memory.count());
 
+    std::cout << "Getting device pointer\n";
     EXPECT_NE(memory.deviceData(), nullptr);
+
+    std::cout << "Checking location (2nd time)\n";
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
+    std::cout << "Checking buffer\n";
     checkBuffer(static_cast<float*>(memory.deviceData()), memory.count());
 }
 
 TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -158,6 +170,7 @@ TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -184,6 +197,7 @@ TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToHost)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     MigratableMemory<float> memory(10);
@@ -211,6 +225,7 @@ TEST(TestMigratableMemory, MigrateToHost)
 
 TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -249,6 +264,7 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
