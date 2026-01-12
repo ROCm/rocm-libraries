@@ -103,8 +103,8 @@ void testing_scal_batched(const Arguments& arg)
         return;
     }
 
-    size_t sizeX         = size_t(N) * incx;
-    U      alpha         = arg.get_alpha<U>();
+    size_t sizeX = size_t(N) * incx;
+    U      alpha = arg.get_alpha<U>();
 
     double hipblas_error{0};
 
@@ -156,7 +156,7 @@ void testing_scal_batched(const Arguments& arg)
 
     if(timing)
     {
-        double gpu_time_used{0};
+        double      gpu_time_used{0};
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 

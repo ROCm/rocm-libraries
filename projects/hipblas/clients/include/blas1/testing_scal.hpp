@@ -152,7 +152,7 @@ void testing_scal(const Arguments& arg)
 
     if(timing)
     {
-        double gpu_time_used{0};
+        double      gpu_time_used{0};
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 
