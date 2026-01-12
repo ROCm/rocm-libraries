@@ -67,6 +67,11 @@ if(ORIGAMI_ENABLE_PYTHON)
         "\n# Python tests\n"
         "add_test(origami_python_test python3 \"origami_test.py\")\n"
         "add_test(origami_python_grid_test python3 \"origami_grid_test.py\")\n"
+        "\n# Set environment for Python tests to find liborigami.so and the Python module\n"
+        "# Paths are relative to bin/origami/ where CTestTestfile.cmake is installed\n"
+        "set_tests_properties(origami_python_test origami_python_grid_test PROPERTIES\n"
+        "    ENVIRONMENT \"LD_LIBRARY_PATH=\${CMAKE_CURRENT_LIST_DIR}/../../lib:\$ENV{LD_LIBRARY_PATH};PYTHONPATH=\${CMAKE_CURRENT_LIST_DIR}:\$ENV{PYTHONPATH}\"\n"
+        ")\n"
     )
     
     # Install Python test files to bin/origami/
