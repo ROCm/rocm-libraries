@@ -22,9 +22,9 @@ Checks: >
   -readability-uppercase-literal-suffix,
   -readability-avoid-unconditional-preprocessor-if,
   -readability-use-anyofallof,
-  -readability-function-cognitive-complexity
-  -portability-avoid-pragma-once
-  -modernize-use-scoped-lock
+  -readability-function-cognitive-complexity,
+  -portability-avoid-pragma-once,
+  -modernize-use-scoped-lock,
   -readability-use-concise-preprocessor-directives
 
 WarningsAsErrors: "*"
