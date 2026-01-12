@@ -180,11 +180,7 @@ std::shared_future<std::unique_ptr<RTCKernel>>
 std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
     const RTCKernel::RTCGenerator& generator, const std::string& gpu_arch, std::string& kernel_name)
 {
-    int deviceId = 0;
-    if(hipGetDevice(&deviceId) != hipSuccess)
-    {
-        throw std::runtime_error("failed to get device");
-    }
+    int deviceId = get_current_hip_device();
 
     kernel_name = generator.generate_name();
 
