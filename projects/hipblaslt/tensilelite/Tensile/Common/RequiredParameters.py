@@ -82,6 +82,7 @@ def getRequiredParametersMin() -> set:
         'PrefetchLocalRead',
         'PreloadKernArgs',
         'ScheduleIterAlg',
+        'ScheduleGROverBarrier',
         'SourceSwap',
         'SpaceFillingAlgo',
         'StorePriorityOpt',

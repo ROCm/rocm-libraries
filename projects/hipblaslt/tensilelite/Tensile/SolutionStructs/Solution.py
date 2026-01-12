@@ -2795,6 +2795,25 @@ class Solution(collections.abc.Mapping):
     if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]):
       state["NoLdsWriteCode"] = True
 
+    # enable scheduling GR (in LWcode for PGR2) over barrier sync
+    if state["ScheduleGROverBarrier"] == -1:
+      # auto enable ScheduleGROverBarrier for PGR>=3.
+      if state["PrefetchGlobalRead"] >= 3:
+        state["ScheduleGROverBarrier"] = 1
+      else:
+        state["ScheduleGROverBarrier"] = 0
+    if state["ScheduleGROverBarrier"]:
+      # enable ScheduleGROverBarrier only for
+      # - NoLdsWriteCode, and
+      # - not DTV, and
+      # - PGR>=2, and
+      # - PLR>=1
+      if (not state["NoLdsWriteCode"]) or \
+         (state["DirectToVgprA"] or state["DirectToVgprB"]) or \
+         state["PrefetchGlobalRead"] < 2 or \
+         state["PrefetchLocalRead"] == 0:
+        state["ScheduleGROverBarrier"] = 0
+
     # calculate ldsPad
     state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
 

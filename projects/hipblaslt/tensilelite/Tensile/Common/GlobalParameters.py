@@ -429,7 +429,8 @@ defaultBenchmarkCommonParameters = [
     {"AdaptiveGemm": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
-    {"SwapGlobalReadOrder": [0]}
+    {"SwapGlobalReadOrder": [0]},
+    {"ScheduleGROverBarrier": [-1]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

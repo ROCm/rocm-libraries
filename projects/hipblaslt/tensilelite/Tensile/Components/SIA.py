@@ -265,12 +265,13 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
             writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
 
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
-    writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
-    if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
-        # DirectToLds + PGR=2 case, lwEndMfmaIndex must be after the end of local read (excluding local reads for next iter)
-        lrEnd = min(writer.states.syncPlrMfmaIndex - 1, writer.states.numMfmaForNextLoopLR)
-        if writer.states.lwEndMfmaIndex < lrEnd:
-            writer.states.lwEndMfmaIndex = lrEnd
+    if kernel["NoLdsWriteCode"]:
+        # no interval needed in no ds_write case
+        numMfmaBetweenLWandBarrier = 0
+    if writer.states.scheduleGROverBarrier or writer.states.numItersPLR == 0:
+        writer.states.lwEndMfmaIndex = writer.states.numMfmaPerIter*kernel["LoopIters"] - 1
+    else:
+        writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0)
     return numMfmaBetweenLWandBarrier, latencyLeft
 
 def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB, latencyLeft):
@@ -425,23 +426,13 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
     # last globalread will be scheduled at lwEndMfmaIndex,
     # and last localwrite will be scheduled at lwEndMfmaIndex - 1
     # so we offset lwEndMfmaIndex by 1 mfma
-    if kernel["PrefetchGlobalRead"] == 2 and writer.states.numLocalWriteModPerMfma % PRECISION != 0:
+    if kernel["PrefetchGlobalRead"] == 2 and writer.states.numLocalWriteModPerMfma % PRECISION != 0 and not kernel["NoLdsWriteCode"]:
         numMfmaBetweenLWandBarrier -= 1
 
-    writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
-    # adjust lwEndMfmaIndex for the following cases
-    #  1) PGR=2
-    #  2) last loop enabled case
-    # In these cases, lwEndMfmaIndex needs to be < numMfmaPerIter * (kernel["LoopIters"] - 1)
-    # to schedule global read for DTV after lwEndMfmaIndex or execute PostLoop after StoreC in NoLoadLoop
-    # kernel["LoopIters"]  has to be > 1 to make this logic work.
-    if kernel["LoopIters"] > 1 and lastLoop:
-        writer.states.lwEndMfmaIndex = min(writer.states.lwEndMfmaIndex, numMfmaPerIter * (kernel["LoopIters"] - 1) - 1)
-    if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
-        # DirectToLds + PGR=2 case, lwEndMfmaIndex must be after the end of local read (excluding local reads for next iter)
-        lrEnd = min(writer.states.syncPlrMfmaIndex - 1, writer.states.numMfmaForLR * (kernel["LoopIters"] - writer.states.numItersPLR))
-        if writer.states.lwEndMfmaIndex < lrEnd:
-            writer.states.lwEndMfmaIndex = lrEnd
+    if writer.states.scheduleGROverBarrier or writer.states.numItersPLR == 0:
+        writer.states.lwEndMfmaIndex = numMfmaPerIter*kernel["LoopIters"] - 1
+    else:
+        writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0)
     localWriteEndIter = writer.states.lwEndMfmaIndex//numMfmaPerIter
     localWriteEndIter = min(kernel["LoopIters"] - 1, localWriteEndIter)
     assert localWriteEndIter < kernel["LoopIters"]
@@ -729,11 +720,6 @@ def assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEnd
     writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex - max(1,roundUp(numWritesToSched/numLocalWritesPerSched)) + 1
     if writer.states.lwStartMfmaIndex < writer.states.grEndMfmaIndex:
         writer.states.lwStartMfmaIndex = writer.states.grEndMfmaIndex
-    # DirectToLds + PGR=2 case, lwStart must be after all local reads are done
-    if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
-        lrEnd = min(writer.states.lwEndMfmaIndex, writer.states.numMfmaForLR * (kernel["LoopIters"] - writer.states.numItersPLR))
-        if writer.states.lwStartMfmaIndex < lrEnd:
-            writer.states.lwStartMfmaIndex = lrEnd
     if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
         writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
     startIter = writer.states.lwStartMfmaIndex//numMfmaPerIter

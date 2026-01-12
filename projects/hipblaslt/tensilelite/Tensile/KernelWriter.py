@@ -547,6 +547,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.codes.perIterLocalWriteCodeNGLL = [ [[], Module()] for i in range (kernel["LoopIters"]) ]
     self.states.perIterLocalWriteCanSkip = [ 0 for i in range (kernel["LoopIters"]) ]
     assert([item.name for item in self.codes.globalReadIncrements.items()] == ['globalReadIncrementA', 'globalReadIncrementB'])
+    self.states.scheduledGRInstCounts = 0
 
     globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
     globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
@@ -607,7 +608,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   #  localReadCode + otherCode
   ##############################################################################
   def _makeSubIterSchedule(self, kernel, tPA, tPB, localReadCode, iteration, pointerLWCode, pointerLRCode, waitCode, macIterCode, \
-      waitLWCode = Module(), syncCode = Module(), packCode = Module(), prevIterCode = Module(), NLLlast = False):
+      waitLWCode = Module(), syncCode = Module(), packCode = Module(), prevIterCode = Module(), NLLlast = False, \
+      isNLLorNGLL=False):
 
     iterCode = Module()
     globalReadCode       = deepcopy(self.codes.perIterGlobalRead[iteration])
@@ -782,6 +784,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       iterCode.add(pointerLRCode)
       iterCode.add(SSetPrior(prior=2, comment="Raise priority while processing macs"))
     elif self.states.scheduleIterAlg == 3:
+      oneBufferScheduling = kernel["1LDSBuffer"] or kernel["DirectToLdsA"] or kernel["DirectToLdsB"]
       iterCode.addComment0(" grEndMfmaIndex:%u, lwStartMfmaIndex:%u, lwEndMfmaIndex:%u "\
                           %(self.states.grEndMfmaIndex, self.states.lwStartMfmaIndex, self.states.lwEndMfmaIndex))
       iterCode.addComment0(" numMfmaForLR:%u, syncPlrMfmaIndex:%u "\
@@ -1053,7 +1056,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               vacancy["latencyLeft"] -= localRead.issueLatency() * 2
               vacancy["items"].add(localRead)
               localReadItemsThisLoop.remove(localRead)
-              if vacancy["atMfmaIndex"] > self.states.sync1LdsMfmaIndex and kernel["1LDSBuffer"]:
+              if vacancy["atMfmaIndex"] > self.states.sync1LdsMfmaIndex and oneBufferScheduling:
                 self.states.overflowedResources = 5
               # update waitCnt
               if self.states.numItersPLR:
@@ -1113,8 +1116,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
               break
           numToBeIssued += 1
         return numToBeIssued
-
-      oneBufferScheduling = kernel["1LDSBuffer"] or kernel["DirectToLdsA"] or kernel["DirectToLdsB"]
 
       insertedPackA = 0
       insertedPackB = 0
@@ -1249,7 +1250,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if (i == 0):
               localReadsWaitcnt += 1
         if not localReadItemsThisLoop and latencyLeft > 0 and iteration < isBarrier and \
-            not(mfmaIndex > self.states.sync1LdsMfmaIndex and kernel["1LDSBuffer"]):
+            not(mfmaIndex > self.states.sync1LdsMfmaIndex and oneBufferScheduling):
           item = Module()
           item.addComment0("localReadsVacancy: latencyLeft %d"%(latencyLeft))
           iterCode.add(item)
@@ -1271,6 +1272,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               (countGlobalRead(globalReadCode) or kernel["PrefetchGlobalRead"] == 2):
             loadModule = globalReadCode.popFirstItem()
             iterCode.add(loadModule)
+            self.states.scheduledGRInstCounts += countGlobalRead(loadModule)
         # schedule remaining globalReadIncInst
         if (i == numMfmaPerIter - 1 and globalReadCode.itemsSize()) or \
            (i == 0 and globalReadCode.itemsSize() and (iteration == 1 and kernel["ForceUnrollSubIter"])):
@@ -1315,6 +1317,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               localWriteCodeCounts.pop(0)
               writeItem = writeItems.pop(0)
               iterCode.add(writeItem)
+              self.states.scheduledGRInstCounts += countGlobalRead(writeItem) # PGR2 case GR is in localWriteCode
               # if there is localWrite at first mfma, need to skip it in waitcnt.
               if i == 0:
                 skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
@@ -1348,6 +1351,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # scheduled sync
         ####
         if mfmaIndex == self.states.syncPlrMfmaIndex and self.states.numItersPLR:
+          # scheduleGROverBarrier case, add GR wait at barrier sync with the number of GR already scheduled
+          if self.states.scheduleGROverBarrier and not isNLLorNGLL:
+            iterCode.add(self._wait(kernel, tPA, tPB, 0, -1, -1, "wait for previous set of global reads", \
+                                    skipGlobalReadInst=self.states.scheduledGRInstCounts))
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
 
@@ -2373,7 +2380,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
 
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
-                      u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[luIdx], module, NLLlast)
+                      u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[luIdx], module, NLLlast, isNLLorNGLL=True)
       module.add(subIterCode)
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       pack[luIdx] = Module()
@@ -2761,7 +2768,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.getWaitcntCodeForDirectToVgpr(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, u))
         # put barrier at localWriteEndIter+1
         if u == localWriteEndIter+1 or (u == (localWriteEndIter+1)%kernel["LoopIters"] and kernel["ScheduleIterAlg"] == 2):
-          if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
+          if (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and not self.states.scheduleGROverBarrier:
             vlcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 else 0
             waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, \
                                       "wait for previous set of global reads"))
@@ -3642,6 +3649,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.actualSummationLoops = kernel["ProblemType"]["NumIndicesSummation"]
     self.states.otherSummationLoops  = self.states.actualSummationLoops-1
     self.states.otherSummations      = kernel["ProblemType"]["NumIndicesSummation"]-1 # not loops but summations vars
+
+    # enable scheduling GR (in LWcode for PGR2) over barrier sync
+    self.states.scheduleGROverBarrier = kernel["ScheduleGROverBarrier"]
 
     # doShadowInit performs initialization in the 'shadow' of the global mem prefetch
     if not kernel["ForceDisableShadowInit"]:

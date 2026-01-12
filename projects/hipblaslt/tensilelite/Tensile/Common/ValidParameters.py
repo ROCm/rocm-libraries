@@ -876,7 +876,8 @@ validParameters = { # we need to make sure this matches develop
     # Add extra miLatencyLeft to improve local read scheduling
     # Adding more room for scheduling local read instructions
     # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
-    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8]
+    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8],
+    "ScheduleGROverBarrier": [-1,0,1]
 }
 
 newMIValidParameters = {
