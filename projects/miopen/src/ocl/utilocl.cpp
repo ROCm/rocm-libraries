@@ -1069,7 +1069,7 @@ float transpose_NCHW2Vec(const Handle& handle,
                          const void* alpha,
                          const void* beta)
 {
-    std::string program_name = "MIOpenUtilKernels5.cl";
+    std::string program_name = "MIOpenUtilKernels5.cpp";
 
     if(!(vec_size == 2 || vec_size == 4))
     {
@@ -1111,7 +1111,7 @@ float transpose_NCHW2Vec(const Handle& handle,
         auto n_vec = (trans && (n % vec_size != 0)) ? (n + (vec_size - n % vec_size)) : n;
         auto c_vec = (!trans && (c % vec_size != 0)) ? (c + (vec_size - c % vec_size)) : c;
 
-        std::string kernel_name = "transpose_NCHW2Vec";
+        std::string kernel_name = "TransposeNCHW2Vec";
 
         int RD_BLCK   = ((hw) % (vec_size * 2) == 0) ? static_cast<int>(vec_size) * 2
                                                      : static_cast<int>(vec_size);
@@ -1176,8 +1176,9 @@ float transpose_NCHW2Vec(const Handle& handle,
         // params += " -DGD_1=" + std::to_string(gd1);
         //}
 
-        const std::vector<size_t> vgd{gd0, gd1, 1};
         const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};
+        std::vector<size_t> vgd{
+            (gd0 + vld[0] - 1) / vld[0] * vld[0], (gd1 + vld[1] - 1) / vld[1] * vld[1], 1};
 
         handle.AddKernel(algo_name, network_config, program_name, kernel_name, vld, vgd, params)(
             in, out, alpha_fp, beta_fp);

@@ -160,6 +160,11 @@ add_library(roc::hipsparse ALIAS hipsparse)
 # Target compile options
 target_compile_options(hipsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(hipsparse PRIVATE -fprofile-arcs -ftest-coverage)
+  target_link_options(hipsparse PRIVATE --coverage)
+endif()
+
 # External header includes included as system files
 target_include_directories( hipsparse
   SYSTEM PRIVATE
@@ -253,4 +258,44 @@ if(NOT USE_CUDA)
 else()
   rocm_export_targets(TARGETS roc::hipsparse
                       NAMESPACE roc::)
+endif()
+
+# ADDITIONAL TARGETS FOR CODE COVERAGE
+if(BUILD_CODE_COVERAGE)
+  # > make coverage_cleanup (clean coverage related files.)
+  # > make coverage GTEST_FILTER=<>
+  # will run:
+  #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
+  #  > make coverage_output (generate html documentation)
+  
+  # Run coverage analysis
+  add_custom_target(coverage_analysis
+    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
+    COMMAND ./clients/staging/hipsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+
+  add_dependencies(coverage_analysis hipsparse)
+
+  # Prepare coverage output
+  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
+  add_custom_target(coverage_output
+    DEPENDS coverage_analysis
+    COMMAND mkdir -p lcoverage
+    )
+
+  # Generate coverage output.
+  add_custom_command(TARGET coverage_output
+    COMMAND lcov --directory . --base-directory . --capture -o lcoverage/raw_main_coverage.info
+    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
+    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
+    )
+
+  add_custom_target(coverage DEPENDS coverage_output)
+
+  # Coverage cleanup
+  add_custom_target(coverage_cleanup
+    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
 endif()

@@ -29,6 +29,7 @@
 #include <miopen/common.hpp>
 #include <miopen/miopen.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -180,7 +181,7 @@ MIOPEN_INTERNALS_EXPORT void BatchNormForwardInference(const Handle& handle,
                                                        ConstData_t bnBias,
                                                        ConstData_t estimatedMean,
                                                        ConstData_t estimatedVariance,
-                                                       double epsilon,
+                                                       std::optional<double> epsilonOpt,
                                                        const ActivationDescriptor& activDesc);
 
 MIOPEN_INTERNALS_EXPORT void BatchNormForwardTraining(const Handle& handle,
