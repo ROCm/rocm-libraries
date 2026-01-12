@@ -33,12 +33,12 @@ namespace stinkytofu
     {
     }
 
-    bool IntrinsicExpansionPass::run(IRModule* module)
+    bool IntrinsicExpansionPass::run(PyLogicalModule* module)
     {
         bool changed = false;
 
         // Iterate through all instructions in the module
-        std::vector<IRInstruction*> toExpand;
+        std::vector<LogicalInstruction*> toExpand;
 
         for(auto* inst : module->instructions)
         {
@@ -75,7 +75,8 @@ namespace stinkytofu
         return changed;
     }
 
-    std::vector<IRInstruction*> IntrinsicExpansionPass::expandIntrinsic(IRInstruction* inst)
+    std::vector<LogicalInstruction*>
+        IntrinsicExpansionPass::expandIntrinsic(LogicalInstruction* inst)
     {
         // Cast to IntrinsicCall
         IntrinsicCall* call = dynamic_cast<IntrinsicCall*>(inst);
@@ -110,11 +111,11 @@ namespace stinkytofu
         }
 
         // Create expanded instructions
-        std::vector<IRInstruction*> expanded;
+        std::vector<LogicalInstruction*> expanded;
 
         for(const auto& instDef : pattern->body)
         {
-            IRInstruction* newInst = createInstruction(instDef, regMap);
+            LogicalInstruction* newInst = createInstruction(instDef, regMap);
             if(newInst)
             {
                 expanded.push_back(newInst);
@@ -134,7 +135,7 @@ namespace stinkytofu
         return expanded;
     }
 
-    IRInstruction* IntrinsicExpansionPass::createInstruction(
+    LogicalInstruction* IntrinsicExpansionPass::createInstruction(
         const IntrinsicInstruction&                            inst,
         const std::unordered_map<std::string, StinkyRegister>& regMap)
     {
@@ -193,7 +194,7 @@ namespace stinkytofu
         // TODO: In the future, we'll create specific typed IR instructions
         // based on the operation name (e.g., VCmpGtF32, VSelectF32, etc.)
 
-        IRInstruction* result = new IRInstruction(IRType::StinkyTofu);
+        LogicalInstruction* result = new LogicalInstruction(IRType::StinkyTofu);
         result->dests.push_back(destReg);
         result->srcs = srcRegs;
 

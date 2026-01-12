@@ -31,7 +31,7 @@ namespace stinkytofu
     bool genAllArchDefinitions(GpuArchManager& manager, const std::string& outdir);
     bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir);
     bool genPeepholePatterns(const std::string& patternFile, const std::string& outdir);
-    bool genHighLevelIR(const std::string& outdir);
+    bool genLogicalIR(const std::string& outdir);
 }
 
 using namespace stinkytofu;
@@ -80,11 +80,11 @@ int main(int argc, char** argv)
 
     // Generate high-level IR optimization patterns
     std::string hlirPatternFile
-        = hardwareDir + "/../lib/Dialect/Transforms/HighLevelIR/HighLevelIRPatterns.pattern";
+        = hardwareDir + "/../lib/Dialect/Transforms/LogicalIR/LogicalIRPatterns.pattern";
     success &= genPeepholePatterns(hlirPatternFile, outdir);
 
     // Generate high-level IR instruction classes and mappings
-    success &= genHighLevelIR(outdir);
+    success &= genLogicalIR(outdir);
 
     return success ? SUCCESS : FAILURE;
 }

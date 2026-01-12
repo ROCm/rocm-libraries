@@ -21,15 +21,13 @@
  *
  * ************************************************************************ */
 
-#include "ir/IRModule.hpp"
 #include "ir/IntrinsicCall.hpp"
 #include "ir/IntrinsicLibrary.hpp"
 #include "ir/IntrinsicRegistry.hpp"
-#include "ir/StinkyInstructions.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
-#include "ir/passes/CompositeInstructionLoweringPass.hpp"
-#include "ir/passes/PassManager.hpp"
-#include "ir/passes/ToStinkyAsmPass.hpp"
+#include "ir/logical/LogicalInstructionFactory.hpp"
+#include "ir/logical/LogicalInstructions.hpp"
+#include "ir/python/PyLogicalModule.hpp"
 #include "isa/gfx/GfxIsa.hpp"
 
 #include <nanobind/nanobind.h>
@@ -203,20 +201,21 @@ NB_MODULE(_stinkytofu, m)
         .value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0 (RDNA4)");
 
     // ========================================================================
-    // IRModule - High-Level IR Container
+    // PyLogicalModule - Python-Specific High-Level IR Container
     // ========================================================================
-    nb::class_<IRModule>(m, "IRModule")
+    // Note: Exposed as "LogicalModule" in Python for backward compatibility
+    nb::class_<PyLogicalModule>(m, "LogicalModule")
         .def(nb::init<const std::string&>(),
              nb::arg("name"),
              "Create a new IR module with the given kernel name")
         .def("add",
-             &IRModule::add,
+             &PyLogicalModule::add,
              nb::arg("instruction"),
              "Add a high-level IR instruction to the module (shared ownership)")
-        .def("getName", &IRModule::getName, "Get the kernel name")
+        .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
             "dump",
-            [](const IRModule& module) {
+            [](const PyLogicalModule& module) {
                 std::ostringstream oss;
                 module.dump(oss);
                 return oss.str();
@@ -224,22 +223,23 @@ NB_MODULE(_stinkytofu, m)
             "Dump the IR module to a string");
 
     // ========================================================================
-    // IRInstruction Base Class (polymorphic with virtual functions)
+    // LogicalInstruction Base Class (polymorphic with virtual functions)
     // ========================================================================
     // Note: No trampoline needed. Trampolines are for Python subclasses that
     // override virtual methods. We only create concrete C++ classes (VAddF32, etc.)
     // that already implement all virtual methods, so no trampoline is needed.
     // Rocisa uses trampolines because it allows Python subclassing of instructions.
-    nb::class_<IRInstruction>(m, "IRInstruction")
-        .def_rw("comment", &IRInstruction::comment, "Optional comment")
+    nb::class_<LogicalInstruction>(m, "LogicalInstruction")
+        .def_rw("comment", &LogicalInstruction::comment, "Optional comment")
         .def("get_logical_name",
-             &IRInstruction::getLogicalName,
+             &LogicalInstruction::getLogicalName,
              "Get the logical name of this instruction")
-        .def(
-            "is_composite", &IRInstruction::isComposite, "Check if this is a composite instruction")
+        .def("is_composite",
+             &LogicalInstruction::isComposite,
+             "Check if this is a composite instruction")
         .def(
             "dump",
-            [](const IRInstruction& inst) {
+            [](const LogicalInstruction& inst) {
                 std::ostringstream oss;
                 inst.dump(oss);
                 return oss.str();
@@ -271,19 +271,19 @@ NB_MODULE(_stinkytofu, m)
            std::optional<StinkyRegister> acc2,
            bool                          neg,
            const std::string&            comment) {
-            return std::shared_ptr<IRInstruction>(std::make_shared<MFMA>(instType,
-                                                                         accType,
-                                                                         m,
-                                                                         n,
-                                                                         k,
-                                                                         blocks,
-                                                                         mfma1k,
-                                                                         acc,
-                                                                         a,
-                                                                         b,
-                                                                         acc2 ? &(*acc2) : nullptr,
-                                                                         neg,
-                                                                         comment));
+            return std::shared_ptr<LogicalInstruction>(createMFMA(instType,
+                                                                  accType,
+                                                                  m,
+                                                                  n,
+                                                                  k,
+                                                                  blocks,
+                                                                  mfma1k,
+                                                                  acc,
+                                                                  a,
+                                                                  b,
+                                                                  acc2 ? &(*acc2) : nullptr,
+                                                                  neg,
+                                                                  comment));
         },
         nb::arg("instType"),
         nb::arg("accType"),
@@ -320,23 +320,23 @@ NB_MODULE(_stinkytofu, m)
            bool                  reuseA,
            bool                  reuseB,
            const std::string&    comment) {
-            return std::shared_ptr<IRInstruction>(std::make_shared<MXMFMA>(instType,
-                                                                           accType,
-                                                                           mxScaleATypeStr,
-                                                                           mxScaleBTypeStr,
-                                                                           m,
-                                                                           n,
-                                                                           k,
-                                                                           block,
-                                                                           acc,
-                                                                           a,
-                                                                           b,
-                                                                           acc2,
-                                                                           mxsa,
-                                                                           mxsb,
-                                                                           reuseA,
-                                                                           reuseB,
-                                                                           comment));
+            return std::shared_ptr<LogicalInstruction>(createMXMFMA(instType,
+                                                                    accType,
+                                                                    mxScaleATypeStr,
+                                                                    mxScaleBTypeStr,
+                                                                    m,
+                                                                    n,
+                                                                    k,
+                                                                    block,
+                                                                    acc,
+                                                                    a,
+                                                                    b,
+                                                                    acc2,
+                                                                    mxsa,
+                                                                    mxsb,
+                                                                    reuseA,
+                                                                    reuseB,
+                                                                    comment));
         },
         nb::arg("instType"),
         nb::arg("accType"),
@@ -373,7 +373,7 @@ NB_MODULE(_stinkytofu, m)
            const StinkyRegister& metadata,
            bool                  neg,
            const std::string&    comment) {
-            return std::shared_ptr<IRInstruction>(std::make_shared<SMFMA>(
+            return std::shared_ptr<LogicalInstruction>(createSMFMA(
                 instType, accType, m, n, k, blocks, mfma1k, acc, a, b, metadata, neg, comment));
         },
         nb::arg("instType"),
@@ -399,12 +399,12 @@ NB_MODULE(_stinkytofu, m)
            std::optional<StinkyRegister> group2,
            std::optional<StinkyRegister> group3,
            const std::string&            comment) {
-            return std::shared_ptr<IRInstruction>(
-                std::make_shared<TensorLoadToLds>(group0,
-                                                  group1,
-                                                  group2 ? &(*group2) : nullptr,
-                                                  group3 ? &(*group3) : nullptr,
-                                                  comment));
+            return std::shared_ptr<LogicalInstruction>(
+                createTensorLoadToLds(group0,
+                                      group1,
+                                      group2 ? &(*group2) : nullptr,
+                                      group3 ? &(*group3) : nullptr,
+                                      comment));
         },
         nb::arg("group0"),
         nb::arg("group1"),
@@ -417,7 +417,7 @@ NB_MODULE(_stinkytofu, m)
     m.def(
         "Label",
         [](const std::string& labelName) {
-            return std::shared_ptr<IRInstruction>(std::make_shared<Label>(labelName));
+            return std::shared_ptr<LogicalInstruction>(createLabel(labelName));
         },
         nb::arg("labelName"),
         "Create a Label");
@@ -425,7 +425,7 @@ NB_MODULE(_stinkytofu, m)
     // ========================================================================
     // IntrinsicCall - Placeholder for intrinsic function calls
     // ========================================================================
-    nb::class_<IntrinsicCall, IRInstruction>(m, "IntrinsicCall")
+    nb::class_<IntrinsicCall, LogicalInstruction>(m, "IntrinsicCall")
         .def(nb::init<const std::string&, const std::vector<StinkyRegister>&>(),
              nb::arg("name"),
              nb::arg("args"),
@@ -534,7 +534,7 @@ NB_MODULE(_stinkytofu, m)
                 }
             }
 
-            return std::shared_ptr<IRInstruction>(std::make_shared<IntrinsicCall>(name, args));
+            return std::shared_ptr<LogicalInstruction>(createIntrinsicCall(name, args));
         },
         "Create an intrinsic call with named arguments\n\n"
         "Example:\n"

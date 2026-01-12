@@ -24,8 +24,8 @@
 #include "ErrorHandling.hpp"
 #include "ir/asm/DeadCodeEliminationPass.hpp"
 #include "ir/asm/DefUseChain.hpp"
-#include "ir/asm/DuplicateEliminationPass.hpp"
 #include "ir/asm/PeepholeOptimizationPass.hpp"
+#include "ir/asm/RedundantMovEliminationPass.hpp"
 
 #include <iostream>
 
@@ -118,11 +118,12 @@ namespace stinkytofu
                 passManager.addPass(createPeepholeOptimizationPass());
             }
 
+            // RedundantMovElimination - Simple block-local duplicate removal for mov-type instructions
             if(config.enableDuplicateElim)
             {
                 if(config.verbose)
-                    std::cout << "    - DuplicateElimination" << std::endl;
-                passManager.addPass(createDuplicateEliminationPass());
+                    std::cout << "    - RedundantMovElimination" << std::endl;
+                passManager.addPass(createRedundantMovEliminationPass());
             }
 
             if(config.enableDCE)

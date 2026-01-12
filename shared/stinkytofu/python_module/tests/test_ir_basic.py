@@ -35,10 +35,10 @@ class TestRegisterCreation:
 
 
 class TestIRModule:
-    """Test IRModule creation and management"""
+    """Test LogicalModule creation and management"""
 
     def test_create_module(self):
-        module = stinkytofu.IRModule("test_kernel")
+        module = stinkytofu.LogicalModule("test_kernel")
         assert module.getName() == "test_kernel"
 
     def test_add_instructions(self):
@@ -46,7 +46,7 @@ class TestIRModule:
         v1 = stinkytofu.vgpr(1)
         v2 = stinkytofu.vgpr(2)
 
-        module = stinkytofu.IRModule("test_kernel")
+        module = stinkytofu.LogicalModule("test_kernel")
 
         # Add instructions
         module.add(stinkytofu.VAddF32(v0, v1, v2))
@@ -66,7 +66,7 @@ class TestIRModule:
         v1 = stinkytofu.vgpr(1)
         v2 = stinkytofu.vgpr(2)
 
-        module = stinkytofu.IRModule("test")
+        module = stinkytofu.LogicalModule("test")
         module.add(stinkytofu.VAddU32(v0, v1, v2, comment="This is a test comment"))
 
         dump = module.dump()
@@ -81,7 +81,7 @@ class TestInstructionTypes:
         v1 = stinkytofu.vgpr(1)
         v2 = stinkytofu.vgpr(2)
 
-        module = stinkytofu.IRModule("alu_test")
+        module = stinkytofu.LogicalModule("alu_test")
 
         # Integer operations
         module.add(stinkytofu.VAddU32(v0, v1, v2))
@@ -105,7 +105,7 @@ class TestInstructionTypes:
         v1 = stinkytofu.vgpr(1)
         v2 = stinkytofu.vgpr(2)
 
-        module = stinkytofu.IRModule("ds_test")
+        module = stinkytofu.LogicalModule("ds_test")
 
         # DS load/store instructions
         module.add(stinkytofu.DSLoadB32(v0, v1, comment="Load 32-bit"))
@@ -121,7 +121,7 @@ class TestInstructionTypes:
         s1 = stinkytofu.sgpr(1)
         s2 = stinkytofu.sgpr(2)
 
-        module = stinkytofu.IRModule("scalar_test")
+        module = stinkytofu.LogicalModule("scalar_test")
 
         module.add(stinkytofu.SAddU32(s0, s1, s2))
         module.add(stinkytofu.SSubU32(s0, s1, s2))
@@ -139,7 +139,7 @@ class TestSpecialInstructions:
         v1 = stinkytofu.vgpr(1)
         acc = stinkytofu.accvgpr(0, 4)
 
-        module = stinkytofu.IRModule("mfma_test")
+        module = stinkytofu.LogicalModule("mfma_test")
 
         mfma = stinkytofu.MFMA(
             instType="f32",
@@ -161,7 +161,7 @@ class TestSpecialInstructions:
         assert "16x16x16 MFMA" in dump
 
     def test_label(self):
-        module = stinkytofu.IRModule("label_test")
+        module = stinkytofu.LogicalModule("label_test")
 
         label = stinkytofu.Label("loop_start")
         module.add(label)
@@ -173,7 +173,7 @@ class TestSpecialInstructions:
         v0 = stinkytofu.vgpr(0)
         v1 = stinkytofu.vgpr(1)
 
-        module = stinkytofu.IRModule("tensor_test")
+        module = stinkytofu.LogicalModule("tensor_test")
 
         tensor_load = stinkytofu.TensorLoadToLds(v0, v1, comment="Load tensor")
         module.add(tensor_load)
@@ -194,7 +194,7 @@ class TestMemoryManagement:
 
         # Create and destroy multiple modules
         for i in range(10):
-            module = stinkytofu.IRModule(f"test_{i}")
+            module = stinkytofu.LogicalModule(f"test_{i}")
             for j in range(10):
                 module.add(stinkytofu.VAddF32(v0, v1, v2))
             del module
@@ -212,8 +212,8 @@ class TestMemoryManagement:
         inst = stinkytofu.VAddF32(v0, v1, v2, comment="shared instruction")
 
         # Add to multiple modules
-        module1 = stinkytofu.IRModule("module1")
-        module2 = stinkytofu.IRModule("module2")
+        module1 = stinkytofu.LogicalModule("module1")
+        module2 = stinkytofu.LogicalModule("module2")
 
         module1.add(inst)
         module2.add(inst)
@@ -234,7 +234,7 @@ class TestComplexKernel:
         v3 = stinkytofu.vgpr(3)
         acc = stinkytofu.accvgpr(0, 4)
 
-        module = stinkytofu.IRModule("simple_gemm")
+        module = stinkytofu.LogicalModule("simple_gemm")
 
         # Load data
         module.add(stinkytofu.Label("load_data"))

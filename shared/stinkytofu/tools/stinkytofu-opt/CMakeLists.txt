@@ -13,3 +13,9 @@ target_include_directories(stinkytofu-opt PRIVATE
 target_link_libraries(stinkytofu-opt PRIVATE
     stinkytofu
 )
+
+# Install stinkytofu-opt tool
+install(TARGETS stinkytofu-opt
+    RUNTIME DESTINATION bin
+    COMPONENT tools
+)

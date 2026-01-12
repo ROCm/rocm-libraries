@@ -102,7 +102,11 @@ namespace stinkytofu
             DEF_T(SALU, "s_cmov_" + ty);
 
         DEF_T(WaitCntInst, "s_waitcnt");
-        DEF_T(BarrierInst, "s_barrier");
+        DEF_T(BarrierInst, "s_barrier"); // Deprecated on gfx1250
+
+        // New barrier instructions for gfx1250
+        DEF_T(BarrierInst, "s_barrier_signal"); // Signal barrier with ID
+        DEF_T(BarrierInst, "s_barrier_wait");   // Wait on barrier with ID
 
         // scalar instructions that have side effects
         for(auto op : {
@@ -309,6 +313,8 @@ namespace stinkytofu
         // Buffer / Global / Flat memory access
         // ============================================
 
+        // Buffer instructions - gfx1250 supports both naming conventions
+        // Old dword-based naming (legacy)
         for(std::string ty : {"dword",
                               "dwordx2",
                               "dwordx3",
@@ -339,16 +345,32 @@ namespace stinkytofu
             DEF_T(MUBUFStore, "buffer_store_" + ty);
         }
 
+        // New byte-based naming (gfx12 preferred)
+        for(std::string ty : {"b32", "b64", "b96", "b128"})
+        {
+            DEF_T(MUBUFLoad, "buffer_load_" + ty);
+            DEF_T(MUBUFStore, "buffer_store_" + ty);
+        }
+
         DEF_T(MUBUFAtomic, "buffer_atomic_add_f32");
         DEF_T(MUBUFAtomic, "buffer_atomic_cmpswap");
         DEF_T(MUBUFAtomic, "buffer_atomic_cmpswap_x2");
         DEF_T(MUBUFAtomic, "s_atomic_dec");
 
+        // SMEM instructions - gfx1250 supports both naming conventions
+        // Old dword-based naming (legacy)
         for(std::string ty : {"dword", "dwordx2", "dwordx4", "dwordx8", "dwordx16"})
-            DEF_T(MUBUFLoad, "s_load_" + ty);
+            DEF_T(SMemLoad, "s_load_" + ty);
 
         for(std::string ty : {"dword", "dwordx2", "dwordx4"})
-            DEF_T(MUBUFLoad, "s_store_" + ty);
+            DEF_T(SMemStore, "s_store_" + ty);
+
+        // New byte-based naming (gfx12 preferred)
+        for(std::string ty : {"b32", "b64", "b128", "b256", "b512"})
+            DEF_T(SMemLoad, "s_load_" + ty);
+
+        for(std::string ty : {"b32", "b64", "b128"})
+            DEF_T(SMemStore, "s_store_" + ty);
 
         for(std::string ty : {"ubyte",
                               "ubyte_d16",
@@ -362,7 +384,16 @@ namespace stinkytofu
                               "short_d16_hi"})
             DEF_T(FLATLoad, "flat_load_" + ty);
 
+        // FLAT instructions - gfx1250 supports both naming conventions
+        // Old dword-based naming (legacy)
         for(std::string ty : {"dword", "dwordx2", "dwordx3", "dwordx4"})
+        {
+            DEF_T(FLATLoad, "flat_load_" + ty);
+            DEF_T(FLATStore, "flat_store_" + ty);
+        }
+
+        // New byte-based naming (gfx12 preferred)
+        for(std::string ty : {"b32", "b64", "b96", "b128"})
         {
             DEF_T(FLATLoad, "flat_load_" + ty);
             DEF_T(FLATStore, "flat_store_" + ty);
@@ -607,6 +638,20 @@ namespace stinkytofu
         DEF_T(HasSideEffectInst, "s_set_vgpr_msb");
 
         // ============================================
+        // Wait Instructions (gfx1250 specific)
+        // ============================================
+        // Separate wait counters for different memory operations
+        DEF_T(WaitCntInst, "s_wait_loadcnt");    // Wait for VMEM loads
+        DEF_T(WaitCntInst, "s_wait_storecnt");   // Wait for VMEM stores
+        DEF_T(WaitCntInst, "s_wait_dscnt");      // Wait for LDS operations
+        DEF_T(WaitCntInst, "s_wait_kmcnt");      // Wait for scalar memory/constant fetch
+        DEF_T(WaitCntInst, "s_wait_asynccnt");   // Wait for async operations
+
+        // Combined wait instructions
+        DEF_T(WaitCntInst, "s_wait_loadcnt_dscnt");  // Wait for loads and LDS
+        DEF_T(WaitCntInst, "s_wait_storecnt_dscnt"); // Wait for stores and LDS
+
+        // ============================================
         // TDM
         // ============================================
         DEF_T(TensorLoadToLds, "tensor_load_to_lds");
@@ -727,31 +772,32 @@ namespace stinkytofu
             {"BufferLoadD16U8", "buffer_load_ubyte_d16"},
             {"BufferLoadD16HIB16", "buffer_load_short_d16_hi"},
             {"BufferLoadD16B16", "buffer_load_short_d16"},
-            {"BufferLoadB32", "buffer_load_dword"},
-            {"BufferLoadB64", "buffer_load_dwordx2"},
-            {"BufferLoadB128", "buffer_load_dwordx4"},
+            {"BufferLoadB32", "buffer_load_b32"},
+            {"BufferLoadB64", "buffer_load_b64"},
+            {"BufferLoadB96", "buffer_load_b96"},
+            {"BufferLoadB128", "buffer_load_b128"},
             {"FlatLoadD16HIU8", "flat_load_ubyte_d16_hi"},
             {"FlatLoadD16U8", "flat_load_ubyte_d16"},
             {"FlatLoadD16HIB16", "flat_load_short_d16_hi"},
             {"FlatLoadD16B16", "flat_load_short_d16"},
-            {"FlatLoadB32", "flat_load_dword"},
-            {"FlatLoadB64", "flat_load_dwordx2"},
-            {"FlatLoadB128", "flat_load_dwordx4"},
+            {"FlatLoadB32", "flat_load_b32"},
+            {"FlatLoadB64", "flat_load_b64"},
+            {"FlatLoadB128", "flat_load_b128"},
             {"TensorLoadToLds", "tensor_load_to_lds"},
             {"BufferStoreB8", "buffer_store_byte"},
             {"BufferStoreD16HIU8", "buffer_store_byte_d16_hi"},
             {"BufferStoreD16HIB16", "buffer_store_short_d16_hi"},
             {"BufferStoreB16", "buffer_store_short"},
-            {"BufferStoreB32", "buffer_store_dword"},
-            {"BufferStoreB64", "buffer_store_dwordx2"},
-            {"BufferStoreB128", "buffer_store_dwordx4"},
+            {"BufferStoreB32", "buffer_store_b32"},
+            {"BufferStoreB64", "buffer_store_b64"},
+            {"BufferStoreB128", "buffer_store_b128"},
             {"BufferAtomicAddF32", "buffer_atomic_add_f32"},
             {"BufferAtomicCmpswapB32", "buffer_atomic_cmpswap"},
             {"BufferAtomicCmpswapB64", "buffer_atomic_cmpswap_x2"},
             {"FlatStoreD16HIB16", "flat_store_short_d16_hi"},
-            {"FlatStoreB32", "flat_store_dword"},
-            {"FlatStoreB64", "flat_store_dwordx2"},
-            {"FlatStoreB128", "flat_store_dwordx4"},
+            {"FlatStoreB32", "flat_store_b32"},
+            {"FlatStoreB64", "flat_store_b64"},
+            {"FlatStoreB128", "flat_store_b128"},
             {"FlatAtomicCmpswapB32", "flat_atomic_cmpswap"},
             {"DSLoadU8", "ds_load_u8"},
             {"DSLoadU16", "ds_load_u16"},
@@ -764,14 +810,14 @@ namespace stinkytofu
             {"DSStoreB64", "ds_store_b64"},
             {"DSStoreB128", "ds_store_b128"},
             {"SAtomicDec", "s_atomic_dec"},
-            {"SLoadB32", "s_load_dword"},
-            {"SLoadB64", "s_load_dwordx2"},
-            {"SLoadB128", "s_load_dwordx4"},
-            {"SLoadB256", "s_load_dwordx8"},
-            {"SLoadB512", "s_load_dwordx16"},
-            {"SStoreB32", "s_store_dword"},
-            {"SStoreB64", "s_store_dwordx2"},
-            {"SStoreB128", "s_store_dwordx4"},
+            {"SLoadB32", "s_load_b32"},
+            {"SLoadB64", "s_load_b64"},
+            {"SLoadB128", "s_load_b128"},
+            {"SLoadB256", "s_load_b256"},
+            {"SLoadB512", "s_load_b512"},
+            {"SStoreB32", "s_store_b32"},
+            {"SStoreB64", "s_store_b64"},
+            {"SStoreB128", "s_store_b128"},
 
             /* common.hpp */
             {"SAbsI32", "s_abs_i32"},

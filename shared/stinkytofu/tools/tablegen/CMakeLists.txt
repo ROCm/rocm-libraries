@@ -6,7 +6,7 @@ set(SOURCES
     GenIsa.cpp
     GenRocisaHwMapping.cpp
     GenPatterns.cpp
-    GenHighLevelIR.cpp
+    GenLogicalIR.cpp
     # Pattern parser sources (needed for GenPatterns)
     ../../src/ir/asm/IRLexer.cpp
     ../../src/ir/asm/PatternParser.cpp
@@ -41,14 +41,18 @@ endforeach()
 
 # Add pattern-generated files
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PeepholePatterns.inc")
-list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/HighLevelIRPatterns.inc")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/LogicalIRPatterns.inc")
 set(PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Dialect/Transforms/PeepholePatterns.pattern")
-set(HLIR_PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Dialect/Transforms/HighLevelIR/HighLevelIRPatterns.pattern")
+set(HLIR_PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Dialect/Transforms/LogicalIR/LogicalIRPatterns.pattern")
 
 # Add high-level IR generated files
-list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/StinkyInstructions_generated.inc")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/LogicalOpcodes_generated.inc")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalOpcode.cpp")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalInstructions_generated.hpp")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/StinkyBuilder_decls_generated.inc")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/StinkyBuilder_impls_generated.inc")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/IRMnemonics_generated.inc")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc")
 
 # Custom command to run tablegen and generate .inc files
 # Using $<TARGET_FILE:tablegen> allows CMake to:
@@ -59,9 +63,10 @@ add_custom_command(
     OUTPUT ${TABLEGEN_GENERATED_FILES}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/logical"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/rocisa"
     COMMAND $<TARGET_FILE:tablegen> "${TABLEGEN_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware"
-    DEPENDS $<TARGET_FILE:tablegen> ${HARDWARE_YAML_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
+    DEPENDS tablegen ${HARDWARE_YAML_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
     COMMENT "Generating ISA definitions, IR classes, and pattern matchers with tablegen..."
     VERBATIM
 )

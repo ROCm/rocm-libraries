@@ -22,15 +22,11 @@
  * ************************************************************************ */
 #pragma once
 
-#include "ir/passes/PassManager.hpp"
-#include "stinkytofu.hpp"
-#include <vector>
+#include <memory>
 
 namespace stinkytofu
 {
-    // Forward declarations
-    class IRInstruction;
-    struct StinkyInstruction;
+    class Pass;
 
     /**
      * @brief Converts simple IR instructions to assembly instructions (1:1 mapping)
@@ -44,31 +40,22 @@ namespace stinkytofu
      * Composite instructions (like VAddPKF32, VMovB64) should be expanded
      * by CompositeInstructionLoweringPass BEFORE this pass runs.
      *
-     * The pass uses the logicalToArchMap to find the correct assembly
-     * mnemonic for the target architecture.
+     * The pass uses auto-generated IR mnemonic mappings to find the correct
+     * assembly mnemonic for the target architecture.
+     *
+     * Now uses unified Pass infrastructure:
+     * - Operates on Function -> BasicBlock -> IRList
+     * - Replaces LogicalInstruction* with StinkyInstruction* in-place
+     * - Integrates with PassManager
+     *
+     * Usage:
+     * ```cpp
+     * PassManager pm;
+     * pm.addPass(createCompositeInstructionLoweringPass());
+     * pm.addPass(createToStinkyAsmPass());
+     * pm.run();
+     * ```
      */
-    class ToStinkyAsmPass : public IRInstToAsmPass
-    {
-    public:
-        /**
-         * @brief Get the name of this pass
-         */
-        const char* getName() const override
-        {
-            return "ToStinkyAsmPass";
-        }
-
-        /**
-         * @brief Lower a simple IR instruction to assembly
-         *
-         * @param irInst Simple (non-composite) IR instruction
-         * @param arch Target architecture for mnemonic mapping
-         * @return Vector containing the single assembly instruction
-         *
-         * @note If the instruction is composite, this will throw an error.
-         *       Use CompositeInstructionLoweringPass first.
-         */
-        std::vector<StinkyInstruction*> lower(IRInstruction* irInst, GfxArchID arch) override;
-    };
+    std::unique_ptr<Pass> createToStinkyAsmPass();
 
 } // namespace stinkytofu

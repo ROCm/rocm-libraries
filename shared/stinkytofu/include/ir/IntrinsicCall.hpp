@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "ir/StinkyInstructions.hpp"
+#include "ir/logical/LogicalInstructions.hpp"
 #include <string>
 #include <vector>
 
@@ -44,7 +44,7 @@ namespace stinkytofu
      *
      * Note: All registers (including temporaries) are part of the signature.
      */
-    class IntrinsicCall : public IRInstruction
+    class IntrinsicCall : public LogicalInstruction
     {
     public:
         std::string functionName;
@@ -56,7 +56,7 @@ namespace stinkytofu
          * @param allRegs All registers in signature order (dest, src, temps)
          */
         IntrinsicCall(const std::string& name, const std::vector<StinkyRegister>& allRegs)
-            : IRInstruction(IRType::StinkyTofu)
+            : LogicalInstruction()
             , functionName(name)
         {
             // Store all registers - IntrinsicExpansionPass will map them

@@ -21,16 +21,16 @@
  *
  * ************************************************************************ */
 
-#include "ir/IRModule.hpp"
-#include "ir/StinkyInstructions.hpp"
+#include "ir/python/PyLogicalModule.hpp"
+#include "ir/logical/LogicalInstructions.hpp"
 #include <iostream>
 
 namespace stinkytofu
 {
-    struct IRModule::Impl
+    struct PyLogicalModule::Impl
     {
-        std::string                                 name;
-        std::vector<std::shared_ptr<IRInstruction>> instructions;
+        std::string                                      name;
+        std::vector<std::shared_ptr<LogicalInstruction>> instructions;
 
         Impl(const std::string& name)
             : name(name)
@@ -43,22 +43,23 @@ namespace stinkytofu
         }
     };
 
-    IRModule::IRModule(const std::string& name)
+    PyLogicalModule::PyLogicalModule(const std::string& name)
         : pImpl(std::make_unique<Impl>(name))
     {
     }
 
-    IRModule::~IRModule() = default;
+    PyLogicalModule::~PyLogicalModule() = default;
 
-    IRModule::IRModule(IRModule&&) noexcept            = default;
-    IRModule& IRModule::operator=(IRModule&&) noexcept = default;
+    PyLogicalModule::PyLogicalModule(PyLogicalModule&&) noexcept            = default;
+    PyLogicalModule& PyLogicalModule::operator=(PyLogicalModule&&) noexcept = default;
 
-    std::string IRModule::getName() const
+    std::string PyLogicalModule::getName() const
     {
         return pImpl->name;
     }
 
-    std::shared_ptr<IRInstruction> IRModule::add(std::shared_ptr<IRInstruction> inst)
+    std::shared_ptr<LogicalInstruction>
+        PyLogicalModule::add(std::shared_ptr<LogicalInstruction> inst)
     {
         if(inst)
         {
@@ -67,17 +68,17 @@ namespace stinkytofu
         return inst;
     }
 
-    const std::vector<std::shared_ptr<IRInstruction>>& IRModule::getInstructions() const
+    const std::vector<std::shared_ptr<LogicalInstruction>>& PyLogicalModule::getInstructions() const
     {
         return pImpl->instructions;
     }
 
-    std::vector<std::shared_ptr<IRInstruction>>& IRModule::getMutableInstructions()
+    std::vector<std::shared_ptr<LogicalInstruction>>& PyLogicalModule::getMutableInstructions()
     {
         return pImpl->instructions;
     }
 
-    bool IRModule::removeInstruction(IRInstruction* inst)
+    bool PyLogicalModule::removeInstruction(LogicalInstruction* inst)
     {
         auto it = std::find_if(pImpl->instructions.begin(),
                                pImpl->instructions.end(),
@@ -90,14 +91,14 @@ namespace stinkytofu
         return false;
     }
 
-    size_t IRModule::size() const
+    size_t PyLogicalModule::size() const
     {
         return pImpl->instructions.size();
     }
 
-    void IRModule::dump(std::ostream& out) const
+    void PyLogicalModule::dump(std::ostream& out) const
     {
-        out << "IRModule: " << pImpl->name << "\n";
+        out << "LogicalModule: " << pImpl->name << "\n";
         out << "Instructions: " << pImpl->instructions.size() << "\n";
         for(size_t i = 0; i < pImpl->instructions.size(); ++i)
         {

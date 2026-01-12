@@ -79,7 +79,7 @@ namespace stinkytofu
     enum class PatternType
     {
         Peephole, // Peephole optimization pattern (assembly IR)
-        HighLevelIR, // High-level IR optimization pattern
+        LogicalIR, // High-level IR optimization pattern
         Intrinsic // High-level IR intrinsic definition
     };
 

@@ -28,8 +28,8 @@ Technical design documents explaining the architecture and implementation of cor
 - [Optimization Pipeline](design/optimization-pipeline.md) - Flexible optimization pipeline system with multiple profiles and levels
 - [Pattern Type System](design/pattern-type-system.md) - Pattern type classification system for peephole, DAG, and global patterns
 - [Peephole Pattern System](design/peephole-pattern-system.md) - Declarative pattern-based peephole optimization
-- [Dead Code Elimination](design/dead-code-elimination.md) - Dead store elimination pass
-- [Duplicate Elimination](design/duplicate-elimination.md) - Common subexpression elimination pass
+- [Dead Code Elimination](design/dead-code-elimination.md) - Conservative block-local dead store elimination pass
+- [Redundant Mov Elimination](design/redundant-mov-elimination.md) - Block-local redundant mov instruction elimination pass
 - [StinkyConfigurableWaitCntPass](design/stinky-configurable-waitcnt-pass.md) - Wait count insertion pass design
 
 ## Quick Links

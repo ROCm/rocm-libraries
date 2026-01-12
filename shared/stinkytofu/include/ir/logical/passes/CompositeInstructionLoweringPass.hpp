@@ -22,14 +22,11 @@
  * ************************************************************************ */
 #pragma once
 
-#include "ir/passes/PassManager.hpp"
-#include "stinkytofu.hpp"
-#include <vector>
+#include <memory>
 
 namespace stinkytofu
 {
-    // Forward declarations
-    class IRInstruction;
+    class Pass;
 
     /**
      * @brief Expands composite IR instructions based on architecture capabilities
@@ -51,39 +48,22 @@ namespace stinkytofu
      *   - If supported: Single v_lshl_or_b32 instruction
      *   - Fallback: v_lshlrev_b32 + v_or_b32
      *
-     * This pass runs BEFORE ToStinkyAsmPass and produces simple IR instructions
-     * that have 1:1 mappings to assembly.
+     * This pass runs BEFORE ToStinkyAsmPass and operates on IRList,
+     * expanding composite instructions in-place.
+     *
+     * Now uses unified Pass infrastructure:
+     * - Operates on Function -> BasicBlock -> IRList
+     * - Works with raw LogicalInstruction* pointers
+     * - Integrates with PassManager
+     *
+     * Usage:
+     * ```cpp
+     * PassManager pm;
+     * pm.addPass(createCompositeInstructionLoweringPass());
+     * pm.addPass(createToStinkyAsmPass());
+     * pm.run();
+     * ```
      */
-    class CompositeInstructionLoweringPass : public IRInstTransformPass
-    {
-    public:
-        /**
-         * @brief Get the name of this pass
-         */
-        const char* getName() const override
-        {
-            return "CompositeInstructionLoweringPass";
-        }
+    std::unique_ptr<Pass> createCompositeInstructionLoweringPass();
 
-        /**
-         * @brief Transform (expand) a composite IR instruction
-         *
-         * @param irInst IR instruction (composite or simple)
-         * @param arch Target architecture for capability queries
-         * @return Vector of simple IR instructions (may be 1 or more)
-         *
-         * @note The returned instructions are newly allocated and caller takes ownership
-         */
-        std::vector<IRInstruction*> transform(IRInstruction* irInst, GfxArchID arch) override;
-
-    private:
-        // Helper to check if instruction is supported on target architecture
-        bool isInstructionSupported(const std::string& mnemonic, GfxArchID arch) const;
-
-        // Architecture capability queries (use isInstructionSupported)
-        bool hasVPKAddF32(GfxArchID arch) const;
-        bool hasVPKMulF32(GfxArchID arch) const;
-        bool hasVMovB64(GfxArchID arch) const;
-        bool hasVLShlOrB32(GfxArchID arch) const;
-    };
 } // namespace stinkytofu

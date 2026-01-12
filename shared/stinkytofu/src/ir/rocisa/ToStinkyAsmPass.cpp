@@ -79,13 +79,54 @@ namespace
     using namespace rocisa;
     using namespace stinkytofu;
 
+    // Helper functions to convert rocisa modifiers to stinkytofu modifiers
+    stinkytofu::DSModifiers convertDSModifiers(const rocisa::DSModifiers& rocMod)
+    {
+        return stinkytofu::DSModifiers(
+            rocMod.na, rocMod.offset, rocMod.offset0, rocMod.offset1, rocMod.gds);
+    }
+
+    stinkytofu::FLATModifiers convertFLATModifiers(const rocisa::FLATModifiers& rocMod)
+    {
+        return stinkytofu::FLATModifiers(
+            rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds, rocMod.isStore);
+    }
+
+    stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod)
+    {
+        return stinkytofu::MUBUFModifiers(rocMod.offen,
+                                          rocMod.offset12,
+                                          rocMod.glc,
+                                          rocMod.slc,
+                                          rocMod.nt,
+                                          rocMod.lds,
+                                          rocMod.isStore);
+    }
+
+    stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocMod)
+    {
+        return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv, rocMod.offset);
+    }
+
     StinkyRegister getStinkyRegister(const Container* container)
     {
         if(const RegisterContainer* regCont = dynamic_cast<const RegisterContainer*>(container))
         {
             // Convert string regType to RegType enum
-            RegType regType = stringToRegType(regCont->regType);
-            return StinkyRegister{regType, regCont->regIdx, regCont->regNum};
+            RegType        regType = stringToRegType(regCont->regType);
+            StinkyRegister reg{regType, regCont->regIdx, regCont->regNum};
+
+            // Capture symbolic register name if available
+            // In rocisa, the symbolic name includes the type prefix and all offsets
+            // (e.g., "vgprLocalWriteAddrA+0" or "vgprValuA_X0_I0+4")
+            if(regCont->regName.has_value())
+            {
+                // regName->toString() includes the base name and all offsets
+                std::string fullName = regCont->regType + "gpr" + regCont->regName->toString();
+                reg.setSymbolicName(fullName);
+            }
+
+            return reg;
         }
         return StinkyRegister{};
     }
@@ -97,8 +138,21 @@ namespace
             if(auto regContainer = std::dynamic_pointer_cast<RegisterContainer>(*pptr))
             {
                 // Convert string regType to RegType enum
-                RegType regType = stringToRegType(regContainer->regType);
-                return StinkyRegister{regType, regContainer->regIdx, regContainer->regNum};
+                RegType        regType = stringToRegType(regContainer->regType);
+                StinkyRegister reg{regType, regContainer->regIdx, regContainer->regNum};
+
+                // Capture symbolic register name if available
+                // In rocisa, the symbolic name includes the type prefix and all offsets
+                // (e.g., "vgprLocalWriteAddrA+0" or "vgprValuA_X0_I0+4")
+                if(regContainer->regName.has_value())
+                {
+                    // regName->toString() includes the base name and all offsets
+                    std::string fullName
+                        = regContainer->regType + "gpr" + regContainer->regName->toString();
+                    reg.setSymbolicName(fullName);
+                }
+
+                return reg;
             }
         }
         else if(const int* literalInt = std::get_if<int>(&input))
@@ -111,6 +165,37 @@ namespace
         }
         else if(const std::string* literalString = std::get_if<std::string>(&input))
         {
+            // Try to convert numeric strings to integers
+            if(!literalString->empty())
+            {
+                bool   isNumeric = true;
+                size_t start     = 0;
+
+                // Check for optional leading minus sign
+                if((*literalString)[0] == '-')
+                {
+                    start = 1;
+                    if(literalString->length() == 1)
+                    {
+                        isNumeric = false;
+                    }
+                }
+
+                // Check if all remaining characters are digits
+                for(size_t i = start; i < literalString->length() && isNumeric; ++i)
+                {
+                    if(!std::isdigit(static_cast<unsigned char>((*literalString)[i])))
+                    {
+                        isNumeric = false;
+                    }
+                }
+
+                if(isNumeric)
+                {
+                    int value = std::atoi(literalString->c_str());
+                    return StinkyRegister(value);
+                }
+            }
             return StinkyRegister(*literalString);
         }
 
@@ -264,6 +349,90 @@ namespace
                 if(doesWriteSCC(inst))
                 {
                     stinkyInst->addDestReg(StinkyRegister::getSCCRegister());
+                }
+
+                // Copy modifiers from rocisa instruction to StinkyInstruction
+                // DS (Local Memory) modifiers
+                if(auto dsLoad = dynamic_cast<const DSLoadInstruction*>(inst))
+                {
+                    if(dsLoad->ds.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::DSModifiers>(
+                            convertDSModifiers(dsLoad->ds.value()));
+                    }
+                }
+                else if(auto dsStore = dynamic_cast<const DSStoreInstruction*>(inst))
+                {
+                    if(dsStore->ds.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::DSModifiers>(
+                            convertDSModifiers(dsStore->ds.value()));
+                    }
+                }
+                // FLAT (Flat Memory) modifiers
+                else if(auto flatRead = dynamic_cast<const FLATReadInstruction*>(inst))
+                {
+                    if(flatRead->flat.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::FLATModifiers>(
+                            convertFLATModifiers(flatRead->flat.value()));
+                    }
+                }
+                else if(auto flatStore = dynamic_cast<const FLATStoreInstruction*>(inst))
+                {
+                    if(flatStore->flat.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::FLATModifiers>(
+                            convertFLATModifiers(flatStore->flat.value()));
+                    }
+                }
+                // MUBUF (Buffer Memory) modifiers
+                else if(auto mubufRead = dynamic_cast<const MUBUFReadInstruction*>(inst))
+                {
+                    if(mubufRead->mubuf.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
+                            convertMUBUFModifiers(mubufRead->mubuf.value()));
+                    }
+                }
+                else if(auto mubufStore = dynamic_cast<const MUBUFStoreInstruction*>(inst))
+                {
+                    if(mubufStore->mubuf.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
+                            convertMUBUFModifiers(mubufStore->mubuf.value()));
+                    }
+                }
+                // SMEM (Scalar Memory) modifiers
+                else if(auto smemLoad = dynamic_cast<const SMemLoadInstruction*>(inst))
+                {
+                    if(smemLoad->smem.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::SMEMModifiers>(
+                            convertSMEMModifiers(smemLoad->smem.value()));
+                    }
+                }
+                else if(auto smemStore = dynamic_cast<const SMemStoreInstruction*>(inst))
+                {
+                    if(smemStore->smem.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::SMEMModifiers>(
+                            convertSMEMModifiers(smemStore->smem.value()));
+                    }
+                }
+                else if(auto smemAtomic = dynamic_cast<const SMemAtomicDecInstruction*>(inst))
+                {
+                    if(smemAtomic->smem.has_value())
+                    {
+                        stinkyInst->addModifier<stinkytofu::SMEMModifiers>(
+                            convertSMEMModifiers(smemAtomic->smem.value()));
+                    }
+                }
+
+                // Copy comment from rocisa instruction to StinkyInstruction
+                if(!inst->comment.empty())
+                {
+                    stinkyInst->addModifier<CommentData>(CommentData{inst->comment});
                 }
 
                 if(isBranch(*stinkyInst))

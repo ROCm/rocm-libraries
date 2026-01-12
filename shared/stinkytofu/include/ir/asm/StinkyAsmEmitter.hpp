@@ -49,6 +49,11 @@ namespace stinkytofu
 
         // Whether to emit blank lines between instruction groups
         bool emitBlankLines = false;
+
+        // Whether to use symbolic register names when available
+        // If true: v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+3]
+        // If false: v10, v[46:49]
+        bool useSymbolicNames = false;
     };
 
     /**
@@ -178,6 +183,11 @@ namespace stinkytofu
          * Emit operands for an instruction.
          */
         void emitOperands(std::ostream& os, const StinkyInstruction& inst);
+
+        /**
+         * Emit memory modifiers (DS, FLAT, MUBUF, SMEM) after operands.
+         */
+        void emitMemoryModifiers(std::ostream& os, const StinkyInstruction& inst);
 
         /**
          * Emit cycle information as a comment.
