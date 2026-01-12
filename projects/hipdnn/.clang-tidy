@@ -25,7 +25,8 @@ Checks: >
   -readability-function-cognitive-complexity,
   -portability-avoid-pragma-once,
   -modernize-use-scoped-lock,
-  -readability-use-concise-preprocessor-directives
+  -readability-use-concise-preprocessor-directives,
+  -readability-math-missing-parentheses
 
 WarningsAsErrors: "*"
 HeaderFileExtensions: ['h','hpp']
