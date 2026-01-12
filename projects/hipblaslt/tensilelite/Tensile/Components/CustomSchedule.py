@@ -3013,34 +3013,28 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
     syncs = SyncSchedule()
     syncCode = []   
-    snops: list[tuple[int, SNop]] = []
-    snopCode = []
-    S4 = SNop(4)
-    gr_inc_step = 0
+    gr_inc_step = 1
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         print("AAAAAAAAAAAAAAAAAAAAA")
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
 
-        pack = [0,0,0,0, 1,1,   2,2,2,2,
-                3,3,3,3, 4,4,   5,5,5,5,
-                6,6,6,6, 7,7,   8,8,8,8, 
-                9,9,9,9, 10,10, 11,11,11,11
-                ]
-
+        pa_offset=[0,0,1,1, 8,8,  9, 9,10,10, 
+                   2,2,3,3, 8,8, 11,11,12,12]
+        pb_offset=[4,4,5,5, 8,8, 13,13,14,14, 
+                   6,6,7,7, 8,8, 15,15,16,16]
+        
         lra0   = [ 0,1, 4,5, 8,9,  12,13]
         lrb0   = [  2,3, 6,7, 10,11, 14,15]
         #                     wait then read
-        syncs.add(            10, dscnt=2, comment="wait for first LRs before packing")
-        pa      =[                  11,11,11,12, 16,16, 17,17,17,18, 
-                                    12,12,13,13, 16,16, 18,18,19,19]
-        pb      =[                  13,14,14,14, 16,16, 19,20,20,20,
-                                    15,15,15,15, 16,16, 21,21,21,21]
-
-        syncs.add(                                 22, dscnt=0, barrier=True, comment="wait for LR before pack to complete + barrier for GR")
-        pack_a0 = pa + [                           i+12 for i in pa]
-        pack_b0 = pb + [                           i+12 for i in pb]
+        syncs.add(            10, dscnt=2, comment="wait for the first half of LRs before packing")
+        pack_a0 = [             i+11 for i in pa_offset] # last at 23
+        pack_b0 = [             i+11 for i in pb_offset] # last at 27
+        syncs.add(                          21, dscnt=0, comment="wait for the rest of LRs before the rest of the packing",
+                                            barrier=True, barrier_comment="barrier before GR")
+        pack_a0 +=[                             i+28 for i in pa_offset]
+        pack_b0 +=[                             i+28 for i in pb_offset] # last at 44
 
         grinca = [0,0,1,1,2,2,3,3,4]
         grincb = [5,5,6,6,7,7,8,8,9]
@@ -3049,18 +3043,20 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         lwsa   = [72]
         lwsb   = [72]        
         
-        gra    = [                                     23,26,30,34, 38,42,46,50] # one index for two instructions
-        grb    = [                                                             54,58,62, 66,70,74,78,82] # one index for two instructions
+        gra    = [                            22,25,29,33, 37,41,45,49] # one index for two instructions
+        grb    = [                                                    53,57,61, 65,69,73,77,81] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
-        syncs.add(                                                           48, vlcnt=7, barrier=True, comment="wait for previous set of global reads")
+        syncs.add(                                                 48, vlcnt=7, barrier=True, comment="wait for the previous GRs")
 
-        lra1   = [48,49,  52,53,  56,57, 60,61]
-        lrb1   = [ 50,51,  54,55,  58,59, 62,63]
-        syncs.add(                 58, dscnt=2, comment="wait for the first half of LRs before pack ")
-        syncs.add(                                           70, dscnt=0, barrier=True, comment="wait for LR before pack to complete + barrier for GR")
-        pack_a1 =[                 i+59-pa[0] for i in pa] + [i+71-pa[0] for i in pa]
-        pack_b1 =[                 i+59-pa[0] for i in pb] + [i+71-pa[0] for i in pb]
+        lra1   = [                                                 48,49,  52,53,  56,57, 61,62]
+        lrb1   = [                                                  50,51,  54,55,  59,60, 63,64]
+        syncs.add(                                                                  58, dscnt=2, comment="wait for the first half of LRs before pack")
+        pack_a1 = [                                                                   i+59 for i in pa_offset]
+        pack_b1 = [                                                                   i+59 for i in pb_offset] # last at 75
+        syncs.add(                                                                                            76, dscnt=0, comment="wait for the rest of LRs before the rest of the packing")
+        pack_a1 +=[                                                                                           i+77 for i in pa_offset]
+        pack_b1 +=[                                                                                           i+77 for i in pb_offset] # last at 93
 
     else:
         return False, None  
@@ -3090,11 +3086,8 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
-    if snops:
-        optSchedule['SNOP'] = [ [s[0] for s in snops] ]
-        snopCode = [s[1] for s in snops]
 
-    opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+    opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     opt1.pretty_print()
     return True, opt1
 
