@@ -877,6 +877,11 @@ validParameters = { # we need to make sure this matches develop
     # Adding more room for scheduling local read instructions
     # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
     "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8],
+    # Schedule global read instructions over barrier sync.
+    # Only for DirectToLdsA+B + PGR>=2.
+    # -1: auto (enable this for PGR>=3 (TODO: enable PGR>=3))
+    #  0: disable
+    #  1: enable (force to 0 if not applicable)
     "ScheduleGROverBarrier": [-1,0,1]
 }
 
