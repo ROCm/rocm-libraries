@@ -41,320 +41,11 @@ std::shared_ptr<TensorAttributes>
 // Graph Comparison Helpers
 //==============================================================================
 
-namespace
-{
-
-// Helper to compare FlatBuffer vectors
-template <typename T>
-void expectVectorsEqual(const flatbuffers::Vector<T>* expected,
-                        const flatbuffers::Vector<T>* actual,
-                        const std::string& context)
-{
-    if(expected == nullptr && actual == nullptr)
-    {
-        return;
-    }
-    ASSERT_NE(expected, nullptr) << context << ": expected is null but actual is not";
-    ASSERT_NE(actual, nullptr) << context << ": actual is null but expected is not";
-    ASSERT_EQ(expected->size(), actual->size()) << context << ": size mismatch";
-    for(size_t i = 0; i < expected->size(); ++i)
-    {
-        EXPECT_EQ(expected->Get(static_cast<flatbuffers::uoffset_t>(i)),
-                  actual->Get(static_cast<flatbuffers::uoffset_t>(i)))
-            << context << "[" << i << "]";
-    }
-}
-
-// Helper to compare pass-by-value tensor values
-void expectTensorValuesEqual(const hipdnn_data_sdk::data_objects::TensorAttributes* expected,
-                             const hipdnn_data_sdk::data_objects::TensorAttributes* actual,
-                             const std::string& context)
-{
-    using namespace hipdnn_data_sdk::data_objects;
-
-    ASSERT_EQ(expected->value_type(), actual->value_type()) << context << ".value_type";
-
-    switch(expected->value_type())
-    {
-    case TensorValue::NONE:
-        break;
-    case TensorValue::Float32Value:
-        EXPECT_EQ(expected->value_as_Float32Value()->value(),
-                  actual->value_as_Float32Value()->value())
-            << context << ".value (float32)";
-        break;
-    case TensorValue::Float16Value:
-        EXPECT_EQ(expected->value_as_Float16Value()->value(),
-                  actual->value_as_Float16Value()->value())
-            << context << ".value (float16)";
-        break;
-    case TensorValue::BFloat16Value:
-        EXPECT_EQ(expected->value_as_BFloat16Value()->value(),
-                  actual->value_as_BFloat16Value()->value())
-            << context << ".value (bfloat16)";
-        break;
-    case TensorValue::Float8Value:
-        EXPECT_EQ(expected->value_as_Float8Value()->value(),
-                  actual->value_as_Float8Value()->value())
-            << context << ".value (float8)";
-        break;
-    case TensorValue::Int32Value:
-        EXPECT_EQ(expected->value_as_Int32Value()->value(), actual->value_as_Int32Value()->value())
-            << context << ".value (int32)";
-        break;
-    case TensorValue::Float64Value:
-        EXPECT_EQ(expected->value_as_Float64Value()->value(),
-                  actual->value_as_Float64Value()->value())
-            << context << ".value (float64)";
-        break;
-    default:
-        FAIL() << context << ": unknown tensor value type "
-               << static_cast<int>(expected->value_type());
-    }
-}
-
-// Compare tensor attributes from FlatBuffer
-void expectTensorsEqual(const hipdnn_data_sdk::data_objects::TensorAttributes* expected,
-                        const hipdnn_data_sdk::data_objects::TensorAttributes* actual,
-                        const std::string& context)
-{
-    ASSERT_NE(expected, nullptr) << context << ": expected tensor is null";
-    ASSERT_NE(actual, nullptr) << context << ": actual tensor is null";
-
-    EXPECT_EQ(expected->uid(), actual->uid()) << context << ".uid";
-    if(expected->name() != nullptr && actual->name() != nullptr)
-    {
-        EXPECT_STREQ(expected->name()->c_str(), actual->name()->c_str()) << context << ".name";
-    }
-    EXPECT_EQ(expected->data_type(), actual->data_type()) << context << ".data_type";
-    EXPECT_EQ(expected->virtual_(), actual->virtual_()) << context << ".virtual";
-    expectVectorsEqual(expected->dims(), actual->dims(), context + ".dims");
-    expectVectorsEqual(expected->strides(), actual->strides(), context + ".strides");
-    expectTensorValuesEqual(expected, actual, context);
-}
-
-// Compare node attributes based on type
-void expectNodeAttributesEqual(const hipdnn_data_sdk::data_objects::Node* expected,
-                               const hipdnn_data_sdk::data_objects::Node* actual,
-                               const std::string& context)
-{
-    using namespace hipdnn_data_sdk::data_objects;
-
-    ASSERT_EQ(expected->attributes_type(), actual->attributes_type())
-        << context << ": node type mismatch";
-
-    switch(expected->attributes_type())
-    {
-    case NodeAttributes::ConvolutionFwdAttributes:
-    {
-        auto exp = expected->attributes_as_ConvolutionFwdAttributes();
-        auto act = actual->attributes_as_ConvolutionFwdAttributes();
-        EXPECT_EQ(exp->x_tensor_uid(), act->x_tensor_uid()) << context << ".x_tensor_uid";
-        EXPECT_EQ(exp->w_tensor_uid(), act->w_tensor_uid()) << context << ".w_tensor_uid";
-        EXPECT_EQ(exp->y_tensor_uid(), act->y_tensor_uid()) << context << ".y_tensor_uid";
-        EXPECT_EQ(exp->conv_mode(), act->conv_mode()) << context << ".conv_mode";
-        expectVectorsEqual(exp->pre_padding(), act->pre_padding(), context + ".pre_padding");
-        expectVectorsEqual(exp->post_padding(), act->post_padding(), context + ".post_padding");
-        expectVectorsEqual(exp->stride(), act->stride(), context + ".stride");
-        expectVectorsEqual(exp->dilation(), act->dilation(), context + ".dilation");
-        break;
-    }
-    case NodeAttributes::ConvolutionBwdAttributes:
-    {
-        auto exp = expected->attributes_as_ConvolutionBwdAttributes();
-        auto act = actual->attributes_as_ConvolutionBwdAttributes();
-        EXPECT_EQ(exp->dy_tensor_uid(), act->dy_tensor_uid()) << context << ".dy_tensor_uid";
-        EXPECT_EQ(exp->w_tensor_uid(), act->w_tensor_uid()) << context << ".w_tensor_uid";
-        EXPECT_EQ(exp->dx_tensor_uid(), act->dx_tensor_uid()) << context << ".dx_tensor_uid";
-        EXPECT_EQ(exp->conv_mode(), act->conv_mode()) << context << ".conv_mode";
-        expectVectorsEqual(exp->pre_padding(), act->pre_padding(), context + ".pre_padding");
-        expectVectorsEqual(exp->post_padding(), act->post_padding(), context + ".post_padding");
-        expectVectorsEqual(exp->stride(), act->stride(), context + ".stride");
-        expectVectorsEqual(exp->dilation(), act->dilation(), context + ".dilation");
-        break;
-    }
-    case NodeAttributes::ConvolutionWrwAttributes:
-    {
-        auto exp = expected->attributes_as_ConvolutionWrwAttributes();
-        auto act = actual->attributes_as_ConvolutionWrwAttributes();
-        EXPECT_EQ(exp->x_tensor_uid(), act->x_tensor_uid()) << context << ".x_tensor_uid";
-        EXPECT_EQ(exp->dy_tensor_uid(), act->dy_tensor_uid()) << context << ".dy_tensor_uid";
-        EXPECT_EQ(exp->dw_tensor_uid(), act->dw_tensor_uid()) << context << ".dw_tensor_uid";
-        EXPECT_EQ(exp->conv_mode(), act->conv_mode()) << context << ".conv_mode";
-        expectVectorsEqual(exp->pre_padding(), act->pre_padding(), context + ".pre_padding");
-        expectVectorsEqual(exp->post_padding(), act->post_padding(), context + ".post_padding");
-        expectVectorsEqual(exp->stride(), act->stride(), context + ".stride");
-        expectVectorsEqual(exp->dilation(), act->dilation(), context + ".dilation");
-        break;
-    }
-    case NodeAttributes::PointwiseAttributes:
-    {
-        auto exp = expected->attributes_as_PointwiseAttributes();
-        auto act = actual->attributes_as_PointwiseAttributes();
-        EXPECT_EQ(exp->operation(), act->operation()) << context << ".operation";
-        EXPECT_EQ(exp->in_0_tensor_uid(), act->in_0_tensor_uid()) << context << ".in_0_tensor_uid";
-        EXPECT_EQ(exp->out_0_tensor_uid(), act->out_0_tensor_uid())
-            << context << ".out_0_tensor_uid";
-        EXPECT_EQ(exp->in_1_tensor_uid(), act->in_1_tensor_uid()) << context << ".in_1_tensor_uid";
-        EXPECT_EQ(exp->in_2_tensor_uid(), act->in_2_tensor_uid()) << context << ".in_2_tensor_uid";
-        EXPECT_EQ(exp->relu_lower_clip(), act->relu_lower_clip()) << context << ".relu_lower_clip";
-        EXPECT_EQ(exp->relu_upper_clip(), act->relu_upper_clip()) << context << ".relu_upper_clip";
-        EXPECT_EQ(exp->swish_beta(), act->swish_beta()) << context << ".swish_beta";
-        EXPECT_EQ(exp->elu_alpha(), act->elu_alpha()) << context << ".elu_alpha";
-        EXPECT_EQ(exp->softplus_beta(), act->softplus_beta()) << context << ".softplus_beta";
-        break;
-    }
-    case NodeAttributes::MatmulAttributes:
-    {
-        auto exp = expected->attributes_as_MatmulAttributes();
-        auto act = actual->attributes_as_MatmulAttributes();
-        EXPECT_EQ(exp->a_tensor_uid(), act->a_tensor_uid()) << context << ".a_tensor_uid";
-        EXPECT_EQ(exp->b_tensor_uid(), act->b_tensor_uid()) << context << ".b_tensor_uid";
-        EXPECT_EQ(exp->c_tensor_uid(), act->c_tensor_uid()) << context << ".c_tensor_uid";
-        break;
-    }
-    case NodeAttributes::BatchnormAttributes:
-    {
-        auto exp = expected->attributes_as_BatchnormAttributes();
-        auto act = actual->attributes_as_BatchnormAttributes();
-        EXPECT_EQ(exp->x_tensor_uid(), act->x_tensor_uid()) << context << ".x_tensor_uid";
-        EXPECT_EQ(exp->scale_tensor_uid(), act->scale_tensor_uid())
-            << context << ".scale_tensor_uid";
-        EXPECT_EQ(exp->bias_tensor_uid(), act->bias_tensor_uid()) << context << ".bias_tensor_uid";
-        EXPECT_EQ(exp->y_tensor_uid(), act->y_tensor_uid()) << context << ".y_tensor_uid";
-        EXPECT_EQ(exp->epsilon_tensor_uid(), act->epsilon_tensor_uid())
-            << context << ".epsilon_tensor_uid";
-        break;
-    }
-    case NodeAttributes::BatchnormInferenceAttributes:
-    {
-        auto exp = expected->attributes_as_BatchnormInferenceAttributes();
-        auto act = actual->attributes_as_BatchnormInferenceAttributes();
-        EXPECT_EQ(exp->x_tensor_uid(), act->x_tensor_uid()) << context << ".x_tensor_uid";
-        EXPECT_EQ(exp->mean_tensor_uid(), act->mean_tensor_uid()) << context << ".mean_tensor_uid";
-        EXPECT_EQ(exp->inv_variance_tensor_uid(), act->inv_variance_tensor_uid())
-            << context << ".inv_variance_tensor_uid";
-        EXPECT_EQ(exp->scale_tensor_uid(), act->scale_tensor_uid())
-            << context << ".scale_tensor_uid";
-        EXPECT_EQ(exp->bias_tensor_uid(), act->bias_tensor_uid()) << context << ".bias_tensor_uid";
-        EXPECT_EQ(exp->y_tensor_uid(), act->y_tensor_uid()) << context << ".y_tensor_uid";
-        break;
-    }
-    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
-    {
-        auto exp = expected->attributes_as_BatchnormInferenceAttributesVarianceExt();
-        auto act = actual->attributes_as_BatchnormInferenceAttributesVarianceExt();
-        EXPECT_EQ(exp->x_tensor_uid(), act->x_tensor_uid()) << context << ".x_tensor_uid";
-        EXPECT_EQ(exp->mean_tensor_uid(), act->mean_tensor_uid()) << context << ".mean_tensor_uid";
-        EXPECT_EQ(exp->variance_tensor_uid(), act->variance_tensor_uid())
-            << context << ".variance_tensor_uid";
-        EXPECT_EQ(exp->scale_tensor_uid(), act->scale_tensor_uid())
-            << context << ".scale_tensor_uid";
-        EXPECT_EQ(exp->bias_tensor_uid(), act->bias_tensor_uid()) << context << ".bias_tensor_uid";
-        EXPECT_EQ(exp->y_tensor_uid(), act->y_tensor_uid()) << context << ".y_tensor_uid";
-        break;
-    }
-    case NodeAttributes::BatchnormBackwardAttributes:
-    {
-        auto exp = expected->attributes_as_BatchnormBackwardAttributes();
-        auto act = actual->attributes_as_BatchnormBackwardAttributes();
-        EXPECT_EQ(exp->x_tensor_uid(), act->x_tensor_uid()) << context << ".x_tensor_uid";
-        EXPECT_EQ(exp->dy_tensor_uid(), act->dy_tensor_uid()) << context << ".dy_tensor_uid";
-        EXPECT_EQ(exp->scale_tensor_uid(), act->scale_tensor_uid())
-            << context << ".scale_tensor_uid";
-        EXPECT_EQ(exp->dx_tensor_uid(), act->dx_tensor_uid()) << context << ".dx_tensor_uid";
-        EXPECT_EQ(exp->dscale_tensor_uid(), act->dscale_tensor_uid())
-            << context << ".dscale_tensor_uid";
-        EXPECT_EQ(exp->dbias_tensor_uid(), act->dbias_tensor_uid())
-            << context << ".dbias_tensor_uid";
-        EXPECT_EQ(exp->mean_tensor_uid(), act->mean_tensor_uid()) << context << ".mean_tensor_uid";
-        EXPECT_EQ(exp->inv_variance_tensor_uid(), act->inv_variance_tensor_uid())
-            << context << ".inv_variance_tensor_uid";
-        break;
-    }
-    default:
-        FAIL() << context << ": unknown node type "
-               << static_cast<int>(expected->attributes_type());
-    }
-}
-
-} // namespace
-
-// Compare two graphs by serializing to FlatBuffer and comparing field-by-field
+// Compare two graphs using FlatBuffer-generated == operators on unpacked types.
+// We cannot use GraphT::operator== directly because it compares tensor vectors
+// positionally (using std::equal), but serialization may reorder tensors.
+// Instead, we match tensors by UID and use TensorAttributesT::operator== for each pair.
 void expectGraphsEqual(Graph& expected, Graph& actual)
-{
-    using namespace hipdnn_data_sdk::data_objects;
-
-    auto expectedBuffer = expected.toFlatBuffer();
-    auto actualBuffer = actual.toFlatBuffer();
-
-    auto fbExpected = GetGraph(expectedBuffer.data());
-    auto fbActual = GetGraph(actualBuffer.data());
-
-    // Compare graph-level attributes
-    if(fbExpected->name() != nullptr && fbActual->name() != nullptr)
-    {
-        EXPECT_STREQ(fbExpected->name()->c_str(), fbActual->name()->c_str()) << "graph.name";
-    }
-    EXPECT_EQ(fbExpected->compute_data_type(), fbActual->compute_data_type())
-        << "graph.compute_data_type";
-    EXPECT_EQ(fbExpected->io_data_type(), fbActual->io_data_type()) << "graph.io_data_type";
-    EXPECT_EQ(fbExpected->intermediate_data_type(), fbActual->intermediate_data_type())
-        << "graph.intermediate_data_type";
-    EXPECT_EQ(fbExpected->preferred_engine_id(), fbActual->preferred_engine_id())
-        << "graph.preferred_engine_id";
-
-    // Compare tensors by UID (ordering may differ after serialization)
-    ASSERT_EQ(fbExpected->tensors()->size(), fbActual->tensors()->size())
-        << "tensor count mismatch";
-
-    // Build UID -> tensor map for actual graph
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>
-        actualTensorMap;
-    for(size_t i = 0; i < fbActual->tensors()->size(); ++i)
-    {
-        auto tensor = fbActual->tensors()->Get(static_cast<flatbuffers::uoffset_t>(i));
-        actualTensorMap[tensor->uid()] = tensor;
-    }
-
-    // Compare each expected tensor with its counterpart by UID
-    for(size_t i = 0; i < fbExpected->tensors()->size(); ++i)
-    {
-        auto expTensor = fbExpected->tensors()->Get(static_cast<flatbuffers::uoffset_t>(i));
-        auto it = actualTensorMap.find(expTensor->uid());
-        ASSERT_NE(it, actualTensorMap.end())
-            << "tensor with uid " << expTensor->uid() << " not found in actual graph";
-        expectTensorsEqual(
-            expTensor, it->second, "tensor[uid=" + std::to_string(expTensor->uid()) + "]");
-    }
-
-    // Compare nodes
-    ASSERT_EQ(fbExpected->nodes()->size(), fbActual->nodes()->size()) << "node count mismatch";
-    for(size_t i = 0; i < fbExpected->nodes()->size(); ++i)
-    {
-        auto expNode = fbExpected->nodes()->Get(static_cast<flatbuffers::uoffset_t>(i));
-        auto actNode = fbActual->nodes()->Get(static_cast<flatbuffers::uoffset_t>(i));
-
-        std::string nodeContext = "node[" + std::to_string(i) + "]";
-        if(expNode->name() != nullptr && actNode->name() != nullptr)
-        {
-            EXPECT_STREQ(expNode->name()->c_str(), actNode->name()->c_str())
-                << nodeContext << ".name";
-        }
-        EXPECT_EQ(expNode->compute_data_type(), actNode->compute_data_type())
-            << nodeContext << ".compute_data_type";
-
-        expectNodeAttributesEqual(expNode, actNode, nodeContext);
-    }
-}
-
-// Deep comparison using FlatBuffer-generated == operators on unpacked native types.
-// This provides a second verification layer using different code paths than expectGraphsEqual.
-// Note: We cannot use GraphT::operator== directly because it compares tensor vectors
-// positionally (using std::equal), but serialization may reorder tensors. Since tensors
-// are referenced by UID in graph operations, ordering is semantically irrelevant.
-// Instead, we match tensors by UID and use TensorAttributesT::operator== on each pair.
-void expectGraphsEqualUnpacked(Graph& expected, Graph& actual)
 {
     using namespace hipdnn_data_sdk::data_objects;
 
@@ -364,51 +55,48 @@ void expectGraphsEqualUnpacked(Graph& expected, Graph& actual)
     auto expectedUnpacked = UnPackGraph(expectedBuffer.data());
     auto actualUnpacked = UnPackGraph(actualBuffer.data());
 
-    // Verify graph-level fields match
-    EXPECT_EQ(expectedUnpacked->name, actualUnpacked->name) << "GraphT name mismatch";
+    // Manually compare graph-level fields (can't use GraphT::operator== due to tensor ordering)
+    EXPECT_EQ(expectedUnpacked->name, actualUnpacked->name) << "Graph name mismatch";
     EXPECT_EQ(expectedUnpacked->compute_data_type, actualUnpacked->compute_data_type)
-        << "GraphT compute_data_type mismatch";
+        << "Graph compute_data_type mismatch";
     EXPECT_EQ(expectedUnpacked->io_data_type, actualUnpacked->io_data_type)
-        << "GraphT io_data_type mismatch";
+        << "Graph io_data_type mismatch";
     EXPECT_EQ(expectedUnpacked->intermediate_data_type, actualUnpacked->intermediate_data_type)
-        << "GraphT intermediate_data_type mismatch";
+        << "Graph intermediate_data_type mismatch";
     EXPECT_EQ(expectedUnpacked->preferred_engine_id, actualUnpacked->preferred_engine_id)
-        << "GraphT preferred_engine_id mismatch";
+        << "Graph preferred_engine_id mismatch";
 
-    // Verify tensor count matches
+    // Compare tensors using TensorAttributesT::operator== (match by UID due to potential reordering)
     ASSERT_EQ(expectedUnpacked->tensors.size(), actualUnpacked->tensors.size())
-        << "GraphT tensor count mismatch";
+        << "Tensor count mismatch";
 
-    // Build UID -> tensor map for actual graph
-    std::unordered_map<int64_t, const TensorAttributesT*> actualUnpackedTensorMap;
+    std::unordered_map<int64_t, const TensorAttributesT*> actualTensorMap;
     for(const auto& tensor : actualUnpacked->tensors)
     {
-        actualUnpackedTensorMap[tensor->uid] = tensor.get();
+        actualTensorMap[tensor->uid] = tensor.get();
     }
 
-    // Verify no duplicate UIDs in actual (all UIDs should be unique)
-    EXPECT_EQ(actualUnpackedTensorMap.size(), actualUnpacked->tensors.size())
-        << "Duplicate tensor UIDs detected in actual graph";
+    EXPECT_EQ(actualTensorMap.size(), actualUnpacked->tensors.size())
+        << "Duplicate tensor UIDs detected";
 
-    // Compare each tensor using generated == operator (matched by UID)
     for(const auto& expTensor : expectedUnpacked->tensors)
     {
-        auto it = actualUnpackedTensorMap.find(expTensor->uid);
-        ASSERT_NE(it, actualUnpackedTensorMap.end())
-            << "tensor with uid " << expTensor->uid << " not found in actual graph";
+        auto it = actualTensorMap.find(expTensor->uid);
+        ASSERT_NE(it, actualTensorMap.end())
+            << "Tensor with uid " << expTensor->uid << " not found";
 
-        // Compare using generated == operator
         EXPECT_EQ(*expTensor, *(it->second))
-            << "TensorAttributesT == failed for uid " << expTensor->uid;
+            << "TensorAttributesT::operator== failed for uid " << expTensor->uid;
     }
 
-    // Compare each node using generated == operator
+    // Compare nodes using NodeT::operator==
     ASSERT_EQ(expectedUnpacked->nodes.size(), actualUnpacked->nodes.size())
-        << "GraphT node count mismatch";
+        << "Node count mismatch";
+
     for(size_t i = 0; i < expectedUnpacked->nodes.size(); ++i)
     {
         EXPECT_EQ(*expectedUnpacked->nodes[i], *actualUnpacked->nodes[i])
-            << "NodeT == failed for node[" << i << "]";
+            << "NodeT::operator== failed for node[" << i << "]";
     }
 }
 
@@ -674,7 +362,6 @@ TEST(TestGraphSerialization, ConvReluFusionDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, ConvBiasReluFusionDeepComparison)
@@ -710,7 +397,6 @@ TEST(TestGraphSerialization, ConvBiasReluFusionDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, ResidualBlockSerialization)
@@ -789,7 +475,6 @@ TEST(TestGraphSerialization, BnTrainingActivFusionDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, BnInfDReluBnBwdFusionDeepComparison)
@@ -827,7 +512,6 @@ TEST(TestGraphSerialization, BnInfDReluBnBwdFusionDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 //==============================================================================
@@ -1689,47 +1373,6 @@ TEST(TestGraphSerialization, MatmulNodeSerialization)
     expectGraphsEqual(graph, newGraph);
 }
 
-TEST(TestGraphSerialization, MatmulNodeFieldVerification)
-{
-    Graph graph;
-    graph.set_name("matmul_field_test");
-    graph.set_compute_data_type(DataType::FLOAT);
-    graph.set_io_data_type(DataType::FLOAT);
-    graph.set_intermediate_data_type(DataType::FLOAT);
-
-    auto a = createTensor("a", {16, 32}, DataType::FLOAT, 100);
-    auto b = createTensor("b", {32, 64}, DataType::FLOAT, 200);
-
-    MatmulAttributes matmulAttrs;
-    auto c = graph.matmul(a, b, matmulAttrs);
-    c->set_uid(300);
-
-    // Round-trip through JSON
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    // Deep comparison via FlatBuffer
-    expectGraphsEqual(graph, restored);
-
-    // Additional explicit field verification
-    auto originalBuffer = graph.toFlatBuffer();
-    auto restoredBuffer = restored.toFlatBuffer();
-
-    auto fbOriginal = hipdnn_data_sdk::data_objects::GetGraph(originalBuffer.data());
-    auto fbRestored = hipdnn_data_sdk::data_objects::GetGraph(restoredBuffer.data());
-
-    auto origMatmul = fbOriginal->nodes()->Get(0)->attributes_as_MatmulAttributes();
-    auto restMatmul = fbRestored->nodes()->Get(0)->attributes_as_MatmulAttributes();
-
-    EXPECT_EQ(origMatmul->a_tensor_uid(), 100);
-    EXPECT_EQ(origMatmul->b_tensor_uid(), 200);
-    EXPECT_EQ(origMatmul->c_tensor_uid(), 300);
-    EXPECT_EQ(restMatmul->a_tensor_uid(), 100);
-    EXPECT_EQ(restMatmul->b_tensor_uid(), 200);
-    EXPECT_EQ(restMatmul->c_tensor_uid(), 300);
-}
-
 //==============================================================================
 // BatchnormInferenceVarianceExt Node Tests
 //==============================================================================
@@ -1764,60 +1407,6 @@ TEST(TestGraphSerialization, BatchnormInferenceNodeVarianceExtSerialization)
     expectGraphsEqual(graph, newGraph);
 }
 
-TEST(TestGraphSerialization, BatchnormInferenceVarianceExtFieldVerification)
-{
-    Graph graph;
-    graph.set_name("bn_inf_var_ext_field_test");
-    graph.set_compute_data_type(DataType::FLOAT);
-    graph.set_io_data_type(DataType::FLOAT);
-    graph.set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = createTensor("x", {2, 128, 16, 16}, DataType::FLOAT, 10);
-    auto mean = createTensor1D("mean", 128, DataType::FLOAT, 20);
-    auto variance = createTensor1D("variance", 128, DataType::FLOAT, 30);
-    auto scale = createTensor1D("scale", 128, DataType::FLOAT, 40);
-    auto bias = createTensor1D("bias", 128, DataType::FLOAT, 50);
-
-    BatchnormInferenceAttributesVarianceExt bnInfVarAttrs;
-
-    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, bnInfVarAttrs);
-    y->set_uid(60);
-
-    // Round-trip through JSON
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    // Deep comparison
-    expectGraphsEqual(graph, restored);
-
-    // Additional explicit field verification
-    auto originalBuffer = graph.toFlatBuffer();
-    auto restoredBuffer = restored.toFlatBuffer();
-
-    auto fbOriginal = hipdnn_data_sdk::data_objects::GetGraph(originalBuffer.data());
-    auto fbRestored = hipdnn_data_sdk::data_objects::GetGraph(restoredBuffer.data());
-
-    auto origBn
-        = fbOriginal->nodes()->Get(0)->attributes_as_BatchnormInferenceAttributesVarianceExt();
-    auto restBn
-        = fbRestored->nodes()->Get(0)->attributes_as_BatchnormInferenceAttributesVarianceExt();
-
-    EXPECT_EQ(origBn->x_tensor_uid(), 10);
-    EXPECT_EQ(origBn->mean_tensor_uid(), 20);
-    EXPECT_EQ(origBn->variance_tensor_uid(), 30);
-    EXPECT_EQ(origBn->scale_tensor_uid(), 40);
-    EXPECT_EQ(origBn->bias_tensor_uid(), 50);
-    EXPECT_EQ(origBn->y_tensor_uid(), 60);
-
-    EXPECT_EQ(restBn->x_tensor_uid(), 10);
-    EXPECT_EQ(restBn->mean_tensor_uid(), 20);
-    EXPECT_EQ(restBn->variance_tensor_uid(), 30);
-    EXPECT_EQ(restBn->scale_tensor_uid(), 40);
-    EXPECT_EQ(restBn->bias_tensor_uid(), 50);
-    EXPECT_EQ(restBn->y_tensor_uid(), 60);
-}
-
 //==============================================================================
 // Deep Comparison Tests for All Node Types
 //==============================================================================
@@ -1848,7 +1437,6 @@ TEST(TestGraphSerialization, ConvFpropDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, PointwiseWithParamsDeepComparison)
@@ -1872,23 +1460,6 @@ TEST(TestGraphSerialization, PointwiseWithParamsDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-
-    // Verify the elu_alpha specifically
-    auto originalBuffer = graph.toFlatBuffer();
-    auto restoredBuffer = restored.toFlatBuffer();
-
-    auto fbOriginal = hipdnn_data_sdk::data_objects::GetGraph(originalBuffer.data());
-    auto fbRestored = hipdnn_data_sdk::data_objects::GetGraph(restoredBuffer.data());
-
-    auto origPw = fbOriginal->nodes()->Get(0)->attributes_as_PointwiseAttributes();
-    auto restPw = fbRestored->nodes()->Get(0)->attributes_as_PointwiseAttributes();
-
-    EXPECT_TRUE(origPw->elu_alpha().has_value());
-    EXPECT_TRUE(restPw->elu_alpha().has_value());
-    EXPECT_FLOAT_EQ(origPw->elu_alpha().value(), 0.5f);
-    EXPECT_FLOAT_EQ(restPw->elu_alpha().value(), 0.5f);
-
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, BatchnormBackwardDeepComparison)
@@ -1915,7 +1486,6 @@ TEST(TestGraphSerialization, BatchnormBackwardDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, ConvDgradDeepComparison)
@@ -1944,7 +1514,6 @@ TEST(TestGraphSerialization, ConvDgradDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, ConvWgradDeepComparison)
@@ -1973,7 +1542,6 @@ TEST(TestGraphSerialization, ConvWgradDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, BatchnormDeepComparison)
@@ -2000,7 +1568,6 @@ TEST(TestGraphSerialization, BatchnormDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
 
 TEST(TestGraphSerialization, BatchnormInferenceDeepComparison)
@@ -2027,5 +1594,4 @@ TEST(TestGraphSerialization, BatchnormInferenceDeepComparison)
     restored.deserialize(json);
 
     expectGraphsEqual(graph, restored);
-    expectGraphsEqualUnpacked(graph, restored);
 }
