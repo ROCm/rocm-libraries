@@ -25,6 +25,7 @@
 #include "hipfft/hipfftXt.h"
 #include "rocfft/rocfft.h"
 #include <algorithm>
+#include <cstring> // std::memset
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1773,7 +1774,7 @@ try
         return HIPFFT_INVALID_VALUE;
 
     auto lib_desc = std::make_unique<hipLibXtDesc>();
-    memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
+    std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
 
     lib_desc->version       = 0;
     lib_desc->library       = HIPLIB_FORMAT_HIPFFT;
@@ -1781,7 +1782,7 @@ try
     lib_desc->libDescriptor = nullptr;
 
     auto xt_desc = std::make_unique<hipXtDesc>();
-    memset(xt_desc.get(), 0, sizeof(hipXtDesc));
+    std::memset(xt_desc.get(), 0, sizeof(hipXtDesc));
     xt_desc->version = 0;
 
     std::vector<hipfft_brick>* bricks           = nullptr;
