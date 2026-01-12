@@ -145,7 +145,8 @@ namespace
     {
         if constexpr(!is_real(dft_type))
             return rocfft_array_type_complex_interleaved;
-        else if constexpr(dft_type == rocfft_transform_type_real_forward ^ io == fft_io::fft_io_in)
+        else if constexpr((dft_type == rocfft_transform_type_real_forward)
+                          ^ (io == fft_io::fft_io_in))
             return rocfft_array_type_hermitian_interleaved;
         else
             return rocfft_array_type_real;
