@@ -42,8 +42,7 @@ int main(int argc, char* argv[])
     std::vector<size_t> devices = {0, 1};
 
     // Is the transform in-place or out-of-place:
-    bool inplace = false;
-    // FIXME: actually use this.
+    rocfft_result_placement place = rocfft_placement_notinplace;
     
     // Command-line options:
     CLI::App app{"rocfft sample command line options"};
@@ -51,13 +50,12 @@ int main(int argc, char* argv[])
     app.add_option(
         "--devices", devices, "List of devices to use separated by spaces (eg: --devices 1 3)");
     app.add_flag("-o, --notInPlace", "")->each([&](const std::string&) {
-        inplace = false;
+        place = rocfft_placement_notinplace;
     });
     app.add_flag("-i, --inPlace", "")->each([&](const std::string&) {
-        inplace = true;
+        place = rocfft_placement_inplace;
     });
-    
-    
+        
     try
     {
         app.parse(argc, argv);
@@ -68,7 +66,12 @@ int main(int argc, char* argv[])
     }
 
     int deviceCount = devices.size();
-    std::cout << "Using " << deviceCount << " device(s)\n";
+    std::cout << "Transform lengths:";
+    for(const auto val: length)
+        std::cout << " " << val;
+    std::cout << "\n";
+    std::cout << "Using " << deviceCount << " device(s)\n\n";
+
     int nDevices;
     (void)hipGetDeviceCount(&nDevices);
 
@@ -76,12 +79,10 @@ int main(int argc, char* argv[])
     if(nDevices <= static_cast<int>(*std::max_element(devices.begin(), devices.end())))
         throw std::runtime_error("device ID greater than number of available devices");
 
-    // Placeness for the transform
     auto fftrc = rocfft_status_success;
     fftrc      = rocfft_setup();
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("rocfft_setup failed.");
-    const rocfft_result_placement place = rocfft_placement_notinplace;
 
     // Direction of transform
     const rocfft_transform_type direction = rocfft_transform_type_real_forward;
@@ -103,74 +104,56 @@ int main(int argc, char* argv[])
                                             0);
 
     auto hiprc = hipSuccess;
-
-    std::cout << "input data decomposition:\n";
-    std::vector<void*> gpu_in(devices.size());
+    
+    std::cout << "\nInput data decomposition:\n";
+    std::vector<size_t> inlength = length;
+    if(place == rocfft_placement_inplace)
+        inlength[0] += 2;
+    std::vector<std::vector<size_t>> inbrick_lower(devices.size());
+    std::vector<std::vector<size_t>> inbrick_upper(devices.size());
+    std::vector<std::vector<size_t>> inbrick_stride(devices.size());
+    std::vector<size_t> inbufsizes(devices.size());
     {
-
         rocfft_field infield = nullptr;
         rocfft_field_create(&infield);
-        
-        for(size_t idx = 0; idx < gpu_in.size(); ++idx)
+
+        for(size_t idx = 0; idx < devices.size(); ++idx)
         {
             const size_t inbrick_length1
-                = length[1] / gpu_in.size() + (idx < length[1] % gpu_in.size() ? 1 : 0);
+                = inlength[1] / devices.size() + (idx < inlength[1] % devices.size() ? 1 : 0);
             const size_t inbrick_lower1
-                = idx * (length[1] / gpu_in.size()) + std::min(idx, length[1] % gpu_in.size());
+                = idx * (inlength[1] / devices.size()) + std::min(idx, inlength[1] % devices.size());
             const size_t inbrick_upper1 = inbrick_lower1 + inbrick_length1;
-            std::vector<size_t> inbrick_lower          = {0, inbrick_lower1, 0};
-            std::vector<size_t> inbrick_upper          = {length[0], inbrick_upper1, 1};
-            std::vector<size_t> inbrick_stride = {1, length[0], inbrick_upper[1] - inbrick_lower[1]};
+            inbrick_lower[idx]          = {0, inbrick_lower1, 0};
+            inbrick_upper[idx]          = {inlength[0], inbrick_upper1, 1};
+            inbrick_stride[idx] = {1, inlength[0], inbrick_upper[idx][1] - inbrick_lower[idx][1]};
             
             rocfft_brick inbrick = nullptr;
             rocfft_brick_create(&inbrick,
-                                inbrick_lower.data(),
-                                inbrick_upper.data(),
-                                inbrick_stride.data(),
-                                inbrick_lower.size(),
+                                inbrick_lower[idx].data(),
+                                inbrick_upper[idx].data(),
+                                inbrick_stride[idx].data(),
+                                inbrick_lower[idx].size(),
                                 devices[idx]);
             rocfft_field_add_brick(infield, inbrick);
             rocfft_brick_destroy(inbrick);
             inbrick = nullptr;
 
-            const size_t memSize = length[0] * inbrick_length1 * sizeof(double);
-
+            const size_t memSize = inlength[0] * inbrick_length1 * sizeof(double);
+            inbufsizes[idx] = memSize;
+            
             std::cout << "in-brick " << idx;
             std::cout << "\n\tlower indices:";
-            for(const auto val : inbrick_lower)
+            for(const auto val : inbrick_lower[idx])
                 std::cout << " " << val;
             std::cout << "\n\tupper indices:";
-            for(const auto val : inbrick_upper)
+            for(const auto val : inbrick_upper[idx])
                 std::cout << " " << val;
             std::cout << "\n\tstrides:";
-            for(const auto val : inbrick_stride)
+            for(const auto val : inbrick_stride[idx])
                 std::cout << " " << val;
             std::cout << "\n";
             std::cout << "\tbuffer size: " << memSize << "\n";
-
-            hiprc = hipSetDevice(devices[idx]);
-            if(hiprc != hipSuccess)
-                throw std::runtime_error("hipSetDevice failed");
-
-            hiprc = hipMalloc(&gpu_in[idx], memSize);
-            if(hiprc != hipSuccess)
-                throw std::runtime_error("hipMalloc failed");
-            std::vector<double> host_in(length[0] * inbrick_length1);
-            for(auto idx0 = inbrick_lower[0]; idx0 < inbrick_upper[0]; ++idx0)
-            {
-                for(auto idx1 = inbrick_lower[1]; idx1 < inbrick_upper[1]; ++idx1)
-                {
-                    const auto pos = (idx0 - inbrick_lower[0]) * inbrick_stride[0]
-                                     + (idx1 - inbrick_lower[1]) * inbrick_stride[1];
-                    host_in[pos] = idx0 + idx1;
-                    std::cout << host_in[pos] << " ";
-                }
-                std::cout << "\n";
-            }
-
-            hiprc = hipMemcpy(gpu_in[idx], host_in.data(), memSize, hipMemcpyHostToDevice);
-            if(hiprc != hipSuccess)
-                throw std::runtime_error("hipMemcpy failed");
         }
 
         rocfft_plan_description_add_infield(description, infield);
@@ -179,27 +162,24 @@ int main(int argc, char* argv[])
         if(fftrc != rocfft_status_success)
             throw std::runtime_error("failed destroy infield");
     }
-
-    std::cout << "output data decomposition:\n";
-    std::vector<void*>               gpu_out(devices.size());
-
+        
+    std::cout << "\nOutput data decomposition:\n";
     std::vector<size_t> outlength = length;
     outlength[0] = outlength[0] / 2 + 1;
-    
-    // For the output, we store the format so that we can view the output of the transform.
-    std::vector<std::vector<size_t>> outbrick_lower(gpu_out.size());
-    std::vector<std::vector<size_t>> outbrick_upper(gpu_out.size());
-    std::vector<std::vector<size_t>> outbrick_stride(gpu_out.size());
+    std::vector<std::vector<size_t>> outbrick_lower(devices.size());
+    std::vector<std::vector<size_t>> outbrick_upper(devices.size());
+    std::vector<std::vector<size_t>> outbrick_stride(devices.size());
+    std::vector<size_t> outbufsizes(devices.size());
     {
         rocfft_field outfield = nullptr;
         rocfft_field_create(&outfield);
 
-        for(size_t idx = 0; idx < gpu_out.size(); ++idx)
+        for(size_t idx = 0; idx < devices.size(); ++idx)
         {
             const size_t outbrick_length1
-                = outlength[1] / gpu_out.size() + (idx < outlength[1] % gpu_in.size() ? 1 : 0);
+                = outlength[1] / devices.size() + (idx < outlength[1] % devices.size() ? 1 : 0);
             const size_t outbrick_lower1
-                = idx * (outlength[1] / gpu_out.size()) + std::min(idx, outlength[1] % gpu_out.size());
+                = idx * (outlength[1] / devices.size()) + std::min(idx, outlength[1] % devices.size());
             outbrick_lower[idx]   = {0, outbrick_lower1, 0};
             outbrick_upper[idx]   = {outlength[0], outbrick_lower1 + outbrick_length1, 1};
             outbrick_stride[idx] = {1, outlength[0], outbrick_upper[idx][1] - outbrick_lower[idx][1]};
@@ -216,7 +196,9 @@ int main(int argc, char* argv[])
             outbrick = nullptr;
 
             const size_t memSize = outlength[0] * outbrick_length1 * sizeof(std::complex<double>);
-
+            outbufsizes[idx] = memSize;
+                        
+            
             std::cout << "out-brick " << idx;
             std::cout << "\n\tlower indices:";
             for(const auto val : outbrick_lower[idx])
@@ -229,11 +211,6 @@ int main(int argc, char* argv[])
                 std::cout << " " << val;
             std::cout << "\n";
             std::cout << "\tbuffer size: " << memSize << "\n";
-
-            (void)hipSetDevice(devices[idx]);
-
-            if(hipMalloc(&gpu_out[idx], memSize) != hipSuccess)
-                throw std::runtime_error("hipMalloc failed");
         }
 
         rocfft_plan_description_add_outfield(description, outfield);
@@ -243,6 +220,43 @@ int main(int argc, char* argv[])
             throw std::runtime_error("failed destroy outfield");
     }
 
+    // Allocation and initialization of gpu buffers:
+    std::cout << "\nInput data:\n";
+    std::vector<void*> gpu_in(devices.size());
+    std::vector<void*> gpu_out(devices.size());
+    for(size_t idx = 0; idx < gpu_in.size(); ++idx)
+    {
+        std::cout << "Input brick " << idx << "\n";
+        hiprc = hipSetDevice(devices[idx]);
+        if(hiprc != hipSuccess)
+            throw std::runtime_error("hipSetDevice failed");
+
+        const size_t memsize = place == rocfft_placement_notinplace ? inbufsizes[idx] : std::max(inbufsizes[idx], outbufsizes[idx]);
+        hiprc = hipMalloc(&gpu_in[idx], memsize);
+        if(hiprc != hipSuccess)
+            throw std::runtime_error("hipMalloc failed");
+        std::vector<double> host_in((inbrick_upper[idx][0] - inbrick_lower[idx][0])
+                                    *(inbrick_upper[idx][1] - inbrick_lower[idx][1]));
+        for(auto idx0 = inbrick_lower[idx][0]; idx0 < inbrick_upper[idx][0]; ++idx0)
+        {
+            for(auto idx1 = inbrick_lower[idx][1]; idx1 < inbrick_upper[idx][1]; ++idx1)
+            {
+                const auto pos = (idx0 - inbrick_lower[idx][0]) * inbrick_stride[idx][0]
+                    + (idx1 - inbrick_lower[idx][1]) * inbrick_stride[idx][1];
+                host_in[pos] = idx0 + idx1;
+                std::cout << host_in[pos] << " ";
+            }
+            std::cout << "\n";
+        }
+        hiprc = hipMemcpy(gpu_in[idx], host_in.data(), inbufsizes[idx], hipMemcpyHostToDevice);
+        if(hiprc != hipSuccess)
+            throw std::runtime_error("hipMemcpy failed");
+
+        if(place == rocfft_placement_notinplace)
+            if(hipMalloc(&gpu_out[idx], outbufsizes[idx]) != hipSuccess)
+                throw std::runtime_error("hipMalloc failed");
+    }
+    
     // Create a multi-gpu plan:
     (void)hipSetDevice(devices[0]);
     rocfft_plan gpu_plan = nullptr;
@@ -260,10 +274,11 @@ int main(int argc, char* argv[])
     // Get execution information and allocate work buffer
     rocfft_execution_info planinfo      = nullptr;
     size_t                work_buf_size = 0;
-    if(rocfft_plan_get_work_buffer_size(gpu_plan, &work_buf_size) != rocfft_status_success)
+    fftrc = rocfft_plan_get_work_buffer_size(gpu_plan, &work_buf_size);
+    if(fftrc != rocfft_status_success)
         throw std::runtime_error("rocfft_plan_get_work_buffer_size failed.");
-    void* work_buf = nullptr;
 
+    void* work_buf = nullptr;
     if(work_buf_size)
     {
         if(rocfft_execution_info_create(&planinfo) != rocfft_status_success)
@@ -276,14 +291,17 @@ int main(int argc, char* argv[])
     }
 
     // Execute plan:
-    fftrc = rocfft_execute(gpu_plan, (void**)gpu_in.data(), (void**)gpu_out.data(), planinfo);
+    fftrc = rocfft_execute(gpu_plan,
+                           (void**)gpu_in.data(),
+                           place == rocfft_placement_notinplace ? (void**)gpu_out.data() : nullptr,
+                           planinfo);
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("failed to execute.");
 
-    // Output the data.
+    std::cout << "\nOutput data:\n";
     for(size_t idx = 0; idx < gpu_out.size(); ++idx)
     {
-        std::cout << "out brick " << idx << "\n";
+        std::cout << "Output brick " << idx << "\n";
 
         const auto nbrick = (outbrick_upper[idx][0] - outbrick_lower[idx][0])
                             * (outbrick_upper[idx][1] - outbrick_lower[idx][1]);
