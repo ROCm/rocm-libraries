@@ -79,22 +79,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
     // Scenario 1: Local filesystem, no environment variable set
     EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
-    // Diagnostic logging
-    const auto temp_dir = fs::temp_directory_path();
-    std::cout << "\n=== UserDbPath_LocalFS_NoEnvVar Diagnostics ===" << std::endl;
-    std::cout << "fs::temp_directory_path() = '" << temp_dir.string() << "'" << std::endl;
-
-#if MIOPEN_BUILD_DEV
-    std::cout << "MIOPEN_BUILD_DEV = 1 (defined)" << std::endl;
-#else
-    std::cout << "MIOPEN_BUILD_DEV = 0 (not defined)" << std::endl;
-#endif
-
     const auto& user_db_path = miopen::GetUserDbPath();
-    std::cout << "Returned user_db_path = '" << user_db_path.string() << "'" << std::endl;
-    std::cout << "PathContains(user_db_path, temp_dir) = "
-              << (PathContains(user_db_path, temp_dir.string()) ? "true" : "false") << std::endl;
-    std::cout << "============================================\n" << std::endl;
 
     if(user_db_path.empty())
     {
@@ -137,33 +122,9 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
     ScopedEnvironment<std::string> unset_user_db(MIOPEN_USER_DB_PATH, "");
 
     // Scenario 3: Network filesystem, no environment variable set
-    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_))
-        .WillRepeatedly(::testing::Invoke([](const fs::path& path) {
-            std::cout << "[MOCK] IsNetworkedFilesystem('" << path.string() << "') -> true"
-                      << std::endl;
-            return true;
-        }));
-
-    // Diagnostic logging
-    const auto temp_dir = fs::temp_directory_path();
-    std::cout << "\n=== UserDbPath_NetworkFS_NoEnvVar Diagnostics ===" << std::endl;
-    std::cout << "fs::temp_directory_path() = '" << temp_dir.string() << "'" << std::endl;
-
-#if MIOPEN_BUILD_DEV
-    std::cout << "MIOPEN_BUILD_DEV = 1 (defined)" << std::endl;
-#else
-    std::cout << "MIOPEN_BUILD_DEV = 0 (not defined)" << std::endl;
-#endif
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(true));
 
     const auto& user_db_path = miopen::GetUserDbPath();
-    std::cout << "Returned user_db_path = '" << user_db_path.string() << "'" << std::endl;
-    std::cout << "PathContains(user_db_path, temp_dir) = "
-              << (PathContains(user_db_path, temp_dir.string()) ? "true" : "false") << std::endl;
-    std::cout << "PathContains(user_db_path, '.config') = "
-              << (PathContains(user_db_path, ".config") ? "true" : "false") << std::endl;
-    std::cout << "PathContains(user_db_path, 'miopen') = "
-              << (PathContains(user_db_path, "miopen") ? "true" : "false") << std::endl;
-    std::cout << "================================================\n" << std::endl;
 
     if(user_db_path.empty())
     {
@@ -171,6 +132,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
     }
 
     // Should fallback to temp directory
+    const auto temp_dir = fs::temp_directory_path();
     EXPECT_TRUE(PathContains(user_db_path, temp_dir.string()))
         << "User DB path '" << user_db_path.string()
         << "' should be in temp directory for network filesystem";
@@ -214,29 +176,9 @@ TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_NoEnvVar)
     ScopedEnvironment<std::string> unset_cache(MIOPEN_CUSTOM_CACHE_DIR, "");
 
     // Scenario 1: Local filesystem, no environment variable set
-    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_))
-        .WillRepeatedly(::testing::Invoke([](const fs::path& path) {
-            std::cout << "[MOCK] IsNetworkedFilesystem('" << path.string() << "') -> false"
-                      << std::endl;
-            return false;
-        }));
-
-    // Diagnostic logging
-    const auto temp_dir = fs::temp_directory_path();
-    std::cout << "\n=== CachePath_LocalFS_NoEnvVar Diagnostics ===" << std::endl;
-    std::cout << "fs::temp_directory_path() = '" << temp_dir.string() << "'" << std::endl;
-
-#if MIOPEN_BUILD_DEV
-    std::cout << "MIOPEN_BUILD_DEV = 1 (defined)" << std::endl;
-#else
-    std::cout << "MIOPEN_BUILD_DEV = 0 (not defined)" << std::endl;
-#endif
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
     const auto cache_path = miopen::GetCachePath(false);
-    std::cout << "Returned cache_path = '" << cache_path.string() << "'" << std::endl;
-    std::cout << "PathContains(cache_path, temp_dir) = "
-              << (PathContains(cache_path, temp_dir.string()) ? "true" : "false") << std::endl;
-    std::cout << "============================================\n" << std::endl;
 
     if(cache_path.empty())
     {

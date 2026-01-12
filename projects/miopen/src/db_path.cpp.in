@@ -91,10 +91,7 @@ fs::path PrepareUserDbPath()
     /// the library to use exactly that path.
     const auto p = env::value(MIOPEN_USER_DB_PATH);
     if(!p.empty())
-    {
-        std::cout << "Using env MIOPEN_USER_DB_PATH=" << p << "\n";
         return ExpandUser(p);
-    }
     /// \anchor nfs-detection
     /// Otherwise, check if the user-db-path denotes a network filesystem. If this is the case, then
     /// let's assume that the library is running on a cluster system, where home directory is shared
@@ -104,11 +101,9 @@ fs::path PrepareUserDbPath()
     /// assume that the performance hit associated with the usage of shared home dir is worse than
     /// the deletion of user databases.
     const auto udb_path = ExpandUser("${MIOPEN_USER_DB_PATH}");
-    std::cout << "Using build MIOPEN_USER_DB_PATH=" << udb_path << "\n";
 #if !MIOPEN_BUILD_DEV
     if(GetFilesystemChecker().IsNetworkedFilesystem(udb_path))
     {
-        std::cout << "Falling back to tmp directory\n";
         return fs::temp_directory_path() / ".config" / "miopen";
     }
 #endif
