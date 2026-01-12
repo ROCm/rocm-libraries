@@ -323,11 +323,6 @@ class OrigamiMatmulSelector:
                 mi_dim = origami.dim3_t(16, 16, 32)
             # F4F6F8
             if largest_bitsize <= 8:
-                if self._k % 256 == 0:
-                    self.block_k_range = [256]
-                else:
-                    self.block_k_range = [128]
-                self.block_mn_range = [32, 64, 128, 256]
                 mi_dim = origami.dim3_t(16, 16, 128)
         # gfx942
         if self._hardware.N_CU == 304:
@@ -339,8 +334,6 @@ class OrigamiMatmulSelector:
                 mi_dim = origami.dim3_t(16, 16, 16)
             # F8
             if largest_bitsize == 8:
-                self.block_mn_range = self.block_mn_range + [512]
-                self.block_k_range = self.block_k_range + [128, 256]
                 mi_dim = origami.dim3_t(16, 16, 32)
             # F4F6 -> Unsupported on MI300X
             if largest_bitsize < 8:
@@ -354,8 +347,6 @@ class OrigamiMatmulSelector:
                 mi_dim = origami.dim3_t(16, 16, 16)
             # F8
             if largest_bitsize == 8:
-                self.block_mn_range = self.block_mn_range + [512]
-                self.block_k_range = self.block_k_range + [128, 256]
                 mi_dim = origami.dim3_t(16, 16, 32)
             # F4F6 -> Unsupported on MI300A
             if largest_bitsize < 8:
