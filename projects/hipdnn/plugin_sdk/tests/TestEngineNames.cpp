@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/utilities/EngineIdHash.hpp>
 #include <hipdnn_plugin_sdk/EngineNames.hpp>
 #include <string>
 #include <unordered_map>
@@ -22,7 +21,7 @@ TEST_F(TestEngineNames, MacroGeneratesCorrectConstants)
     EXPECT_STREQ(MIOPEN_PLUGIN, "MIOPEN_PLUGIN");
 
     // Check that the ID constants are defined and match the hash function
-    EXPECT_EQ(MIOPEN_PLUGIN_ID, hipdnn_data_sdk::engineNameToId("MIOPEN_PLUGIN"));
+    EXPECT_EQ(MIOPEN_PLUGIN_ID, engineNameToId("MIOPEN_PLUGIN"));
 }
 
 TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
@@ -33,7 +32,7 @@ TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
     // Verify each mapping is consistent
     for(const auto& [id, name] : idToName)
     {
-        auto calculatedId = hipdnn_data_sdk::engineNameToId(name.data());
+        auto calculatedId = hipdnn_plugin_sdk::engine_names::engineNameToId(name.data());
         EXPECT_EQ(id, calculatedId)
             << "ID mismatch for engine: " << name << " (stored: 0x" << std::hex << id
             << ", calculated: 0x" << calculatedId << std::dec << ")";
@@ -77,8 +76,20 @@ TEST_F(TestEngineNames, EngineCountMatches)
     // Also verify all names in one are in the other
     for(const auto& name : allEngines)
     {
-        auto id = hipdnn_data_sdk::engineNameToId(name.data());
+        auto id = hipdnn_plugin_sdk::engine_names::engineNameToId(name.data());
         EXPECT_NE(idToName.find(id), idToName.end())
             << "Engine '" << name << "' is in getAllEngineNames but not in getEngineIdToNameMap";
     }
+}
+
+TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
+{
+    using namespace hipdnn_plugin_sdk::engine_names;
+
+    auto engineIdCString = engineNameToId(MIOPEN_PLUGIN);
+    auto engineIdString = engineNameToId(std::string(MIOPEN_PLUGIN));
+    auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_PLUGIN));
+
+    EXPECT_EQ(engineIdCString, engineIdString);
+    EXPECT_EQ(engineIdCString, engineIdStringView);
 }

@@ -4,13 +4,45 @@
 #pragma once
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_data_sdk/utilities/EngineIdHash.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <set>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 
 namespace hipdnn_plugin_sdk::engine_names
 {
+
+/**
+ * @brief Converts an engine name string to a deterministic int64_t ID
+ *
+ * This function uses the FNV-1a hash algorithm to convert engine names
+ * to unique IDs. The hash is deterministic - the same input will always
+ * produce the same output.
+ *
+ * @param engineName The name of the engine to convert to an ID
+ * @return int64_t The unique engine ID
+ */
+inline int64_t engineNameToId(const char* engineName)
+{
+    return hipdnn_data_sdk::utilities::fnv1aHash(engineName);
+}
+
+/**
+ * @brief Overload for std::string
+ */
+inline int64_t engineNameToId(const std::string& engineName)
+{
+    return hipdnn_data_sdk::utilities::fnv1aHash(engineName);
+}
+
+/**
+ * @brief Overload for std::string_view
+ */
+inline int64_t engineNameToId(std::string_view engineName)
+{
+    return hipdnn_data_sdk::utilities::fnv1aHash(engineName);
+}
 
 inline std::set<std::string_view>& getAllEngineNames()
 {
@@ -47,7 +79,7 @@ struct EngineRegistrar
     EngineRegistrar(std::string_view name)
     {
         getAllEngineNames().insert(name);
-        auto id = hipdnn_data_sdk::engineNameToId(name.data());
+        auto id = engineNameToId(name.data());
         getEngineIdToNameMap()[id] = name;
 
         // Check for collisions
@@ -66,9 +98,9 @@ struct EngineRegistrar
 };
 
 // Macro that defines engine and automatically registers it
-#define HIPDNN_REGISTER_ENGINE(name, value)                                  \
-    inline constexpr const char* name = value;                               \
-    inline const int64_t name##_ID = hipdnn_data_sdk::engineNameToId(value); \
+#define HIPDNN_REGISTER_ENGINE(name, value)                 \
+    inline constexpr const char* name = value;              \
+    inline const int64_t name##_ID = engineNameToId(value); \
     inline const EngineRegistrar name##_registrar{value};
 
 // Define all engines using the macro
