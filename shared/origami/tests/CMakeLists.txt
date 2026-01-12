@@ -49,7 +49,9 @@ target_link_libraries(origami-tests PRIVATE roc::origami Catch2::Catch2WithMain)
 
 include(CTest)
 include(Catch)
-catch_discover_tests(origami-tests)
+catch_discover_tests(origami-tests
+    DISCOVERY_MODE PRE_TEST
+)
 
 # Install CTestTestfile for TheRock CI testing
 set(INSTALLED_CTEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
