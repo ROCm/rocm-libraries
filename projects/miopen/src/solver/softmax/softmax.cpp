@@ -1,6 +1,9 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "miopen/execution_context.hpp"
+#include "miopen/miopen.h"
+#include "miopen/softmax/problem_description.hpp"
 #include <miopen/env.hpp>
 #include <miopen/softmax/solvers.hpp>
 
@@ -10,8 +13,6 @@
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/float_equal.hpp>
-
-#define LOCAL_SIZE 256
 
 namespace miopen {
 
@@ -89,8 +90,23 @@ bool Softmax::IsApplicable(
     return true;
 }
 
+PerformanceConfigSoftmax Softmax::GetDefaultPerformanceConfig(const ExecutionContext& context, const miopen::softmax::ProblemDescription& problem) const
+{
+    PerformanceConfigSoftmax config;
+    config.HeuristicInit(problem);
+    config.local_size = PerformanceConfigSoftmax::default_local_size;
+    MIOPEN_LOG_I(config.ToString());
+    return config;
+}
+
+bool Softmax::IsValidPerformanceConfig(const ExecutionContext& context, const miopen::softmax::ProblemDescription& problem, const PerformanceConfigSoftmax& config) const
+{
+    return config.IsValid(context, problem);
+}
+
 ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& context,
-                                  const miopen::softmax::ProblemDescription& problem) const
+                                  const miopen::softmax::ProblemDescription& problem,
+                                  const PerformanceConfigSoftmax& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -106,14 +122,14 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     auto spatial_dim = mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? 1 : lengths[2] * lengths[3];
     auto vector_size =
         mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[1] * lengths[2] * lengths[3] : lengths[1];
-    auto num_batch    = vector_size < LOCAL_SIZE ? nextPow2(LOCAL_SIZE / vector_size) : 1;
+    auto num_batch    = vector_size < config.local_size ? nextPow2(config.local_size / vector_size) : 1;
     auto workgroups   = num_batch == 1               ? grid_size
                         : grid_size % num_batch == 0 ? grid_size / num_batch
                                                      : grid_size / num_batch + 1;
-    auto batch_size   = LOCAL_SIZE / num_batch;
+    auto batch_size   = config.local_size / num_batch;
     auto u_batch_size = vector_size > batch_size ? nextPow2(vector_size / batch_size) : 1;
 
-    size_t xlocalsize = LOCAL_SIZE;
+    size_t xlocalsize = config.local_size;
     size_t xgridsize  = workgroups * xlocalsize;
     size_t ylocalsize = 1;
     size_t ygridsize  = 1;
@@ -141,7 +157,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                               {"C_STRIDE", strides[1]},
                               {"H_STRIDE", strides[2]},
                               {"W_STRIDE", strides[3]},
-                              {"LOCAL_SIZE", LOCAL_SIZE},
+                              {"LOCAL_SIZE", config.local_size},
                               {"WORKGROUPS", workgroups},
                               {"GRID_SIZE", grid_size},
                               {"SPATIAL_DIM", spatial_dim},
@@ -202,6 +218,81 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     }
 
     return result;
+}
+
+void PerformanceConfigSoftmax::HeuristicInit(const miopen::softmax::ProblemDescription& problem)
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+#else
+    switch(problem.GetYDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: local_size = PerformanceConfigSoftmax::start_local_size; break;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+#endif
+    initialized = true;
+}
+
+bool PerformanceConfigSoftmax::SetNextValue(const miopen::softmax::ProblemDescription& problem)
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+    return false;
+#else
+    if(!initialized)
+    {
+        HeuristicInit(problem);
+    }
+    if(local_size <= 0)
+    {
+        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
+    }
+    local_size *= 2;
+    return local_size <= max_local_size;
+#endif
+}
+
+bool PerformanceConfigSoftmax::IsValidValue() const
+{
+    return local_size > 0 && local_size <= max_local_size;
+}
+
+bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
+                                       const miopen::softmax::ProblemDescription& problem) const
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+    return false;
+#else
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: return true;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+    return false;
+#endif
+}
+
+bool PerformanceConfigSoftmax::operator==(const PerformanceConfigSoftmax& other) const
+{
+    return local_size == other.local_size;
 }
 
 } // namespace softmax
