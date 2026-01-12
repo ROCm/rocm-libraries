@@ -3591,32 +3591,36 @@ inline std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase>
         {
             for(const auto& typeConfig : bn_type_configs::VALID)
             {
-                auto configs = createBatchnormInferenceWithVarianceTensors(typeConfig, dims, *layout);
+                auto configs
+                    = createBatchnormInferenceWithVarianceTensors(typeConfig, dims, *layout);
                 // Add virtual tensor for fusion
-                auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout->strideOrder);
-                configs.push_back(createIoTensor(bnYVirtualUid, "bn_y", typeConfig.io, dims, strides, true));
+                auto strides
+                    = hipdnn_data_sdk::utilities::generateStrides(dims, layout->strideOrder);
+                configs.push_back(
+                    createIoTensor(bnYVirtualUid, "bn_y", typeConfig.io, dims, strides, true));
 
-                cases.push_back(
-                    {"AcceptsInferenceVarExtFused_" + generateName(dims, *layout) + "_"
-                         + toString(typeConfig),
-                     true,
-                     configs,
-                     UIDs::X,
-                     UIDs::Y,
-                     UIDs::SCALE,
-                     UIDs::BIAS,
-                     UIDs::EPSILON,
-                     UIDs::MEAN,
-                     UIDs::VARIANCE,
-                     PM::RELU_FWD});
+                cases.push_back({"AcceptsInferenceVarExtFused_" + generateName(dims, *layout) + "_"
+                                     + toString(typeConfig),
+                                 true,
+                                 configs,
+                                 UIDs::X,
+                                 UIDs::Y,
+                                 UIDs::SCALE,
+                                 UIDs::BIAS,
+                                 UIDs::EPSILON,
+                                 UIDs::MEAN,
+                                 UIDs::VARIANCE,
+                                 PM::RELU_FWD});
             }
         }
     }
 
     // Unhappy paths - unsupported activation mode
     const auto& sampleDims = shapes::INFERENCE_4D[0];
-    auto configs = createBatchnormInferenceWithVarianceTensors(bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW);
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NCHW.strideOrder);
+    auto configs = createBatchnormInferenceWithVarianceTensors(
+        bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW);
+    auto strides
+        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NCHW.strideOrder);
     configs.push_back(createIoTensor(bnYVirtualUid, "bn_y", DT::FLOAT, sampleDims, strides, true));
 
     cases.push_back({"RejectsInferenceVarExtFused_UnsupportedActivation",
@@ -3707,7 +3711,8 @@ TEST_P(TestCheckBatchnormInferenceWithVarianceFusedConfigSupported, ValidatesCor
 
     if(tc.shouldPass)
     {
-        EXPECT_NO_THROW({ checkBatchnormTensorConfigSupported(*bnAttrs, *actAttrs, graph.getTensorMap()); });
+        EXPECT_NO_THROW(
+            { checkBatchnormTensorConfigSupported(*bnAttrs, *actAttrs, graph.getTensorMap()); });
     }
     else
     {

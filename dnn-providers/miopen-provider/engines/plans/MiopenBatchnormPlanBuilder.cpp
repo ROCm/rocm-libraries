@@ -403,10 +403,9 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         bool isFwdInferenceFirst
             = node0.attributesType()
               == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
-        bool isFwdInferenceWithVarianceFirst
-            = node0.attributesType()
-              == hipdnn_data_sdk::data_objects::NodeAttributes::
-                  BatchnormInferenceAttributesVarianceExt;
+        bool isFwdInferenceWithVarianceFirst = node0.attributesType()
+                                               == hipdnn_data_sdk::data_objects::NodeAttributes::
+                                                   BatchnormInferenceAttributesVarianceExt;
         bool isPointwiseSecond
             = node1.attributesType()
               == hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
@@ -420,12 +419,11 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         if(isFwdInferenceFirst)
         {
-            const auto& bnInfAttr = node0.attributesAs<
-                hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
+            const auto& bnInfAttr
+                = node0.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
             const auto& actAttr
                 = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
-            if(!batchnormFwdFusionCheckTensorsLogErrors(
-                   bnInfAttr, actAttr, opGraph.getTensorMap()))
+            if(!batchnormFwdFusionCheckTensorsLogErrors(bnInfAttr, actAttr, opGraph.getTensorMap()))
             {
                 return false;
             }
@@ -627,7 +625,8 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
     const auto& activation
         = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
-    BatchnormFwdInferenceWithVarianceParams params(fwdInference, activation, opGraph.getTensorMap());
+    BatchnormFwdInferenceWithVarianceParams params(
+        fwdInference, activation, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(std::move(params));
     executionContext.setPlan(std::move(plan));
 }
@@ -652,8 +651,7 @@ void MiopenBatchnormPlanBuilder::buildPlan(
                 == hipdnn_data_sdk::data_objects::NodeAttributes::
                     BatchnormInferenceAttributesVarianceExt)
         {
-            HIPDNN_LOG_INFO(
-                "Building batchnorm inference with variance + activation fusion plan");
+            HIPDNN_LOG_INFO("Building batchnorm inference with variance + activation fusion plan");
             buildPlanFusedFwdInferenceWithVarianceActivation(handle, opGraph, executionContext);
         }
         return;

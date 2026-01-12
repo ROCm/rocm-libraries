@@ -38,10 +38,12 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFro
     EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
 }
 
-TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFromValidGraphWithActivation)
+TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
+     InitializesAllTensorsFromValidGraphWithActivation)
 {
     // Create a valid batchnorm graph with variance and activation
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the batchnorm node and attributes
@@ -55,7 +57,8 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFro
     ASSERT_NE(activAttrs, nullptr);
 
     // Expect that params construction doesn't throw
-    EXPECT_NO_THROW(BatchnormFwdInferenceWithVarianceParams(*attrs, *activAttrs, graph.getTensorMap()));
+    EXPECT_NO_THROW(
+        BatchnormFwdInferenceWithVarianceParams(*attrs, *activAttrs, graph.getTensorMap()));
 
     BatchnormFwdInferenceWithVarianceParams params(*attrs, *activAttrs, graph.getTensorMap());
 
