@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,26 +30,26 @@ Tests:
   category: pre_checkin
   function: bsr2csr_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: bsr2csr
   category: quick
   function: bsr2csr
   precision: *single_double_precisions_complex_real
-  M: [0, 872, 21453]
-  N: [0, 12766, 29285]
+  M: [0, 872, 2145]
+  N: [0, 1276, 2928]
   block_dim: [1, 2, 4, 7, 16]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
 
 - name: bsr2csr_file
   category: pre_checkin
   function: bsr2csr
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M: 1
-  block_dim: [5, 7, 12]
-  baseA: [HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  block_dim: [3, 5, 6, 8, 11, 12, 14]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
   filename: [nos1,
              nos2,
@@ -59,3 +59,17 @@ Tests:
              nos6,
              nos7]
 
+- name: bsr2csr_file
+  category: nightly
+  function: bsr2csr
+  precision: *single_only_precisions
+  M: 1
+  block_dim: [9]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  filename: [bmwcra_1,
+             shipsec1,
+             rma10,
+             scircuit,
+             sme3Dc]

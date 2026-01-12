@@ -3,8 +3,15 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 ## (Unreleased) MIOpen 3.5.1 for ROCm 7.11.0
+### Added
+* New API entry-points `miopenBatchNormalizationForwardInferenceInvVariance` and
+  `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
+
 ### Optimized
 * Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels
+
+### Resolved issues
+* Fixed calculation of workspace size for fusions when tuning is done
 
 ## MIOpen 3.5.1 for ROCm 7.2.0
 ### Changed

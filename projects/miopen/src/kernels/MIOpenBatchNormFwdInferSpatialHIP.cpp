@@ -39,6 +39,52 @@ using FLOAT_VEC_TYPE = typename miopen::mapped_vector_type<FLOAT, MIO_BN_VEC_SIZ
 using FLOAT_ACCUM_VEC_TYPE =
     typename miopen::mapped_vector_type<FLOAT_ACCUM, MIO_BN_VEC_SIZE>::type;
 
+template <unsigned int vecSizeX, unsigned int vecSizeY>
+__device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
+                                                      unsigned int tidy,
+                                                      const FLOAT* in,
+                                                      FLOAT* out,
+                                                      const FLOAT_ACCUM* mean,
+                                                      const FLOAT_ACCUM* invVariance,
+                                                      const FLOAT_ACCUM* scale,
+                                                      const FLOAT_ACCUM* bias,
+                                                      unsigned int batchSize,
+                                                      unsigned int cStride,
+                                                      unsigned int hwStride,
+                                                      unsigned int batchStride,
+                                                      FLOAT_ACCUM alpha,
+                                                      FLOAT_ACCUM beta)
+{
+    FLOAT_ACCUM inhat[MIO_BN_VEC_SIZE];
+    FLOAT value[MIO_BN_VEC_SIZE];
+
+    // loop over the batches
+    for(unsigned int n = 0; n < batchSize; ++n)
+    {
+        // load input value
+        const unsigned int batchIndex =
+            (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
+
+        // perform batchnorm and activation
+#pragma unroll
+        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+        {
+            inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
+            inhat[i] = scale[i] * inhat[i] + bias[i];
+            inhat[i] = miopen::batchnorm::activation_op<FLOAT_ACCUM,
+                                                        miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
+                inhat[i], alpha, beta);
+            value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+        }
+
+        // write output value
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
+    }
+}
+
 extern "C" __global__ void __launch_bounds__(blockSize)
     MIOpenBatchNormFwdInferSpatialEst(const FLOAT* __restrict in,
                                       FLOAT* __restrict out,
@@ -53,8 +99,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                       unsigned int cStride,
                                       unsigned int hwStride,
                                       unsigned int batchStride,
-                                      FLOAT_ACCUM _alpha,
-                                      FLOAT_ACCUM _beta)
+                                      FLOAT_ACCUM alpha,
+                                      FLOAT_ACCUM beta)
 {
     unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
@@ -109,32 +155,101 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     {
         invVariance[i] = rsqrt(fabs(variance[i] + static_cast<FLOAT_ACCUM>(epsilon)));
     }
-    FLOAT_ACCUM inhat[MIO_BN_VEC_SIZE];
-    FLOAT value[MIO_BN_VEC_SIZE];
 
-    // loop over the batches
-    for(unsigned int n = 0; n < batchSize; ++n)
+    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+                                              tidy,
+                                              in,
+                                              out,
+                                              mean,
+                                              invVariance,
+                                              pscale,
+                                              pbias,
+                                              batchSize,
+                                              cStride,
+                                              hwStride,
+                                              batchStride,
+                                              alpha,
+                                              beta);
+}
+
+// Uses estimated inverse variance rather than inverse variance, which avoids need for an
+// epsilon parameter and rsqrt() operations.
+extern "C" __global__ void __launch_bounds__(blockSize)
+    MIOpenBatchNormFwdInferSpatialEstInvVar(const FLOAT* __restrict in,
+                                            FLOAT* __restrict out,
+                                            const FLOAT_ACCUM* __restrict estimatedMean,
+                                            const FLOAT_ACCUM* __restrict estimatedInvVariance,
+                                            const FLOAT_ACCUM* __restrict scale,
+                                            const FLOAT_ACCUM* __restrict bias,
+                                            unsigned int c,
+                                            unsigned int hw,
+                                            unsigned int batchSize,
+                                            unsigned int cStride,
+                                            unsigned int hwStride,
+                                            unsigned int batchStride,
+                                            FLOAT_ACCUM alpha,
+                                            FLOAT_ACCUM beta)
+{
+    unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
+    unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
+
+    // decide vector sizes based on problem layout
+    constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
+    constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
+
+    // skip execution for out-of-bound threads
+    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw)
     {
-        // load input value
-        const unsigned int batchIndex =
-            (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
+        return;
+    }
 
-        // perform batchnorm and activation
+    // indices for current thread
+    unsigned int adjIndex = tidx * vecSizeX;
+
+    // batch parameters and values for current thread
+    FLOAT_ACCUM mean[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM pscale[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM pbias[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM invVariance[MIO_BN_VEC_SIZE];
+    if constexpr(MIO_LAYOUT_NHWC)
+    {
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(mean)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(invVariance)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedInvVariance + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + adjIndex));
+    }
+    else // NCHW layout
+    {
+        const auto mean_val        = estimatedMean[adjIndex];
+        const auto invVariance_val = estimatedInvVariance[adjIndex];
+        const auto pscale_val      = scale[adjIndex];
+        const auto pbias_val       = bias[adjIndex];
 #pragma unroll
         for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
         {
-            inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
-            inhat[i] = pscale[i] * inhat[i] + pbias[i];
-            inhat[i] = miopen::batchnorm::activation_op<FLOAT_ACCUM,
-                                                        miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
-                inhat[i], _alpha, _beta);
-            value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+            mean[i]        = mean_val;
+            invVariance[i] = invVariance_val;
+            pscale[i]      = pscale_val;
+            pbias[i]       = pbias_val;
         }
-
-        // write output value
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
     }
+
+    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+                                              tidy,
+                                              in,
+                                              out,
+                                              mean,
+                                              invVariance,
+                                              pscale,
+                                              pbias,
+                                              batchSize,
+                                              cStride,
+                                              hwStride,
+                                              batchStride,
+                                              alpha,
+                                              beta);
 }

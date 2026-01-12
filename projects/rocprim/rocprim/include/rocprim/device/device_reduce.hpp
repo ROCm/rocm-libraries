@@ -80,12 +80,12 @@ namespace detail
                                      result_type>(input, size, output, initial_value, reduce_op); \
         };                                                                                        \
                                                                                                   \
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,                          \
-                                                            block_reduce_kernel,                  \
-                                                            dim3(1),                              \
-                                                            dim3(block_size),                     \
-                                                            0,                                    \
-                                                            stream));                             \
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,             \
+                                                                      block_reduce_kernel,        \
+                                                                      dim3(1),                    \
+                                                                      dim3(block_size),           \
+                                                                      0,                          \
+                                                                      stream));                   \
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);          \
     }                                                                                             \
     while(0)
@@ -109,12 +109,17 @@ inline hipError_t reduce_impl(void*               temporary_storage,
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
-    using config = wrapped_reduce_config<Config, result_type>;
+    using Selector = reduce_config_selector<input_type>;
 
-    detail::target_arch target_arch;
+    target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
 
-    const reduce_config_params params = dispatch_target_arch<config, false>(target_arch);
+    gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+    const target current_target(target_arch, target_gpu);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -196,12 +201,12 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                     initial_value,
                     reduce_op);
             };
-            ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                block_reduce_kernel,
-                                                                dim3(current_blocks),
-                                                                dim3(block_size),
-                                                                0,
-                                                                stream));
+            ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                          block_reduce_kernel,
+                                                                          dim3(current_blocks),
+                                                                          dim3(block_size),
+                                                                          0,
+                                                                          stream));
 
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", current_size, start);
         }

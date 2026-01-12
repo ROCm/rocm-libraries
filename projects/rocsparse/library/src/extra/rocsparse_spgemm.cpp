@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -529,12 +529,23 @@ namespace rocsparse
                             params...)));
                     return rocsparse_status_success;
                 }
+                case rocsparse_datatype_f16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int32_t, int32_t, _Float16>(params...)));
+                    return rocsparse_status_success;
+                }
+                case rocsparse_datatype_bf16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int32_t, int32_t, rocsparse_bfloat16>(
+                            params...)));
+                    return rocsparse_status_success;
+                }
                 case rocsparse_datatype_i8_r:
                 case rocsparse_datatype_u8_r:
                 case rocsparse_datatype_i32_r:
                 case rocsparse_datatype_u32_r:
-                case rocsparse_datatype_f16_r:
-                case rocsparse_datatype_bf16_r:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
                 }
@@ -580,12 +591,23 @@ namespace rocsparse
                             params...)));
                     return rocsparse_status_success;
                 }
+                case rocsparse_datatype_f16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int32_t, _Float16>(params...)));
+                    return rocsparse_status_success;
+                }
+                case rocsparse_datatype_bf16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int32_t, rocsparse_bfloat16>(
+                            params...)));
+                    return rocsparse_status_success;
+                }
                 case rocsparse_datatype_i8_r:
                 case rocsparse_datatype_u8_r:
                 case rocsparse_datatype_i32_r:
                 case rocsparse_datatype_u32_r:
-                case rocsparse_datatype_f16_r:
-                case rocsparse_datatype_bf16_r:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
                 }
@@ -621,12 +643,23 @@ namespace rocsparse
                             params...)));
                     return rocsparse_status_success;
                 }
+                case rocsparse_datatype_f16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int64_t, _Float16>(params...)));
+                    return rocsparse_status_success;
+                }
+                case rocsparse_datatype_bf16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int64_t, rocsparse_bfloat16>(
+                            params...)));
+                    return rocsparse_status_success;
+                }
                 case rocsparse_datatype_i8_r:
                 case rocsparse_datatype_u8_r:
                 case rocsparse_datatype_i32_r:
                 case rocsparse_datatype_u32_r:
-                case rocsparse_datatype_f16_r:
-                case rocsparse_datatype_bf16_r:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
                 }
@@ -697,12 +730,19 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(7, D, (D->get_init() == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(8, C, (C->get_init() == false), rocsparse_status_not_initialized);
 
+
         ROCSPARSE_CHECKARG(
             5, B, (B->get_format() != A->get_format()), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(
             7, D, (D->get_format() != A->get_format()), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(
             8, C, (C->get_format() != A->get_format()), rocsparse_status_not_implemented);
+
+        ROCSPARSE_CHECKARG(4, A, (A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(5, B, (B->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(7, D, (D->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(8, C, (C->batch_count != 1), rocsparse_status_not_implemented);
+
 
         ROCSPARSE_CHECKARG(
             4, A, (A->get_data_type() != compute_type), rocsparse_status_not_implemented);

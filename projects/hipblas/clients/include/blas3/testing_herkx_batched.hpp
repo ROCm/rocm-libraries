@@ -411,7 +411,7 @@ void testing_herkx_batched(const Arguments& arg)
         return;
     }
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     size_t rows = (transA != HIPBLAS_OP_N ? std::max(K, int64_t(1)) : N);
     size_t cols = (transA == HIPBLAS_OP_N ? std::max(K, int64_t(1)) : N);

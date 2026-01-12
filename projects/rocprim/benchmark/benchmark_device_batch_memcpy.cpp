@@ -133,18 +133,23 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(hipStream_t         stre
 
     BatchMemcpyData<ValueType, BufferSizeType> result;
 
-    using config
-        = rocprim::detail::wrapped_batch_memcpy_config<rocprim::default_config, ValueType, true>;
+    using Selector = rocprim::detail::batch_memcpy_config_selector<ValueType, IsMemCpy>;
 
     rocprim::detail::target_arch target_arch;
-    hipError_t                   success = rocprim::detail::host_target_arch(stream, target_arch);
+    hipError_t                   success = host_target_arch(stream, target_arch);
+
+    rocprim::detail::gpu target_gpu;
+    success = host_target_gpu(stream, target_gpu);
+
     if(success != hipSuccess)
     {
         return result;
     }
 
-    const rocprim::detail::batch_memcpy_config_params params
-        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+    const rocprim::detail::target get_target(target_arch, target_gpu);
+
+    const auto params
+        = rocprim::detail::get_config<Selector>(rocprim::default_config{}, get_target);
 
     const int32_t wlev_min_size = params.wlev_size_threshold;
     const int32_t blev_min_size = params.blev_size_threshold;
