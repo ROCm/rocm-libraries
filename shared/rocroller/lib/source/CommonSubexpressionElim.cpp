@@ -334,6 +334,21 @@ namespace rocRoller
 
                         tree.back().reg = reg;
                     }
+                    else if(depTypeInfo.isIntegral && expTypeInfo.isIntegral
+                            && depTypeInfo.elementBits == 64 && expTypeInfo.elementBits == 32)
+                    {
+                        std::vector<int> indices;
+                        for(int i = 0; i < depTypeInfo.registerCount;
+                            i += depTypeInfo.elementBits / Register::bitsPerRegister)
+                        {
+                            indices.push_back(i);
+                        }
+                        auto reg = dep.reg->subset(indices);
+                        reg->setVariableType(expr.destinationType);
+                        auto regWithName = tree.back().reg ? tree.back().reg : reg;
+                        reg->setName(regWithName->name() + " convertForwardSubset");
+                        tree.back().reg = reg;
+                    }
                 }
 
                 return tree;

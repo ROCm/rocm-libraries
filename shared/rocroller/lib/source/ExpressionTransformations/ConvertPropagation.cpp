@@ -40,6 +40,10 @@ namespace rocRoller
             ApplyConvertToValuesVisitor(DataType datatype)
                 : m_destinationType(datatype)
             {
+                AssertFatal(
+                    m_destinationType == DataType::UInt32 or m_destinationType == DataType::Int32,
+                    "ApplyConvertToValuesVisitor only allows destinationType to be UInt32 or Int32",
+                    ShowValue(m_destinationType));
             }
 
             template <CUnary Expr>
@@ -53,6 +57,20 @@ namespace rocRoller
             template <typename Expr>
             requires CBinary<Expr> &&(!CShift<Expr>)ExpressionPtr operator()(Expr const& expr) const
             {
+                if constexpr(std::same_as<Expr, Divide> or std::same_as<Expr, Modulo>)
+                {
+                    auto const resultDataType = resultVariableType(expr).dataType;
+                    if(DataTypeInfo::Get(resultDataType).elementBytes
+                       > DataTypeInfo::Get(m_destinationType).elementBytes)
+                    {
+                        auto const typeInfo = DataTypeInfo::Get(resultDataType);
+                        AssertFatal(typeInfo.isIntegral,
+                                    "Converting a non-integral to integral might result in loss of "
+                                    "precision");
+                        return convert(m_destinationType, std::make_shared<Expression>(expr));
+                    }
+                }
+
                 Expr cpy = expr;
                 cpy.lhs  = call(expr.lhs);
                 cpy.rhs  = call(expr.rhs);
@@ -62,6 +80,16 @@ namespace rocRoller
             template <CShift Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
+                if constexpr(CIsAnyOf<Expr, LogicalShiftR, ArithmeticShiftR>)
+                {
+                    auto const resultDataType = resultVariableType(expr).dataType;
+                    if(DataTypeInfo::Get(resultDataType).elementBytes
+                       > DataTypeInfo::Get(m_destinationType).elementBytes)
+                    {
+                        return convert(m_destinationType, std::make_shared<Expression>(expr));
+                    }
+                }
+
                 Expr cpy = expr;
                 cpy.lhs  = call(expr.lhs);
                 return std::make_shared<Expression>(cpy);
@@ -128,21 +156,31 @@ namespace rocRoller
                     cpy.arg  = call(expr.arg);
                     return std::make_shared<Expression>(cpy);
                 }
+
+                if((m_destinationType == DataType::UInt32 or m_destinationType == DataType::Int32)
+                   and (expr.destinationType == DataType::UInt64
+                        or expr.destinationType == DataType::Int64))
+                {
+                    auto cpy            = expr;
+                    cpy.destinationType = m_destinationType;
+                    cpy.arg             = call(expr.arg);
+                    return std::make_shared<Expression>(cpy);
+                }
+
                 return applyConvertToValues(expr);
             }
 
             template <CValue Value>
             ExpressionPtr operator()(Value const& value) const
             {
-                if constexpr(std::same_as<Value, Register::ValuePtr>)
+                // Operating on CommandArgumentPtr causes more scalar loads at start of kernel
+                // leading to running out of SGPRs
+                if constexpr(not std::same_as<Value, CommandArgumentPtr>)
                 {
-                    if(value->variableType() == m_destinationType)
-                    {
-                        return std::make_shared<Expression>(value);
-                    }
-                    // Only propagate to 64-bit Int
-                    if(value->variableType() == DataType::Int64
-                       || value->variableType() == DataType::UInt64)
+                    const auto variableType
+                        = resultVariableType(std::make_shared<Expression>(value));
+                    if(variableType != m_destinationType
+                       && (variableType == DataType::Int64 || variableType == DataType::UInt64))
                     {
                         return convert(m_destinationType, std::make_shared<Expression>(value));
                     }
