@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,6 +67,25 @@ Tests:
   spgemm_alg: [rocsparse_spgemm_alg_default]
 
 - name: spgemm_mult_bsr
+  category: quick
+  function: spgemm_bsr
+  indextype: *i32
+  precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
+  M: [512]
+  N: [256, 512]
+  K: [512]
+  block_dim: [2, 4]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+
+- name: spgemm_mult_bsr
   category: pre_checkin
   function: spgemm_bsr
   indextype: *i64
@@ -82,6 +101,25 @@ Tests:
   baseB: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+
+- name: spgemm_mult_bsr
+  category: pre_checkin
+  function: spgemm_bsr
+  indextype: *i32
+  precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
+  M: [1024]
+  N: [512, 1024]
+  K: [1024]
+  block_dim: [2, 4]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
   spgemm_alg: [rocsparse_spgemm_alg_default]
 
