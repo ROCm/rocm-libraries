@@ -87,7 +87,7 @@ target_link_libraries(origami PUBLIC roc::origami-headers)
 
 target_sources(
     origami
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/formocast_predict.cpp"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_predict.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"
