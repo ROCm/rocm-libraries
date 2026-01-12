@@ -400,6 +400,16 @@ Definitions:
     alpha_beta: *alpha_beta_range
     matrix_size: *syrk_ex_dims
 
+  - &herk_ex_dims
+    - { N:    12, K:   9,   lda:  12,  ldc: 12 }
+
+  - &herk_ex_common_args
+    precision: *herk_ex_precisions
+    uplo: [ U, L ]
+    transA: [ N, C ]
+    alpha_beta: *alpha_beta_range
+    matrix_size: *herk_ex_dims
+
   - &syr2k_dims
     - { N:    12, K:   9,   lda:  12,  ldb: 12,  ldc: 12 }
 
@@ -1142,6 +1152,17 @@ Tests:
     # - syrk_batched
     # - syrk_strided_batched
     arguments: *syrk_ex_common_args
+    batch_count: [ 1 ]
+    stride_scale: [ 1 ]
+    api: [ C ]
+
+  - name: herk_ex
+    category: quick
+    function:
+    - herk_ex
+    # - herk_batched
+    # - herk_strided_batched
+    arguments: *herk_ex_common_args
     batch_count: [ 1 ]
     stride_scale: [ 1 ]
     api: [ C ]

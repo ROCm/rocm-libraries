@@ -69,8 +69,7 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
     // Use dynamic tile id
     using ordered_tile_id_type = detail::ordered_block_id<unsigned long long>;
 
-    // Kernel launch config
-    using config = wrapped_adjacent_find_config<Config, input_type>;
+    using Selector = adjacent_find_config_selector<input_type>;
 
     // Transform input
     auto wrapped_equal_op = [op, size](const wrapped_input_type& a) -> index_type
@@ -138,7 +137,14 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 
         target_arch target_arch;
         ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-        const adjacent_find_config_params params = dispatch_target_arch<config, false>(target_arch);
+
+        gpu target_gpu;
+        ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+        const target current_target(target_arch, target_gpu);
+
+        const auto params = get_config<Selector>(Config{}, current_target);
+
         const unsigned int                block_size       = params.kernel_config.block_size;
         const unsigned int                items_per_thread = params.kernel_config.items_per_thread;
         const unsigned int                items_per_block  = block_size * items_per_thread;
@@ -155,7 +161,8 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
                 ordered_tile_id);
         };
 
-        auto adjacent_find_block_reduce_kernel = make_launch_plan<config>(target_arch, kernel);
+        auto adjacent_find_block_reduce_kernel
+            = make_launch_plan<Config, Selector>(current_target, kernel);
 
         // Get grid size for maximum occupancy, as we may not be able to schedule all the blocks
         // at the same time

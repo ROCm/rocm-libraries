@@ -351,13 +351,6 @@ void testing_csrsv2(Arguments argus)
     // Set matrix fill mode
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatFillMode(descr, fill_mode));
 
-    if(m == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures
@@ -367,11 +360,8 @@ void testing_csrsv2(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     std::vector<T> hx(m);
     std::vector<T> hy_1(m);

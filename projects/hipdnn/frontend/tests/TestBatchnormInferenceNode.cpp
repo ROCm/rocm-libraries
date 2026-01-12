@@ -257,11 +257,11 @@ TEST(TestBatchnormInferenceNode, PackNode)
 
     builder.Finish(offset);
     auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Node>(bufferPointer);
+    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
 
     EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "BatchnormInference");
     EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
 
     auto packedAttributes = nodeFlatbuffer->attributes_as_BatchnormInferenceAttributes();
     ASSERT_NE(packedAttributes, nullptr);
