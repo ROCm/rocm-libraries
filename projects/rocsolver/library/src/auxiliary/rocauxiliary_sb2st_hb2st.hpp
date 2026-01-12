@@ -355,7 +355,7 @@ __device__ void sb2st_hb2st_sweep_step(
             // Apply on right of diagonal and (next) off-diagonal block, A{i:i+1, i} = A{i:i+1, i} H.
             /// Isn't this a race condition with the thread block updating the
             /// left off-diagonal of next block? Or are they not packing the
-            /// tasks as tight, skipping every other task to avoid races?
+            /// tasks as tightly, skipping every other task to avoid races?
             sb2st_larf( xid, yid, rocblas_side_right, mm, mm, housev, tau,
                         A + sm_i + sm_i * lda, lda, reduct);
 
@@ -470,16 +470,16 @@ ROCSOLVER_KERNEL void sb2st_hb2st_step_kernel(
 
     // get sweep parameters
     rocblas_int last_started = step / 3;
-    rocblas_int s = last_started - sid;
-    rocblas_int step_in_sweep = step - (3 * s);
-    rocblas_int sm_i = s + 1 + step_in_sweep * nb;
+    rocblas_int sweep = last_started - sid;         // was: s
+    rocblas_int step_in_sweep = step - (3 * sweep);
+    rocblas_int sm_i = sweep + 1 + step_in_sweep * nb;
 
-    if (s < 0 || sm_i >= n)
+    if (sweep < 0 || sm_i >= n)
         return;
 
     // execute sweep step
     sb2st_hb2st_sweep_step<T, S>(
-        xid, yid, n, nb, s, sm_i, A, lda, D, E, housev, reduct);
+        xid, yid, n, nb, sweep, sm_i, A, lda, D, E, housev, reduct);
 }
 
 //------------------------------------------------------------------------------
