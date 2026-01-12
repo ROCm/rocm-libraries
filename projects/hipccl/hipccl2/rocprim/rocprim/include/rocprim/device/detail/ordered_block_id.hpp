@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,14 +53,14 @@ struct ordered_block_id
     //   my_kernel<<<x, y>>>(ordered_bid);
     //
     // On the kernel side it should be:
-    //   __globbal__ my_kernel(ordered_block_id<> ordered_bid)
+    //   __global__ my_kernel(ordered_block_id<> ordered_bid)
     //   {
     //     __shared__ ordered_block_id<>::storage ordered_bid_storage;
     //
     //     auto tid      = threadIdx.x;
     //     auto block_id = ordered_bid.get(tid, ordered_bid_storage);
     //   }
-    static_assert(std::is_integral<T>::value, "T must be integer");
+    static_assert(rocprim::is_integral<T>::value, "T must be integer");
     using id_type = T;
 
     /// Pointer to global memory that contains the atomic counter for block id.
