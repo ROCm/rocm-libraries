@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "ir/IROpcode.hpp"
 #include "ir/asm/StinkyAsmIR.hpp" // For StinkyRegister definition
 #include "ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu.hpp"
@@ -70,10 +71,35 @@ namespace stinkytofu
         }
 
         /**
+         * @brief Get the unified opcode of this instruction (for pattern matching)
+         * @return HLIR opcode enum value
+         *
+         * Similar to StinkyInstruction::getUnifiedOpcode() for assembly IR.
+         * Enables fast integer comparison in pattern matching instead of string comparison.
+         * Each IR instruction class overrides this to return its specific opcode.
+         */
+        virtual HLIR::Opcode getOpcode() const
+        {
+            return HLIR::UNKNOWN;
+        }
+
+        /**
          * @brief Check if this is a composite instruction that needs expansion
          * @return true if composite (expands to multiple instructions)
          */
         virtual bool isComposite() const
+        {
+            return false;
+        }
+
+        /**
+         * @brief Check if this instruction is commutative (src0 and src1 can be swapped)
+         * @return true if commutative (e.g., add, mul, min, max)
+         *
+         * Commutative instructions allow pattern matching to work regardless of
+         * operand order. For example, a pattern for `a + 1.0` will also match `1.0 + a`.
+         */
+        virtual bool isCommutative() const
         {
             return false;
         }

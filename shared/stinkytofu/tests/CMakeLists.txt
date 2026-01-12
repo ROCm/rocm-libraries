@@ -15,6 +15,7 @@ set(TEST_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipblaslt/tensilelite/rocisa/rocisa/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../hardware/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit  # For TestHelpers.hpp
     ${TABLEGEN_OUTPUT_DIR}
 )
 
@@ -28,23 +29,43 @@ set(TEST_LINK_LIBS
 # =============================================================================
 # Unit Tests
 # =============================================================================
-set(UNIT_TEST_FILES
-    unit/PassManagerTest.cpp
-    unit/IRBuilderTest.cpp
-    unit/IRModuleTest.cpp
-    unit/IRToAsmPipelineTest.cpp
-    unit/IntrusiveListTest.cpp
-    unit/ConfigurableWaitCntPassTest.cpp
-    unit/StinkyAsmEmitterTest.cpp
-    unit/VirtualRegisterTest.cpp
+
+# Assembly IR Tests
+set(UNIT_ASM_TEST_FILES
+    unit/asm/ConfigurableWaitCntPassTest.cpp
+    unit/asm/DeadCodeEliminationPassTest.cpp
+    unit/asm/DelayAluInsertionPassTest.cpp
+    unit/asm/DuplicateEliminationPassTest.cpp
+    unit/asm/OptimizationPipelineTest.cpp
+    unit/asm/PeepholeOptimizationPassTest.cpp
+    unit/asm/StinkyAsmEmitterTest.cpp
+    unit/asm/VirtualRegisterTest.cpp
+)
+
+# High-Level IR Tests
+set(UNIT_IR_TEST_FILES
+    unit/ir/CommutativeTest.cpp
+    unit/ir/HexLiteralTest.cpp
+    unit/ir/HighLevelPeepholePassTest.cpp
+    unit/ir/IRBuilderTest.cpp
+    unit/ir/IRModuleTest.cpp
+    unit/ir/IROpcodeTest.cpp
+    unit/ir/IRToAsmPipelineTest.cpp
+    unit/ir/IntrinsicFlowTest.cpp
+    unit/ir/PassManagerTest.cpp
+)
+
+# Common/Shared Tests
+set(UNIT_COMMON_TEST_FILES
     unit/ErrorHandlingTest.cpp
-    unit/PeepholeOptimizationPassTest.cpp
-    unit/DeadCodeEliminationPassTest.cpp
-    unit/DuplicateEliminationPassTest.cpp
-    unit/DelayAluInsertionPassTest.cpp
-    unit/OptimizationPipelineTest.cpp
-    unit/IntrinsicFlowTest.cpp
-    unit/HexLiteralTest.cpp
+    unit/IntrusiveListTest.cpp
+)
+
+# Combine all unit tests
+set(UNIT_TEST_FILES
+    ${UNIT_ASM_TEST_FILES}
+    ${UNIT_IR_TEST_FILES}
+    ${UNIT_COMMON_TEST_FILES}
 )
 list(TRANSFORM UNIT_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 

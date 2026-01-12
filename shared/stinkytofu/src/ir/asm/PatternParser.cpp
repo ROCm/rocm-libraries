@@ -96,8 +96,8 @@ namespace stinkytofu
             if(lexer.isAtEnd())
                 break;
 
-            // Check for pattern type keywords (peephole, intrinsic, etc.)
-            if(lexer.peek().kind == TokenKind::KW_peephole)
+            // Check for pattern type keywords (peephole, ir, intrinsic, etc.)
+            if(lexer.peek().kind == TokenKind::KW_peephole || lexer.peek().kind == TokenKind::KW_ir)
             {
                 patterns.push_back(parsePattern());
                 if(hadError)

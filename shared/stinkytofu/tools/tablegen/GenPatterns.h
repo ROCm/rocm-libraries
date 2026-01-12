@@ -48,11 +48,17 @@ namespace stinkytofu
     private:
         std::string outputDir;
 
-        // Code generation helpers
+        // Code generation helpers (assembly IR)
         std::string generateMatcherClass(const Pattern& pattern, PatternType type);
         std::string generateMatchFunction(const Pattern& pattern, PatternType type);
+
+        // Code generation helpers (high-level IR)
+        std::string generateMatcherClassHLIR(const Pattern& pattern);
+        std::string generateMatchFunctionHLIR(const Pattern& pattern);
+
+        // Common helpers
         std::string generateHeader(PatternType type);
-        std::string generateFooter(const std::vector<Pattern>& patterns);
+        std::string generateFooter(const std::vector<Pattern>& patterns, PatternType type);
 
         // Utility
         std::string toCppIdentifier(const std::string& name);

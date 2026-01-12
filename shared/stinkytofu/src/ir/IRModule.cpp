@@ -72,6 +72,24 @@ namespace stinkytofu
         return pImpl->instructions;
     }
 
+    std::vector<std::shared_ptr<IRInstruction>>& IRModule::getMutableInstructions()
+    {
+        return pImpl->instructions;
+    }
+
+    bool IRModule::removeInstruction(IRInstruction* inst)
+    {
+        auto it = std::find_if(pImpl->instructions.begin(),
+                               pImpl->instructions.end(),
+                               [inst](const auto& ptr) { return ptr.get() == inst; });
+        if(it != pImpl->instructions.end())
+        {
+            pImpl->instructions.erase(it);
+            return true;
+        }
+        return false;
+    }
+
     size_t IRModule::size() const
     {
         return pImpl->instructions.size();

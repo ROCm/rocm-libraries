@@ -73,9 +73,15 @@ int main(int argc, char** argv)
     success &= genAllArchDefinitions(manager, outdir);
     success &= genAllArchRocisaMappings(manager, outdir);
 
-    // Generate peephole optimization patterns
-    std::string patternFile = hardwareDir + "/../lib/Dialect/Transforms/PeepholePatterns.pattern";
-    success &= genPeepholePatterns(patternFile, outdir);
+    // Generate peephole optimization patterns (assembly IR)
+    std::string asmPatternFile
+        = hardwareDir + "/../lib/Dialect/Transforms/PeepholePatterns.pattern";
+    success &= genPeepholePatterns(asmPatternFile, outdir);
+
+    // Generate high-level IR optimization patterns
+    std::string hlirPatternFile
+        = hardwareDir + "/../lib/Dialect/Transforms/HighLevelIR/HighLevelIRPatterns.pattern";
+    success &= genPeepholePatterns(hlirPatternFile, outdir);
 
     // Generate high-level IR instruction classes and mappings
     success &= genHighLevelIR(outdir);

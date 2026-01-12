@@ -52,6 +52,33 @@ namespace stinkytofu
         return result;
     }
 
+    // Convert assembly mnemonic to IR class name
+    // Example: "v_add_f32" -> "VAddF32"
+    static std::string mnemonicToIRClassName(const std::string& mnemonic)
+    {
+        std::string result;
+        bool        capitalizeNext = true;
+
+        for(char c : mnemonic)
+        {
+            if(c == '_')
+            {
+                capitalizeNext = true;
+            }
+            else if(capitalizeNext)
+            {
+                result += std::toupper(c);
+                capitalizeNext = false;
+            }
+            else
+            {
+                result += c;
+            }
+        }
+
+        return result;
+    }
+
     std::string PatternCodeGen::generateHeader(PatternType type)
     {
         if(type == PatternType::HighLevelIR)
@@ -64,11 +91,70 @@ namespace stinkytofu
 
 #pragma once
 
+#include "ir/IRModule.hpp"
+#include "ir/StinkyInstructions.hpp"
+#include <optional>
+#include <unordered_map>
+#include <vector>
+#include <memory>
+
 namespace stinkytofu {
 namespace hlir_patterns {
 
-// Placeholder for high-level IR pattern matching
-// Full implementation to be added later
+// Helper to check if a register is a constant
+inline bool isConstant(const StinkyRegister& reg) {
+    return reg.dataType == StinkyRegister::Type::LiteralDouble ||
+           reg.dataType == StinkyRegister::Type::LiteralInt;
+}
+
+// Helper to get constant value
+inline double getConstantValue(const StinkyRegister& reg) {
+    if (reg.dataType == StinkyRegister::Type::LiteralDouble) {
+        return reg.literalDouble;
+    } else if (reg.dataType == StinkyRegister::Type::LiteralInt) {
+        return static_cast<double>(reg.literalInt);
+    }
+    return 0.0;
+}
+
+// Built-in constant folding functions
+inline double AddConstants(double a, double b) { return a + b; }
+inline double SubConstants(double a, double b) { return a - b; }
+inline double MulConstants(double a, double b) { return a * b; }
+inline double NegateConstant(double a) { return -a; }
+
+//===----------------------------------------------------------------------===//
+// High-Level IR Pattern Matcher Interface
+//===----------------------------------------------------------------------===//
+
+/// Base class for all high-level IR pattern matchers
+/// Operates on IRInstruction* (architecture-independent IR)
+class PatternMatcher {
+public:
+    virtual ~PatternMatcher() = default;
+
+    /// Context provided to pattern matchers
+    struct MatchContext {
+        const std::unordered_map<StinkyRegister, IRInstruction*>& defMap;
+        const std::unordered_map<StinkyRegister, int>& useCount;
+    };
+
+    /// Result of a successful pattern match and rewrite
+    struct RewriteResult {
+        std::vector<IRInstruction*> instructionsToRemove;
+        bool applied = false;
+    };
+
+    /// Try to match and rewrite the given IR instruction
+    /// Returns nullopt if pattern doesn't match
+    /// If pattern matches, performs rewrite in-place and returns instructions to remove
+    virtual std::optional<RewriteResult> tryMatchAndRewrite(
+        IRInstruction* inst,
+        const MatchContext& context) = 0;
+
+    /// Get the name of this pattern (for debugging)
+    virtual const char* getName() const = 0;
+};
 
 )";
         }
@@ -154,7 +240,8 @@ public:
         }
     }
 
-    std::string PatternCodeGen::generateFooter(const std::vector<Pattern>& patterns)
+    std::string PatternCodeGen::generateFooter(const std::vector<Pattern>& patterns,
+                                               PatternType                 type)
     {
         std::ostringstream oss;
 
@@ -177,13 +264,21 @@ public:
         oss << "    return patterns;\n";
         oss << "}\n\n";
 
-        oss << "} // namespace patterns\n";
+        // Use correct namespace based on pattern type
+        if(type == PatternType::HighLevelIR)
+        {
+            oss << "} // namespace hlir_patterns\n";
+        }
+        else
+        {
+            oss << "} // namespace patterns\n";
+        }
         oss << "} // namespace stinkytofu\n";
 
         return oss.str();
     }
 
-    std::string PatternCodeGen::generateMatchFunction(const Pattern& pattern)
+    std::string PatternCodeGen::generateMatchFunction(const Pattern& pattern, PatternType type)
     {
         std::ostringstream oss;
 
@@ -455,7 +550,7 @@ public:
         return oss.str();
     }
 
-    std::string PatternCodeGen::generateMatcherClass(const Pattern& pattern)
+    std::string PatternCodeGen::generateMatcherClass(const Pattern& pattern, PatternType type)
     {
         std::ostringstream oss;
 
@@ -468,7 +563,299 @@ public:
         oss << "public:\n";
 
         // tryMatchAndRewrite function (match + rewrite combined)
-        oss << generateMatchFunction(pattern);
+        oss << generateMatchFunction(pattern, type);
+        oss << "\n";
+
+        // getName function
+        oss << "    const char* getName() const override {\n";
+        oss << "        return \"" << pattern.name << "\";\n";
+        oss << "    }\n";
+
+        oss << "};\n\n";
+
+        return oss.str();
+    }
+
+    //===----------------------------------------------------------------------===//
+    // High-Level IR Pattern Generation (architecture-independent)
+    //===----------------------------------------------------------------------===//
+
+    std::string PatternCodeGen::generateMatchFunctionHLIR(const Pattern& pattern)
+    {
+        std::ostringstream oss;
+
+        oss << "    std::optional<RewriteResult> tryMatchAndRewrite(\n";
+        oss << "        IRInstruction* inst,\n";
+        oss << "        const MatchContext& context) override\n";
+        oss << "    {\n";
+        oss << "        const auto& defMap = context.defMap;\n";
+        oss << "        const auto& useCount = context.useCount;\n\n";
+
+        // We match the LAST instruction first (bottom-up matching)
+        const auto& lastMatch = pattern.match.back();
+
+        oss << "        // Match pattern root: " << lastMatch.opcode << "\n";
+        oss << "        if (inst->getOpcode() != HLIR::" << mnemonicToIRClassName(lastMatch.opcode)
+            << ")\n";
+        oss << "            return std::nullopt;\n\n";
+
+        // Assign the root instruction to its variable name
+        oss << "        // Root instruction\n";
+        oss << "        IRInstruction* " << lastMatch.instVar << " = inst;\n\n";
+
+        oss << "        // Extract operands from " << lastMatch.opcode << "\n";
+        oss << "        const auto& destRegs = " << lastMatch.instVar << "->dests;\n";
+        oss << "        const auto& srcRegs = " << lastMatch.instVar << "->srcs;\n";
+        oss << "        if (destRegs.empty() || srcRegs.size() < "
+            << (lastMatch.operands.size() - 1) << ")\n";
+        oss << "            return std::nullopt;\n\n";
+
+        // Bind operands
+        for(size_t i = 0; i < lastMatch.operands.size(); i++)
+        {
+            if(i == 0)
+            {
+                oss << "        StinkyRegister " << lastMatch.operands[i] << " = destRegs[0];\n";
+            }
+            else
+            {
+                oss << "        StinkyRegister " << lastMatch.operands[i] << " = srcRegs["
+                    << (i - 1) << "];\n";
+            }
+        }
+        oss << "\n";
+
+        // Match previous instructions (if any)
+        if(pattern.match.size() > 1)
+        {
+            for(size_t i = 0; i < pattern.match.size() - 1; i++)
+            {
+                const auto& matchStmt = pattern.match[i];
+
+                // Find which operand from the last instruction references this instruction's result
+                std::string resultVar = matchStmt.operands[0]; // First operand is destination
+
+                oss << "        // Find defining instruction for " << resultVar << "\n";
+                oss << "        auto defIt = defMap.find(" << resultVar << ");\n";
+                oss << "        if (defIt == defMap.end())\n";
+                oss << "            return std::nullopt;\n";
+                oss << "        IRInstruction* " << matchStmt.instVar << " = defIt->second;\n\n";
+
+                oss << "        // Check opcode: " << matchStmt.opcode << "\n";
+                oss << "        if (" << matchStmt.instVar
+                    << "->getOpcode() != HLIR::" << mnemonicToIRClassName(matchStmt.opcode)
+                    << ")\n";
+                oss << "            return std::nullopt;\n\n";
+
+                // Extract operands from this instruction (direct field access)
+                oss << "        // Extract operands from " << matchStmt.opcode << "\n";
+                oss << "        const auto& " << matchStmt.instVar << "_src = " << matchStmt.instVar
+                    << "->srcs;\n";
+                oss << "        if (" << matchStmt.instVar << "_src.size() < "
+                    << (matchStmt.operands.size() - 1) << ")\n";
+                oss << "            return std::nullopt;\n\n";
+
+                for(size_t j = 1; j < matchStmt.operands.size(); j++)
+                {
+                    oss << "        StinkyRegister " << matchStmt.operands[j] << " = "
+                        << matchStmt.instVar << "_src[" << (j - 1) << "];\n";
+                }
+                oss << "\n";
+            }
+        }
+
+        // Check constraints
+        if(!pattern.constraints.empty())
+        {
+            oss << "        // Check constraints\n";
+            for(const auto& constraint : pattern.constraints)
+            {
+                if(constraint.function == "HasOneUse")
+                {
+                    oss << "        {\n";
+                    oss << "            auto it = useCount.find(" << constraint.args[0] << ");\n";
+                    oss << "            if (it == useCount.end() || it->second != 1)\n";
+                    oss << "                return std::nullopt;\n";
+                    oss << "        }\n";
+                }
+                else if(constraint.function == "IsConstant")
+                {
+                    oss << "        if (!isConstant(" << constraint.args[0] << "))\n";
+                    oss << "            return std::nullopt;\n";
+                }
+                else if(constraint.function == "SameValue")
+                {
+                    oss << "        if (!(" << constraint.args[0] << " == " << constraint.args[1]
+                        << "))\n";
+                    oss << "            return std::nullopt;\n";
+                }
+                else if(constraint.function == "DifferentValue")
+                {
+                    oss << "        if (" << constraint.args[0] << " == " << constraint.args[1]
+                        << ")\n";
+                    oss << "            return std::nullopt;\n";
+                }
+            }
+            oss << "\n";
+        }
+
+        // Apply rewrite inline
+        oss << "        // Match successful - apply rewrite!\n\n";
+
+        // Process rewrite statements
+        for(const auto& stmt : pattern.rewrite)
+        {
+            if(stmt.kind == RewriteStmt::Kind::BuiltinCall)
+            {
+                // Constant folding: compute new constant
+                oss << "        // Fold constants: " << stmt.lhs << " = " << stmt.function
+                    << "(...)\n";
+                oss << "        double " << stmt.lhs << " = " << stmt.function << "(";
+                for(size_t i = 0; i < stmt.operands.size(); i++)
+                {
+                    if(i > 0)
+                        oss << ", ";
+                    oss << "getConstantValue(" << stmt.operands[i] << ")";
+                }
+                oss << ");\n\n";
+            }
+        }
+
+        // Find the instruction to modify and the instruction to remove
+        std::string instToModify;
+        std::string instToRemove;
+
+        if(pattern.match.size() == 2)
+        {
+            // Look for 'replace' and 'remove' statements in rewrite block
+            for(const auto& stmt : pattern.rewrite)
+            {
+                if(stmt.kind == RewriteStmt::Kind::Replace)
+                {
+                    instToModify = stmt.oldVar; // The instruction being replaced/modified
+                }
+                else if(stmt.kind == RewriteStmt::Kind::Remove)
+                {
+                    instToRemove = stmt.instVar; // The instruction being removed
+                }
+            }
+
+            // Fallback: if no explicit replace/remove, use default behavior (modify first, remove last)
+            if(instToModify.empty() && instToRemove.empty())
+            {
+                instToModify = pattern.match[0].instVar;
+                instToRemove = pattern.match[1].instVar;
+            }
+        }
+
+        // Apply the rewrite: update instruction in-place
+        oss << "        // Update " << instToModify << " in-place\n";
+
+        // Find the CreateInst rewrite statement
+        const RewriteStmt* createStmt = nullptr;
+        for(const auto& stmt : pattern.rewrite)
+        {
+            if(stmt.kind == RewriteStmt::Kind::CreateInst)
+            {
+                createStmt = &stmt;
+                break;
+            }
+        }
+
+        if(createStmt)
+        {
+            // For high-level IR, we need to replace the instruction with a new one
+            // since we can't just change the opcode (different types)
+            oss << "        // Create new instruction: " << createStmt->opcode << "\n";
+            oss << "        // Note: For high-level IR, instruction replacement will be handled\n";
+            oss << "        // by the pass infrastructure (removing old, adding new)\n\n";
+
+            // Update destination register
+            oss << "        // Update destination register\n";
+            oss << "        if (!" << instToModify << "->dests.empty()) {\n";
+            oss << "            " << instToModify << "->dests[0] = " << createStmt->operands[0]
+                << ";\n";
+            oss << "        }\n\n";
+
+            // Update source registers
+            oss << "        // Update source registers\n";
+            oss << "        " << instToModify << "->srcs.clear();\n";
+
+            // Add all source operands
+            for(size_t i = 1; i < createStmt->operands.size(); ++i)
+            {
+                const std::string& operand = createStmt->operands[i];
+
+                // Check if this operand is a folded constant from a builtin call
+                bool isBuiltinResult = false;
+                for(const auto& stmt : pattern.rewrite)
+                {
+                    if(stmt.kind == RewriteStmt::Kind::BuiltinCall && stmt.lhs == operand)
+                    {
+                        oss << "        " << instToModify
+                            << "->srcs.push_back(StinkyRegister(static_cast<double>(" << operand
+                            << ")));\n";
+                        isBuiltinResult = true;
+                        break;
+                    }
+                }
+
+                // If not a builtin result, it's a direct operand reference
+                if(!isBuiltinResult)
+                {
+                    oss << "        " << instToModify << "->srcs.push_back(" << operand << ");\n";
+                }
+            }
+
+            // Change opcode by creating a new instruction of the correct type
+            oss << "\n        // TODO: Change opcode from old type to " << createStmt->opcode
+                << "\n";
+            oss << "        // This requires creating a new IR instruction of the target type\n";
+            oss << "        // For now, we just modify operands in-place\n";
+        }
+        else
+        {
+            // Fallback: old behavior for backward compatibility
+            oss << "        " << instToModify << "->dests[0] = " << lastMatch.operands[0] << ";\n";
+
+            for(const auto& stmt : pattern.rewrite)
+            {
+                if(stmt.kind == RewriteStmt::Kind::BuiltinCall)
+                {
+                    oss << "        " << instToModify
+                        << "->srcs[0] = StinkyRegister(static_cast<double>(" << stmt.lhs << "));\n";
+                    break;
+                }
+            }
+        }
+
+        oss << "\n";
+
+        // Return result with instruction to remove
+        oss << "        // Return result\n";
+        oss << "        RewriteResult result;\n";
+        oss << "        result.instructionsToRemove = {" << instToRemove << "};\n";
+        oss << "        result.applied = true;\n";
+        oss << "        return result;\n";
+        oss << "    }\n";
+
+        return oss.str();
+    }
+
+    std::string PatternCodeGen::generateMatcherClassHLIR(const Pattern& pattern)
+    {
+        std::ostringstream oss;
+
+        oss << "//===----------------------------------------------------------------------===//\n";
+        oss << "// Pattern: " << pattern.name << "\n";
+        oss << "//===----------------------------------------------------------------------===//"
+               "\n\n";
+
+        oss << "class " << toCppIdentifier(pattern.name) << " : public PatternMatcher {\n";
+        oss << "public:\n";
+
+        // tryMatchAndRewrite function (match + rewrite combined)
+        oss << generateMatchFunctionHLIR(pattern);
         oss << "\n";
 
         // getName function
@@ -524,26 +911,24 @@ public:
 
         out << generateHeader(type);
 
-        // For high-level IR, output placeholder comment
+        // Generate pattern matchers based on type
         if(type == PatternType::HighLevelIR)
         {
-            out << "// High-level IR pattern matching not yet implemented\n";
-            out << "// Patterns parsed: " << filteredPatterns.size() << "\n";
+            // Generate matchers for high-level IR (architecture-independent)
             for(const auto& pattern : filteredPatterns)
             {
-                out << "//   - " << pattern.name << "\n";
+                out << generateMatcherClassHLIR(pattern);
             }
-            out << "\n} // namespace hlir_patterns\n";
-            out << "} // namespace stinkytofu\n";
+            out << generateFooter(filteredPatterns, type);
         }
         else
         {
-            // Generate full matchers for assembly IR
+            // Generate full matchers for assembly IR (architecture-specific)
             for(const auto& pattern : filteredPatterns)
             {
-                out << generateMatcherClass(pattern);
+                out << generateMatcherClass(pattern, type);
             }
-            out << generateFooter(filteredPatterns);
+            out << generateFooter(filteredPatterns, type);
         }
 
         std::cout << "Generated " << filteredPatterns.size() << " pattern matchers: " << outputPath
