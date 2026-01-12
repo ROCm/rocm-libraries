@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -237,6 +237,9 @@ void testing_spmm_coo(Arguments argus)
                             hcol_ind,
                             hval,
                             idx_base));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
 
     std::vector<I> hrow_ind(nnz_A);
 

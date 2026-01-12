@@ -439,6 +439,21 @@ void checkBatchnormTensorConfigSupported(
 }
 
 void checkBatchnormTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
+    std::vector<int64_t> affineTensorIds
+        = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
+    std::vector<int64_t> statTensorIds
+        = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
+
+    checkBatchnormTensorConfigSupported(
+        ioTensorIds, affineTensorIds, statTensorIds, tensorMap, false);
+}
+
+void checkBatchnormTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)

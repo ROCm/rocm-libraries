@@ -170,6 +170,20 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
         &derivedStrides,
         &derivedDims));
 
+    // Epsilon (pass-by-value)
+    std::vector<int64_t> passByValueDims = {1};
+    hipdnn_data_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        7,
+        "epsilon",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &passByValueDims,
+        &passByValueDims,
+        false,
+        hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
+        builder.CreateStruct(epsilonVal).Union()));
+
     auto bnormAttributes
         = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
             builder,
@@ -178,7 +192,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
             6, // variance uid
             3, // scale uid
             4, // bias uid
-            2 // y uid
+            2, // y uid
+            7 // epsilon uid
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;

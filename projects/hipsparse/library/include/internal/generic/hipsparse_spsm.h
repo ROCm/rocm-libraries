@@ -248,7 +248,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *  </table>
 *
 *  \note This routine does not correctly match the parameter list of the corresponding cusparse API, \p cusparseSpSM_solve, 
-*  which does not take the external buffer paramter. We provide an alternate routine \ref hipsparseSpSM_solve_ex which
+*  which does not take the external buffer parameter. We provide an alternate routine \ref hipsparseSpSM_solve_ex which
 *  correctly matches the parameter list of \p cusparseSpSM_solve.
 *
 *  @param[in]
