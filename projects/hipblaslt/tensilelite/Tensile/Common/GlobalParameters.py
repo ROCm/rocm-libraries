@@ -429,6 +429,7 @@ defaultBenchmarkCommonParameters = [
     {"AdaptiveGemm": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
+    {"SwapGlobalReadOrder": [0]},
     {"TailloopInNll": [False]}
 ]
 

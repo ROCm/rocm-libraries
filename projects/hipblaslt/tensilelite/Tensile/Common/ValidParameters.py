@@ -225,6 +225,12 @@ validParameters = { # we need to make sure this matches develop
     # Add an unrolled loop and NGLL loop with swapped GRA and GRB order.
     # which may change the tlb thrashing behavior.
     "UnrollLoopSwapGlobalReadOrder": [0, 1],
+    # swap global read order
+    # 0: A->B->A->B->repeat... (or swap depending on DTL and/or DTV)
+    # 1: B->A->B->A->repeat...
+    # normal/DTL/DTV should be same for A and B to swap GR order
+    # (normalA + normalB) or (DTLA + DTLB) or (DTVA + DTVB)
+    "SwapGlobalReadOrder": [0, 1],
     # PrefetchGlobalRead = 1:
     # Requires 2X LDS space, and VGPRs for buffering data on way into LDS
     #   prefetch / double-buffer reads from global memory -> vgprs -> lds.
