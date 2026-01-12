@@ -224,6 +224,12 @@ namespace rocsparse
 #define BLOCKSIZE 1024
     static const std::map<tpl_t, rocsparse::csrsv_launch_kernel_t> s_spmm_template_dispatch{{
 
+       CONFIG(BLOCKSIZE,
+              64,
+              true,
+              rocsparse_indextype_i32,
+              rocsparse_indextype_i32,
+              rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
