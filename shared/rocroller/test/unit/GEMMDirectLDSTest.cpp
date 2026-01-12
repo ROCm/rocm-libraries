@@ -91,7 +91,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToBuffer;
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -160,7 +160,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToBuffer;
 
         problem.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -235,7 +235,7 @@ namespace GEMMTests
         gemm.transB    = transOp.second;
         gemm.loadPathA = loadPathA;
         gemm.loadPathB = loadPathB;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToBuffer;
 
         basicGEMM<float>(gemm);
 
@@ -272,7 +272,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToBuffer;
 
         problem.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -336,7 +336,7 @@ namespace GEMMTests
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
                                        : SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        problem.storeLDSD = false;
+        problem.storePath = SolutionParams::StorePath::VGPRToBuffer;
 
         problem.prefetch         = true;
         problem.prefetchInFlight = 2;

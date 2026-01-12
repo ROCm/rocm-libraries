@@ -519,14 +519,11 @@ namespace rocRoller
                             {
                                 auto name = getForLoopName(graph, tag);
                                 if(name == rocRoller::XLOOP)
-                                    graph.mapper.connect<Unroll>(
-                                        op, unrollDimension, rocRoller::XLOOP_UNROLL);
+                                    graph.mapper.connect<Unroll>(op, unrollDimension, 0);
                                 else if(name == rocRoller::YLOOP)
-                                    graph.mapper.connect<Unroll>(
-                                        op, unrollDimension, rocRoller::YLOOP_UNROLL);
+                                    graph.mapper.connect<Unroll>(op, unrollDimension, 1);
                                 else if(name == rocRoller::KLOOP)
-                                    graph.mapper.connect<Unroll>(
-                                        op, unrollDimension, rocRoller::KLOOP_UNROLL);
+                                    graph.mapper.connect<Unroll>(op, unrollDimension, 2);
                                 auto setCoord = replaceWith(graph,
                                                             op,
                                                             graph.control.addElement(SetCoordinate(
@@ -633,8 +630,7 @@ namespace rocRoller
                 for(auto ldsLoad : currentLDSLoads)
                 {
                     if(name == rocRoller::KLOOP)
-                        graph.mapper.connect<Unroll>(
-                            ldsLoad, unrollDimension, rocRoller::KLOOP_UNROLL);
+                        graph.mapper.connect<Unroll>(ldsLoad, unrollDimension, 2);
                 }
             }
 
@@ -846,8 +842,7 @@ namespace rocRoller
                                                             Expression::literal(coordValue))),
                                                         false);
                             graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                            graph.mapper.connect<Unroll>(
-                                op, unrollDimension, rocRoller::KLOOP_UNROLL);
+                            graph.mapper.connect<Unroll>(op, unrollDimension, 2);
                             graph.control.chain<Body>(setCoord, op);
                         }
                     }

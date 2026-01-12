@@ -44,7 +44,7 @@ namespace GEMMTests
                                                    StreamKMode,
                                                    SolutionParams::LoadPath, /* loadPathA */
                                                    SolutionParams::LoadPath, /* loadPathB */
-                                                   bool /* storeLDSD */>>
+                                                   SolutionParams::StorePath /* storePath */>>
     {
     };
 
@@ -61,12 +61,12 @@ namespace GEMMTests
     // PrefetchConfig: (prefetchInFlight, prefetchLDSFactor)
     using PrefetchConfig = std::tuple<int, int>;
 
-    // Params: typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero, prefetchConfig
+    // Params: typeAB, unrollK, loadPathA, loadPathB, storePath, mode, betaZero, prefetchConfig
     class StreamKTestGPU : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                                     int,
                                                                     SolutionParams::LoadPath,
                                                                     SolutionParams::LoadPath,
-                                                                    bool,
+                                                                    SolutionParams::StorePath,
                                                                     rocRoller::StreamKMode,
                                                                     bool,
                                                                     PrefetchConfig>>
@@ -80,7 +80,7 @@ namespace GEMMTests
             GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
         }
 
-        auto [problemConfig, mode, loadPathA, loadPathB, storeLDSD] = std::get<1>(GetParam());
+        auto [problemConfig, mode, loadPathA, loadPathB, storePath] = std::get<1>(GetParam());
         auto [dataTypeAB, macM, macN, macK, m, n, k, numWGs]        = problemConfig;
 
         GEMMProblem gemm;
@@ -109,7 +109,7 @@ namespace GEMMTests
         gemm.streamK   = mode;
         gemm.loadPathA = loadPathA;
         gemm.loadPathB = loadPathB;
-        gemm.storeLDSD = storeLDSD;
+        gemm.storePath = storePath;
 
         switch(dataTypeAB)
         {
@@ -163,7 +163,7 @@ namespace GEMMTests
             GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
         }
 
-        auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero, prefetchConfig]
+        auto [typeAB, unrollK, loadPathA, loadPathB, storePath, mode, betaZero, prefetchConfig]
             = std::get<1>(GetParam());
         auto [prefetchInFlight, prefetchLDSFactor] = prefetchConfig;
 
@@ -189,7 +189,7 @@ namespace GEMMTests
 
         gemm.loadPathA = loadPathA;
         gemm.loadPathB = loadPathB;
-        gemm.storeLDSD = storeLDSD;
+        gemm.storePath = storePath;
         gemm.unrollK   = unrollK;
 
         gemm.transA = "T";
@@ -262,7 +262,8 @@ namespace GEMMTests
                                   SolutionParams::LoadPath::BufferToVGPR,
                                   SolutionParams::LoadPath::GlobalToVGPR,
                                   SolutionParams::LoadPath::GlobalToLDSViaVGPR), /* loadPathB */
-                ::testing::Values(true, false) /* storeLDSD */
+                ::testing::Values(SolutionParams::StorePath::LDSViaVGPRToBuffer,
+                                  SolutionParams::StorePath::VGPRToBuffer) /* storePath */
                 )));
 
     using StreamKParamGenerator = ::testing::internal::ParamGenerator<StreamKTestGPU::ParamType>;
@@ -281,7 +282,7 @@ namespace GEMMTests
             auto const& unrollK                               = std::get<1>(params);
             auto const& loadPathA                             = std::get<2>(params);
             auto const& loadPathB                             = std::get<3>(params);
-            auto const& storeLDSD                             = std::get<4>(params);
+            auto const& storePath                             = std::get<4>(params);
             auto const& mode                                  = std::get<5>(params);
             auto const& [prefetchInFlight, prefetchLDSFactor] = std::get<7>(params);
 
@@ -300,7 +301,7 @@ namespace GEMMTests
 
             // Runs out of LDS
             if((typeAB == DT::Float) and (loadPathA == LP::BufferToLDSViaVGPR)
-               and (loadPathB == LP::BufferToLDSViaVGPR) and (storeLDSD) and (mode != SM::Standard))
+               and (loadPathB == LP::BufferToLDSViaVGPR) and (IsLDSStore(storePath)) and (mode != SM::Standard))
             {
                 continue;
             }
@@ -331,7 +332,8 @@ namespace GEMMTests
                                                  SolutionParams::LoadPath::BufferToLDSViaVGPR),
                                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
                                                  SolutionParams::LoadPath::BufferToLDSViaVGPR),
-                               ::testing::Values(true, false), // storeLDSD
+                               ::testing::Values(SolutionParams::StorePath::LDSViaVGPRToBuffer,
+                                                 SolutionParams::StorePath::VGPRToBuffer), // storePath
                                ::testing::Values(rocRoller::StreamKMode::Standard,
                                                  rocRoller::StreamKMode::TwoTile,
                                                  rocRoller::StreamKMode::TwoTileDPFirst),
