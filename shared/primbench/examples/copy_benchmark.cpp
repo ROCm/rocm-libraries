@@ -76,8 +76,7 @@ struct copy_benchmark : public primbench::benchmark_interface
         // This passes a lambda to primbench, which calls it many times
         // primbench completely handles synchronization
         state.run(
-            [&]
-            {
+            [&] {
                 copy_kernel<T, BlockSize, ItemsPerThread>
                     <<<grid, block, 0, stream>>>(d_input, d_output);
             });
