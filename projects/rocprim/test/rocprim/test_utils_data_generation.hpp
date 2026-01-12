@@ -211,7 +211,7 @@ private:
 public:
     static std::vector<T> vector()
     {
-        if(std::is_integral<T>::value)
+        if(rocprim::is_integral<T>::value)
         {
             return std::vector<T>();
         }
@@ -439,7 +439,7 @@ inline auto generate_random_data_n(OutputIter                                   
                                    Generator&&                                         gen)
     -> std::enable_if_t<
         is_custom_test_array_type<common::it_value_t<OutputIter>>::value
-            && std::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
+            && rocprim::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
         OutputIter>
 {
     using T = typename std::iterator_traits<OutputIter>::value_type;
