@@ -21,6 +21,10 @@ function(add_rocsparse_example EXAMPLE_SOURCE)
     if(ROCSPARSE_ENABLE_ASAN)
         rocsparse_target_configure_sanitizers(${EXAMPLE_TARGET} PRIVATE)
     endif()
+
+    if(ROCSPARSE_ENABLE_ROCBLAS AND rocblas_FOUND)
+        target_compile_definitions(${EXAMPLE_TARGET} PRIVATE ROCSPARSE_WITH_ROCBLAS)
+    endif()
 endfunction()
 
 # Empty C program for checking rocsparse headers are C compatible
@@ -29,6 +33,9 @@ if(NOT WIN32)
     target_link_libraries(example_c_headers PRIVATE roc::rocsparse hip::host hip::device)
     if(ROCSPARSE_ENABLE_ASAN)
         rocsparse_target_configure_sanitizers(example_c_headers PRIVATE)
+    endif()
+    if(ROCSPARSE_ENABLE_ROCBLAS AND rocblas_FOUND)
+        target_compile_definitions(example_c_headers PRIVATE ROCSPARSE_WITH_ROCBLAS)
     endif()
 endif()
 
@@ -117,6 +124,10 @@ if(ROCSPARSE_ENABLE_FORTRAN AND NOT WIN32)
             $<$<PLATFORM_ID:Linux>:stdc++>
             $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>
         )
+
+        if(ROCSPARSE_ENABLE_ROCBLAS AND rocblas_FOUND)
+            target_compile_definitions(${EXAMPLE_TARGET} PRIVATE ROCSPARSE_WITH_ROCBLAS)
+        endif()
     endfunction()
 
     add_rocsparse_fortran_example(${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_gtsv.f90)

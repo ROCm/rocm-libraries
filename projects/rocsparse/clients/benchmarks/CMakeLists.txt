@@ -40,6 +40,10 @@ target_link_libraries(rocsparse-bench PRIVATE
     hip::device
 )
 
+if(ROCSPARSE_ENABLE_ROCBLAS AND rocblas_FOUND)
+    target_compile_definitions(rocsparse-bench PRIVATE ROCSPARSE_WITH_ROCBLAS)
+endif()
+
 if(TARGET OpenMP::OpenMP_CXX)
     target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX)
     # Set RPATH to find libomp.so at install time

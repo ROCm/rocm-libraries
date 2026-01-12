@@ -16,6 +16,10 @@ foreach(app rocsparseio-info rocsparseio-convert)
 
     target_link_libraries(${app} PRIVATE hip::host)
 
+    if(ROCSPARSE_ENABLE_ROCBLAS AND rocblas_FOUND)
+        target_compile_definitions(${app} PRIVATE ROCSPARSE_WITH_ROCBLAS)
+    endif()
+
     if(ROCSPARSE_ENABLE_ASAN)
         rocsparse_target_configure_sanitizers(${app} PRIVATE)
     endif()
