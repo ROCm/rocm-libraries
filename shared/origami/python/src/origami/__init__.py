@@ -41,13 +41,13 @@ except ImportError as e:
     ) from e
 
 # Import the torch heuristic selection module if possible
-HAS_TORCH_HEURISTICS = False
+HAS_PYTHON_SELECTION = False
 try:
-    from .torch_ext import *
-    HAS_TORCH_HEURISTICS = True
+    from .selector import *
+    HAS_PYTHON_SELECTION = True
 except ImportError:
     pass
 
-__all__ = ["HAS_CORE", "HAS_TORCH_HEURISTICS"]
+__all__ = ["HAS_CORE", "HAS_PYTHON_SELECTION"]
 __version__ = "0.1.0"
 

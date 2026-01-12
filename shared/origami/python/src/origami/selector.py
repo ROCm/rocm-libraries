@@ -1,5 +1,4 @@
 
-import functools
 import itertools
 import math
 import torch
@@ -7,38 +6,91 @@ from typing import Iterable
 import origami
 
 
-class TorchMatmulHeuristic:
-    def __init__(self,
-                 torch_configs: Iterable,
-                 m: int,
-                 n: int,
-                 k: int,
-                 a_dtype: torch.dtype,
-                 b_dtype: torch.dtype,
-                 c_dtype: torch.dtype,
-                 device: torch.device,
-                 streamk=False):
+class OrigamiMatmulSelector:
+    # https://docs.pytorch.org/docs/stable/tensors.html
+    dtype_to_str = {
+        torch.float32: "f32",
+        torch.complex64: "c32",
+        torch.complex128: "c64",
+        torch.float64: "f64",
+        torch.float16: "f16",
+        torch.int32: "i32",
+        torch.bfloat16: "bf16",
+        torch.int8: "i8",
+        torch.float8_e5m2: "f8",
+        torch.float8_e4m3fn: "f8",
+    }
+    # Add FP8 FNUZ variants if available (for non-gfx950 architectures)
+    if hasattr(torch, "float8_e5m2fnuz"):
+        dtype_to_str[torch.float8_e5m2fnuz] = "f8"
+    if hasattr(torch, "float8_e4m3fnuz"):
+        dtype_to_str[torch.float8_e4m3fnuz] = "f8"
+
+
+    def __init__(
+        self,
+        config_gen: Iterable,
+        m: int,
+        n: int,
+        k: int,
+        a_dtype: torch.dtype,
+        b_dtype: torch.dtype,
+        out_dtype: torch.dtype,
+        device: torch.device,
+        mx_block_size=0,
+        streamk=False
+    ):
         # Save tensor sizes
         self._m = m
         self._n = n
         self._k = k
 
-        # Save tensor dtypes
-        self._a_dtype = a_dtype
-        self._b_dtype = b_dtype
-        self._c_dtype = c_dtype
+        # Save tensor dtypes as strings
+        self._a_dtype_str   = OrigamiMatmulSelector.dtype_to_str.get(a_dtype, a_dtype)
+        self._b_dtype_str   = OrigamiMatmulSelector.dtype_to_str.get(b_dtype, b_dtype)
+        self._out_dtype_str = OrigamiMatmulSelector.dtype_to_str.get(out_dtype, out_dtype)
+        
+        # Save MX block size
+        self._mx_block_size = mx_block_size
 
-        # Save tensor dtype byte sizes
-        self._a_dtype_bytes = a_dtype.itemsize
-        self._b_dtype_bytes = b_dtype.itemsize
-        self._c_dtype_bytes = c_dtype.itemsize
+        # Helper function to get bits for both float, int, and MX dtypes
+        mx_types = ["f4"]
+        def get_dtype_bits(dtype):
+            # Handle MX types (string-based)
+            if dtype in mx_types:
+                return origami.datatype_to_bits(origami.string_to_datatype(dtype))
+
+            # Handle torch dtypes
+            try:
+                return torch.finfo(dtype).bits
+            except TypeError:
+                return torch.iinfo(dtype).bits
+        self._a_dtype_bitsize = get_dtype_bits(a_dtype)
+        self._b_dtype_bitsize = get_dtype_bits(a_dtype)
+        self._out_dtype_bitsize = get_dtype_bits(a_dtype)
+
+        # For matrix instruction latency lookup, use input dtype (not output dtype)
+        # because the matrix instruction type is determined by input operand types
+        # Example: FP8 inputs with BF16 output still uses FP8 matrix instructions
+        # Set MI dtype - use string for MX types, otherwise lookup from dict
+        if a_dtype in mx_types:
+            self.mi_dtype = a_dtype
+        else:
+            input_dtype_for_mi = (
+                a_dtype
+                if get_dtype_bits(a_dtype) <= get_dtype_bits(b_dtype)
+                else b_dtype
+            )
+            self.mi_dtype = OrigamiMatmulSelector.dtype_to_str.get(
+                input_dtype_for_mi, OrigamiMatmulSelector.dtype_to_str.get(out_dtype)
+            )
 
         # Get hardware info from Origami
         self._hardware = origami.get_hardware_for_device(device.index)
         self._N_CU = self._hardware.N_CU
-
-        # Create list of Origami config_t objects based on generator from torch.
-        self._configs = self._generate_configs(torch_configs)
+        
+        # Create list of Origami config_t objects based on generator.
+        self._configs = self._generate_configs(config_gen)
 
         # Create Origami problem_t based on problem metadata
         self._problem = self._make_problem()
@@ -53,10 +105,13 @@ class TorchMatmulHeuristic:
         else:
             self._grid = self._hardware.N_CU
 
-        _, self._workgroup_mapping = origami.select_workgroup_mapping(self._problem,
-                                                                      self._hardware,
-                                                                      self._result.config,
-                                                                      self._grid)
+        self._xcc_workgroup_mapping, self._workgroup_mapping = (
+            origami.select_workgroup_mapping(self._problem,
+                                             self._hardware,
+                                             self._result.config,
+                                             self._grid)
+        )
+
 
     @property
     def block_m(self):
@@ -76,6 +131,11 @@ class TorchMatmulHeuristic:
     @property
     def group_m(self):
         return self._workgroup_mapping
+
+
+    @property
+    def num_sms(self):
+        return self._xcc_workgroup_mapping
 
 
     @property
@@ -105,7 +165,7 @@ class TorchMatmulHeuristic:
         max_workspace  = 128 * 1024 * 1024
 
         M, N, K = self._m, self._n, self._k
-        BLK_M, BLK_N, BLK_K = self._result.config.mt.m, self._result.config.mt.n, self._result.config.mt.k
+        BLK_M, BLK_N, BLK_K = self.block_m, self.block_n, self._result.block_k
         cu_count = self._hardware.N_CU
 
         # Fallback if no better fractional split is found
@@ -174,10 +234,10 @@ class TorchMatmulHeuristic:
         return tileSize * sk_grid
         """
         # get the macro-tile dims you already compute
-        BLK_M, BLK_N, GSIZE = self._result.config.mt.m, self._result.config.mt.n, self._result.config.workgroup_mapping
+        BLK_M, BLK_N, GSIZE = self.block_m, self.block_n, self.group_m
 
         # bytes per C element
-        bytes_per_elem = self._c_dtype_bytes
+        bytes_per_elem = self._out_dtype_bitsize // 8
 
         # size of one partial tile per WG
         tile_size = BLK_M * BLK_N * bytes_per_elem
@@ -186,16 +246,16 @@ class TorchMatmulHeuristic:
         return tile_size * sk_grid
 
 
-    def _generate_configs(self, torch_configs):
+    def _generate_configs(self, config_gen):
         configs_list = []
 
-        for tconfig in torch_configs:
-            # tconfig is type triton.runtime.autotuner.Config
+        for config in config_gen:
+            # config is type triton.runtime.autotuner.Config
 
             # Create special dim3_t object for BLK_* sizes
-            mt = origami.dim3_t(tconfig.kwargs['BLOCK_M'],
-                                tconfig.kwargs['BLOCK_N'],
-                                tconfig.kwargs['BLOCK_K'])
+            mt = origami.dim3_t(config.kwargs['BLOCK_M'],
+                                config.kwargs['BLOCK_N'],
+                                config.kwargs['BLOCK_K'])
             # Get matrix instruction dimentions, also in dim3_t object
             mi = self._infer_matrix_instruction_dimensions()
 
@@ -203,7 +263,7 @@ class TorchMatmulHeuristic:
             new_config           = origami.config_t()
             new_config.mt        = mt
             new_config.mi        = mi
-            new_config.occupancy = tconfig.kwargs['waves_per_eu']
+            new_config.occupancy = config.kwargs['waves_per_eu']
 
             configs_list.append(new_config)
 
@@ -215,21 +275,23 @@ class TorchMatmulHeuristic:
         size = origami.dim3_t(self._m, self._n, self._k)
 
         # Convert torch dtypes to Origami dtypes based on problem metadata
-        a_origami_dtype = TorchMatmulHeuristic.torch_dtype_to_origami_dtype(self._a_dtype)
-        b_origami_dtype = TorchMatmulHeuristic.torch_dtype_to_origami_dtype(self._b_dtype)
-        c_origami_dtype = TorchMatmulHeuristic.torch_dtype_to_origami_dtype(self._c_dtype)
+        a_origami_dtype = origami.string_to_datatype(self._a_dtype_str)
+        b_origami_dtype = origami.string_to_datatype(self._b_dtype_str)
+        c_origami_dtype = origami.string_to_datatype(self._out_dtype_str)
 
         # Create and set new problem_t values
         problem = origami.problem_t()
-        problem.size        = size
-        problem.batch       = 1
-        problem.a_transpose = origami.transpose_t.T
-        problem.b_transpose = origami.transpose_t.N
-        problem.a_dtype     = a_origami_dtype
-        problem.b_dtype     = b_origami_dtype
-        problem.c_dtype     = c_origami_dtype
-        problem.d_dtype     = c_origami_dtype
-        problem.mi_dtype    = c_origami_dtype
+        problem.size            = size
+        problem.batch           = 1
+        problem.a_transpose     = origami.transpose_t.T
+        problem.b_transpose     = origami.transpose_t.N
+        problem.a_dtype         = a_origami_dtype
+        problem.b_dtype         = b_origami_dtype
+        problem.c_dtype         = c_origami_dtype
+        problem.d_dtype         = c_origami_dtype
+        problem.mi_dtype        = c_origami_dtype
+        problem.a_mx_block_size = self._mx_block_size
+        problem.b_mx_block_size = self._mx_block_size
     
         return problem
 
@@ -237,22 +299,18 @@ class TorchMatmulHeuristic:
     def _infer_matrix_instruction_dimensions(self):
         """
         Infers the matrix instruction dimensions based on the hardware configuration
-        and the sizes of the input data types.
-
-        Parameters:
-            element_bitsize_A (int): The size (in bits) of the elements in matrix A.
-            element_bitsize_B (int): The size (in bits) of the elements in matrix B.
+        and the sizes of the input data types.  The input dtype sizes are retrieved
+        from local object variables.
 
         Returns:
-            list[int]: A list representing the matrix instruction dimensions [M, N, K].
+            origami.dim3_t: An Origami dimension trio containing the matrixinstruction
+                dimensions [M, N, K].
 
         Raises:
             ValueError: If the hardware architecture is unsupported or if the data type
-            sizes are not compatible with the detected hardware.
+                sizes are not compatible with the detected hardware.
         """
-        element_bitsize_A = self._a_dtype_bytes * 8
-        element_bitsize_B = self._b_dtype_bytes * 8
-        largest_bitsize = max(element_bitsize_A, element_bitsize_B)
+        largest_bitsize = max(self._a_dtype_bitsize, self._b_dtype_bitsize)
 
         mi_dim = None
         # gfx950
@@ -265,6 +323,11 @@ class TorchMatmulHeuristic:
                 mi_dim = origami.dim3_t(16, 16, 32)
             # F4F6F8
             if largest_bitsize <= 8:
+                if self._k % 256 == 0:
+                    self.block_k_range = [256]
+                else:
+                    self.block_k_range = [128]
+                self.block_mn_range = [32, 64, 128, 256]
                 mi_dim = origami.dim3_t(16, 16, 128)
         # gfx942
         if self._hardware.N_CU == 304:
@@ -276,6 +339,8 @@ class TorchMatmulHeuristic:
                 mi_dim = origami.dim3_t(16, 16, 16)
             # F8
             if largest_bitsize == 8:
+                self.block_mn_range = self.block_mn_range + [512]
+                self.block_k_range = self.block_k_range + [128, 256]
                 mi_dim = origami.dim3_t(16, 16, 32)
             # F4F6 -> Unsupported on MI300X
             if largest_bitsize < 8:
@@ -289,6 +354,8 @@ class TorchMatmulHeuristic:
                 mi_dim = origami.dim3_t(16, 16, 16)
             # F8
             if largest_bitsize == 8:
+                self.block_mn_range = self.block_mn_range + [512]
+                self.block_k_range = self.block_k_range + [128, 256]
                 mi_dim = origami.dim3_t(16, 16, 32)
             # F4F6 -> Unsupported on MI300A
             if largest_bitsize < 8:
@@ -312,34 +379,4 @@ class TorchMatmulHeuristic:
             )
 
         return mi_dim
-
-
-    @staticmethod
-    def torch_dtype_to_origami_dtype(torch_dtype: torch.dtype) -> origami.data_type_t:
-        origami_dtype = None
-        
-        #TODO: Add the rest of the types after resolving type differences
-        match torch_dtype:
-            case torch.float32:
-                origami_dtype = origami.data_type_t.Float
-            case torch.float64:
-                origami_dtype = origami.data_type_t.Double
-            case torch.complex32:
-                origami_dtype = origami.data_type_t.ComplexFloat
-            case torch.complex64:
-                origami_dtype = origami.data_type_t.ComplexDouble
-            case torch.float16:
-                origami_dtype = origami.data_type_t.Half
-            case torch.bfloat16:
-                origami_dtype = origami.data_type_t.BFloat16
-            case torch.int32:
-                origami_dtype = origami.data_type_t.Int32
-            case torch.int64:
-                origami_dtype = origami.data_type_t.Int64
-            case torch.int8:
-                origami_dtype = origami.data_type_t.Int8
-            case _:
-                raise RuntimeError(f'Conversion from {torch_dtype} to respective origami dtype not mapped out')
-
-        return origami_dtype
 
