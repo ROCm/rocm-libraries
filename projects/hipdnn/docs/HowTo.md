@@ -226,7 +226,7 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 
 ### CI Maintenance
 
-- **TheRock Version**: The TheRock commit ref is centralized in `.github/workflows/therock-ci.yml` (the `THEROCK_REF` env variable). Update this single value when bumping TheRock version - it propagates to all dependent workflows including hipDNN clang-tidy.
+- **TheRock Version**: The TheRock nightly releases are centralized in `.github/workflows/therock-ci.yml`. Update the `--release` arg in the `hipdnn-clang-tidy.yml` workflow to a recent release on demand. It will likely need to be updated whenever new dependency API is used that is absent from past ROCm releases. 
 
 ### Debugging Tips
 
