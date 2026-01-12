@@ -66,8 +66,8 @@ void run_even_benchmark(benchmark_utils::state&& state,
     size_t size = bytes / sizeof(T);
 
     using counter_type = unsigned int;
-    using level_type =
-        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
+    using level_type   = typename std::
+        conditional_t<rocprim::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
     const level_type lower_level = 0;
     const level_type upper_level = bins * scale;
@@ -124,8 +124,8 @@ void run_multi_even_benchmark(benchmark_utils::state&& state,
     size_t size = bytes / sizeof(T);
 
     using counter_type = unsigned int;
-    using level_type =
-        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
+    using level_type   = typename std::
+        conditional_t<rocprim::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
     unsigned int num_levels[ActiveChannels];
     level_type   lower_level[ActiveChannels];
@@ -198,8 +198,8 @@ void run_range_benchmark(benchmark_utils::state&& state, size_t bins)
     size_t size = bytes / sizeof(T);
 
     using counter_type = unsigned int;
-    using level_type =
-        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
+    using level_type   = typename std::
+        conditional_t<rocprim::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
     // Generate data
     const auto     random_range = limit_random_range<T>(0, bins);
@@ -258,8 +258,8 @@ void run_multi_range_benchmark(benchmark_utils::state&& state, size_t bins)
     size_t size = bytes / sizeof(T);
 
     using counter_type = unsigned int;
-    using level_type =
-        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
+    using level_type   = typename std::
+        conditional_t<rocprim::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
     const int               num_levels_channel = bins + 1;
     unsigned int            num_levels[ActiveChannels];
