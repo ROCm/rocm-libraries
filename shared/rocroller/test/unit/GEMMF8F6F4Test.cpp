@@ -50,7 +50,7 @@ namespace GEMMTests
     };
 
     // Params are: A & B type, K tile size, (transA, transB), loadPathA, loadPathB
-    class StreamKGEMMF8F6F4TestGPU
+    class StreamKGEMMMXF8F6F4TestGPU
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    int,
                                                    std::pair<std::string, std::string>,
@@ -635,12 +635,11 @@ namespace GEMMTests
         EXPECT_GE(countSubstring(generatedCode, "buffer_load_dwordx2 "), 6);
     }
 
-    TEST_P(StreamKGEMMF8F6F4TestGPU, GPU_BasicStreamKGEMM)
+    TEST_P(StreamKGEMMMXF8F6F4TestGPU, GPU_StreamKUnrollPrefetchSwizzleScaledGEMMMX)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
         auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
-        const auto expectedLoadPath = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         if((typeAB == DataType::FP6 || typeAB == DataType::BF6)
            && (loadPathA == SolutionParams::LoadPath::BufferToLDS
@@ -698,11 +697,19 @@ namespace GEMMTests
         problem.unrollK           = 2;
         problem.prefetch          = true;
         problem.prefetchInFlight  = 2;
-        problem.prefetchLDSFactor = 0;
+        problem.prefetchLDSFactor = 2;
+
+        // TODO: remove this condition when SwizzleScale supports non-TN data layout
+        if(problem.transA == "T" && problem.transB == "N")
+        {
+            problem.swizzleScale  = true;
+            problem.swizzleM      = 64;
+            problem.swizzleN      = 64;
+            problem.swizzleK      = 4;
+            problem.prefetchScale = true;
+        }
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
-
-        std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
         switch(typeAB)
         {
@@ -711,19 +718,15 @@ namespace GEMMTests
             break;
         case DataType::BF8:
             basicGEMM<BF8, BF8, float>(problem);
-            modifiers = "cbsz:0b001 blgp:0b001";
             break;
         case DataType::FP6:
             basicGEMM<FP6, FP6, float>(problem);
-            modifiers = "cbsz:0b010 blgp:0b010";
             break;
         case DataType::BF6:
             basicGEMM<BF6, BF6, float>(problem);
-            modifiers = "cbsz:0b011 blgp:0b011";
             break;
         case DataType::FP4:
             basicGEMM<FP4, FP4, float>(problem);
-            modifiers = "cbsz:0b100 blgp:0b100";
             break;
         default:
             Throw<FatalError>(
@@ -858,8 +861,8 @@ namespace GEMMTests
                                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
-        StreamKGEMMF8F6F4Test,
-        StreamKGEMMF8F6F4TestGPU,
+        StreamKGEMMMXF8F6F4Test,
+        StreamKGEMMMXF8F6F4TestGPU,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(
