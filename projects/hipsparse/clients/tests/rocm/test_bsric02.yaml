@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,7 @@ Tests:
   category: pre_checkin
   function: bsric02_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: bsric02
   category: quick
   function: bsric02
@@ -39,17 +39,60 @@ Tests:
   block_dim: [3, 5, 9]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
   solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
 
 - name: bsric02
   category: pre_checkin
   function: bsric02
-  precision: *single_double_precisions
+  precision: *double_only_precisions_complex_real
   M: 1
-  block_dim: [3, 5, 9]
-  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  block_dim: [2, 3, 4, 6]
   solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  filename: [nos4, 
-             nos6, 
-             nos7]
+  filename: [nos5]
+
+- name: bsric02
+  category: pre_checkin
+  function: bsric02
+  precision: *double_only_precisions_complex_real
+  M: 1
+  block_dim: [2, 4, 5, 10]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4]
+
+- name: bsric02
+  category: pre_checkin
+  function: bsric02
+  precision: *double_only_precisions_complex_real
+  M: 1
+  block_dim: [3, 5, 15, 25]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos6]
+
+- name: bsric02
+  category: pre_checkin
+  function: bsric02
+  precision: *double_only_precisions_complex_real
+  M: 1
+  block_dim: [3, 9, 27]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos7]
+
+# - name: bsric02
+#   category: nightly
+#   function: bsric02
+#   precision: *double_only_precisions
+#   M: 1
+#   block_dim: [2, 3, 6]
+#   solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+#   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+#   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+#   filename: [bmwcra_1,
+#              shipsec1]

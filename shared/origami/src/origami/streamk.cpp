@@ -158,7 +158,7 @@ reduction_t select_reduction(const problem_t& problem,
       // For problems with large k and low number of tiles, use parallel reduction
       // TODO Benchmark to check if limits are correct
       constexpr int MinItersForParallel = 64;
-      constexpr int MaxTilesForParallel = 64;
+      const int MaxTilesForParallel = cu_count / 4;
       if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
         reduction_strategy = reduction_t::parallel;
     }

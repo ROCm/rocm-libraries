@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -238,6 +238,9 @@ void testing_spmm_csc(Arguments argus)
                             hcsc_row_ind,
                             hcsc_val,
                             idx_base));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsc_val, hcsc_val.size(), 1);
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;

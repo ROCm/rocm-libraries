@@ -301,6 +301,7 @@ std::string BnormArgsForMIOpenDriver(const miopenTensorDescriptor_t xDesc,
                                      const void* resultSaveInvVariance,
                                      const BatchNormDirection_t& dir,
                                      const miopenActivationDescriptor_t activDesc,
+                                     bool useInverseVariance,
                                      bool print_for_bn_driver)
 {
     int size = {0};
@@ -317,27 +318,29 @@ std::string BnormArgsForMIOpenDriver(const miopenTensorDescriptor_t xDesc,
                    dir);
     }
 
-    ss << " -n " << miopen::deref(xDesc).GetLengths()[0] // clang-format off
-            << " -c " << miopen::deref(xDesc).GetLengths()[1];
-        if(size == 5)
-        {
-            ss << " -D " << miopen::deref(xDesc).GetLengths()[2]
-            << " -H " << miopen::deref(xDesc).GetLengths()[3]
-            << " -W " << miopen::deref(xDesc).GetLengths()[4];
-        }
-        else
-        {
-            ss << " -H " << miopen::deref(xDesc).GetLengths()[2]
-            << " -W " << miopen::deref(xDesc).GetLengths()[3];
-        }
-        if (activDesc != nullptr && miopen::deref(activDesc).GetMode() != miopenActivationPASTHRU)
-	{
-            ss << " -f " << miopen::deref(activDesc).GetMode()
-	    << " -x " << miopen::deref(activDesc).GetAlpha()
-	    << " -y " << miopen::deref(activDesc).GetBeta()
-	    << " -z " << miopen::deref(activDesc).GetGamma();
-	}
-            ss << " -m " << bn_mode; // clang-format on
+    ss << " -n " << miopen::deref(xDesc).GetLengths()[0];
+    ss << " -c " << miopen::deref(xDesc).GetLengths()[1];
+    if(size == 5)
+    {
+        ss << " -D " << miopen::deref(xDesc).GetLengths()[2];
+        ss << " -H " << miopen::deref(xDesc).GetLengths()[3];
+        ss << " -W " << miopen::deref(xDesc).GetLengths()[4];
+    }
+    else
+    {
+        ss << " -H " << miopen::deref(xDesc).GetLengths()[2];
+        ss << " -W " << miopen::deref(xDesc).GetLengths()[3];
+    }
+
+    if(activDesc != nullptr && miopen::deref(activDesc).GetMode() != miopenActivationPASTHRU)
+    {
+        ss << " -f " << miopen::deref(activDesc).GetMode();
+        ss << " -x " << miopen::deref(activDesc).GetAlpha();
+        ss << " -y " << miopen::deref(activDesc).GetBeta();
+        ss << " -z " << miopen::deref(activDesc).GetGamma();
+    }
+    ss << " -m " << bn_mode;
+    ss << " -I " << (useInverseVariance ? '1' : '0');
     if(print_for_bn_driver)
     {
         BnDriverInfo(ss,
