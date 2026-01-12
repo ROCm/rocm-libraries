@@ -11,13 +11,15 @@ find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 # Option to control origami library source
 option(ORIGAMI_BUILD_FROM_SOURCE "Build origami from source instead of finding installed version" ON)
 
-# Get ROCM_PATH from environment or use default
-if(DEFINED ENV{ROCM_PATH})
-    set(ROCM_PATH $ENV{ROCM_PATH})
-    message(STATUS "Using ROCM_PATH from environment: ${ROCM_PATH}")
-else()
-    set(ROCM_PATH "/opt/rocm")
-    message(STATUS "ROCM_PATH not set, using default: ${ROCM_PATH}")
+# Get ROCM_PATH - fail if not found
+if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH $ENV{ROCM_PATH})
+        message(STATUS "Using ROCM_PATH from environment: ${ROCM_PATH}")
+    else()
+        set(ROCM_PATH "/opt/rocm")
+        message(STATUS "ROCM_PATH not set, using default: ${ROCM_PATH}")
+    endif()
 endif()
 
 # Verify ROCM_PATH exists
@@ -25,27 +27,13 @@ if(NOT EXISTS "${ROCM_PATH}")
     message(WARNING "ROCM_PATH '${ROCM_PATH}' does not exist. Build may fail if HIP is not found elsewhere.")
 endif()
 
-# Use origami library
+# Determine how to obtain origami library - no fallback logic
 # Check if the target is already available (when added as subdirectory from parent)
 if(TARGET roc::origami)
     message(STATUS "Using origami target from parent CMakeLists.txt")
     set(ORIGAMI_TARGET roc::origami)
-elseif(NOT ORIGAMI_BUILD_FROM_SOURCE)
-    # Try to find installed origami package (not recommended, but available as option)
-    message(STATUS "Attempting to find installed origami package...")
-    find_package(origami QUIET)
-    if(origami_FOUND)
-        message(STATUS "Found installed origami package")
-        set(ORIGAMI_TARGET roc::origami)
-    else()
-        message(WARNING "Installed origami package not found. Falling back to building from source.")
-        set(ORIGAMI_BUILD_FROM_SOURCE ON)
-    endif()
-endif()
-
-# Build from source if needed
-if(NOT ORIGAMI_TARGET)
-    message(STATUS "Building origami from source (parent directory)")
+elseif(ORIGAMI_BUILD_FROM_SOURCE)
+    message(STATUS "Building origami from source (ORIGAMI_BUILD_FROM_SOURCE=ON)")
     
     # Get parent directory (shared/origami) - go up one level from python/
     get_filename_component(ORIGAMI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
@@ -53,18 +41,20 @@ if(NOT ORIGAMI_TARGET)
     # Verify the CMakeLists.txt exists
     if(NOT EXISTS "${ORIGAMI_ROOT}/CMakeLists.txt")
         message(FATAL_ERROR 
-            "Could not find origami CMakeLists.txt at:\n"
+            "ORIGAMI_BUILD_FROM_SOURCE is ON but could not find origami CMakeLists.txt at:\n"
             "  ${ORIGAMI_ROOT}/CMakeLists.txt\n"
             "Please ensure you are building from the correct directory structure.\n"
-            "Expected structure: shared/origami/python/CMakeLists.txt")
+            "Expected structure: shared/origami/python/CMakeLists.txt\n"
+            "Or set ORIGAMI_BUILD_FROM_SOURCE=OFF to use an installed origami package.")
     endif()
     
     # Verify source directory structure
     if(NOT EXISTS "${ORIGAMI_ROOT}/src/origami")
         message(FATAL_ERROR 
-            "Could not find origami source directory at:\n"
+            "ORIGAMI_BUILD_FROM_SOURCE is ON but could not find origami source directory at:\n"
             "  ${ORIGAMI_ROOT}/src/origami\n"
-            "Please ensure the origami source code is present.")
+            "Please ensure the origami source code is present.\n"
+            "Or set ORIGAMI_BUILD_FROM_SOURCE=OFF to use an installed origami package.")
     endif()
     
     # Add origami as a subdirectory
@@ -73,11 +63,25 @@ if(NOT ORIGAMI_TARGET)
     # Verify target was created
     if(NOT TARGET roc::origami)
         message(FATAL_ERROR 
-            "Failed to create origami target. Check the parent CMakeLists.txt for errors.")
+            "ORIGAMI_BUILD_FROM_SOURCE is ON but failed to create roc::origami target.\n"
+            "Check the parent CMakeLists.txt at ${ORIGAMI_ROOT}/CMakeLists.txt for errors.")
     endif()
     
     set(ORIGAMI_TARGET roc::origami)
     message(STATUS "Successfully configured origami build from source")
+else()
+    message(STATUS "Looking for installed origami package (ORIGAMI_BUILD_FROM_SOURCE=OFF)")
+    find_package(origami REQUIRED)
+
+    if(NOT TARGET roc::origami)
+        message(FATAL_ERROR
+            "ORIGAMI_BUILD_FROM_SOURCE is OFF but installed origami package does not provide roc::origami target.\n"
+            "Please install origami or set ORIGAMI_BUILD_FROM_SOURCE=ON to build from source.\n"
+            "To install origami, build and install the parent project first.")
+    endif()
+
+    set(ORIGAMI_TARGET roc::origami)
+    message(STATUS "Using installed origami package")
 endif()
 
 # Find HIP - add ROCM_PATH to CMAKE_PREFIX_PATH if not already there
