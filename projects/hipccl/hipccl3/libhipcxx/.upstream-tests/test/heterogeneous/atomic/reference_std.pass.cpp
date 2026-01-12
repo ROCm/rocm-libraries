@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -172,17 +172,27 @@ using basic_testers =
               exchange_tester<-12, 17>>;
 
 using arithmetic_atomic_testers =
-  append<basic_testers, fetch_add_tester<17, 13, 30>, fetch_sub_tester<30, 21, 9>, fetch_sub_tester<9, 17, -8>>;
+  append<basic_testers, fetch_add_tester<17, 13, 30>
+#ifdef LIBHIPCXX_SUPPORTS_MANAGED_MEMORY_ATOMIC_FETCH
+         // NOTE(HIP/AMD): fetch_(sub/or/xor/and) are not supported with hipMallocManaged.
+         // This issue is tracked internally in issue SWDEV-390383.
+         , fetch_sub_tester<30, 21, 9>, fetch_sub_tester<9, 17, -8>
+#endif
+         >;
 
 using bitwise_atomic_testers =
   append<arithmetic_atomic_testers,
-         fetch_add_tester<-8, 10, 2>/*,
-         //FIXME(HIP): fetch_(or/xor/and) do not return the correct previous value when the atomic is allocated with hipMallocManaged.
-         //This issue is tracked internally in issue SWDEV-390383. 
-         fetch_or_tester<2, 13, 15>
+#ifdef LIBHIPCXX_SUPPORTS_MANAGED_MEMORY_ATOMIC_FETCH
+         fetch_add_tester<-8, 10, 2>,
+         // NOTE(HIP/AMD): fetch_(sub/or/xor/and) are not supported with hipMallocManaged.
+         // This issue is tracked internally in issue SWDEV-390383.
+         fetch_or_tester<2, 13, 15>,
          fetch_and_tester<15, 8, 8>,
          fetch_and_tester<8, 13, 8>,
-         fetch_xor_tester<8, 12, 4>*/
+         fetch_xor_tester<8, 12, 4>
+#else
+         fetch_add_tester<30, 10, 40>
+#endif
          >;
 
 void kernel_invoker()
@@ -199,8 +209,15 @@ void kernel_invoker()
   validate_pinned<unsigned long, bitwise_atomic_testers>();
   validate_pinned<unsigned long long, bitwise_atomic_testers>();
 
+#ifdef LIBHIPCXX_SUPPORTS_MANAGED_MEMORY_ATOMIC_FETCH
   validate_pinned<float, arithmetic_atomic_testers>();
   validate_pinned<double, arithmetic_atomic_testers>();
+#else
+  // NOTE(HIP/AMD): fetch_(sub/or/xor/and) are not supported with hipMallocManaged.
+  // For float and double also fetch_add is not supported. This issue is tracked internally in issue SWDEV-390383.
+  validate_pinned<float, basic_testers>();
+  validate_pinned<double, basic_testers>();
+#endif
 }
 
 int main(int arg, char** argv)
