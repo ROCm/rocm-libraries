@@ -542,6 +542,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1, 2]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -721,6 +722,7 @@ BenchmarkProblems:
         - LDSTrInst: [1]
         - UseSgprForGRO: [1]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -829,6 +831,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -957,6 +960,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - SourceSwap: [1]
         - LDSTrInst: [0,1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1091,6 +1095,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1146,6 +1151,7 @@ BenchmarkProblems:
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

@@ -46,7 +46,7 @@ namespace DGen
     }
 
     /**
-     * @brief Compute strides for row-major layout given sizes
+     * @brief Compute strides for column-major layout given sizes
      */
     inline std::vector<size_t> computeStrides(std::vector<size_t> const& sizes)
     {

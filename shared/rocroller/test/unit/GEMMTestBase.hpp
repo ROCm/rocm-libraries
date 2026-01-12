@@ -529,8 +529,6 @@ namespace GEMMTests
 
             if(gemm.streamK)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
-
                 AssertFatal(
                     numWorkgroupY == 1,
                     "Current scratch space implementation assumes that the kernel is launched "

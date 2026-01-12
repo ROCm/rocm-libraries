@@ -3247,8 +3247,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # if swapGlobalRoad is true, swap the order of global read (B->A)
       tensorParameters1st = tensorParametersA
       tensorParameters2nd = tensorParametersB
-      tailLoopOpt1st = kernel["tailLoopOptA"]
-      tailLoopOpt2nd = kernel["tailLoopOptB"]
+      tailLoopOpt1st = kernel["tailLoopOptA"] and self.do["GlobalReadA"]
+      tailLoopOpt2nd = kernel["tailLoopOptB"] and self.do["GlobalReadB"]
 
       tc1 = 'A'
       tc2 = 'B'
@@ -3285,6 +3285,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif tc2 == 'B':
           globalReadMode2nd = 2
 
+      # Opt Mode 2
       module.addComment1("Update M0 for DTLDS")
       moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters1st)
       module.add(replaceHolder(moduleTmp, 0))
@@ -3304,6 +3305,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd))
 
+      # Opt Mode 3
       doA = False
       doB = False
       if globalReadMode1st == 3:
@@ -5160,13 +5162,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # TODO: Avoid the logic which does not make sense.
       # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
       # Changed the value based on this and also to mitigate some instruction scheduling issues.
-      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2:
+      # Invalidate this adjustment if ExtraMiLatencyLeft is >= 0
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
         self.states.miLatency = kernel["MatrixInstM"] // 2
         miIssueLatency = 2
 
       # give 1 quad-cycle buffer to prevend bubble from sync
       miLatencyBuffer = 1
       self.states.miLatencyLeft = max(self.states.miLatency - miLatencyBuffer - miIssueLatency,0)
+      # add extra miLatencyLeft from parameter
+      if kernel["ExtraMiLatencyLeft"] > 0:
+        self.states.miLatencyLeft += kernel["ExtraMiLatencyLeft"]
 
       # Special dependency cases
       if kernel["ProblemType"]["ComputeDataType"].isDouble():

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -48,12 +48,22 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [mc2depi, 
-             scircuit, 
              nos1, 
              nos2, 
              nos3, 
              nos4, 
              nos5, 
              nos6, 
-             nos7, 
+             nos7]
+
+- name: coosort_file
+  category: nightly
+  function: coosort
+  M: 1
+  N: 1
+  permute: [0, 1]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [bmwcra_1, 
+             scircuit,
              shipsec1]
