@@ -76,58 +76,17 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
 
-## Creating a Kernel Engine Plugin
-
-This section focuses on developing kernel engine plugins; currently the only supported plugin type.
-
-### Prerequisites
-
-Before creating a plugin, ensure you have **built and installed hipDNN**. Plugins depend on the hipDNN Data SDK and Plugin SDK headers. See the [Quick Start Guide](./Building.md#quick-start-guide) for build and installation instructions.
-
-### Steps Overview
-
-1. **Create Plugin Structure**
-   - Create a new project/repository for your plugin
-   - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-   - See [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/) as a reference implementation (currently included but will become a separate project)
-
-2. **Implement Plugin API Functions**
-
-   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in `engine_plugin_api.h`. However, the common architectural pattern consists of:
-   - **Engine Manager**: Manages available engines and their capabilities
-   - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
-   - **Execution Plans**: Define how operations are executed
-
-3. **Build and Deploy Plugin**
-   - Configure CMake to build the plugin as a shared library
-   - Install to the appropriate plugin directory where hipDNN can discover it at runtime
-
-### Implementation Details
-
-The **Engine Manager** is responsible for:
-- Creating and managing engine instances
-- Reporting supported operations
-- Handling resource allocation
-- Managing device-specific contexts
-
-For **Engine Implementations**:
-- Each engine must have a unique inter-plugin `int64_t` identifier
-- Implement the `execute()` method for graph execution
-- Provide `get_supported_operations()` to report capabilities
-- Handle operation-specific kernel launches
-- Manage memory transfers and synchronization
-
-### Engine IDs
+## Engine IDs
 
 hipDNN uses a deterministic hash-based system for managing engine IDs. This system converts human-readable engine names to unique `int64_t` identifiers.
 
-#### How It Works
+### How It Works
 
 1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
 2. **Hash Function**: The `hipdnn_plugin_sdk::engine_names::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
 3. **Registration**: Engine names are registered in the Plugin SDK header for discoverability
 
-#### Using Engine IDs
+### Using Engine IDs
 
 ```cpp
 #include <hipdnn_plugin_sdk/EngineNames.hpp>
@@ -149,7 +108,7 @@ public:
 };
 ```
 
-#### Registering New Engine Names
+### Registering New Engine Names
 
 To add your engine name to the official registry:
 
@@ -164,7 +123,7 @@ To add your engine name to the official registry:
 
 3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
 
-#### Benefits
+### Benefits
 
 - **Deterministic**: Same name always produces same ID
 - **No Collisions**: Hash algorithm minimizes collision risk
@@ -173,6 +132,49 @@ To add your engine name to the official registry:
 
 > [!TIP]
 > 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_plugin_sdk::engine_names::getAllEngineNames()` and check for name collisions using the provided test utilities.
+
+
+## Creating a Kernel Engine Plugin
+
+This section focuses on developing kernel engine plugins; currently the only supported plugin type.
+
+### Prerequisites
+
+Before creating a plugin, ensure you have **built and installed hipDNN**. Plugins depend on the hipDNN Data SDK and Plugin SDK headers. See the [Quick Start Guide](./Building.md#quick-start-guide) for build and installation instructions.
+
+### Steps Overview
+
+1. **Create Plugin Structure**
+   - Create a new project/repository for your plugin
+   - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
+   - See [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/) as a reference implementation (currently included but will become a separate project)
+
+2. **Implement Plugin API Functions**
+
+   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in `engine_plugin_api.h`. However, the common architectural pattern consists of:
+   - **Engine Manager**: Manages available engines and their capabilities
+   - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
+   - **Execution Plans**: Define how operations are executed
+   - **Engine Name & ID**: Name your engine and place it in the [EngineNames](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp) registry
+
+3. **Build and Deploy Plugin**
+   - Configure CMake to build the plugin as a shared library
+   - Install to the appropriate plugin directory where hipDNN can discover it at runtime
+
+### Implementation Details
+
+The **Engine Manager** is responsible for:
+- Creating and managing engine instances
+- Reporting supported operations
+- Handling resource allocation
+- Managing device-specific contexts
+
+For **Engine Implementations**:
+- Each engine must have a unique inter-plugin `int64_t` identifier
+- Implement the `execute()` method for graph execution
+- Provide `get_supported_operations()` to report capabilities
+- Handle operation-specific kernel launches
+- Manage memory transfers and synchronization
 
 **Execution plans** for kernel engines:
 - Map hipDNN operations to backend-specific kernel implementations
