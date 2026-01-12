@@ -451,7 +451,7 @@ struct ConvWinoRageRxSFused final : FusionSolverBase
     ConvSolution GetSolution(const FusionContext&, const FusionDescription&) const override;
 };
 
-#ifndef CONV_WINO_FURY_RXS_CPP
+#ifndef CONV_WINO_RAGE_RXS_CPP
 extern template struct ConvWinoRageRxSFused<2, 3>;
 #endif
 
