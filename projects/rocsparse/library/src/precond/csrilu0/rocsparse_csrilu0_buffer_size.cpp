@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,12 +35,14 @@ rocsparse_status rocsparse::csrilu0_solve_buffer_size(rocsparse_handle          
     ROCSPARSE_CHECKARG_POINTER(1, A);
     ROCSPARSE_CHECKARG_POINTER(2, buffer_size_in_bytes);
 
-    ROCSPARSE_CHECKARG(1, A, (A->descr == nullptr), rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(
-        1, A, (A->descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1, A, (A->get_descr() == nullptr), rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(1,
                        A,
-                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       (A->get_descr()->type != rocsparse_matrix_type_general),
+                       rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1,
+                       A,
+                       (A->get_descr()->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_solve_buffer_size(
@@ -57,12 +59,14 @@ rocsparse_status rocsparse::csrilu0_analysis_buffer_size(rocsparse_handle       
     ROCSPARSE_CHECKARG_POINTER(1, A);
     ROCSPARSE_CHECKARG_POINTER(2, buffer_size_in_bytes);
 
-    ROCSPARSE_CHECKARG(1, A, (A->descr == nullptr), rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(
-        1, A, (A->descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1, A, (A->get_descr() == nullptr), rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(1,
                        A,
-                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       (A->get_descr()->type != rocsparse_matrix_type_general),
+                       rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1,
+                       A,
+                       (A->get_descr()->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_analysis_buffer_size(

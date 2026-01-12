@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,8 +42,25 @@ protected:
 
 public:
     ~_rocsparse_spmat_descr();
-    void                         set_own_spattern(bool value);
-    void                         set_own_values(bool value);
+    void set_own_spattern(bool value);
+    void set_own_values(bool value);
+
+    static rocsparse_spmat_descr create_sell(int64_t              rows,
+                                             int64_t              cols,
+                                             int64_t              nnz,
+                                             int64_t              sell_slice_size,
+                                             int64_t              sell_colval_size,
+                                             const void*          const_row_data,
+                                             void*                row_data,
+                                             const void*          const_col_data,
+                                             void*                col_data,
+                                             const void*          const_val_data,
+                                             void*                val_data,
+                                             rocsparse_indextype  row_type,
+                                             rocsparse_indextype  col_type,
+                                             rocsparse_index_base idx_base,
+                                             rocsparse_datatype   val_type);
+
     static rocsparse_spmat_descr create_coo(int64_t              rows,
                                             int64_t              cols,
                                             int64_t              nnz,
@@ -114,7 +131,6 @@ public:
                                             rocsparse_index_base idx_base,
                                             rocsparse_datatype   val_type);
 
-
     static rocsparse_spmat_descr create_bell(int64_t              rows,
                                              int64_t              cols,
                                              rocsparse_direction  block_dir,
@@ -141,12 +157,15 @@ public:
 
     _rocsparse_spmat_descr() = default;
 
-    _rocsparse_spmat_descr(_rocsparse_spattern_descr* spattern, rocsparse_dnvec_descr values);
+    _rocsparse_spmat_descr(_rocsparse_spattern_descr* spattern,
+                           rocsparse_dnvec_descr      values,
+                           rocsparse_mat_info         info);
 
     _rocsparse_spmat_descr(_rocsparse_spattern_descr* spattern,
                            rocsparse_direction        block_dir,
                            int64_t                    block_dim,
-                           rocsparse_dnvec_descr      values);
+                           rocsparse_dnvec_descr      values,
+                           rocsparse_mat_info         info);
 
     const _rocsparse_spattern_descr* get_spattern() const;
     rocsparse_spattern_descr         get_spattern();
@@ -195,10 +214,8 @@ public:
     int64_t get_val_batch_dist() const;
 
     rocsparse_indextype get_row_type() const;
-
     rocsparse_indextype get_col_type() const;
-
-    rocsparse_datatype get_data_type() const;
+    rocsparse_datatype  get_data_type() const;
 
     void set_row_data(void* value);
     void set_col_data(void* value);
@@ -215,12 +232,11 @@ public:
     void set_col_batch_dist(int64_t value);
     void set_val_batch_dist(int64_t value);
     void set_ell_width(int64_t value);
-  
-    int64_t             sell_slice_size{};
-    int64_t             sell_colval_size{};
-  
+
+    int64_t sell_slice_size{};
+    int64_t sell_colval_size{};
+
 #if 0
-    _rocsparse_spmat_descr() = default;
     _rocsparse_spmat_descr(rocsparse_format     format,
                            bool                 analysed,
                            int64_t              batch_count,

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,15 +41,15 @@ rocsparse_status rocsparse::coosv_analysis(rocsparse_handle            handle, /
     ROCSPARSE_CHECKARG_ENUM(3, analysis);
     ROCSPARSE_CHECKARG_ENUM(4, solve);
     ROCSPARSE_CHECKARG_POINTER(5, p_csrsv_info);
-    ROCSPARSE_CHECKARG_ARRAY(6, (A->rows > 0 && A->batch_count > 0), buffer);
+    ROCSPARSE_CHECKARG_ARRAY(6, (A->get_rows() > 0 && A->get_batch_count() > 0), buffer);
 
     // Quick return if possible
-    if(A->rows == 0 || A->batch_count == 0)
+    if(A->get_rows() == 0 || A->get_batch_count() == 0)
     {
         return rocsparse_status_success;
     }
-    rocsparse_mat_descr descr = A->descr;
-    rocsparse_mat_info  info  = A->info;
+    rocsparse_mat_descr descr = A->get_descr();
+    rocsparse_mat_info  info  = A->get_info();
     // Check matrix type
     ROCSPARSE_CHECKARG(5,
                        descr,
@@ -63,7 +63,7 @@ rocsparse_status rocsparse::coosv_analysis(rocsparse_handle            handle, /
                        rocsparse_status_requires_sorted_storage);
 
     // All must be null (zero matrix) or none null
-    const bool                use_32 = A->nnz < std::numeric_limits<int32_t>::max();
+    const bool                use_32 = A->get_nnz() < std::numeric_limits<int32_t>::max();
     const rocsparse_indextype indextype
         = use_32 ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
 
@@ -72,32 +72,58 @@ rocsparse_status rocsparse::coosv_analysis(rocsparse_handle            handle, /
     if(sorted_coo2csr_info == nullptr)
     {
         sorted_coo2csr_info
-            = new rocsparse::sorted_coo2csr_info_t(A->rows, indextype, handle->stream);
+            = new rocsparse::sorted_coo2csr_info_t(A->get_rows(), indextype, handle->stream);
 
         //
         // Assign it first, because if an error occurs in calculate below, then we won't have a memory leak.
         //
         info->set_sorted_coo2csr_info(sorted_coo2csr_info);
-        RETURN_IF_ROCSPARSE_ERROR(
-            sorted_coo2csr_info->calculate(handle, A->nnz, A->row_data, A->row_type, descr->base));
+        RETURN_IF_ROCSPARSE_ERROR(sorted_coo2csr_info->calculate(
+            handle, A->get_nnz(), A->get_row_data(), A->get_row_type(), descr->base));
     }
 
     const rocsparse_indextype csr_row_ptr_indextype
         = (use_32) ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
     const void*   csr_row_ptr        = sorted_coo2csr_info->get_row_ptr();
-    const int64_t csr_row_ptr_stride = (A->offsets_batch_stride == 0) ? 0 : (A->rows + 1);
+    const int64_t csr_row_ptr_stride = (A->get_row_batch_dist() == 0) ? 0 : (A->get_rows() + 1);
 
+    const auto coo_spattern = A->get_spattern();
+
+    _rocsparse_idvec_descr row_idvec(csr_row_ptr_indextype,
+                                     descr->base,
+                                     A->get_rows() + 1,
+                                     static_cast<int64_t>(1),
+                                     rocsparse_batchtype_strided,
+                                     rocsparse_batchstorage_soa,
+                                     A->get_batch_count(),
+                                     csr_row_ptr_stride,
+                                     csr_row_ptr,
+                                     nullptr);
+
+    _rocsparse_spattern_descr csr_spattern(rocsparse_format_csr,
+                                           A->get_rows(),
+                                           A->get_cols(),
+                                           A->get_nnz(),
+                                           &row_idvec,
+                                           (rocsparse_idvec_descr)coo_spattern->get_col_data(),
+                                           descr);
+
+    _rocsparse_spmat_descr csr(&csr_spattern,
+                               (rocsparse_dnvec_descr)A->get_val_data(), // DESIGN FLAW!!!!
+                               A->get_info());
+
+#if 0
     _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                               A->analysed,
-                               A->batch_count,
-                               A->rows,
-                               A->cols,
-                               A->nnz,
+                               A->get_analysed(),
+                               A->get_batch_count(),
+                               A->get_rows(),
+                               A->get_cols(),
+                               A->get_nnz(),
 
-                               A->data_type,
-                               A->const_val_data,
-                               A->val_data,
-                               A->batch_stride,
+                               A->get_data_type(),
+                               A->get_const_val_data(),
+                               A->get_val_data(),
+                               A->get_val_batch_dist(),
 
                                //
                                csr_row_ptr_indextype,
@@ -105,14 +131,15 @@ rocsparse_status rocsparse::coosv_analysis(rocsparse_handle            handle, /
                                nullptr,
                                csr_row_ptr_stride,
 
-                               A->col_type,
-                               A->const_col_data,
-                               A->col_data,
-                               A->columns_values_batch_stride,
+                               A->get_col_type(),
+                               A->get_const_col_data(),
+                               A->get_col_data(),
+                               A->get_col_batch_dist(),
 
-                               A->idx_base,
-                               A->descr,
-                               A->info);
+                               A->get_idx_base(),
+                               A->get_descr(),
+                               A->get_info());
+#endif
 
     RETURN_IF_ROCSPARSE_ERROR(
         (rocsparse::csrsv_analysis(handle, trans, &csr, analysis, solve, p_csrsv_info, buffer)));

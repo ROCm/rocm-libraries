@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -76,6 +76,7 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG_POINTER(10, buffer_size);
 
+#if 0
         _rocsparse_spmat_descr bsr(rocsparse_format_bsr,
                                    false,
                                    static_cast<int64_t>(1),
@@ -99,6 +100,29 @@ namespace rocsparse
                                    descr->base,
                                    descr,
                                    info);
+#endif
+
+        _rocsparse_idvec_descr row_idvec(rocsparse::get_indextype<rocsparse_int>(),
+                                         descr->base,
+                                         mb + 1,
+                                         static_cast<int64_t>(1),
+                                         bsr_row_ptr,
+                                         nullptr);
+
+        _rocsparse_idvec_descr col_idvec(rocsparse::get_indextype<rocsparse_int>(),
+                                         descr->base,
+                                         nnzb,
+                                         static_cast<int64_t>(1),
+                                         bsr_row_ptr,
+                                         nullptr);
+
+        _rocsparse_spattern_descr csr_spattern(
+            rocsparse_format_csr, mb, mb, nnzb, &row_idvec, &col_idvec, descr);
+
+        _rocsparse_dnvec_descr val_dnvec(
+            rocsparse::get_datatype<T>(), nnzb, static_cast<int64_t>(1), bsr_val, nullptr);
+
+        _rocsparse_spmat_descr bsr(&csr_spattern, dir, block_dim, val_dnvec, info);
 
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::bsrilu0_analysis_buffer_size(handle, &bsr, buffer_size));

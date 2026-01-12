@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -184,24 +184,24 @@ namespace rocsparse
             static_cast<J>(m),
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
             alpha_stride,
-            reinterpret_cast<const I* __restrict__>(A->const_row_data),
-            reinterpret_cast<const J* __restrict__>(A->const_col_data),
-            reinterpret_cast<const T* __restrict__>(A->const_val_data),
+            reinterpret_cast<const I* __restrict__>(A->get_const_row_data()),
+            reinterpret_cast<const J* __restrict__>(A->get_const_col_data()),
+            reinterpret_cast<const T* __restrict__>(A->get_const_val_data()),
             csr_val_inc,
-            A->batch_stride,
-            reinterpret_cast<const T* __restrict__>(x->const_values),
-            x->inc,
-            x->batch_stride,
-            reinterpret_cast<T* __restrict__>(y->values),
-            y->inc,
-            y->batch_stride,
+            A->get_val_batch_dist(),
+            reinterpret_cast<const T* __restrict__>(x->const_data()),
+            x->get_inc(),
+            x->get_batch_dist(),
+            reinterpret_cast<T* __restrict__>(y->data()),
+            y->get_inc(),
+            y->get_batch_dist(),
             done_array,
             reinterpret_cast<const J* __restrict__>(map),
             0,
             reinterpret_cast<J* __restrict__>(zero_pivot),
-            A->descr->base,
-            A->descr->fill_mode,
-            A->descr->diag_type,
+            A->get_descr()->base,
+            A->get_descr()->fill_mode,
+            A->get_descr()->diag_type,
             handle->pointer_mode == rocsparse_pointer_mode_host);
         return rocsparse_status_success;
     }

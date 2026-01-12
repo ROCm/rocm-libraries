@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -323,7 +323,7 @@ namespace rocsparse
         // done array
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
 
-        const int64_t done_array_stride = A->rows;
+        const int64_t done_array_stride = A->get_rows();
 
         const T*     boost_val = reinterpret_cast<const T*>(gboost_val);
         const float* boost_tol_32
@@ -331,7 +331,8 @@ namespace rocsparse
         const double* boost_tol_64
             = reinterpret_cast<const double*>((boost_enable) ? gboost_tol : nullptr);
 
-        dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
+        dim3 csrilu0_blocks((A->get_rows() * handle->wavefront_size - 1) / BLOCKSIZE + 1,
+                            A->get_batch_count());
         dim3 csrilu0_threads(BLOCKSIZE);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -340,11 +341,11 @@ namespace rocsparse
             csrilu0_threads,
             0,
             handle->stream,
-            static_cast<J>(A->rows),
-            reinterpret_cast<const I*>(A->const_row_data),
-            reinterpret_cast<const J*>(A->const_col_data),
-            reinterpret_cast<T*>(A->val_data),
-            A->batch_stride,
+            static_cast<J>(A->get_rows()),
+            reinterpret_cast<const I*>(A->get_const_row_data()),
+            reinterpret_cast<const J*>(A->get_const_col_data()),
+            reinterpret_cast<T*>(A->get_val_data()),
+            A->get_val_batch_dist(),
             reinterpret_cast<const I*>(trm_info->get_diag_ind()),
             done_array,
             done_array_stride,
@@ -354,7 +355,7 @@ namespace rocsparse
             reinterpret_cast<J*>(csrilu0_info->get_singular_pivot()),
             csrilu0_info->get_singular_pivot_stride(),
             csrilu0_info->get_singular_tol(),
-            A->descr->base,
+            A->get_descr()->base,
             boost_enable,
             boost_tol_size,
             ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
@@ -456,6 +457,9 @@ rocsparse::csrilu0_kernel_launch_t rocsparse::find_csrilu0_kernel_hash_launch(
 {
     auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-    return rocsparse::transform_wf<256>(
-        handle->wavefront_size, trm_info->get_max_nnz(), A->data_type, A->row_type, A->col_type);
+    return rocsparse::transform_wf<256>(handle->wavefront_size,
+                                        trm_info->get_max_nnz(),
+                                        A->get_data_type(),
+                                        A->get_row_type(),
+                                        A->get_col_type());
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,7 +104,31 @@ namespace rocsparse
                                                                    policy,
                                                                    temp_buffer));
 
-        rocsparse_csrsv_info   csrsv_info = (info != nullptr) ? info->get_csrsv_info() : nullptr;
+        rocsparse_csrsv_info csrsv_info = (info != nullptr) ? info->get_csrsv_info() : nullptr;
+
+        _rocsparse_idvec_descr row_idvec(rocsparse::get_indextype<rocsparse_int>(),
+                                         descr->base,
+                                         m + 1,
+                                         static_cast<int64_t>(1),
+                                         csr_row_ptr,
+                                         nullptr);
+
+        _rocsparse_idvec_descr col_idvec(rocsparse::get_indextype<rocsparse_int>(),
+                                         descr->base,
+                                         nnz,
+                                         static_cast<int64_t>(1),
+                                         csr_col_ind,
+                                         nullptr);
+
+        _rocsparse_spattern_descr csr_spattern(
+            rocsparse_format_csr, m, m, nnz, &row_idvec, &col_idvec, descr);
+
+        _rocsparse_dnvec_descr val_dnvec(
+            rocsparse::get_datatype<T>(), nnz, static_cast<int64_t>(1), csr_val, nullptr);
+
+        _rocsparse_spmat_descr csr(&csr_spattern, val_dnvec, info);
+
+#if 0
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
 
                                    false,
@@ -132,9 +156,10 @@ namespace rocsparse
                                    descr->base,
                                    descr,
                                    info);
+#endif
 
-        _rocsparse_dnvec_descr dnvec_descr_x(1, m, rocsparse::get_datatype<T>(), x, nullptr, 1, 0);
-        _rocsparse_dnvec_descr dnvec_descr_y(1, m, rocsparse::get_datatype<T>(), y, y, 1, 0);
+        _rocsparse_dnvec_descr dnvec_descr_x(rocsparse::get_datatype<T>(), m, 1, x, nullptr);
+        _rocsparse_dnvec_descr dnvec_descr_y(rocsparse::get_datatype<T>(), m, 1, y, y);
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                          trans,

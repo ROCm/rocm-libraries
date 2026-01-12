@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -462,27 +462,27 @@ namespace rocsparse
         auto trm_info = bsric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
-        const int64_t done_array_stride = A->rows;
+        const int64_t done_array_stride = A->get_rows();
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_2_8_unrolled<BSRDIM>),
-                                           dim3(A->rows, A->batch_count),
+                                           dim3(A->get_rows(), A->get_batch_count()),
                                            dim3(BSRDIM, BSRDIM),
                                            0,
                                            handle->stream,
-                                           A->block_dir,
-                                           static_cast<J>(A->rows),
-                                           reinterpret_cast<const I*>(A->const_row_data),
-                                           reinterpret_cast<const J*>(A->const_col_data),
-                                           reinterpret_cast<T*>(A->val_data),
-                                           A->batch_stride,
+                                           A->get_block_dir(),
+                                           static_cast<J>(A->get_rows()),
+                                           reinterpret_cast<const I*>(A->get_const_row_data()),
+                                           reinterpret_cast<const J*>(A->get_const_col_data()),
+                                           reinterpret_cast<T*>(A->get_val_data()),
+                                           A->get_val_batch_dist(),
                                            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
-                                           static_cast<J>(A->block_dim),
+                                           static_cast<J>(A->get_block_dim()),
                                            done_array,
                                            done_array_stride,
                                            reinterpret_cast<const J*>(trm_info->get_row_map()),
                                            reinterpret_cast<J*>(bsric0_info->get_zero_pivot()),
                                            bsric0_info->get_zero_pivot_stride(),
-                                           A->descr->base);
+                                           A->get_descr()->base);
         return rocsparse_status_success;
     }
 
@@ -579,46 +579,54 @@ namespace rocsparse
 rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_2_8_unrolled_launch(
     rocsparse_handle handle, rocsparse_bsric0_info bsric0_info, rocsparse_const_spmat_descr A)
 {
-    switch(A->block_dim)
+    switch(A->get_block_dim())
     {
     case 1:
     {
-        return rocsparse::transform_t_type<1>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<1>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     case 2:
     {
-        return rocsparse::transform_t_type<2>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<2>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     case 3:
     {
-        return rocsparse::transform_t_type<3>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<3>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     case 4:
     {
-        return rocsparse::transform_t_type<4>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<4>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     case 5:
     {
-        return rocsparse::transform_t_type<5>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<5>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     case 6:
     {
-        return rocsparse::transform_t_type<6>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<6>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     case 7:
     {
-        return rocsparse::transform_t_type<7>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<7>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     case 8:
     {
-        return rocsparse::transform_t_type<8>(A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_t_type<8>(
+            A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
 
     default:

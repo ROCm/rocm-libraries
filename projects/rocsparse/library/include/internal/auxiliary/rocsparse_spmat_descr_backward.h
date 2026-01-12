@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,50 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_sell_descr(rocsparse_spmat_descr* descr,
+                                             int64_t                rows,
+                                             int64_t                cols,
+                                             int64_t                nnz,
+                                             int64_t                sell_slice_size,
+                                             int64_t                sell_colval_size,
+                                             void*                  sell_slice_offsets,
+                                             void*                  sell_col_ind,
+                                             void*                  sell_val,
+                                             rocsparse_indextype    sell_slice_offsets_type,
+                                             rocsparse_indextype    sell_col_ind_type,
+                                             rocsparse_index_base   idx_base,
+                                             rocsparse_datatype     data_type);
+
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_const_sell_descr(rocsparse_const_spmat_descr* descr,
+                                                   int64_t                      rows,
+                                                   int64_t                      cols,
+                                                   int64_t                      nnz,
+                                                   int64_t                      sell_slice_size,
+                                                   int64_t                      sell_colval_size,
+                                                   const void*                  sell_slice_offsets,
+                                                   const void*                  sell_col_ind,
+                                                   const void*                  sell_val,
+                                                   rocsparse_indextype  sell_slice_offsets_type,
+                                                   rocsparse_indextype  sell_col_ind_type,
+                                                   rocsparse_index_base idx_base,
+                                                   rocsparse_datatype   data_type);
+
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
+                                          int64_t*                    rows,
+                                          int64_t*                    cols,
+                                          int64_t*                    nnz,
+                                          int64_t*                    sell_slice_size,
+                                          int64_t*                    sell_colval_size,
+                                          const void**                sell_slice_offsets,
+                                          const void**                sell_col_ind,
+                                          const void**                sell_val,
+                                          rocsparse_indextype*        sell_slice_offsets_type,
+                                          rocsparse_indextype*        sell_col_ind_type,
+                                          rocsparse_index_base*       idx_base,
+                                          rocsparse_datatype*         data_type);
 
 /*! \ingroup aux_module
  *  \brief Create a sparse COO matrix descriptor
@@ -1254,8 +1298,6 @@ rocsparse_status rocsparse_spmat_set_attribute(rocsparse_spmat_descr     descr,
 
 #endif
 
-
-
 #if 0
 
 
@@ -1667,20 +1709,6 @@ rocsparse_status rocsparse_sell_get(const rocsparse_spmat_descr descr,
                                     rocsparse_index_base*       idx_base,
                                     rocsparse_datatype*         data_type);
 
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
-                                          int64_t*                    rows,
-                                          int64_t*                    cols,
-                                          int64_t*                    nnz,
-                                          int64_t*                    sell_slice_size,
-                                          int64_t*                    sell_colval_size,
-                                          const void**                sell_slice_offsets,
-                                          const void**                sell_col_ind,
-                                          const void**                sell_val,
-                                          rocsparse_indextype*        sell_slice_offsets_type,
-                                          rocsparse_indextype*        sell_col_ind_type,
-                                          rocsparse_index_base*       idx_base,
-                                          rocsparse_datatype*         data_type);
 /**@}*/
 
 /*! \ingroup aux_module

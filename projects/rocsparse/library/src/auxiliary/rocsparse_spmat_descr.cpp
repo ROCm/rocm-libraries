@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -69,6 +69,8 @@ _rocsparse_spmat_descr::~_rocsparse_spmat_descr()
     this->m_values   = nullptr;
 }
 
+#if 1
+
 rocsparse_spmat_descr _rocsparse_spmat_descr::create_coo(int64_t              rows,
                                                          int64_t              cols,
                                                          int64_t              nnz,
@@ -99,7 +101,7 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_coo(int64_t              ro
 
         spattern->set_own_data(true);
 
-        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec);
+        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec, new _rocsparse_mat_info());
         spmat->set_own_spattern(true);
         spmat->set_own_values(true);
     }
@@ -118,7 +120,6 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_coo(int64_t              ro
         return nullptr;
     }
 
-    spattern->set_own_data(true);
     return spmat;
 }
 
@@ -157,7 +158,7 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_coo_aos(int64_t     rows,
         spattern  = _rocsparse_spattern_descr::create_coo(rows, cols, nnz, row_idvec, col_idvec);
         spattern->set_own_data(true);
 
-        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec);
+        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec, new _rocsparse_mat_info());
         spmat->set_own_spattern(true);
         spmat->set_own_values(true);
     }
@@ -211,7 +212,62 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_bsr(int64_t             mb,
         spattern = _rocsparse_spattern_descr::create_bsr(mb, nb, nnzb, row_idvec, col_idvec);
 
         spattern->set_own_data(true);
-        spmat = new _rocsparse_spmat_descr(spattern, block_dir, block_dim, val_dnvec);
+        spmat = new _rocsparse_spmat_descr(
+            spattern, block_dir, block_dim, val_dnvec, new _rocsparse_mat_info());
+        spmat->set_own_spattern(true);
+        spmat->set_own_values(true);
+    }
+    catch(...)
+    {
+        if(row_idvec != nullptr)
+            delete row_idvec;
+        if(col_idvec != nullptr)
+            delete col_idvec;
+        if(val_dnvec != nullptr)
+            delete val_dnvec;
+        if(spattern != nullptr)
+            delete spattern;
+        if(spmat != nullptr)
+            delete spmat;
+    }
+    return spmat;
+}
+
+rocsparse_spmat_descr _rocsparse_spmat_descr::create_sell(int64_t              rows,
+                                                          int64_t              cols,
+                                                          int64_t              nnz,
+                                                          int64_t              sell_slice_size,
+                                                          int64_t              sell_colval_size,
+                                                          const void*          const_row_data,
+                                                          void*                row_data,
+                                                          const void*          const_col_data,
+                                                          void*                col_data,
+                                                          const void*          const_val_data,
+                                                          void*                val_data,
+                                                          rocsparse_indextype  row_type,
+                                                          rocsparse_indextype  col_type,
+                                                          rocsparse_index_base idx_base,
+                                                          rocsparse_datatype   val_type)
+{
+    rocsparse_idvec_descr    row_idvec{};
+    rocsparse_idvec_descr    col_idvec{};
+    rocsparse_dnvec_descr    val_dnvec{};
+    rocsparse_spattern_descr spattern{};
+    rocsparse_spmat_descr    spmat{};
+    try
+    {
+        row_idvec
+            = new _rocsparse_idvec_descr(row_type, idx_base, rows + 1, 1, const_row_data, row_data);
+        col_idvec
+            = new _rocsparse_idvec_descr(col_type, idx_base, nnz, 1, const_col_data, col_data);
+        val_dnvec = new _rocsparse_dnvec_descr(val_type, nnz, 1, const_val_data, val_data);
+        spattern  = _rocsparse_spattern_descr::create_sell(rows, cols, nnz, row_idvec, col_idvec);
+
+        spmat->sell_slice_size  = sell_slice_size;
+        spmat->sell_colval_size = sell_colval_size;
+
+        spattern->set_own_data(true);
+        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec, new _rocsparse_mat_info());
         spmat->set_own_spattern(true);
         spmat->set_own_values(true);
     }
@@ -260,7 +316,7 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_csr(int64_t              ro
         spattern  = _rocsparse_spattern_descr::create_csr(rows, cols, nnz, row_idvec, col_idvec);
 
         spattern->set_own_data(true);
-        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec);
+        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec, new _rocsparse_mat_info());
         spmat->set_own_spattern(true);
         spmat->set_own_values(true);
     }
@@ -309,7 +365,7 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_csc(int64_t              ro
         spattern  = _rocsparse_spattern_descr::create_csc(rows, cols, nnz, row_idvec, col_idvec);
 
         spattern->set_own_data(true);
-        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec);
+        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec, new _rocsparse_mat_info());
         spmat->set_own_spattern(true);
         spmat->set_own_values(true);
     }
@@ -357,7 +413,8 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_bell(int64_t              r
         spattern  = _rocsparse_spattern_descr::create_bell(rows, cols, nnz_s, col_idvec);
 
         spattern->set_own_data(true);
-        spmat = new _rocsparse_spmat_descr(spattern, block_dir, block_dim, val_dnvec);
+        spmat = new _rocsparse_spmat_descr(
+            spattern, block_dir, block_dim, val_dnvec, new _rocsparse_mat_info());
         spmat->set_own_spattern(true);
         spmat->set_own_values(true);
     }
@@ -402,7 +459,7 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_ell(int64_t              ro
         spattern  = _rocsparse_spattern_descr::create_ell(rows, cols, width, col_idvec);
 
         spattern->set_own_data(true);
-        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec);
+        spmat = new _rocsparse_spmat_descr(spattern, val_dnvec, new _rocsparse_mat_info());
 
         spmat->set_own_spattern(true);
         spmat->set_own_values(true);
@@ -421,26 +478,30 @@ rocsparse_spmat_descr _rocsparse_spmat_descr::create_ell(int64_t              ro
     return spmat;
 }
 
+#endif
+
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_spattern_descr spattern,
-                                               rocsparse_dnvec_descr    values)
+                                               rocsparse_dnvec_descr    values,
+                                               rocsparse_mat_info       info)
     : m_spattern(spattern)
     , m_values(values)
+    , m_mat_info(info)
 {
     this->m_block_dim = 1;
     this->m_block_dir = rocsparse_direction_column;
-    THROW_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&this->m_mat_info));
 }
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_spattern_descr spattern,
                                                rocsparse_direction      block_dir,
                                                int64_t                  block_dim,
-                                               rocsparse_dnvec_descr    values)
+                                               rocsparse_dnvec_descr    values,
+                                               rocsparse_mat_info       info)
     : m_spattern(spattern)
     , m_values(values)
+    , m_mat_info(info)
 {
     this->m_block_dim = block_dim;
     this->m_block_dir = block_dir;
-    THROW_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&this->m_mat_info));
 }
 
 rocsparse_direction _rocsparse_spmat_descr::get_block_dir() const
@@ -678,7 +739,9 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, p_descr);
     ROCSPARSE_CHECKARG_POINTER(2, spattern);
     ROCSPARSE_CHECKARG_POINTER(3, values);
-    p_descr[0] = new _rocsparse_spmat_descr(spattern, values);
+    rocsparse_mat_info info;
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&info));
+    p_descr[0] = new _rocsparse_spmat_descr(spattern, values, info);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -702,7 +765,9 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, p_descr);
     ROCSPARSE_CHECKARG_POINTER(2, spattern);
     ROCSPARSE_CHECKARG_POINTER(3, values);
-    p_descr[0] = new _rocsparse_spmat_descr(spattern, block_dir, block_dim, values);
+    rocsparse_mat_info info;
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&info));
+    p_descr[0] = new _rocsparse_spmat_descr(spattern, block_dir, block_dim, values, info);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

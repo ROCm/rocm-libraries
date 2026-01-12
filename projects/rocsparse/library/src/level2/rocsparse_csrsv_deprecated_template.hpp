@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,29 @@ namespace rocsparse
         const int64_t batch_dist_csr_row_ptr = static_cast<int64_t>(0);
         const int64_t batch_dist_csr_col_ind = static_cast<int64_t>(0);
 
+        _rocsparse_idvec_descr row_idvec(rocsparse::get_indextype<I>(),
+                                         descr->base,
+                                         m + 1,
+                                         static_cast<int64_t>(1),
+                                         csr_row_ptr,
+                                         nullptr);
+
+        _rocsparse_idvec_descr col_idvec(rocsparse::get_indextype<J>(),
+                                         descr->base,
+                                         nnz,
+                                         static_cast<int64_t>(1),
+                                         csr_col_ind,
+                                         nullptr);
+
+        _rocsparse_dnvec_descr val_dnvec(
+            rocsparse::get_datatype<T>(), nnz, static_cast<int64_t>(1), csr_val, nullptr);
+
+        _rocsparse_spattern_descr csr_spattern(
+            rocsparse_format_csr, m, m, nnz, &row_idvec, &col_idvec, descr);
+
+        _rocsparse_spmat_descr csr(&csr_spattern, &val_dnvec, info);
+
+#if 0
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
                                    false,
                                    batch_count,
@@ -68,6 +91,7 @@ namespace rocsparse
                                    descr->base,
                                    descr,
                                    info);
+#endif
 
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::csrsv_analysis_buffer_size(handle, op, &csr, p_buffer_size_in_bytes));
@@ -99,6 +123,7 @@ namespace rocsparse
         const int64_t batch_dist_csr_row_ptr = static_cast<int64_t>(0);
         const int64_t batch_dist_csr_col_ind = static_cast<int64_t>(0);
 
+#if 0
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
                                    false,
                                    batch_count,
@@ -120,6 +145,29 @@ namespace rocsparse
                                    descr->base,
                                    descr,
                                    info);
+#endif
+
+        _rocsparse_idvec_descr row_idvec(rocsparse::get_indextype<I>(),
+                                         descr->base,
+                                         m + 1,
+                                         static_cast<int64_t>(1),
+                                         csr_row_ptr,
+                                         nullptr);
+
+        _rocsparse_idvec_descr col_idvec(rocsparse::get_indextype<J>(),
+                                         descr->base,
+                                         nnz,
+                                         static_cast<int64_t>(1),
+                                         csr_col_ind,
+                                         nullptr);
+
+        _rocsparse_dnvec_descr val_dnvec(
+            rocsparse::get_datatype<T>(), nnz, static_cast<int64_t>(1), csr_val, nullptr);
+
+        _rocsparse_spattern_descr csr_spattern(
+            rocsparse_format_csr, m, m, nnz, &row_idvec, &col_idvec, descr);
+
+        _rocsparse_spmat_descr csr(&csr_spattern, &val_dnvec, info);
 
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::csrsv_analysis(handle, op, &csr, analysis, solve, p_csrsv_info, buffer));
@@ -144,17 +192,43 @@ namespace rocsparse
                                                  rocsparse_csrsv_info      csrsv_info,
                                                  void*                     buffer)
     {
-        const int64_t batch_count            = static_cast<int64_t>(1);
-        const int64_t batch_dist_csr_val     = static_cast<int64_t>(0);
-        const int64_t batch_dist_csr_row_ptr = static_cast<int64_t>(0);
-        const int64_t batch_dist_csr_col_ind = static_cast<int64_t>(0);
-        const int64_t batch_dist_x           = static_cast<int64_t>(0);
-        const int64_t batch_dist_y           = static_cast<int64_t>(0);
-        const int64_t batch_dist_alpha       = static_cast<int64_t>(0);
-        const int64_t inc_x                  = x_inc;
-        const int64_t inc_y                  = static_cast<int64_t>(1);
+        const int64_t                batch_count            = static_cast<int64_t>(1);
+        const int64_t                batch_dist_csr_val     = static_cast<int64_t>(0);
+        const int64_t                batch_dist_csr_row_ptr = static_cast<int64_t>(0);
+        const int64_t                batch_dist_csr_col_ind = static_cast<int64_t>(0);
+        const int64_t                batch_dist_x           = static_cast<int64_t>(0);
+        const int64_t                batch_dist_y           = static_cast<int64_t>(0);
+        const int64_t                batch_dist_alpha       = static_cast<int64_t>(0);
+        const int64_t                inc_x                  = x_inc;
+        const int64_t                inc_y                  = static_cast<int64_t>(1);
+        const rocsparse_batchtype    batchtype              = rocsparse_batchtype_strided;
+        const rocsparse_batchstorage batchstorage           = rocsparse_batchstorage_soa;
 
-        _rocsparse_spmat_descr csr(rocsparse_format_csr,
+        _rocsparse_idvec_descr row_idvec(rocsparse::get_indextype<I>(),
+                                         descr->base,
+                                         m + 1,
+                                         static_cast<int64_t>(1),
+                                         csr_row_ptr,
+                                         nullptr);
+
+        _rocsparse_idvec_descr col_idvec(rocsparse::get_indextype<J>(),
+                                         descr->base,
+                                         nnz,
+                                         static_cast<int64_t>(1),
+                                         csr_col_ind,
+                                         nullptr);
+
+        _rocsparse_dnvec_descr val_dnvec(
+            rocsparse::get_datatype<T>(), nnz, x_inc, csr_val, nullptr);
+
+        _rocsparse_spattern_descr csr_spattern(
+            rocsparse_format_csr, m, m, nnz, &row_idvec, &col_idvec, descr);
+
+        _rocsparse_spmat_descr csr(&csr_spattern, &val_dnvec, info);
+
+#if 0
+
+	_rocsparse_spmat_descr csr(rocsparse_format_csr,
                                    false,
                                    batch_count,
                                    m,
@@ -175,12 +249,31 @@ namespace rocsparse
                                    descr->base,
                                    descr,
                                    info);
+#endif
 
-        _rocsparse_dnvec_descr dnx(
-            batch_count, m, rocsparse::get_datatype<T>(), x, nullptr, inc_x, batch_dist_x);
+        _rocsparse_dnvec_descr dnx(rocsparse::get_datatype<T>(),
+                                   m,
+                                   inc_x,
+#if 0
+				   batchtype,
+				   batchstorage,
+				   batch_count,
+				   batch_dist_x,
+#endif
+                                   x,
+                                   nullptr);
 
-        _rocsparse_dnvec_descr dny(
-            batch_count, m, rocsparse::get_datatype<T>(), y, y, inc_y, batch_dist_y);
+        _rocsparse_dnvec_descr dny(rocsparse::get_datatype<T>(),
+                                   m,
+                                   inc_y,
+#if 0
+				   batchtype,
+				   batchstorage,
+				   batch_count,
+				   batch_dist_y,
+#endif
+                                   y,
+                                   y);
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                          op,

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,16 @@ protected:
 
 public:
     ~_rocsparse_spattern_descr();
+    _rocsparse_spattern_descr() {}
+
+    _rocsparse_spattern_descr(rocsparse_format      format_,
+                              int64_t               rows_,
+                              int64_t               cols_,
+                              int64_t               nnz_,
+                              rocsparse_idvec_descr row_data_,
+                              rocsparse_idvec_descr col_data_,
+                              rocsparse_mat_descr   mat_descr_);
+
     void                              set_own_data(bool value);
     int64_t                           get_rows() const;
     int64_t                           get_cols() const;
@@ -74,6 +84,12 @@ public:
                                                  int64_t               nnz,
                                                  rocsparse_idvec_descr row_data,
                                                  rocsparse_idvec_descr col_data);
+
+    static _rocsparse_spattern_descr* create_sell(int64_t               rows,
+                                                  int64_t               cols,
+                                                  int64_t               nnz,
+                                                  rocsparse_idvec_descr row_data,
+                                                  rocsparse_idvec_descr col_data);
 
     static _rocsparse_spattern_descr* create_coo_aos(int64_t               rows,
                                                      int64_t               cols,

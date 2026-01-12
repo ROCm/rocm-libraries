@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2525,8 +2525,6 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-
-#if 0
 /********************************************************************************
  * \brief rocsparse_create_sell_descr creates a descriptor holding the
  * SLICED ELL matrix data, sizes and properties. It must be called prior to all
@@ -2534,19 +2532,20 @@ catch(...)
  * It should be destroyed at the end using rocsparse_destroy_spmat_descr().
  * All data pointers remain valid.
  *******************************************************************************/
-rocsparse_status rocsparse_create_sell_descr(rocsparse_spmat_descr* descr,
-                                             int64_t                rows,
-                                             int64_t                cols,
-                                             int64_t                nnz,
-                                             int64_t                sell_slice_size,
-                                             int64_t                sell_colval_size,
-                                             void*                  sell_slice_offsets,
-                                             void*                  sell_col_ind,
-                                             void*                  sell_val,
-                                             rocsparse_indextype    sell_slice_offsets_type,
-                                             rocsparse_indextype    sell_col_ind_type,
-                                             rocsparse_index_base   idx_base,
-                                             rocsparse_datatype     data_type)
+
+extern "C" rocsparse_status rocsparse_create_sell_descr(rocsparse_spmat_descr* descr,
+                                                        int64_t                rows,
+                                                        int64_t                cols,
+                                                        int64_t                nnz,
+                                                        int64_t                sell_slice_size,
+                                                        int64_t                sell_colval_size,
+                                                        void*                  sell_slice_offsets,
+                                                        void*                  sell_col_ind,
+                                                        void*                  sell_val,
+                                                        rocsparse_indextype sell_slice_offsets_type,
+                                                        rocsparse_indextype sell_col_ind_type,
+                                                        rocsparse_index_base idx_base,
+                                                        rocsparse_datatype   data_type)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -2571,6 +2570,22 @@ try
     ROCSPARSE_CHECKARG_ENUM(11, idx_base);
     ROCSPARSE_CHECKARG_ENUM(12, data_type);
 
+    *descr = _rocsparse_spmat_descr::create_sell(rows,
+                                                 cols,
+                                                 nnz,
+                                                 sell_slice_size,
+                                                 sell_colval_size,
+                                                 sell_slice_offsets,
+                                                 sell_slice_offsets,
+                                                 sell_col_ind,
+                                                 sell_col_ind,
+                                                 sell_val,
+                                                 sell_val,
+                                                 sell_slice_offsets_type,
+                                                 sell_col_ind_type,
+                                                 idx_base,
+                                                 data_type);
+#if 0
     *descr = new _rocsparse_spmat_descr;
 
     (*descr)->init = true;
@@ -2606,6 +2621,7 @@ try
     (*descr)->batch_stride                = 0;
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
+#endif
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2652,6 +2668,23 @@ try
     ROCSPARSE_CHECKARG_ENUM(11, idx_base);
     ROCSPARSE_CHECKARG_ENUM(12, data_type);
 
+    *descr = _rocsparse_spmat_descr::create_sell(rows,
+                                                 cols,
+                                                 nnz,
+                                                 sell_slice_size,
+                                                 sell_colval_size,
+                                                 sell_slice_offsets,
+                                                 nullptr,
+                                                 sell_col_ind,
+                                                 nullptr,
+                                                 sell_val,
+                                                 nullptr,
+                                                 sell_slice_offsets_type,
+                                                 sell_col_ind_type,
+                                                 idx_base,
+                                                 data_type);
+
+#if 0
     rocsparse_spmat_descr new_descr = new _rocsparse_spmat_descr;
 
     new_descr->init = true;
@@ -2690,6 +2723,7 @@ try
     new_descr->columns_values_batch_stride = 0;
 
     *descr = new_descr;
+#endif
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2698,7 +2732,7 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-#endif
+
 /********************************************************************************
  * \brief rocsparse_create_bsr_descr creates a descriptor holding the BSR matrix
  * data, sizes and properties. It must be called prior to all subsequent library
@@ -3530,6 +3564,62 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
+                                          int64_t*                    rows,
+                                          int64_t*                    cols,
+                                          int64_t*                    nnz,
+                                          int64_t*                    sell_slice_size,
+                                          int64_t*                    sell_colval_size,
+                                          const void**                sell_slice_offsets,
+                                          const void**                sell_col_ind,
+                                          const void**                sell_val,
+                                          rocsparse_indextype*        sell_slice_offsets_type,
+                                          rocsparse_indextype*        sell_col_ind_type,
+                                          rocsparse_index_base*       idx_base,
+                                          rocsparse_datatype*         data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, rows);
+    ROCSPARSE_CHECKARG_POINTER(2, cols);
+    ROCSPARSE_CHECKARG_POINTER(3, nnz);
+    ROCSPARSE_CHECKARG_POINTER(4, sell_slice_size);
+    ROCSPARSE_CHECKARG_POINTER(5, sell_colval_size);
+    ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
+    ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
+    ROCSPARSE_CHECKARG_POINTER(8, sell_val);
+    ROCSPARSE_CHECKARG_POINTER(9, sell_slice_offsets_type);
+    ROCSPARSE_CHECKARG_POINTER(10, sell_col_ind_type);
+    ROCSPARSE_CHECKARG_POINTER(11, idx_base);
+    ROCSPARSE_CHECKARG_POINTER(12, data_type);
+
+    *rows             = descr->get_rows();
+    *cols             = descr->get_cols();
+    *nnz              = descr->get_nnz();
+    *sell_slice_size  = descr->sell_slice_size;
+    *sell_colval_size = descr->sell_colval_size;
+
+    *sell_slice_offsets = descr->get_const_row_data();
+    *sell_col_ind       = descr->get_const_col_data();
+    *sell_val           = descr->get_const_val_data();
+
+    *sell_slice_offsets_type = descr->get_row_type();
+    *sell_col_ind_type       = descr->get_col_type();
+    *idx_base                = descr->get_idx_base();
+    *data_type               = descr->get_data_type();
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
 #if 0
 /********************************************************************************
  * \brief rocsparse_sell_get returns the sparse SLICED ELL matrix data,
@@ -3576,62 +3666,6 @@ try
     *sell_slice_offsets = descr->row_data;
     *sell_col_ind       = descr->col_data;
     *sell_val           = descr->val_data;
-
-    *sell_slice_offsets_type = descr->row_type;
-    *sell_col_ind_type       = descr->col_type;
-    *idx_base                = descr->idx_base;
-    *data_type               = descr->data_type;
-
-    return rocsparse_status_success;
-    // LCOV_EXCL_START
-}
-catch(...)
-{
-    RETURN_ROCSPARSE_EXCEPTION();
-}
-// LCOV_EXCL_STOP
-
-rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
-                                          int64_t*                    rows,
-                                          int64_t*                    cols,
-                                          int64_t*                    nnz,
-                                          int64_t*                    sell_slice_size,
-                                          int64_t*                    sell_colval_size,
-                                          const void**                sell_slice_offsets,
-                                          const void**                sell_col_ind,
-                                          const void**                sell_val,
-                                          rocsparse_indextype*        sell_slice_offsets_type,
-                                          rocsparse_indextype*        sell_col_ind_type,
-                                          rocsparse_index_base*       idx_base,
-                                          rocsparse_datatype*         data_type)
-try
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG_POINTER(1, rows);
-    ROCSPARSE_CHECKARG_POINTER(2, cols);
-    ROCSPARSE_CHECKARG_POINTER(3, nnz);
-    ROCSPARSE_CHECKARG_POINTER(4, sell_slice_size);
-    ROCSPARSE_CHECKARG_POINTER(5, sell_colval_size);
-    ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
-    ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
-    ROCSPARSE_CHECKARG_POINTER(8, sell_val);
-    ROCSPARSE_CHECKARG_POINTER(9, sell_slice_offsets_type);
-    ROCSPARSE_CHECKARG_POINTER(10, sell_col_ind_type);
-    ROCSPARSE_CHECKARG_POINTER(11, idx_base);
-    ROCSPARSE_CHECKARG_POINTER(12, data_type);
-
-    *rows             = descr->rows;
-    *cols             = descr->cols;
-    *nnz              = descr->nnz;
-    *sell_slice_size  = descr->sell_slice_size;
-    *sell_colval_size = descr->sell_colval_size;
-
-    *sell_slice_offsets = descr->const_row_data;
-    *sell_col_ind       = descr->const_col_data;
-    *sell_val           = descr->const_val_data;
 
     *sell_slice_offsets_type = descr->row_type;
     *sell_col_ind_type       = descr->col_type;
@@ -4148,7 +4182,7 @@ try
     }
     case rocsparse_format_sell:
     {
-      descr->set_nnz(nnz);
+        descr->set_nnz(nnz);
         break;
     }
     }
@@ -4414,7 +4448,6 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-#if 0
 /********************************************************************************
  * \brief rocsparse_create_dnvec_descr creates a descriptor holding the dense
  * vector data, size and properties. It must be called prior to all subsequent
@@ -4434,11 +4467,13 @@ try
     ROCSPARSE_CHECKARG_SIZE(1, size);
     ROCSPARSE_CHECKARG_ARRAY(2, size, values);
     ROCSPARSE_CHECKARG_ENUM(3, data_type);
-    static constexpr int64_t batch_count = 1;
-    static constexpr int64_t inc         = 1;
-    static constexpr int64_t batch_dist  = 0;
-    descr[0]
-        = new _rocsparse_dnvec_descr(batch_count, size, data_type, values, values, inc, batch_dist);
+    static constexpr int64_t                batch_count  = 1;
+    static constexpr int64_t                inc          = 1;
+    static constexpr int64_t                batch_dist   = 0;
+    static constexpr rocsparse_batchtype    batchtype    = rocsparse_batchtype_strided;
+    static constexpr rocsparse_batchstorage batchstorage = rocsparse_batchstorage_soa;
+    descr[0]                                             = new _rocsparse_dnvec_descr(
+        data_type, size, inc, batchtype, batchstorage, batch_count, batch_dist, values, values);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4461,11 +4496,20 @@ try
     ROCSPARSE_CHECKARG_ARRAY(2, size, const_values);
     ROCSPARSE_CHECKARG_ENUM(3, data_type);
 
-    static constexpr int64_t batch_count = 1;
-    static constexpr int64_t inc         = 1;
-    static constexpr int64_t batch_dist  = 0;
-    descr[0]                             = new _rocsparse_dnvec_descr(
-        batch_count, size, data_type, values, nullptr, inc, batch_dist);
+    static constexpr int64_t                batch_count  = 1;
+    static constexpr int64_t                inc          = 1;
+    static constexpr int64_t                batch_dist   = 0;
+    static constexpr rocsparse_batchtype    batchtype    = rocsparse_batchtype_strided;
+    static constexpr rocsparse_batchstorage batchstorage = rocsparse_batchstorage_soa;
+    descr[0]                                             = new _rocsparse_dnvec_descr(data_type,
+                                          size,
+                                          inc,
+                                          batchtype,
+                                          batchstorage,
+                                          batch_count,
+                                          batch_dist,
+                                          const_values,
+                                          nullptr);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -4475,7 +4519,7 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-#endif
+
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.
  *******************************************************************************/

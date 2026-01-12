@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,7 +81,7 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ARRAY(10, m, temp_buffer);
 
         rocsparse_csric0_info csric0_info = (info != nullptr) ? info->get_csric0_info() : nullptr;
-
+#if 0
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
                                    false,
                                    static_cast<int64_t>(1),
@@ -103,6 +103,29 @@ namespace rocsparse
                                    descr->base,
                                    descr,
                                    info);
+#endif
+
+        _rocsparse_idvec_descr row_idvec(rocsparse::get_indextype<rocsparse_int>(),
+                                         descr->base,
+                                         m + 1,
+                                         static_cast<int64_t>(1),
+                                         csr_row_ptr,
+                                         nullptr);
+
+        _rocsparse_idvec_descr col_idvec(rocsparse::get_indextype<rocsparse_int>(),
+                                         descr->base,
+                                         nnz,
+                                         static_cast<int64_t>(1),
+                                         csr_col_ind,
+                                         nullptr);
+
+        _rocsparse_spattern_descr csr_spattern(
+            rocsparse_format_csr, m, m, nnz, &row_idvec, &col_idvec, descr);
+
+        _rocsparse_dnvec_descr val_dnvec(
+            rocsparse::get_datatype<T>(), nnz, static_cast<int64_t>(1), csr_val, nullptr);
+
+        _rocsparse_spmat_descr csr(&csr_spattern, val_dnvec, info);
 
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::csric0_analysis(handle, &csr, analysis, &csric0_info, temp_buffer));

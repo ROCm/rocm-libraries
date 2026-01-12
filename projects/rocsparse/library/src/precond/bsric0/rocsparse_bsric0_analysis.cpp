@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ rocsparse_status rocsparse::bsric0_analysis(rocsparse_handle          handle,
     ROCSPARSE_CHECKARG_ENUM(3, solve);
     ROCSPARSE_CHECKARG_POINTER(4, p_bsric0_info);
 
-    const bool quick_return = (A->rows == 0 || A->batch_count == 0);
+    const bool quick_return = (A->get_rows() == 0 || A->get_batch_count() == 0);
     ROCSPARSE_CHECKARG(5,
                        buffer,
                        (buffer == nullptr) && (quick_return == false),
@@ -51,14 +51,16 @@ rocsparse_status rocsparse::bsric0_analysis(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    ROCSPARSE_CHECKARG(1, A, (A->descr == nullptr), rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(
-        1, A, (A->descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1, A, (A->get_descr() == nullptr), rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(1,
                        A,
-                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       (A->get_descr()->type != rocsparse_matrix_type_general),
+                       rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1,
+                       A,
+                       (A->get_descr()->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
-    auto info        = A->info;
+    auto info        = A->get_info();
     auto bsric0_info = p_bsric0_info[0];
     switch(analysis)
     {
@@ -97,15 +99,15 @@ rocsparse_status rocsparse::bsric0_analysis(rocsparse_handle          handle,
                                                     rocsparse_fill_mode_lower,
                                                     handle,
                                                     rocsparse_operation_none,
-                                                    A->rows,
-                                                    A->nnz,
-                                                    A->descr,
-                                                    A->data_type,
-                                                    A->const_val_data,
-                                                    A->row_type,
-                                                    A->const_row_data,
-                                                    A->col_type,
-                                                    A->const_col_data,
+                                                    A->get_rows(),
+                                                    A->get_nnz(),
+                                                    A->get_descr(),
+                                                    A->get_data_type(),
+                                                    A->get_const_val_data(),
+                                                    A->get_row_type(),
+                                                    A->get_const_row_data(),
+                                                    A->get_col_type(),
+                                                    A->get_const_col_data(),
                                                     buffer));
 
     return rocsparse_status_success;

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -148,14 +148,61 @@ rocsparse_const_idvec_descr _rocsparse_spattern_descr::get_col_data() const
 {
     return this->col_data;
 }
+
 rocsparse_mat_descr _rocsparse_spattern_descr::get_mat_descr()
 {
     return this->mat_descr;
 }
+
 const _rocsparse_mat_descr* _rocsparse_spattern_descr::get_mat_descr() const
 {
     return this->mat_descr;
 }
+
+//
+// Constructor.
+//
+_rocsparse_spattern_descr::_rocsparse_spattern_descr(rocsparse_format      format_,
+                                                     int64_t               rows_,
+                                                     int64_t               cols_,
+                                                     int64_t               nnz_,
+                                                     rocsparse_idvec_descr row_data_,
+                                                     rocsparse_idvec_descr col_data_,
+                                                     rocsparse_mat_descr   mat_descr_)
+    : mat_descr(mat_descr_)
+    , format(format_)
+    , rows(rows_)
+    , cols(cols_)
+    , row_data(row_data_)
+    , col_data(col_data_)
+    , nnz(nnz_)
+    , ell_width(0)
+    , ell_cols(0)
+    , own_data(false)
+{
+}
+
+_rocsparse_spattern_descr* _rocsparse_spattern_descr::create_sell(int64_t               rows,
+                                                                  int64_t               cols,
+                                                                  int64_t               nnz,
+                                                                  rocsparse_idvec_descr row_data,
+                                                                  rocsparse_idvec_descr col_data)
+{
+    _rocsparse_spattern_descr* descr = new _rocsparse_spattern_descr();
+    descr->format                    = rocsparse_format_sell;
+    descr->rows                      = rows;
+    descr->cols                      = cols;
+    descr->nnz                       = nnz;
+    descr->row_data                  = row_data;
+    descr->col_data                  = col_data;
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&descr->mat_descr));
+    // Initialize descriptor
+    THROW_IF_ROCSPARSE_ERROR(
+        rocsparse_set_mat_index_base(descr->get_mat_descr(), row_data->get_base()));
+    return descr;
+}
+
+#if 1
 
 _rocsparse_spattern_descr* _rocsparse_spattern_descr::create_csr(int64_t               rows,
                                                                  int64_t               cols,
@@ -287,6 +334,8 @@ _rocsparse_spattern_descr* _rocsparse_spattern_descr::create_bsr(int64_t        
     descr->col_data                  = col_data;
     return descr;
 }
+
+#endif
 
 extern "C" rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle               handle,
                                                         rocsparse_const_spattern_descr descr,
