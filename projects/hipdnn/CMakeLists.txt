@@ -285,13 +285,14 @@ if(HIPDNN_ENABLE_COVERAGE)
                 -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
                 ./coverage-report/code_cov_hipdnn.report
             COMMAND
-                ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
+                ${LLVM_COV_BINARY} show ${CODE_COVERAGE_OBJECTS}
                 -instr-profile=./coverage-report/hipdnn.profdata
                 -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
                 --output-dir=coverage-report
             COMMAND
                 ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage-report/hipdnn.profdata --format=lcov >
+                -instr-profile=./coverage-report/hipdnn.profdata
+                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=lcov >
                 ./coverage-report/coverage.info
             ${DEPENDS_CLAUSE}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
