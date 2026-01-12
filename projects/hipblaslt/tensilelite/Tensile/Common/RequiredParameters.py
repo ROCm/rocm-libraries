@@ -91,6 +91,7 @@ def getRequiredParametersMin() -> set:
         'StreamK',
         'StreamKXCCMapping',
         'StreamKFixupTreeReduction',
+        'SwapGlobalReadOrder',
         'TransposeLDS',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',

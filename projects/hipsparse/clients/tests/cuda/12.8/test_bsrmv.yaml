@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,11 +50,11 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [1]
   N: [1]
-  block_dim: [3, 5, 9]
-  alpha: [0.5]
-  alphai: [-0.2]
-  beta: [0.7]
-  betai: [1.7]
+  block_dim: [2, 4, 6, 7]
+  alpha: [0.6]
+  alphai: [-1.2]
+  beta: [0.5]
+  betai: [0.7]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos1,
@@ -64,3 +64,23 @@ Tests:
              nos5,
              nos6,
              nos7]
+
+- name: bsrmv
+  category: nightly
+  function: bsrmv
+  precision: *double_only_precisions
+  M: [1]
+  N: [1]
+  block_dim: [2, 5, 8, 12]
+  alpha: [2.0]
+  alphai: [-0.5]
+  beta: [1.0]
+  betai: [1.1]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [shipsec1,
+             scircuit,
+             bmwcra_1,
+             rma10,
+             mc2depi,
+             sme3Dc]

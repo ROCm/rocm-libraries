@@ -837,6 +837,7 @@ public:
                                          std::shared_ptr<TensorAttributes> variance,
                                          std::shared_ptr<TensorAttributes> scale,
                                          std::shared_ptr<TensorAttributes> bias,
+                                         std::shared_ptr<TensorAttributes> epsilon,
                                          BatchnormInferenceAttributesVarianceExt attributes)
     {
         if(attributes.get_name().empty())
@@ -852,6 +853,7 @@ public:
         attributes.set_variance(std::move(variance));
         attributes.set_scale(std::move(scale));
         attributes.set_bias(std::move(bias));
+        attributes.set_epsilon(std::move(epsilon));
         attributes.set_y(y);
 
         _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
