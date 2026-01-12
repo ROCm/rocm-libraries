@@ -30,22 +30,23 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, typename S, typename U>
-rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
-                                          const rocblas_int n,
-                                          const rocblas_int nb,
-                                          U A,
-                                          const rocblas_int lda,
-                                          S* D,
-                                          S* E)
+rocblas_status rocsolver_sb2st_hb2st_impl(
+    rocblas_handle handle,
+    const rocblas_int n,
+    const rocblas_int nb,
+    U A,
+    const rocblas_int lda,
+    S* D,
+    S* E)
 {
-    ROCSOLVER_ENTER_TOP("sb2st_hb2st", "-n", n, "-nb", nb, "--lda", lda);
+    ROCSOLVER_ENTER_TOP( "sb2st_hb2st", "-n", n, "-nb", nb, "--lda", lda );
 
-    if(!handle)
+    if (! handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_sb2st_hb2st_argCheck(handle, n, nb, lda, A, D, E);
-    if(st != rocblas_status_continue)
+    rocblas_status st = rocsolver_sb2st_hb2st_argCheck( handle, n, nb, lda, A, D, E );
+    if (st != rocblas_status_continue)
         return st;
 
     // working with unshifted arrays
@@ -62,21 +63,22 @@ rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
     size_t size_work;
     rocsolver_sb2st_hb2st_getMemorySize<false, T, S>(n, nb, batch_count, &size_work);
 
-    if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work);
+    if (rocblas_is_device_memory_size_query( handle) )
+        return rocblas_set_optimal_device_memory_size( handle, size_work );
 
     // memory workspace allocation
     void* work;
-    rocblas_device_malloc mem(handle, size_work);
+    rocblas_device_malloc mem( handle, size_work );
 
-    if(!mem)
+    if (! mem)
         return rocblas_status_memory_error;
 
     work = mem[0];
 
     // execution
     return rocsolver_sb2st_hb2st_template<false, false, T>(
-        handle, n, nb, A, shiftA, lda, strideA, D, strideD, E, strideE, batch_count, (T*)work);
+        handle, n, nb, A, shiftA, lda, strideA,
+        D, strideD, E, strideE, batch_count, (T*)work );
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -89,48 +91,52 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(rocblas_handle handle,
-                                                 const rocblas_int n,
-                                                 const rocblas_int nb,
-                                                 float* A,
-                                                 const rocblas_int lda,
-                                                 float* D,
-                                                 float* E)
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(
+    rocblas_handle handle,
+    const rocblas_int n,
+    const rocblas_int nb,
+    float* A,
+    const rocblas_int lda,
+    float* D,
+    float* E)
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<float>(handle, n, nb, A, lda, D, E);
+    return rocsolver::rocsolver_sb2st_hb2st_impl<float>( handle, n, nb, A, lda, D, E );
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(rocblas_handle handle,
-                                                 const rocblas_int n,
-                                                 const rocblas_int nb,
-                                                 double* A,
-                                                 const rocblas_int lda,
-                                                 double* D,
-                                                 double* E)
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(
+    rocblas_handle handle,
+    const rocblas_int n,
+    const rocblas_int nb,
+    double* A,
+    const rocblas_int lda,
+    double* D,
+    double* E)
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<double>(handle, n, nb, A, lda, D, E);
+    return rocsolver::rocsolver_sb2st_hb2st_impl<double>( handle, n, nb, A, lda, D, E );
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(rocblas_handle handle,
-                                                 const rocblas_int n,
-                                                 const rocblas_int nb,
-                                                 rocblas_float_complex* A,
-                                                 const rocblas_int lda,
-                                                 float* D,
-                                                 float* E)
+ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(
+    rocblas_handle handle,
+    const rocblas_int n,
+    const rocblas_int nb,
+    rocblas_float_complex* A,
+    const rocblas_int lda,
+    float* D,
+    float* E)
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex>(handle, n, nb, A, lda, D, E);
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex>( handle, n, nb, A, lda, D, E );
 }
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(rocblas_handle handle,
-                                                 const rocblas_int n,
-                                                 const rocblas_int nb,
-                                                 rocblas_double_complex* A,
-                                                 const rocblas_int lda,
-                                                 double* D,
-                                                 double* E)
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(
+    rocblas_handle handle,
+    const rocblas_int n,
+    const rocblas_int nb,
+    rocblas_double_complex* A,
+    const rocblas_int lda,
+    double* D,
+    double* E)
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex>(handle, n, nb, A, lda, D, E);
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex>( handle, n, nb, A, lda, D, E );
 }
 
 } // extern C
