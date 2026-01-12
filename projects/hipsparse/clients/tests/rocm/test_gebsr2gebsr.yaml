@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,14 +30,14 @@ Tests:
   category: pre_checkin
   function: gebsr2gebsr_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: gebsr2gebsr
   category: quick
   function: gebsr2gebsr
   precision: *single_double_precisions_complex_real
-  M: [0, 872, 13095, 21453]
-  N: [0, 623, 12766, 29285]
-  row_block_dimA: [2]
+  M: [0, 872, 13095]
+  N: [0, 623, 12766]
+  row_block_dimA: [2, 5]
   col_block_dimA: [5]
   row_block_dimB: [3]
   col_block_dimB: [4]
@@ -48,14 +48,14 @@ Tests:
 - name: gebsr2gebsr_file
   category: pre_checkin
   function: gebsr2gebsr
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M: 1
-  row_block_dimA: [5]
-  col_block_dimA: [4]
+  row_block_dimA: [5, 6]
+  col_block_dimA: [4, 8]
   row_block_dimB: [2]
   col_block_dimB: [7]
-  baseA: [HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
   filename: [nos1,
              nos2,
@@ -64,4 +64,3 @@ Tests:
              nos5,
              nos6,
              nos7]
-

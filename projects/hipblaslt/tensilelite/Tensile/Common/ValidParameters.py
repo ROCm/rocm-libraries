@@ -332,7 +332,11 @@ validParameters = { # we need to make sure this matches develop
     #      GlobalReadVectorWidth = 1/2/4 (GRVW * bpe must be 4 for now)
     #      TransposeLDS = 1 for TLU=0 case
     # DirectToLds support for x1 only for now
-    "DirectToLds": [False, True],
+    #  0: no DirectToLds
+    #  1: DirectToLds A and B
+    #  2: DirectToLds A only (no DTLB)
+    #  3: DirectToLds B only (no DTLA)
+    "DirectToLds": [0, 1, 2, 3],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
@@ -859,7 +863,14 @@ validParameters = { # we need to make sure this matches develop
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
     "UseCustomMainLoopSchedule" : [0, 1],
-    "AdaptiveGemm": [0, 1]
+    "AdaptiveGemm": [0, 1],
+    # Add extra latency to calculate number of MFMA to insert between local read and wait
+    # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
+    "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),
+    # Add extra miLatencyLeft to improve local read scheduling
+    # Adding more room for scheduling local read instructions
+    # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
+    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8]
 }
 
 newMIValidParameters = {
