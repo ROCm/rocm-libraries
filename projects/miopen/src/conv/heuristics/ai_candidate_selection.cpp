@@ -312,10 +312,36 @@ std::vector<std::pair<int, float>> CandidateSelectionModel::SelectBestCandidateI
         scored_candidates.emplace_back(static_cast<int>(i), score);
     }
 
-    // Sort by score in descending order (best to worst)
-    std::sort(scored_candidates.begin(), scored_candidates.end(), [](const auto& a, const auto& b) {
-        return a.second > b.second;
-    });
+    // Check if all scores are NaN (all candidates unsupported)
+    bool all_nan = std::all_of(scored_candidates.begin(),
+                               scored_candidates.end(),
+                               [](const auto& candidate) { return std::isnan(candidate.second); });
+
+    if(all_nan)
+    {
+        MIOPEN_LOG_W("All candidate kernels are unsupported by the AI model - cannot rank");
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "AI model does not support any of the provided kernel candidates");
+    }
+
+    // NaN-aware comparator: ensures NaN scores (unsupported kernels) sort last
+    auto score_comparator_nan_aware = [](const std::pair<int, float>& a,
+                                         const std::pair<int, float>& b) {
+        bool a_is_nan = std::isnan(a.second);
+        bool b_is_nan = std::isnan(b.second);
+
+        if(a_is_nan && b_is_nan)
+            return false; // Both NaN, consider equal
+        if(a_is_nan)
+            return false; // a is NaN, b comes first
+        if(b_is_nan)
+            return true; // b is NaN, a comes first
+
+        return a.second > b.second; // Normal descending order by score
+    };
+
+    // Sort by score in descending order (best to worst), with NaNs last
+    std::sort(scored_candidates.begin(), scored_candidates.end(), score_comparator_nan_aware);
 
     return scored_candidates;
 }
