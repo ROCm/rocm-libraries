@@ -110,6 +110,7 @@ add_library(
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
+    engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/MiopenConvBwdPlan.cpp
