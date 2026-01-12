@@ -27,6 +27,8 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
+#include <istream>
+#include <ostream>
 #include <string>
 
 namespace rocRoller
@@ -46,7 +48,9 @@ namespace rocRoller
             };
 
             std::string   toString(StorePath path);
+            StorePath     storePathFromString(std::string const& str);
             std::ostream& operator<<(std::ostream& stream, StorePath const& path);
+            std::istream& operator>>(std::istream& stream, StorePath& path);
 
             MemoryType GetMemoryType(StorePath const& path);
             bool       IsLDSStore(StorePath const& path);

@@ -248,7 +248,7 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+store_path: LDSViaVGPRToBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -313,7 +313,7 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+store_path: LDSViaVGPRToBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -377,7 +377,7 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+store_path: LDSViaVGPRToBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -683,14 +683,14 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDSViaVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert not post["storeLDS_D"]
+    assert post["store_path"] == "VGPRToBuffer"
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
     )
     assert post["load_A"] == "BufferToVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert post["storeLDS_D"]
+    assert post["store_path"] == "LDSViaVGPRToBuffer"
 
     # setting d2l options
     post = run_and_load_example_yaml(

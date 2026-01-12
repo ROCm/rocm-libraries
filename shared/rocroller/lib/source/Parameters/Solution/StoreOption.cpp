@@ -105,6 +105,29 @@ namespace rocRoller
             {
                 return stream << toString(mode);
             }
+
+            StorePath storePathFromString(std::string const& str)
+            {
+                if(str == "VGPRToBuffer")
+                    return StorePath::VGPRToBuffer;
+                if(str == "VGPRToGlobal")
+                    return StorePath::VGPRToGlobal;
+                if(str == "LDSViaVGPRToBuffer")
+                    return StorePath::LDSViaVGPRToBuffer;
+                if(str == "LDSViaVGPRToGlobal")
+                    return StorePath::LDSViaVGPRToGlobal;
+                if(str == "LDSToBuffer")
+                    return StorePath::LDSToBuffer;
+                Throw<FatalError>(fmt::format("Invalid StorePath: {}", str));
+            }
+
+            std::istream& operator>>(std::istream& stream, StorePath& path)
+            {
+                std::string str;
+                stream >> str;
+                path = storePathFromString(str);
+                return stream;
+            }
         } // namespace Solution
     } // namespace Parameters
 } // namespace rocRoller
