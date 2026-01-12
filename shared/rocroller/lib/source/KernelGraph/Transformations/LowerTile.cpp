@@ -136,6 +136,7 @@ namespace rocRoller
                                        std::vector<int> const&          sdim)
         {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+            using ET     = rocRoller::Expression::EvaluationTime;
 
             AssertFatal(sdim.size() == 4, "Expected 4 sub-dimensions for Pretiled MacroTile CT.");
 
@@ -149,10 +150,18 @@ namespace rocRoller
             auto numMITilesX = graph.coordinates.get<SubDimension>(sdimMIXTile)->size;
             auto numMITilesY = graph.coordinates.get<SubDimension>(sdimMIYTile)->size;
 
-            auto sizeMITileX
-                = getUnsignedInt(evaluate(graph.coordinates.get<SubDimension>(sdimX)->size));
-            auto sizeMITileY
-                = getUnsignedInt(evaluate(graph.coordinates.get<SubDimension>(sdimY)->size));
+            auto sizeMITileXExpr = graph.coordinates.get<SubDimension>(sdimX)->size;
+            AssertFatal(
+                evaluationTimes(sizeMITileXExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizeMITileYExpr = graph.coordinates.get<SubDimension>(sdimY)->size;
+            AssertFatal(
+                evaluationTimes(sizeMITileYExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizeMITileX = getUnsignedInt(evaluate(sizeMITileXExpr));
+            auto sizeMITileY = getUnsignedInt(evaluate(sizeMITileYExpr));
 
             auto nMIX = graph.coordinates.addElement(CT::WaveTileNumber(0, numMITilesX, nullptr));
             auto nMIY = graph.coordinates.addElement(CT::WaveTileNumber(1, numMITilesY, nullptr));
@@ -170,13 +179,18 @@ namespace rocRoller
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));
 
-            auto numTilesX = (numMITilesX * literal(sizeMITileX)) / literal(tile.sizes[0]);
-            auto numTilesY = (numMITilesY * literal(sizeMITileY)) / literal(tile.sizes[1]);
+            auto numTilesX = tileCeilDivide(numMITilesX * literal(sizeMITileX), tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(numMITilesY * literal(sizeMITileY), tile.sizes[1]);
 
             auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
             auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
             auto iX = graph.coordinates.addElement(tile.tileIndex(0));
             auto iY = graph.coordinates.addElement(tile.tileIndex(1));
+
+            AssertFatal(tile.sizes[0] % sizeMITileX == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[1] % sizeMITileY == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[0] / sizeMITileX > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[1] / sizeMITileY > 0, "Bad pre-tile size.");
 
             auto numMITilesPerTileX = tile.sizes[0] / sizeMITileX;
             auto numMITilesPerTileY = tile.sizes[1] / sizeMITileY;
