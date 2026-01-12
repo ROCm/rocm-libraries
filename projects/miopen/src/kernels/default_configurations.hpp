@@ -104,12 +104,12 @@
 #define MIO_BN_GFX110X 0
 #endif
 
-#ifndef MIO_BN_GFX120X
-#define MIO_BN_GFX120X 0
-#endif
-
 #ifndef MIO_BN_GFX115X
 #define MIO_BN_GFX115X 0
+#endif
+
+#ifndef MIO_BN_GFX120X
+#define MIO_BN_GFX120X 0
 #endif
 
 #ifndef MIO_BN_VARIANT
