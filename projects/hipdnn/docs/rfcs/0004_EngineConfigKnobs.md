@@ -16,12 +16,12 @@
 
 ## 1. Executive Summary
 
-This RFC proposes a flexible engine configuration knobs system for hipDNN that allows plugin developers to expose custom runtime settings and enables end-users to adjust these settings. Unlike a more limited int64_t-based knob system with min/max/stride constraints, this design leverages Flatbuffers' union types to support multiple value types (integers, floats, booleans, strings, enums) while maintaining type safety.
+This RFC proposes a flexible engine configuration knobs system for hipDNN that allows plugin developers to expose custom runtime settings and enables end-users to adjust these settings. Unlike a more limited int64_t-based knob system with min/max/stride constraints, this design leverages Flatbuffers' union types to support multiple value types (integers, floats, strings) while maintaining type safety.
 
 The knobs system is designed to be:
 - **Optional**: Plugins can opt-in to exposing knobs
 - **Flexible**: Support for multiple data types beyond int64_t
-- **Namespace-safe**: Plugin-specific knob identifiers prevent conflicts
+- **Namespace-safe**: Plugin-specific human-readable knob identifiers
 - **Extensible**: New knob types can be added without breaking existing code
 
 ## 2. Problem Statement
@@ -32,8 +32,6 @@ Currently, hipDNN engines have limited runtime configurability. While the backen
 
 1. **Plugin developers** to expose custom tuning parameters (e.g., tile sizes, algorithmic choices, memory layout preferences)
 2. **End-users** to discover available settings for a given engine
-3. **Applications** to persist and restore optimal engine configurations across runs
-4. **Different plugins** to safely expose settings without naming conflicts
 
 ### 2.2 The Initial Approach and Its Limitations
 
@@ -49,8 +47,8 @@ typedef struct {
 ```
 
 **Limitations:**
-1. **Type Restriction**: All knob values must be int64_t, making it awkward for boolean flags, floating-point parameters, or enumerated choices
-2. **Forced Range Semantics**: Every knob must specify min/max/stride, even when these concepts don't apply (e.g., boolean flags, enum selections)
+1. **Type Restriction**: All knob values must be int64_t, making it awkward for floating-point parameters or other choices
+2. **Forced Range Semantics**: Every knob must specify min/max/stride, even when these concepts don't apply
 3. **Global Namespace**: Knob types are globally enumerated, making it difficult for custom plugins to add new knobs without upstream changes
 4. **Limited Expressiveness**: Cannot represent complex constraints (e.g., "value must be a power of 2" or "valid values are {1, 4, 8, 16}")
 
@@ -58,12 +56,12 @@ typedef struct {
 
 A robust knobs system for hipDNN must support:
 
-1. **Multiple Value Types**: int64, float64, bool, string, and enumerated types
+1. **Multiple Value Types**: int64, float64, and string types
 2. **Flexible Validation**: Per-knob validation rules appropriate to the value type
 3. **Plugin Autonomy**: Plugins can define custom knobs without modifying core hipDNN
 4. **Namespace Isolation**: Different plugins can have knobs with the same semantic meaning without conflicts
 5. **Discovery**: Users can query available knobs and their valid ranges/values
-6. **Execution Plan Serialization**: Eventually plugin authors will wish to serialize / deserialize / cache execution plans, and if the selected mechanism can support that, it should.,
+6. **Execution Plan Serialization**: Eventually plugin authors will wish to serialize / deserialize / cache execution plans, and if the selected mechanism can support that, it should.
 
 ## 3. Current System Overview
 
@@ -547,7 +545,7 @@ Examples:
 - custom_plugin.matmul.block_size
 ```
 
-The plugin name prefix ensures that different plugins can have semantically similar knobs without collision.
+The plugin name prefix ensures that different plugins can have semantically similar knobs.
 
 Additionally, we will define a "global." namespace which will contain commonly used knobs.  Custom knobs registered in the global namespace will be rejected.
 
@@ -627,12 +625,10 @@ Examples:
 
 ### 6.3 Plugin Compatibility
 
-**Risk**: Plugins may expose incompatible or conflicting knobs.
+**Risk**: Plugins may expose incompatible knobs.
 
 **Mitigation**:
-- Enforce namespace conventions in documentation
 - Provide validation helpers in Plugin SDK
-- Consider adding a knob registry service for conflict detection
 - Document best practices for knob design
 
 ### 6.4 Testing Complexity
@@ -793,7 +789,6 @@ The execution plan has two branches.  One is a "get it in and get it done" versi
 - Engine registers knobs
 - Knob settings applied to engine
 - Multiple engines with different knobs
-- Knob namespace isolation
 
 #### Frontend Integration
 - Type-safe knob setting
