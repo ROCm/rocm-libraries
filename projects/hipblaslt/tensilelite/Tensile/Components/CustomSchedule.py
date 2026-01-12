@@ -79,15 +79,6 @@ class SyncSchedule:
             barrier_idx = barrier_idx if barrier_idx is not None else idx
             self.schedule.append( (barrier_idx, SBarrier(comment=barrier_comment)) )
 
-    def add_barrier(self, idx: int, comment: str = ""):
-        """ Add a SBarrier to the schedule at the given index.
-
-        Args:
-            idx:     The index at which to add the SBarrier.
-            comment: An optional comment for the SBarrier.
-        """
-        self.schedule.append( (idx, SBarrier(comment=comment)) )
-
     def get_indicies(self):
         return [item[0] for item in self.schedule]
     def get_code(self):
@@ -173,22 +164,7 @@ class ScheduleInfo:
         self._skipValidation = True
 
     def isValidationDisabled(self):
-        return self._skipValidation
-    
-    def pretty_print(self):
-        klen = max(len(k) for k in self.optSchedule.keys())
-        for k,v in self.optSchedule.items():
-            print(f"{k:>{klen}}: {v}")
-        
-        if snops := self.optSchedule.get('SNOP', []):
-            print("---- SNOP code ----")
-            for idx, code in zip(snops[0], self.snopCode):
-                print(f"{idx:>2}: {str(code).strip()}")
-        
-        if syncs := self.optSchedule.get('SYNC', []):
-            print("---- SYNC code ----")
-            for idx, code in zip(syncs[0], self.syncCode):
-                print(f"{idx:>2}: {str(code).strip()}")    
+        return self._skipValidation  
 
 def removeComments(module):
     retModule = Module()
@@ -3016,7 +2992,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     gr_inc_step = 1
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        print("AAAAAAAAAAAAAAAAAAAAA")
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
 
@@ -3088,7 +3063,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
 
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.pretty_print()
     return True, opt1
 
   
