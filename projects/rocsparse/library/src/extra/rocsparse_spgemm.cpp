@@ -730,7 +730,6 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(7, D, (D->get_init() == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(8, C, (C->get_init() == false), rocsparse_status_not_initialized);
 
-
         ROCSPARSE_CHECKARG(
             5, B, (B->get_format() != A->get_format()), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(
@@ -738,11 +737,10 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(
             8, C, (C->get_format() != A->get_format()), rocsparse_status_not_implemented);
 
-        ROCSPARSE_CHECKARG(4, A, (A->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(5, B, (B->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(7, D, (D->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(8, C, (C->batch_count != 1), rocsparse_status_not_implemented);
-
+        ROCSPARSE_CHECKARG(4, A, (A->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(5, B, (B->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(7, D, (D->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(8, C, (C->get_batch_count() != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             4, A, (A->get_data_type() != compute_type), rocsparse_status_not_implemented);

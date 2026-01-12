@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -934,14 +934,14 @@ try
     ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(4, matA);
     ROCSPARSE_CHECKARG(4, matA, matA->get_init() == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(4, matA, matA->batch_count != 1, rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, matA, matA->get_batch_count() != 1, rocsparse_status_not_implemented);
 
     ROCSPARSE_CHECKARG_POINTER(5, matB);
     ROCSPARSE_CHECKARG(5, matB, matB->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(5, matB, matB->batch_count != 1, rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5, matB, matB->get_batch_count() != 1, rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG_POINTER(6, matC);
     ROCSPARSE_CHECKARG(6, matC, matC->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(6, matC, matC->batch_count != 1, rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(6, matC, matC->get_batch_count() != 1, rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG_ENUM(7, compute_type);
     ROCSPARSE_CHECKARG(7,
                        compute_type,

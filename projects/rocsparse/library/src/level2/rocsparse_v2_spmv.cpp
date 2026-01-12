@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -602,26 +602,26 @@ namespace rocsparse
         //
         //
         //
-        const rocsparse_format    format         = mat->get_format();
-        const int64_t             rows           = mat->get_rows();
-        const int64_t             cols           = mat->get_cols();
-        const int64_t             nnz            = mat->get_nnz();
-        rocsparse_mat_descr       mat_descr      = mat->get_descr();
-        const rocsparse_datatype  data_type      = mat->get_data_type();
-        const rocsparse_indextype row_type       = mat->get_row_type();
-        const rocsparse_indextype col_type       = mat->get_col_type();
-        const void*               const_val_data = mat->get_const_val_data();
-        const void*               const_row_data = mat->get_const_row_data();
-        const void*               const_ind_data = mat->get_const_ind_data();
-        const void*               const_col_data = mat->get_const_col_data();
-        const rocsparse_datatype  x_data_type    = x->data_type;
-        const rocsparse_datatype  y_data_type    = y->data_type;
-        const void*               x_const_values = x->const_values;
-        void*                     y_values       = y->values;
-        const bool                analysed       = mat->get_analysed();
-        const int64_t             block_dim      = mat->get_block_dim();
-        const int64_t             ell_width      = mat->get_ell_width();
-        const rocsparse_direction block_dir      = mat->get_block_dir();
+        const rocsparse_format    format           = mat->get_format();
+        const int64_t             rows             = mat->get_rows();
+        const int64_t             cols             = mat->get_cols();
+        const int64_t             nnz              = mat->get_nnz();
+        rocsparse_mat_descr       mat_descr        = mat->get_descr();
+        const rocsparse_datatype  data_type        = mat->get_data_type();
+        const rocsparse_indextype row_type         = mat->get_row_type();
+        const rocsparse_indextype col_type         = mat->get_col_type();
+        const void*               const_val_data   = mat->get_const_val_data();
+        const void*               const_row_data   = mat->get_const_row_data();
+        const void*               const_ind_data   = mat->get_const_ind_data();
+        const void*               const_col_data   = mat->get_const_col_data();
+        const rocsparse_datatype  x_data_type      = x->data_type;
+        const rocsparse_datatype  y_data_type      = y->data_type;
+        const void*               x_const_values   = x->const_values;
+        void*                     y_values         = y->values;
+        const bool                analysed         = mat->get_analysed();
+        const int64_t             block_dim        = mat->get_block_dim();
+        const int64_t             ell_width        = mat->get_ell_width();
+        const rocsparse_direction block_dir        = mat->get_block_dir();
         const int64_t             sell_slice_size  = mat->sell_slice_size;
         const int64_t             sell_colval_size = mat->sell_colval_size;
 
@@ -1080,9 +1080,9 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, stage);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size_in_bytes);
 
-    ROCSPARSE_CHECKARG(2, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(3, x, (x->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, mat, (mat->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, x, (x->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     //
     // Validate spmv_inputs.
@@ -1172,9 +1172,9 @@ try
                        (buffer == nullptr && buffer_size_in_bytes > 0),
                        rocsparse_status_invalid_pointer);
 
-    ROCSPARSE_CHECKARG(3, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(4, x, (x->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(6, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, mat, (mat->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, x, (x->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(6, y, (y->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     //
     // Validate spmv_inputs.

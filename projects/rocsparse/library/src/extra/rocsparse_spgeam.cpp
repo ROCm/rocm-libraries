@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -366,16 +366,17 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG_ENUM(5, stage);
 
-
         ROCSPARSE_CHECKARG(
             2, mat_A, (mat_A->get_init() == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(
             3, mat_B, (mat_B->get_init() == false), rocsparse_status_not_initialized);
 
-        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            2, mat_A, (mat_A->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            3, mat_B, (mat_B->get_batch_count() != 1), rocsparse_status_not_implemented);
 
-	ROCSPARSE_CHECKARG(3,
+        ROCSPARSE_CHECKARG(3,
                            mat_B,
                            (mat_B->get_format() != mat_A->get_format()),
                            rocsparse_status_not_implemented);
@@ -454,10 +455,10 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG_ENUM(5, stage);
 
-
-        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
-
+        ROCSPARSE_CHECKARG(
+            2, mat_A, (mat_A->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            3, mat_B, (mat_B->get_batch_count() != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             2, mat_A, (mat_A->get_init() == false), rocsparse_status_not_initialized);

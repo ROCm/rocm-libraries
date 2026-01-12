@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -257,8 +257,10 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ENUM(4, stage);
         ROCSPARSE_CHECKARG_ARRAY(6, buffer_size_in_bytes, buffer);
 
-        ROCSPARSE_CHECKARG(2, source, (source->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(3, target, (target->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            2, source, (source->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            3, target, (target->get_batch_count() != 1), rocsparse_status_not_implemented);
 
         const rocsparse_status status = rocsparse::sparse_to_sparse_quickreturn(
             handle, descr, source, target, stage, buffer_size_in_bytes, buffer);

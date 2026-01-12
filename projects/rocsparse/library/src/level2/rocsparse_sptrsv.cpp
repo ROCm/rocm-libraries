@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -696,9 +696,9 @@ try
     ROCSPARSE_CHECKARG(4, y, (y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
 
-    ROCSPARSE_CHECKARG(2, A, (A->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(3, x, (x->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, A, (A->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, x, (x->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(2,
