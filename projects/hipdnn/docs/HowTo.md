@@ -224,6 +224,10 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 - **Error Handling**: Implement proper error reporting through the plugin API
 - **Performance**: Optimization is critical for facilitating plugin adoption
 
+### CI Maintenance
+
+- **Clang-Tidy Release Version**: The clang-tidy workflow (`.github/workflows/hipdnn-clang-tidy.yml`) uses a pinned ROCm release version for `install_rocm_from_artifacts.py`. This may need to be bumped periodically. Available releases can be found at https://therock-nightly-tarball.s3.amazonaws.com/
+
 ### Debugging Tips
 
 - Enable logging with environment variables (see [Environment Configuration](./Environment.md))
