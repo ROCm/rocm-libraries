@@ -28,9 +28,12 @@
 
 #include <gtest/gtest.h>
 
-#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <iterator>
 #include <numeric>
 #include <stdexcept>
+#include <vector>
 
 using namespace DGen;
 
@@ -75,22 +78,22 @@ TEST(PreSwizzleTest, ProductWithOne)
 TEST(PreSwizzleTest, ComputeStridesEmpty)
 {
     std::vector<size_t> sizes;
-    auto strides = computeStrides(sizes);
+    auto                strides = computeStrides(sizes);
     EXPECT_TRUE(strides.empty());
 }
 
 TEST(PreSwizzleTest, ComputeStridesSingleElement)
 {
-    std::vector<size_t> sizes = {10};
-    auto strides = computeStrides(sizes);
+    std::vector<size_t> sizes   = {10};
+    auto                strides = computeStrides(sizes);
     ASSERT_EQ(strides.size(), 1);
     EXPECT_EQ(strides[0], 1);
 }
 
 TEST(PreSwizzleTest, ComputeStridesColMajor)
 {
-    std::vector<size_t> sizes = {10, 20, 30};
-    auto strides = computeStrides(sizes);
+    std::vector<size_t> sizes   = {10, 20, 30};
+    auto                strides = computeStrides(sizes);
     ASSERT_EQ(strides.size(), 3);
     EXPECT_EQ(strides[0], 1);
     EXPECT_EQ(strides[1], 10);
@@ -103,33 +106,33 @@ TEST(PreSwizzleTest, ComputeStridesColMajor)
 
 TEST(PreSwizzleTest, ComputeShuffledStridesIdentity)
 {
-    std::vector<size_t> sizes = {2, 3, 4};
-    std::vector<size_t> dimOrder = {0, 1, 2};
-    auto strides = computeShuffledStrides(sizes, dimOrder);
-    auto normalStrides = computeStrides(sizes);
+    std::vector<size_t> sizes         = {2, 3, 4};
+    std::vector<size_t> dimOrder      = {0, 1, 2};
+    auto                strides       = computeShuffledStrides(sizes, dimOrder);
+    auto                normalStrides = computeStrides(sizes);
     EXPECT_EQ(strides, normalStrides);
 }
 
 TEST(PreSwizzleTest, ComputeShuffledStridesReverse)
 {
-    std::vector<size_t> sizes = {2, 3, 4};
+    std::vector<size_t> sizes    = {2, 3, 4};
     std::vector<size_t> dimOrder = {2, 1, 0};
-    auto strides = computeShuffledStrides(sizes, dimOrder);
+    auto                strides  = computeShuffledStrides(sizes, dimOrder);
     ASSERT_EQ(strides.size(), 3);
-    EXPECT_EQ(strides[0], 12);  // 3 * 4
-    EXPECT_EQ(strides[1], 4);   // 4
-    EXPECT_EQ(strides[2], 1);   // 1
+    EXPECT_EQ(strides[0], 12); // 3 * 4
+    EXPECT_EQ(strides[1], 4); // 4
+    EXPECT_EQ(strides[2], 1); // 1
 }
 
 TEST(PreSwizzleTest, ComputeShuffledStridesCustomOrder)
 {
-    std::vector<size_t> sizes = {2, 3, 4};
+    std::vector<size_t> sizes    = {2, 3, 4};
     std::vector<size_t> dimOrder = {1, 0, 2};
-    auto strides = computeShuffledStrides(sizes, dimOrder);
+    auto                strides  = computeShuffledStrides(sizes, dimOrder);
     ASSERT_EQ(strides.size(), 3);
-    EXPECT_EQ(strides[0], 3);   // sizes[1] = 3
-    EXPECT_EQ(strides[1], 1);   // first in order
-    EXPECT_EQ(strides[2], 6);   // 2 * 3
+    EXPECT_EQ(strides[0], 3); // sizes[1] = 3
+    EXPECT_EQ(strides[1], 1); // first in order
+    EXPECT_EQ(strides[2], 6); // 2 * 3
 }
 
 // ============================================================================
@@ -138,402 +141,687 @@ TEST(PreSwizzleTest, ComputeShuffledStridesCustomOrder)
 
 TEST(PreSwizzleTest, ShuffleDimsIdentity)
 {
-    std::vector<int> input = {0, 1, 2, 3, 4, 5};
-    std::vector<size_t> sizes = {2, 3};
-    auto srcStrides = computeStrides(sizes);
-    auto output = shuffleDims(input, sizes, srcStrides, srcStrides);
+    std::vector<int>    input      = {0, 1, 2, 3, 4, 5};
+    std::vector<size_t> sizes      = {2, 3};
+    auto                srcStrides = computeStrides(sizes);
+    auto                output     = shuffleDims(input, sizes, srcStrides, srcStrides);
     EXPECT_EQ(input, output);
 }
 
 TEST(PreSwizzleTest, ShuffleDimsTranspose2D)
 {
-    // Input is 2x3 matrix in row-major order: [[0,1,2], [3,4,5]]
-    std::vector<int> input = {0, 1, 2, 3, 4, 5};
+    // Input is 2x3 matrix in col-major order: [[0,1,2], [3,4,5]]
+    std::vector<int>    input = {0, 3, 1, 4, 2, 5};
     std::vector<size_t> sizes = {2, 3};
-    
-    auto srcStrides = computeStrides(sizes);
-    std::vector<size_t> dimOrder = {1, 0};  // transpose
-    auto dstStrides = computeShuffledStrides(sizes, dimOrder);
-    
+
+    auto                srcStrides = computeStrides(sizes);
+    std::vector<size_t> dimOrder   = {1, 0}; // transpose
+    auto                dstStrides = computeShuffledStrides(sizes, dimOrder);
+
     auto output = shuffleDims(input, sizes, dstStrides, srcStrides);
-    
-    // After transpose: 3x2 matrix [[0,3], [1,4], [2,5]]
-    std::vector<int> expected = {0, 3, 1, 4, 2, 5};
+
+    // After shuffle: 3x2 matrix [[0,3], [1,4], [2,5]]
+    std::vector<int> expected = {0, 1, 2, 3, 4, 5};
     EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, ShuffleDims3D)
 {
-    // 2x2x2 cube
-    std::vector<int> input = {0, 1, 2, 3, 4, 5, 6, 7};
+    // 2x2x2 cube: input(i,j,k) = 4k + 2j + i (col-major storage)
+    std::vector<int>    input = {0, 1, 2, 3, 4, 5, 6, 7};
     std::vector<size_t> sizes = {2, 2, 2};
-    
-    auto srcStrides = computeStrides(sizes);
-    std::vector<size_t> dimOrder = {2, 1, 0};  // reverse dimensions
-    auto dstStrides = computeShuffledStrides(sizes, dimOrder);
-    
+
+    auto                srcStrides = computeStrides(sizes);
+    std::vector<size_t> dimOrder   = {2, 1, 0}; // reverse dimensions
+    auto                dstStrides = computeShuffledStrides(sizes, dimOrder);
+
     auto output = shuffleDims(input, sizes, dstStrides, srcStrides);
-    
-    // Verify the shuffle was performed
-    ASSERT_EQ(output.size(), input.size());
-    // Element at position [0,0,0] should stay at [0,0,0]
-    EXPECT_EQ(output[0], 0);
-    // Element at position [1,1,1] should stay at [1,1,1]
-    EXPECT_EQ(output[7], 7);
+
+    // After shuffle: ouput(i,j,k) = input(k,j,i) = 4i + 2j + k
+    std::vector<int> expected = {0, 4, 2, 6, 1, 5, 3, 7};
+    EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, ShuffleDimsSizeMismatch)
 {
-    std::vector<int> input = {0, 1, 2, 3};
-    std::vector<size_t> sizes = {2, 3};  // 6 elements expected
-    auto srcStrides = computeStrides(sizes);
-    auto dstStrides = computeStrides(sizes);
-    
-    EXPECT_THROW(
-        shuffleDims(input, sizes, dstStrides, srcStrides),
-        std::runtime_error
-    );
+    std::vector<int>    input      = {0, 1, 2, 3};
+    std::vector<size_t> sizes      = {2, 3}; // 6 elements expected
+    auto                srcStrides = computeStrides(sizes);
+    auto                dstStrides = computeStrides(sizes);
+
+    EXPECT_THROW(shuffleDims(input, sizes, dstStrides, srcStrides), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, ShuffleDimsTooFewDimensions)
 {
-    std::vector<int> input = {0, 1};
-    std::vector<size_t> sizes = {2};
-    auto srcStrides = computeStrides(sizes);
-    auto dstStrides = computeStrides(sizes);
-    
-    EXPECT_THROW(
-        shuffleDims(input, sizes, dstStrides, srcStrides),
-        std::runtime_error
-    );
+    std::vector<int>    input      = {0, 1};
+    std::vector<size_t> sizes      = {2};
+    auto                srcStrides = computeStrides(sizes);
+    auto                dstStrides = computeStrides(sizes);
+
+    EXPECT_THROW(shuffleDims(input, sizes, dstStrides, srcStrides), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, ShuffleDimsDimensionMismatch)
 {
-    std::vector<int> input = {0, 1, 2, 3};
-    std::vector<size_t> sizes = {2, 2};
+    std::vector<int>    input      = {0, 1, 2, 3};
+    std::vector<size_t> sizes      = {2, 2};
     std::vector<size_t> srcStrides = {1, 2};
-    std::vector<size_t> dstStrides = {1, 2, 4};  // wrong size
-    
-    EXPECT_THROW(
-        shuffleDims(input, sizes, dstStrides, srcStrides),
-        std::runtime_error
-    );
-}
+    std::vector<size_t> dstStrides = {1, 2, 4}; // wrong size
 
-// ============================================================================
-// Tests for preSwizzleScale()
-// ============================================================================
-
-TEST(PreSwizzleTest, PreSwizzleScaleBasic)
-{
-    // Create a simple scale tensor
-    size_t scaleRows = 128;  // K / blockSize
-    size_t scaleCols = 64;   // M or N
-    std::vector<float> input(scaleRows * scaleCols);
-    
-    // Fill with sequential values for testing
-    std::iota(input.begin(), input.end(), 0.0f);
-    
-    std::vector<size_t> tile = {32, 128, 4};  // {tileMN, tileK, subTileK}
-    
-    auto output = preSwizzleScale(input, scaleRows, scaleCols, tile);
-    
-    ASSERT_EQ(output.size(), input.size());
-    // The output should be a permutation of the input
-    std::vector<float> sortedOutput = output;
-    std::vector<float> sortedInput = input;
-    std::sort(sortedOutput.begin(), sortedOutput.end());
-    std::sort(sortedInput.begin(), sortedInput.end());
-    EXPECT_EQ(sortedOutput, sortedInput);
-}
-
-TEST(PreSwizzleTest, PreSwizzleScaleInvalidTileSize)
-{
-    std::vector<float> input(128 * 64);
-    std::vector<size_t> tile = {32, 128};  // Only 2 elements, need 3
-    
-    EXPECT_THROW(
-        preSwizzleScale(input, 128, 64, tile),
-        std::runtime_error
-    );
-}
-
-TEST(PreSwizzleTest, PreSwizzleScaleInvalidTileMN)
-{
-    std::vector<float> input(128 * 64);
-    std::vector<size_t> tile = {64, 128, 4};  // tileMN must be 32
-    
-    EXPECT_THROW(
-        preSwizzleScale(input, 128, 64, tile),
-        std::runtime_error
-    );
-}
-
-TEST(PreSwizzleTest, PreSwizzleScaleTileKNotMultipleOf4)
-{
-    std::vector<float> input(127 * 64);
-    std::vector<size_t> tile = {32, 127, 4};  // tileK not multiple of 4
-    
-    EXPECT_THROW(
-        preSwizzleScale(input, 127, 64, tile),
-        std::runtime_error
-    );
-}
-
-TEST(PreSwizzleTest, PreSwizzleScaleSizeMismatch)
-{
-    std::vector<float> input(100);  // Wrong size
-    std::vector<size_t> tile = {32, 128, 4};
-    
-    EXPECT_THROW(
-        preSwizzleScale(input, 128, 64, tile),
-        std::runtime_error
-    );
+    EXPECT_THROW(shuffleDims(input, sizes, dstStrides, srcStrides), std::runtime_error);
 }
 
 // ============================================================================
 // Tests for preSwizzle()
 // ============================================================================
 
+// Helper class: Multi-dimensional index iterator
+class MultiIndex
+{
+public:
+    // Iterator traits
+    using iterator_category = std::forward_iterator_tag;
+    using value_type        = size_t;
+    using difference_type   = std::ptrdiff_t;
+    using pointer           = const size_t*;
+    using reference         = size_t;
+
+    std::vector<size_t> sizes;
+    std::vector<size_t> indexes;
+    std::vector<size_t> strides;
+    size_t              totalElements;
+
+    MultiIndex(std::vector<size_t> const& sizes)
+        : sizes(sizes)
+        , totalElements(product(sizes))
+    {
+        indexes.resize(sizes.size(), 0);
+        strides = computeStrides(this->sizes);
+    }
+
+    MultiIndex(std::vector<size_t> const& sizes, std::vector<size_t> const& dimOrder)
+        : sizes(sizes)
+        , totalElements(product(sizes))
+    {
+        indexes.resize(sizes.size(), 0);
+        strides = computeShuffledStrides(sizes, dimOrder);
+    }
+
+    // Create end iterator
+    static MultiIndex end(std::vector<size_t> const& sizes)
+    {
+        MultiIndex it(sizes);
+        if(!it.sizes.empty())
+            it.indexes.back() = it.sizes.back(); // Last dimension past the end
+        return it;
+    }
+
+    static MultiIndex end(std::vector<size_t> const& sizes, std::vector<size_t> const& dimOrder)
+    {
+        MultiIndex it(sizes, dimOrder);
+        if(!it.sizes.empty())
+            it.indexes.back() = it.sizes.back(); // Last dimension past the end
+        return it;
+    }
+
+    // Get linear index from multi-dimensional coordinates
+    size_t index() const
+    {
+        size_t rv = 0;
+        for(size_t i = 0; i < indexes.size(); ++i)
+            rv += indexes[i] * strides[i];
+        return rv;
+    }
+
+    // Dereference operator returns the linear index
+    size_t operator*() const
+    {
+        return index();
+    }
+
+    // Pre-increment
+    MultiIndex& operator++()
+    {
+        for(size_t i = 0; i < indexes.size(); ++i)
+        {
+            indexes[i]++;
+            if(indexes[i] < sizes[i])
+                break;
+
+            // If this is the last dimension and we've overflowed,
+            // don't reset - leave it at sizes[i] to indicate end
+            if(i == indexes.size() - 1)
+                break;
+
+            indexes[i] = 0;
+        }
+        return *this;
+    }
+
+    // Post-increment
+    MultiIndex operator++(int)
+    {
+        MultiIndex tmp = *this;
+        ++(*this);
+        return tmp;
+    }
+
+    // Equality comparison
+    bool operator==(const MultiIndex& other) const
+    {
+        return indexes == other.indexes && strides == other.strides;
+    }
+
+    // Inequality comparison
+    bool operator!=(const MultiIndex& other) const
+    {
+        return !(*this == other);
+    }
+
+    // Check if we're at the end
+    bool isEnd() const
+    {
+        return !indexes.empty() && indexes.back() >= sizes.back();
+    }
+};
+
+TEST(PreSwizzleTest, MultiIndexIteratorInterface)
+{
+    std::vector<size_t> sizes = {2, 3, 4};
+    MultiIndex          mi(sizes);
+    MultiIndex          end = MultiIndex::end(sizes);
+
+    // Test dereference operator
+    EXPECT_EQ(*mi, 0); // First element should have index 0
+
+    // Test pre-increment
+    ++mi;
+    EXPECT_EQ(*mi, 1);
+
+    // Test post-increment
+    MultiIndex mi2 = mi++;
+    EXPECT_EQ(*mi2, 1); // Original value
+    EXPECT_EQ(*mi, 2); // Incremented value
+
+    // Test inequality
+    EXPECT_NE(mi, end);
+
+    // Iterate through all elements
+    mi = MultiIndex(sizes);
+    std::vector<size_t> collectedIndices;
+
+    for(; mi != end; ++mi)
+    {
+        collectedIndices.push_back(*mi);
+    }
+
+    // Should have iterated through all 2*3*4 = 24 elements
+    EXPECT_EQ(collectedIndices.size(), 24);
+    EXPECT_EQ(mi, end);
+
+    // Verify indices are sequential
+    std::vector<size_t> expected
+        = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
+    EXPECT_EQ(collectedIndices, expected);
+}
+
+TEST(PreSwizzleTest, MultiIndexWithDimOrder)
+{
+    std::vector<size_t> sizes    = {2, 3};
+    std::vector<size_t> dimOrder = {1, 0};
+    MultiIndex          mi(sizes, dimOrder);
+    MultiIndex          end = MultiIndex::end(sizes, dimOrder);
+
+    std::vector<size_t> collectedIndices;
+    for(; mi != end; ++mi)
+    {
+        collectedIndices.push_back(*mi);
+    }
+
+    EXPECT_EQ(collectedIndices.size(), 6);
+
+    std::vector<size_t> expected = {0, 3, 1, 4, 2, 5};
+    EXPECT_EQ(collectedIndices, expected);
+}
+
+void FillSwizzle(std::vector<float>&        scales,
+                 size_t                     k,
+                 size_t                     mn,
+                 std::vector<size_t> const& preSwizzleSize)
+{
+    auto tileMN   = preSwizzleSize[0];
+    auto tileK    = preSwizzleSize[1];
+    auto subTileK = preSwizzleSize[2];
+
+    size_t nLanesPerSIMD   = 16;
+    size_t nSIMDsPerWave   = 4;
+    size_t nSIMDIndex      = tileMN / nLanesPerSIMD;
+    size_t nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+    size_t nVGPRIndex      = std::min(nSIMDIndex, subTileK);
+    size_t nVGPRBlock      = tileK / nSIMDBlock / nVGPRIndex;
+    size_t nSIMDIndexBlock = nVGPRIndex;
+    size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+
+    auto numTilesK  = k / tileK;
+    auto numTilesMN = mn / tileMN;
+
+    auto sizes = {nVGPRIndex,
+                  nVGPRBlock,
+                  nSIMDBlock,
+                  numTilesK,
+                  nLanesPerSIMD,
+                  nSIMDIndexIndex,
+                  nSIMDIndexBlock,
+                  numTilesMN};
+
+    auto mi = MultiIndex(sizes);
+
+    for(; !mi.isEnd(); ++mi)
+    {
+        // Create a unique value based on multiple dimensions
+        float value = 0.0f;
+        for(size_t i = 0; i < mi.indexes.size(); ++i)
+            value += static_cast<float>(mi.indexes[i]) * std::pow(10.0f, static_cast<float>(i));
+        scales[*mi] = value;
+    }
+}
+
+void FillPreSwizzle(std::vector<float>&        scales,
+                    size_t                     k,
+                    size_t                     mn,
+                    std::vector<size_t> const& preSwizzleSize)
+{
+    auto tileMN   = preSwizzleSize[0];
+    auto tileK    = preSwizzleSize[1];
+    auto subTileK = preSwizzleSize[2];
+
+    size_t nLanesPerSIMD   = 16;
+    size_t nSIMDsPerWave   = 4;
+    size_t nSIMDIndex      = tileMN / nLanesPerSIMD;
+    size_t nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+    size_t nVGPRIndex      = std::min(nSIMDIndex, subTileK);
+    size_t nVGPRBlock      = tileK / nSIMDBlock / nVGPRIndex;
+    size_t nSIMDIndexBlock = nVGPRIndex;
+    size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+
+    auto numTilesK  = k / tileK;
+    auto numTilesMN = mn / tileMN;
+
+    std::vector<size_t> sizes = {nVGPRIndex,
+                                 nVGPRBlock,
+                                 nSIMDBlock,
+                                 numTilesK,
+                                 nLanesPerSIMD,
+                                 nSIMDIndexIndex,
+                                 nSIMDIndexBlock,
+                                 numTilesMN};
+
+    std::vector<size_t> dimOrder;
+    if(tileMN == 64)
+    {
+        // Pre swizzle: swap nSIMDIndexBlock (6) and nVGPRIndex (0)
+        dimOrder = {6, 1, 2, 3, 4, 5, 0, 7};
+    }
+    else if(tileMN == 32 && subTileK == 4)
+    {
+        // Pre swizzle: swap nSIMDIndexBlock (6) and nVGPRIndex (0)
+        //              swap nSIMDBlock (2) and nVGPRBlock (1)
+        dimOrder = {6, 2, 1, 3, 4, 5, 0, 7};
+    }
+    else if(tileMN == 32 && subTileK == 2)
+    {
+        // Pre swizzle: rotate nVGPRIndex (0), nVGPRBlock (1), nSIMDBlock (2)
+        dimOrder = {1, 2, 0, 3, 4, 5, 6, 7};
+    }
+
+    auto mi = MultiIndex(sizes, dimOrder);
+
+    for(; !mi.isEnd(); ++mi)
+    {
+        // Create a unique value based on multiple dimensions
+        float value = 0.0f;
+        for(size_t i = 0; i < mi.indexes.size(); ++i)
+            value += static_cast<float>(mi.indexes[i]) * std::pow(10.0f, static_cast<float>(i));
+        scales[*mi] = value;
+    }
+}
+
+void FillSwizzleAndTile(std::vector<float>&        scales,
+                        size_t                     k,
+                        size_t                     mn,
+                        std::vector<size_t> const& preSwizzleSize,
+                        std::vector<size_t> const& preTileSize)
+{
+    auto tileMN   = preSwizzleSize[0];
+    auto tileK    = preSwizzleSize[1];
+    auto subTileK = preSwizzleSize[2];
+
+    size_t ptTileSizeK  = preTileSize[0];
+    size_t ptTileSizeMN = preTileSize[1];
+
+    size_t nLanesPerSIMD   = 16;
+    size_t nSIMDsPerWave   = 4;
+    size_t nSIMDIndex      = tileMN / nLanesPerSIMD;
+    size_t nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+    size_t nVGPRIndex      = std::min(nSIMDIndex, subTileK);
+    size_t nVGPRBlock      = tileK / nSIMDBlock / nVGPRIndex;
+    size_t nSIMDIndexBlock = nVGPRIndex;
+    size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+
+    auto sizes = {nVGPRIndex,
+                  nVGPRBlock,
+                  nSIMDBlock,
+                  ptTileSizeK / tileK,
+                  k / ptTileSizeK,
+                  nLanesPerSIMD,
+                  nSIMDIndexIndex,
+                  nSIMDIndexBlock,
+                  ptTileSizeMN / tileMN,
+                  mn / ptTileSizeMN};
+
+    auto mi = MultiIndex(sizes);
+
+    for(; !mi.isEnd(); ++mi)
+    {
+        // Create a unique value based on multiple dimensions
+        float value = 0.0f;
+        for(size_t i = 0; i < mi.indexes.size(); ++i)
+            value += static_cast<float>(mi.indexes[i]) * std::pow(10.0f, static_cast<float>(i));
+        scales[*mi] = value;
+    }
+}
+
+void FillPreSwizzleAndTile(std::vector<float>&        scales,
+                           size_t                     k,
+                           size_t                     mn,
+                           std::vector<size_t> const& preSwizzleSize,
+                           std::vector<size_t> const& preTileSize)
+{
+    auto tileMN   = preSwizzleSize[0];
+    auto tileK    = preSwizzleSize[1];
+    auto subTileK = preSwizzleSize[2];
+
+    size_t ptTileSizeK  = preTileSize[0];
+    size_t ptTileSizeMN = preTileSize[1];
+
+    size_t nLanesPerSIMD   = 16;
+    size_t nSIMDsPerWave   = 4;
+    size_t nSIMDIndex      = tileMN / nLanesPerSIMD;
+    size_t nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+    size_t nVGPRIndex      = std::min(nSIMDIndex, subTileK);
+    size_t nVGPRBlock      = tileK / nSIMDBlock / nVGPRIndex;
+    size_t nSIMDIndexBlock = nVGPRIndex;
+    size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+
+    std::vector<size_t> sizes = {nVGPRIndex,
+                                 nVGPRBlock,
+                                 nSIMDBlock,
+                                 ptTileSizeK / tileK,
+                                 k / ptTileSizeK,
+                                 nLanesPerSIMD,
+                                 nSIMDIndexIndex,
+                                 nSIMDIndexBlock,
+                                 ptTileSizeMN / tileMN,
+                                 mn / ptTileSizeMN};
+
+    std::vector<size_t> dimOrder;
+    if(tileMN == 64)
+    {
+        // Pre swizzle: swap nSIMDIndexBlock (7) and nVGPRIndex (0)
+        // Pre tile: push workgroup tiles (4 and 9) to the end
+        dimOrder = {7, 1, 2, 3, 5, 6, 0, 8, 4, 9};
+    }
+    else if(tileMN == 32 && subTileK == 4)
+    {
+        // Pre swizzle: swap nSIMDIndexBlock (7) and nVGPRIndex (0)
+        //              swap nSIMDBlock (2) and nVGPRBlock (1)
+        // Pre tile: push workgroup tiles (4 and 9) to the end
+        dimOrder = {7, 2, 1, 3, 5, 6, 0, 8, 4, 9};
+    }
+    else if(tileMN == 32 && subTileK == 2)
+    {
+        // Pre swizzle: rotate nVGPRIndex (0), nVGPRBlock (1), nSIMDBlock (2)
+        // Pre tile: push workgroup tiles (4 and 9) to the end
+        dimOrder = {1, 2, 0, 3, 5, 6, 7, 8, 4, 9};
+    }
+
+    auto mi = MultiIndex(sizes, dimOrder);
+
+    for(; !mi.isEnd(); ++mi)
+    {
+        // Create a unique value based on multiple dimensions
+        float value = 0.0f;
+        for(size_t i = 0; i < mi.indexes.size(); ++i)
+            value += static_cast<float>(mi.indexes[i]) * std::pow(10.0f, static_cast<float>(i));
+        scales[*mi] = value;
+    }
+}
+
 TEST(PreSwizzleTest, PreSwizzleOnlySwizzle64)
 {
-    size_t k = 256;
-    size_t mn = 128;
+    size_t             k  = 256;
+    size_t             mn = 128;
     std::vector<float> input(k * mn);
-    std::iota(input.begin(), input.end(), 0.0f);
-    
-    std::vector<size_t> sizes = {k, mn};
-    std::vector<size_t> preSwizzleSize = {64, 256, 4};  // tileMN=64, tileK=256, subTileK=4
-    std::vector<size_t> preTileSize;  // empty
-    
+
+    std::vector<size_t> sizes          = {k, mn};
+    std::vector<size_t> preSwizzleSize = {64, 256, 4}; // tileMN=64, tileK=256, subTileK=4
+    std::vector<size_t> preTileSize; // empty
+    FillSwizzle(input, k, mn, preSwizzleSize);
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
+    std::vector<float> expected(k * mn);
+    FillPreSwizzle(expected, k, mn, preSwizzleSize);
+
     ASSERT_EQ(output.size(), input.size());
+    EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, PreSwizzleOnlySwizzle32SubTile4)
 {
-    size_t k = 128;
-    size_t mn = 64;
+    size_t             k  = 128;
+    size_t             mn = 64;
     std::vector<float> input(k * mn);
-    std::iota(input.begin(), input.end(), 0.0f);
-    
-    std::vector<size_t> sizes = {k, mn};
-    std::vector<size_t> preSwizzleSize = {32, 128, 4};  // tileMN=32, tileK=128, subTileK=4
-    std::vector<size_t> preTileSize;  // empty
-    
-    auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
+    std::vector<size_t> sizes          = {k, mn};
+    std::vector<size_t> preSwizzleSize = {32, 128, 4}; // tileMN=32, tileK=128, subTileK=4
+    std::vector<size_t> preTileSize; // empty
+    FillSwizzle(input, k, mn, preSwizzleSize);
+
+    auto               output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
+    std::vector<float> expected(k * mn);
+    FillPreSwizzle(expected, k, mn, preSwizzleSize);
+
     ASSERT_EQ(output.size(), input.size());
+    EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, PreSwizzleOnlySwizzle32SubTile2)
 {
-    size_t k = 128;
-    size_t mn = 64;
+    size_t             k  = 128;
+    size_t             mn = 64;
     std::vector<float> input(k * mn);
-    std::iota(input.begin(), input.end(), 0.0f);
-    
-    std::vector<size_t> sizes = {k, mn};
-    std::vector<size_t> preSwizzleSize = {32, 128, 2};  // tileMN=32, tileK=128, subTileK=2
-    std::vector<size_t> preTileSize;  // empty
-    
+
+    std::vector<size_t> sizes          = {k, mn};
+    std::vector<size_t> preSwizzleSize = {32, 128, 2}; // tileMN=32, tileK=128, subTileK=2
+    std::vector<size_t> preTileSize; // empty
+    FillSwizzle(input, k, mn, preSwizzleSize);
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
+    std::vector<float> expected(k * mn);
+    FillPreSwizzle(expected, k, mn, preSwizzleSize);
+
     ASSERT_EQ(output.size(), input.size());
+    EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, PreSwizzleOnlyPreTile)
 {
-    size_t k = 128;
-    size_t mn = 64;
+    size_t             k  = 128;
+    size_t             mn = 64;
     std::vector<float> input(k * mn);
     std::iota(input.begin(), input.end(), 0.0f);
-    
+
     std::vector<size_t> sizes = {k, mn};
-    std::vector<size_t> preSwizzleSize;  // empty
+    std::vector<size_t> preSwizzleSize; // empty
     std::vector<size_t> preTileSize = {16, 16};
-    
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
     ASSERT_EQ(output.size(), input.size());
 }
 
 TEST(PreSwizzleTest, PreSwizzleBothSwizzleAndTile64)
 {
-    size_t k = 256;
-    size_t mn = 128;
+    size_t             k  = 256;
+    size_t             mn = 128;
     std::vector<float> input(k * mn);
-    std::iota(input.begin(), input.end(), 0.0f);
-    
-    std::vector<size_t> sizes = {k, mn};
+
+    std::vector<size_t> sizes          = {k, mn};
     std::vector<size_t> preSwizzleSize = {64, 256, 4};
-    std::vector<size_t> preTileSize = {256, 64};
-    
+    std::vector<size_t> preTileSize    = {256, 64};
+    FillSwizzleAndTile(input, k, mn, preSwizzleSize, preTileSize);
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
+    std::vector<float> expected(k * mn);
+    FillPreSwizzleAndTile(expected, k, mn, preSwizzleSize, preTileSize);
+
     ASSERT_EQ(output.size(), input.size());
+    EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, PreSwizzleBothSwizzleAndTile32SubTile4)
 {
-    size_t k = 512;
-    size_t mn = 128;
+    size_t             k  = 512;
+    size_t             mn = 128;
     std::vector<float> input(k * mn);
-    std::iota(input.begin(), input.end(), 0.0f);
-    
-    std::vector<size_t> sizes = {k, mn};
+
+    std::vector<size_t> sizes          = {k, mn};
     std::vector<size_t> preSwizzleSize = {32, 128, 4};
-    std::vector<size_t> preTileSize = {128, 32};
-    
+    std::vector<size_t> preTileSize    = {128, 32};
+    FillSwizzleAndTile(input, k, mn, preSwizzleSize, preTileSize);
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
+    std::vector<float> expected(k * mn);
+    FillPreSwizzleAndTile(expected, k, mn, preSwizzleSize, preTileSize);
+
     ASSERT_EQ(output.size(), input.size());
+    EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, PreSwizzleBothSwizzleAndTile32SubTile2)
 {
-    size_t k = 256;
-    size_t mn = 64;
+    size_t             k  = 256;
+    size_t             mn = 64;
     std::vector<float> input(k * mn);
-    std::iota(input.begin(), input.end(), 0.0f);
-    
-    std::vector<size_t> sizes = {k, mn};
+
+    std::vector<size_t> sizes          = {k, mn};
     std::vector<size_t> preSwizzleSize = {32, 128, 2};
-    std::vector<size_t> preTileSize = {128, 64};
-    
+    std::vector<size_t> preTileSize    = {128, 64};
+    FillSwizzleAndTile(input, k, mn, preSwizzleSize, preTileSize);
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
+    std::vector<float> expected(k * mn);
+    FillPreSwizzleAndTile(expected, k, mn, preSwizzleSize, preTileSize);
+
     ASSERT_EQ(output.size(), input.size());
+    EXPECT_EQ(output, expected);
 }
 
 TEST(PreSwizzleTest, PreSwizzleInvalidTileMN)
 {
-    std::vector<float> input(128 * 64);
-    std::vector<size_t> sizes = {128, 64};
-    std::vector<size_t> preSwizzleSize = {48, 128, 4};  // tileMN not 32 or 64
+    std::vector<float>  input(128 * 64);
+    std::vector<size_t> sizes          = {128, 64};
+    std::vector<size_t> preSwizzleSize = {48, 128, 4}; // tileMN not 32 or 64
     std::vector<size_t> preTileSize;
-    
-    EXPECT_THROW(
-        preSwizzle(input, sizes, preSwizzleSize, preTileSize),
-        std::runtime_error
-    );
+
+    EXPECT_THROW(preSwizzle(input, sizes, preSwizzleSize, preTileSize), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, PreSwizzleTileKNotMultipleOf4)
 {
-    std::vector<float> input(127 * 64);
-    std::vector<size_t> sizes = {127, 64};
-    std::vector<size_t> preSwizzleSize = {32, 127, 4};  // tileK not multiple of 4
+    std::vector<float>  input(127 * 64);
+    std::vector<size_t> sizes          = {127, 64};
+    std::vector<size_t> preSwizzleSize = {32, 127, 4}; // tileK not multiple of 4
     std::vector<size_t> preTileSize;
-    
-    EXPECT_THROW(
-        preSwizzle(input, sizes, preSwizzleSize, preTileSize),
-        std::runtime_error
-    );
+
+    EXPECT_THROW(preSwizzle(input, sizes, preSwizzleSize, preTileSize), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, PreSwizzleSizeMismatch)
 {
-    std::vector<float> input(100);  // Wrong size
-    std::vector<size_t> sizes = {128, 64};
+    std::vector<float>  input(100); // Wrong size
+    std::vector<size_t> sizes          = {128, 64};
     std::vector<size_t> preSwizzleSize = {32, 128, 4};
     std::vector<size_t> preTileSize;
-    
-    EXPECT_THROW(
-        preSwizzle(input, sizes, preSwizzleSize, preTileSize),
-        std::runtime_error
-    );
+
+    EXPECT_THROW(preSwizzle(input, sizes, preSwizzleSize, preTileSize), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, PreSwizzleBatchDimensionNotSupported)
 {
-    std::vector<float> input(2 * 128 * 64);
-    std::vector<size_t> sizes = {2, 128, 64};  // 3D tensor (batch dimension)
+    std::vector<float>  input(2 * 128 * 64);
+    std::vector<size_t> sizes          = {2, 128, 64}; // 3D tensor (batch dimension)
     std::vector<size_t> preSwizzleSize = {32, 128, 4};
     std::vector<size_t> preTileSize;
-    
-    EXPECT_THROW(
-        preSwizzle(input, sizes, preSwizzleSize, preTileSize),
-        std::runtime_error
-    );
+
+    EXPECT_THROW(preSwizzle(input, sizes, preSwizzleSize, preTileSize), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, PreSwizzleInvalidPreSwizzleSize)
 {
-    std::vector<float> input(128 * 64);
-    std::vector<size_t> sizes = {128, 64};
-    std::vector<size_t> preSwizzleSize = {32, 128};  // Only 2 elements, need 3
+    std::vector<float>  input(128 * 64);
+    std::vector<size_t> sizes          = {128, 64};
+    std::vector<size_t> preSwizzleSize = {32, 128}; // Only 2 elements, need 3
     std::vector<size_t> preTileSize;
-    
-    EXPECT_THROW(
-        preSwizzle(input, sizes, preSwizzleSize, preTileSize),
-        std::runtime_error
-    );
+
+    EXPECT_THROW(preSwizzle(input, sizes, preSwizzleSize, preTileSize), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, PreSwizzlePtTileSizeKZero)
 {
-    std::vector<float> input(128 * 64);
-    std::vector<size_t> sizes = {128, 64};
-    std::vector<size_t> preSwizzleSize = {32, 256, 4};  // tileK > sizes[0]
-    std::vector<size_t> preTileSize = {128, 64};
-    
-    EXPECT_THROW(
-        preSwizzle(input, sizes, preSwizzleSize, preTileSize),
-        std::runtime_error
-    );
+    std::vector<float>  input(128 * 64);
+    std::vector<size_t> sizes          = {128, 64};
+    std::vector<size_t> preSwizzleSize = {32, 256, 4}; // tileK > sizes[0]
+    std::vector<size_t> preTileSize    = {128, 64};
+
+    EXPECT_THROW(preSwizzle(input, sizes, preSwizzleSize, preTileSize), std::runtime_error);
 }
 
 TEST(PreSwizzleTest, PreSwizzlePtTileSizeMNZero)
 {
-    std::vector<float> input(128 * 64);
-    std::vector<size_t> sizes = {128, 64};
-    std::vector<size_t> preSwizzleSize = {128, 128, 4};  // tileMN > sizes[1]
-    std::vector<size_t> preTileSize = {128, 64};
-    
-    EXPECT_THROW(
-        preSwizzle(input, sizes, preSwizzleSize, preTileSize),
-        std::runtime_error
-    );
+    std::vector<float>  input(128 * 64);
+    std::vector<size_t> sizes          = {128, 64};
+    std::vector<size_t> preSwizzleSize = {128, 128, 4}; // tileMN > sizes[1]
+    std::vector<size_t> preTileSize    = {128, 64};
+
+    EXPECT_THROW(preSwizzle(input, sizes, preSwizzleSize, preTileSize), std::runtime_error);
 }
 
 // ============================================================================
 // Edge Cases and Integration Tests
 // ============================================================================
 
-TEST(PreSwizzleTest, PreSwizzleScaleSmallTensor)
-{
-    size_t scaleRows = 32;  // minimum for tileK=128 would be larger, so this tests smaller case
-    size_t scaleCols = 32;
-    std::vector<float> input(scaleRows * scaleCols);
-    std::iota(input.begin(), input.end(), 1.0f);
-    
-    std::vector<size_t> tile = {32, 32, 4};
-    
-    // This might fail validation, but let's see what happens
-    // Actually tileK must be multiple of 4, and we have 32 which is valid
-    auto output = preSwizzleScale(input, scaleRows, scaleCols, tile);
-    
-    EXPECT_EQ(output.size(), input.size());
-}
-
 TEST(PreSwizzleTest, PreSwizzleIdentityOnSmallData)
 {
     // Test that swizzling preserves all data
-    std::vector<int> input = {1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<int>    input = {1, 2, 3, 4, 5, 6, 7, 8};
     std::vector<size_t> sizes = {2, 4};
     std::vector<size_t> preSwizzleSize;
-    std::vector<size_t> preTileSize = {2, 4};  // Same as sizes, should be identity
-    
+    std::vector<size_t> preTileSize = {2, 4}; // Same as sizes, should be identity
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
     ASSERT_EQ(output.size(), input.size());
-    
+
     // Verify all elements are present
     std::vector<int> sortedOutput = output;
-    std::vector<int> sortedInput = input;
+    std::vector<int> sortedInput  = input;
     std::sort(sortedOutput.begin(), sortedOutput.end());
     std::sort(sortedInput.begin(), sortedInput.end());
     EXPECT_EQ(sortedOutput, sortedInput);
@@ -543,30 +831,43 @@ TEST(PreSwizzleTest, PreSwizzleDoubleType)
 {
     // Test that templates work with different types
     std::vector<double> input(128 * 64);
-    for (size_t i = 0; i < input.size(); ++i)
+    for(size_t i = 0; i < input.size(); ++i)
         input[i] = static_cast<double>(i) * 0.1;
-    
-    std::vector<size_t> sizes = {128, 64};
+
+    std::vector<size_t> sizes          = {128, 64};
     std::vector<size_t> preSwizzleSize = {32, 128, 4};
     std::vector<size_t> preTileSize;
-    
+
     auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
+
     ASSERT_EQ(output.size(), input.size());
 }
 
 TEST(PreSwizzleTest, PreSwizzleIntegerType)
 {
     // Test that templates work with integer types
-    std::vector<int> input(128 * 64);
-    std::iota(input.begin(), input.end(), 0);
-    
-    std::vector<size_t> sizes = {128, 64};
+    size_t           k  = 128;
+    size_t           mn = 64;
+    std::vector<int> input(k * mn);
+
+    std::vector<size_t> sizes          = {k, mn};
     std::vector<size_t> preSwizzleSize = {32, 128, 4};
     std::vector<size_t> preTileSize;
-    
-    auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
-    
-    ASSERT_EQ(output.size(), input.size());
-}
 
+    // Create float versions for helper functions, then convert
+    std::vector<float> inputFloat(k * mn);
+    FillSwizzle(inputFloat, k, mn, preSwizzleSize);
+    for(size_t i = 0; i < input.size(); ++i)
+        input[i] = static_cast<int>(inputFloat[i]);
+
+    auto output = preSwizzle(input, sizes, preSwizzleSize, preTileSize);
+
+    std::vector<float> expectedFloat(k * mn);
+    FillPreSwizzle(expectedFloat, k, mn, preSwizzleSize);
+    std::vector<int> expected(k * mn);
+    for(size_t i = 0; i < expected.size(); ++i)
+        expected[i] = static_cast<int>(expectedFloat[i]);
+
+    ASSERT_EQ(output.size(), input.size());
+    EXPECT_EQ(output, expected);
+}
