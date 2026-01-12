@@ -243,7 +243,7 @@ void BatchNormForwardInference(const Handle& handle,
                                ConstData_t bnBias,
                                ConstData_t estimatedMean,
                                ConstData_t estimatedVariance,
-                               double epsilon,
+                               std::optional<double> epsilonOpt,
                                const ActivationDescriptor& activDesc)
 {
 
@@ -285,14 +285,18 @@ void BatchNormForwardInference(const Handle& handle,
             MIOPEN_THROW(miopenStatusBadParm);
         }
 
-        const auto problem = batchnorm::ProblemDescription{bn_mode,
+        // The BN forward inference APIs taking an estimated inverse variance rather than a
+        // variance don't require and epsilon paramter. If epsilonOpt doesn't have a value then
+        // treat the estimatedVariance parameter as inverse variance rather than variance.
+        const bool useInverseVariance = !epsilonOpt.has_value();
+        const auto problem            = batchnorm::ProblemDescription{bn_mode,
                                                            xDesc,
                                                            yDesc,
                                                            scaleDesc,
                                                            biasDesc,
                                                            estMeanDesc,
                                                            estVarianceDesc,
-                                                           epsilon,
+                                                           epsilonOpt,
                                                            activDesc};
 
         const auto invoke_params = [&]() {
@@ -305,11 +309,16 @@ void BatchNormForwardInference(const Handle& handle,
             tmp.bnBias            = bnBias;
             tmp.estimatedMean     = estimatedMean;
             tmp.estimatedVariance = estimatedVariance;
-            tmp.epsilon           = epsilon;
+            if(!useInverseVariance)
+            {
+                tmp.epsilon = epsilonOpt.value();
+            }
             return tmp;
         }();
 
-        const auto algo    = AlgorithmName{"miopenBatchNormalizationForwardInference"};
+        const auto algo    = useInverseVariance
+                                 ? AlgorithmName{"miopenBatchNormalizationForwardInferenceInvVariance"}
+                                 : AlgorithmName{"miopenBatchNormalizationForwardInference"};
         const auto solvers = solver::SolverContainer<solver::batchnorm::BnFwdInference>{};
 
         solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
@@ -334,7 +343,7 @@ void BatchNormForwardInference(const Handle& handle,
                                  0,
                                  nullptr,
                                  nullptr,
-                                 epsilon,
+                                 epsilonOpt.value_or(1e-5),
                                  nullptr,
                                  nullptr,
                                  activDesc);

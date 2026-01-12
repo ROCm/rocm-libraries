@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,15 @@
 #include "testing_hybmv.hpp"
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
-TEST_ROUTINE(
-    hybmv, level2, arg.M, arg.N, arg.alpha, arg.alphai, arg.beta, arg.betai, arg.part, arg.baseA);
+TEST_ROUTINE(hybmv,
+             level2,
+             arg.M,
+             arg.N,
+             arg.ell_width,
+             arg.alpha,
+             arg.alphai,
+             arg.beta,
+             arg.betai,
+             arg.part,
+             arg.baseA);
 #endif

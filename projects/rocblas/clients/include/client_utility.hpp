@@ -173,7 +173,7 @@ void set_device(rocblas_int device_id);
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us_sync_device();
 
-/*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time */
+/*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time. Must be called in matching pairs (start, stop) */
 double get_time_us_sync(hipStream_t stream);
 
 /*! \brief  CPU Timer(in microsecond): no GPU synchronization and return wall time */

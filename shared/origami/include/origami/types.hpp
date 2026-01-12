@@ -305,7 +305,7 @@ struct config_t {
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
 
-  /// Occupancy (number of waves resident per CU).
+  /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
   /// Reorder workgroup id for L2 reuse.
