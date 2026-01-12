@@ -300,7 +300,7 @@ auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
 template<class T>
 auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
                  const std::vector<common::custom_type<T, T, true>>& expected,
-                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
+                 const float) -> typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -342,8 +342,8 @@ auto assert_near(const T& result, const T& expected, const float percent)
 }
 
 template<class T>
-auto assert_near(const T& result, const T& expected, const float)
-    -> typename std::enable_if<std::is_integral<T>::value>::type
+auto assert_near(const T& result, const T& expected, const float) ->
+    typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
     ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
@@ -372,7 +372,7 @@ auto assert_near(const common::custom_type<T, T, true>& result,
 template<class T>
 auto assert_near(const common::custom_type<T, T, true>& result,
                  const common::custom_type<T, T, true>& expected,
-                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
+                 const float) -> typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
     ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result.x, expected.x));
     ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result.y, expected.y));
@@ -380,7 +380,7 @@ auto assert_near(const common::custom_type<T, T, true>& result,
 
 template<class T>
 auto assert_near(const T& result, const T& expected, const float /*percent*/) ->
-    typename std::enable_if<!std::is_integral<T>::value && !std::is_floating_point<T>::value
+    typename std::enable_if<!rocprim::is_integral<T>::value && !std::is_floating_point<T>::value
                             && !(std::is_same<T, rocprim::bfloat16>::value
                                  || std::is_same<T, rocprim::half>::value)>::type
 {
