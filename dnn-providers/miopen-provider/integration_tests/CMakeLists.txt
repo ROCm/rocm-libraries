@@ -15,6 +15,7 @@ add_executable(
     IntegrationGpuBatchnormBackwardActivation.cpp
     IntegrationGpuBatchnormForwardInference.cpp
     IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
     IntegrationGpuBatchnormFwdPlusActive.cpp
     IntegrationGpuBatchnormForwardTraining.cpp
     IntegrationGpuBatchnormFwdTrainingActiv.cpp
