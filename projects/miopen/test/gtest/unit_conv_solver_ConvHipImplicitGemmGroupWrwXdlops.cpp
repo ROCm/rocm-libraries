@@ -63,6 +63,11 @@ const auto& GetTestParams()
         Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
         if(datatype == miopenBFloat16)
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
+
+        if constexpr(datatype != miopenFloat)
+        {
+            supportedDevices = supportedDevices | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
+        }
 #else
         Gpu supportedDevices = Gpu::None;
 #endif
