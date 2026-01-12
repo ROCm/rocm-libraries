@@ -254,6 +254,14 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PackNode)
         .set_stride({2, 1, 1, 1});
     batchnormAttributes.set_bias(biasTensor);
 
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_uid(7)
+        .set_name("EpsilonTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1})
+        .set_stride({1});
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
     GraphAttributes graphAttributes;
     BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
 
@@ -279,6 +287,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PackNode)
     EXPECT_EQ(packedAttributes->variance_tensor_uid(), varianceTensor->get_uid());
     EXPECT_EQ(packedAttributes->scale_tensor_uid(), scaleTensor->get_uid());
     EXPECT_EQ(packedAttributes->bias_tensor_uid(), biasTensor->get_uid());
+    EXPECT_EQ(packedAttributes->epsilon_tensor_uid(), epsilonTensor->get_uid());
 }
 
 TEST(TestBatchnormInferenceNodeVarianceExt, GatherHipdnnTensors)
