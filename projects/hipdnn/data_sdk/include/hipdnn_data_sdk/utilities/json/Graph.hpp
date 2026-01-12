@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
 
@@ -27,6 +28,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ConvolutionFwdAttributes, "ConvolutionFwdAttributes"},
      {NodeAttributes::ConvolutionBwdAttributes, "ConvolutionBwdAttributes"},
      {NodeAttributes::ConvolutionWrwAttributes, "ConvolutionWrwAttributes"},
+     {NodeAttributes::MatmulAttributes, "MatmulAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -64,6 +66,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::ConvolutionWrwAttributes:
         nodeJson = *node.attributes_as_ConvolutionWrwAttributes();
+        break;
+    case data_objects::NodeAttributes::MatmulAttributes:
+        nodeJson = *node.attributes_as_MatmulAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -117,6 +122,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ConvolutionBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::MatmulAttributes:
+            return to<data_objects::MatmulAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error(
                 "hipdnn_data_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "
