@@ -50,7 +50,7 @@ namespace rocRoller::KernelGraph
                            ContextPtr                       context);
 };
 
-namespace AddPrefetchTest
+namespace AddLDSPaddingTest
 {
     using namespace rocRoller;
     using namespace rocRoller::KernelGraph::CoordinateGraph;
