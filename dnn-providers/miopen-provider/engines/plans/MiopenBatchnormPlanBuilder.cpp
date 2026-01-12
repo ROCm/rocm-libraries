@@ -403,37 +403,65 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         bool isFwdInferenceFirst
             = node0.attributesType()
               == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
+        bool isFwdInferenceWithVarianceFirst
+            = node0.attributesType()
+              == hipdnn_data_sdk::data_objects::NodeAttributes::
+                  BatchnormInferenceAttributesVarianceExt;
         bool isPointwiseSecond
             = node1.attributesType()
               == hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
 
-        if(!(isFwdInferenceFirst && isPointwiseSecond))
+        if(!((isFwdInferenceFirst || isFwdInferenceWithVarianceFirst) && isPointwiseSecond))
         {
             HIPDNN_LOG_INFO(
                 "Batchnorm plan builder is not applicable for this graph node order and types");
             return false;
         }
 
-        const auto& bnInfAttr
-            = node0.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
-        const auto& actAttr
-            = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
-        if(!batchnormFwdFusionCheckTensorsLogErrors(bnInfAttr, actAttr, opGraph.getTensorMap()))
+        if(isFwdInferenceFirst)
         {
-            return false;
-        }
+            const auto& bnInfAttr = node0.attributesAs<
+                hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
+            const auto& actAttr
+                = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+            if(!batchnormFwdFusionCheckTensorsLogErrors(
+                   bnInfAttr, actAttr, opGraph.getTensorMap()))
+            {
+                return false;
+            }
 
-        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
-        // checks manually.
-        try
-        {
-            checkBatchnormTensorConfigSupported(bnInfAttr, opGraph.getTensorMap());
-            checkBatchnormFwdActivationModeSupported(actAttr);
+            // Since MIOpen does not provide an API to validate batchnorm applicability, we perform
+            // the checks manually.
+            try
+            {
+                checkBatchnormTensorConfigSupported(bnInfAttr, opGraph.getTensorMap());
+                checkBatchnormFwdActivationModeSupported(actAttr);
+            }
+            catch(const std::exception& e)
+            {
+                HIPDNN_LOG_INFO(e.what());
+                return false;
+            }
         }
-        catch(const std::exception& e)
+        else
         {
-            HIPDNN_LOG_INFO(e.what());
-            return false;
+            const auto& bnInfAttr = node0.attributesAs<
+                hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+            const auto& actAttr
+                = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+
+            // TODO: Add tensor check for variance ext fusion if needed, or reuse existing if compatible
+            // For now, we rely on the applicability check which we just added support for.
+
+            try
+            {
+                checkBatchnormTensorConfigSupported(bnInfAttr, actAttr, opGraph.getTensorMap());
+            }
+            catch(const std::exception& e)
+            {
+                HIPDNN_LOG_INFO(e.what());
+                return false;
+            }
         }
 
         HIPDNN_LOG_INFO("Batchnorm plan builder applicable for batchnorm inference + "
@@ -586,6 +614,24 @@ void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePlu
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanFusedFwdInferenceWithVarianceActivation(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    const hipdnn_plugin_sdk::IGraph& opGraph,
+    HipdnnEnginePluginExecutionContext& executionContext)
+{
+    const auto& node0 = opGraph.getNodeWrapper(0);
+    const auto& node1 = opGraph.getNodeWrapper(1);
+
+    const auto& fwdInference = node0.attributesAs<
+        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+    const auto& activation
+        = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+
+    BatchnormFwdInferenceWithVarianceParams params(fwdInference, activation, opGraph.getTensorMap());
+    auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(std::move(params));
+    executionContext.setPlan(std::move(plan));
+}
+
 } // namespace
 
 void MiopenBatchnormPlanBuilder::buildPlan(
@@ -595,8 +641,21 @@ void MiopenBatchnormPlanBuilder::buildPlan(
 {
     if(opGraph.nodeCount() == 2)
     {
-        HIPDNN_LOG_INFO("Building batchnorm inference + activation fusion plan");
-        buildPlanFusedFwdInferenceActivation(handle, opGraph, executionContext);
+        const auto& node0 = opGraph.getNodeWrapper(0);
+        if(node0.attributesType()
+           == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
+        {
+            HIPDNN_LOG_INFO("Building batchnorm inference + activation fusion plan");
+            buildPlanFusedFwdInferenceActivation(handle, opGraph, executionContext);
+        }
+        else if(node0.attributesType()
+                == hipdnn_data_sdk::data_objects::NodeAttributes::
+                    BatchnormInferenceAttributesVarianceExt)
+        {
+            HIPDNN_LOG_INFO(
+                "Building batchnorm inference with variance + activation fusion plan");
+            buildPlanFusedFwdInferenceWithVarianceActivation(handle, opGraph, executionContext);
+        }
         return;
     }
     if(opGraph.nodeCount() == 3)
