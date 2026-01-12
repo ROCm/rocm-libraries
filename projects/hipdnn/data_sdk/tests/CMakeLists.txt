@@ -21,6 +21,7 @@ add_executable(
     flatbuffer_utilities/TestNodeWrapper.cpp
     utilities/TestAllocators.cpp
     utilities/TestCallbackLogger.cpp
+    utilities/TestEngineIdHash.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
     utilities/TestMigratableMemory.cpp
