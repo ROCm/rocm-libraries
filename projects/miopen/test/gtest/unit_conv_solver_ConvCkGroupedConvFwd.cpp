@@ -117,9 +117,10 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 
 auto GetTestParams(miopenDataType_t datatype)
 {
-// If MIOpen is built without CK these tests will fail, skip them to avoid failing
+// Solution is only applicable to devices that default to 64-lane wavefronts
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    Gpu supportedDevices = Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X;
+    Gpu supportedDevices =
+        Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif

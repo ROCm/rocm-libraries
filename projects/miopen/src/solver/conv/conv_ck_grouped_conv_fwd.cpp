@@ -453,8 +453,8 @@ bool ConvDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
     if(!ctx.use_hip_kernels)
         return false;
 
-    const std::string& arch = ctx.GetStream().GetDeviceName();
-    if((arch != "gfx906") && (arch != "gfx908") && (arch != "gfx90a") && (arch != "gfx942"))
+    // Kernel requires a wavefront size of 64
+    if(const std::string& arch = ctx.GetStream().GetDeviceName(); !arch.starts_with("gfx9"))
         return false;
 
     if(!problem.IsLayoutDefault())

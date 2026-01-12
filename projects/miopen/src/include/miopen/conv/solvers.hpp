@@ -5008,7 +5008,6 @@ MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetAllFwdKernelTypeStrings();
 MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetAllBwdKernelTypeStrings();
 #endif
 
-
 } // namespace conv
 } // namespace solver
 } // namespace miopen
