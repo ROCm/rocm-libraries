@@ -123,6 +123,95 @@ class TestValidatePackBF16(CMSValidationTestBase):
         # PackA0 at index 2 is invalid because LRs are only guaranteed at index 3 (after SWaitCnt)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=2 issued too early, must be issued after idx=3 (because of LRA0 issued @ idx=0).")
 
+class TestValidatePackBF16MFMAReorder(CMSValidationTestBase):
+    """
+    Validate the Pack instructions present in BF16 kernels.
+    Here, the pack commands map to v_perm.
+
+    Change from column-major to row-major.
+
+    1st half
+    | 0 2 | -> | 0 1 |
+    | 1 3 | -> | 2 3 |
+    2nd half
+    | 4 6 | -> | 4 5 |
+    | 5 7 | -> | 6 7 |
+    """
+    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+        super().setUp(kernel_updates)
+        self.mfma_reorder = [0, 2, 1, 3, 4, 6, 5, 7]
+    
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+
+    def test_passing(self):
+        """
+        Passing case where pack instructions are issued after the SWaitCnt guaranteeing LRs are complete.
+        """
+        assert self.num_vmfma == 8
+
+        optSchedule = {
+            "SYNC": [[2]],
+            
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+            "PackA0": [[3, 3, 5, 5]],
+            "PackB0": [[3, 3, 4, 4]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s")
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None, mfmaReorder=self.mfma_reorder)
+
+    def test_fail_too_early(self):
+        """
+        Failing case where pack instructions are issued before the SWaitCnt guaranteeing LRs are complete.
+        """
+        assert self.num_vmfma == 8
+
+        optSchedule = {
+            "LRA0": [[-1, -1]],
+            "LRB0": [[-1, -1]],
+            "SYNC": [[3]],
+            "PackA0": [[2, 3, 5, 5]],
+            "PackB0": [[3, 3, 4, 4]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s")
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=2 issued too early, must be issued after idx=3 (because of LRA0 issued @ idx=-1).", mfmaReorder=self.mfma_reorder)
+
+    def test_failing_too_late(self):
+        """
+        Failing case where pack instructions are issued after the MFMA that needs them.
+        
+        With mfma_reorder = [0, 2, 1, 3, 4, 6, 5, 7]:
+        - Logical index 4 -> execution position 4
+        - Logical index 5 -> execution position 6
+        - Logical index 6 -> execution position 5
+        
+        For PackA0 (2 tiles, 2 packs per tile):
+        - Tile 0: needed at logical 4 -> execution position 4
+        - Tile 1: needed at logical 5 -> execution position 6
+        
+        If we issue PackA0 at position 4 or later, it's too late for tile 0.
+        """
+        assert self.num_vmfma == 8
+
+        optSchedule = {
+            "LRA0": [[-1, -1]],
+            "LRB0": [[-1, -1]],
+            "SYNC": [[-1]],
+            "PackA0": [[3, 4, 5, 5]],
+            "PackB0": [[3, 3, 4, 4]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s")
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=4 issued too late, must be issued before MFMA @ idx=4.", mfmaReorder=self.mfma_reorder)
 
 class TestValidatePackBF16PLRPack(CMSValidationTestBase):
     """
@@ -383,6 +472,93 @@ class TestValidatePackTF32(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=5 issued too late, must be issued before MFMA @ idx=3.")
+
+class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
+    """
+    Only tests with UsePLRPack since performance is better.
+    Use MFMA reorder to swap Q2 and Q3.
+
+    | 0 |  6 |     | 0 |  3 |
+    | 1 |  7 |     | 1 |  4 |
+    | 2 |  8 |     | 2 |  5 |
+    ----------     ----------
+    | 3 |  9 |  -> | 6 |  9 |
+    | 4 | 10 |     | 7 | 10 |
+    | 5 | 11 |     | 8 | 11 |
+    """
+    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates["UsePLRPack"] = True
+        kernel_updates["UseF32XEmulation"] = True
+        kernel_updates["ForceUnrollSubIter"] = True
+        kernel_updates["DepthU"] = 32
+        super().setUp(kernel_updates)
+
+        self.q1s = 0
+        self.q1e = self.num_vmfma // 4 - 1
+
+        self.q2s = self.q1e + 1
+        self.q2e = self.num_vmfma // 2 - 1
+
+        self.q3s = self.q2e + 1
+        self.q3e = self.num_vmfma // 4 * 3 - 1
+
+        self.q4s = self.q3e + 1
+        self.q4e = self.num_vmfma - 1
+
+        self.mfma_reorder = [0, 1, 2, 6, 7, 8, 3, 4, 5, 9, 10, 11]
+    
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    
+    def test_passing(self):
+        """
+        Simple passing case.
+        """
+        assert self.num_vmfma == 12
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1, self.q3s+1, self.q4s+1]],
+
+            "LRA0": [[self.q2s] * 2],
+            "PackA0": [[self.q2e] * 24],
+
+            "LRB0": [[self.q1s] * 2],
+            "PackB0": [[self.q1e] * 24],
+            
+            "LRB3": [[self.q3s] * 2],
+            "PackB3": [[self.q3e] * 24],
+
+            "LRA3": [[self.q4s] * 2],
+            "PackA3": [[self.q4e] * 24],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s")
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None, mfmaReorder=self.mfma_reorder)
+
+    def test_failing_too_early(self):
+        """
+        Failing case where PackB0 are issued too early (before LRB0s are complete).
+        """
+        assert self.num_vmfma == 12
+
+        optSchedule = {
+            "SYNC": [[self.q1e]],
+            "LRA0": [[self.q1s] * 2],
+            "LRB0": [[self.q1s] * 2],
+            "PackB0": [[self.q1s+1] * 24],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=1 issued too early, must be issued after idx=2 (because of LRB0 issued @ idx=0).", mfmaReorder=self.mfma_reorder)
 
 class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
     """

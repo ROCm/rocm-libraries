@@ -105,6 +105,12 @@ def create_range(min_val: int, num: int, max_val: int = -1, step: int = 1, repea
         max_val = min_val + step*num
     return [min(val, max_val) for val in range(min_val, min_val + step*num, step) for _ in range(repeat)]
 
+def inflight(lst, index):
+    """
+    Return number of inflight loads in a given list of instructions at a specified index
+    """
+    return sum(val < (index) for val in lst)
+
 def duplicate_list_items(input_list: list, repeat_count: int, step: int = 0) -> list:
     """
     Duplicate each item in input_list repeat_count times. Optionally duplicate with a step
@@ -2275,18 +2281,17 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     elif isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         syncTable = [
-            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Begininng of a iteration. Wait for prior local read.") ,
-            5,  SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for first two LRA0. Skip 2*LRA0 + 1*LRB0.") ,
-            17, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Before GRA and PackB0. Wait for all prior LRA0 for GRA and the first 2*LRB0 for PackB0. Skip 4*LRB0.") ,
+            5,  SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for all LRA0. Skip 1*LRB0.") ,
+            17, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackB0. Wait for all prior LRB0 for PackB0.") ,
             17, SBarrier(comment="GRA") ,
             32, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before GRB. Wait for all prior LRB0.") ,
             32, SBarrier(comment="GRB") ,
             35, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Before LRB3. Wait for GRB from previous iter. Skip 4*GRA + 2*GRB") ,
             35, SBarrier(comment="LRB") ,
-            44, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Before PackB3. Wait for first two LRB3. Skip 4*LRA0.") ,
+            44, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackB3. Wait for all prior LRB3.") ,
             53, SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="Before LRA3. Wait for GRA from previous iter. Skip 4*GRA + 6*GRB") ,
             53, SBarrier(comment="LRA") ,
-            63, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Before PackA3. Wait for first two LRA3. Skip 2*LRA3.") ,
+            63, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Before PackA3. Wait for all prior LRA3.") ,
         ]
         optSchedule = {
             'SYNC'  : [syncTable[::2]],
@@ -2320,7 +2325,6 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     
     numMfma = 72
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()
     return True, opt1
 
 @RegisterSchedule(
@@ -2653,6 +2657,108 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(256, 192, 32, 2, 0, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
+    # print('kernel', kernel)
+    kernel["MfmaInitCVgprs"] = True
+    numMfma = 144
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isTN(kernel) and not useLDSTr and TLDS == 1:
+        kernel["UsePLRPack"] = True
+        numPackInstr = 24 
+        numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
+        
+        # LRA0 + PACKA0 - done before 1/4 MFMAs - index 36
+        lrA0 = [0,0, 1,1, 2,2, 3,3]
+        waitLRA0 = max(lrA0) + 2
+        startPACKA0 = waitLRA0
+        packA0 = create_range(startPACKA0, (len(lrA0)//2)*numPackIndices, numMfma//4-1)
+        
+         # LBR0 + PACKB0 - done before 2/4 MFMAs - index 72
+        lrB0 = [7,7, 11,11, 15,15]
+        waitLRB0 = max(lrB0) + 2
+        startPACKB0 = max(waitLRB0,max(packA0)) # Starts after waitLRB0 and packA0
+        packB0 = create_range(startPACKB0, (len(lrB0)//2)*numPackIndices, numMfma//2-1)
+        
+        # LBR3 + PACKB3 - start after 2/4 MFMAs - index 72
+        halfMFMA = numMfma//2
+        startLRB3 = halfMFMA
+        lrB3 = create_range(startLRB3, 1, numMfma-1)
+        lrB3 += create_range(max(lrB3)+6, 2, numMfma-1)
+        waitLRB3 = startLRB3 + 6
+        packB3 = create_range(waitLRB3, (len(lrB3)//2)*numPackIndices, numMfma-1)
+        
+        # LRA3 + PACKA3 - start after 3/4 MFMAs - index 108
+        startLRA3 = (3*numMfma)//4
+        lrA3 = create_range(startLRA3, 4, numMfma-1)
+        waitLRA3 = startLRA3 + 5
+        packA3 = create_range(waitLRA3, (len(lrA3)//2)*numPackIndices, numMfma-1)
+        
+        syncTable = [
+            waitLRA0, SWaitCnt(dscnt=inflight(lrA0, waitLRA0)-2, vlcnt=-1, vscnt=-1, comment="wait for 1st 2 LRA0 to complete"),
+            waitLRA0+numPackIndices, SWaitCnt(dscnt=inflight(lrB0, waitLRA0+numPackIndices), vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete"),
+            
+            waitLRB0, SWaitCnt(dscnt=inflight(lrB0, waitLRB0)-2, vlcnt=-1, vscnt=-1, comment="wait for 1st 2 LRB0 to complete"),
+            waitLRB0+numPackIndices, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete"),
+            waitLRB0+numPackIndices, SBarrier(comment="Barrier before GRA&GRB"),
+            
+            startLRB3-1, SWaitCnt(dscnt=-1, vlcnt=6, vscnt=-1, comment="Wait for prev GRA&GRB"),
+            startLRB3-1, SBarrier(comment=""),
+            
+            waitLRB3,SWaitCnt(dscnt=inflight(lrB3, waitLRB3)-2, vlcnt=-1, vscnt=-1, comment="Wait for 1st 2 LRB3 to complete"),
+            waitLRB3+numPackIndices,SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB3 to complete"),
+
+            waitLRA3, SWaitCnt(dscnt=inflight(lrA3,waitLRA3)-2, vlcnt=-1, vscnt=-1, comment="Wait for 1st 2 LRA3 to complete"),
+            waitLRA3+numPackIndices, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA3 to complete")
+        ]
+
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            
+            'GRIncA' : [[0,0,0, 1,1,1, 2,2,2]],
+            'GRIncB' : [[3,3,3, 4,4,4, 5,5,5]], 
+
+            'LRA0'   : [lrA0],
+            'PackA0' : [packA0],
+            
+            'LRB0'   : [lrB0],
+            'PackB0' : [packB0],
+            
+            'GRA'    : [[72,72, 74,74, 76,76, 100,100, 102,102, 104,104, 106,106, 108,108],
+                        [73,73, 75,75, 77,77, 101,101, 103,103, 105,105, 107,107, 109,109]],
+            'GRB'    : [[38,38, 40,40, 42,42, 44,44, 46,46, 48,48],
+                        [39,39, 41,41, 43,43, 45,45, 47,47, 49,49]],
+            
+            'LRA3'   : [lrA3],
+            'PackA3' : [packA3],
+            
+            'LRB3'   : [lrB3],
+            'PackB3' : [packB3],
+
+            'LRSA'   : [[35]],
+            'LRSB'   : [[35]],
+
+            'LWSA'   : [[107]],
+            'LWSB'   : [[107]],
+
+            'LCC'    : [[143, 143]],
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    else:
+        return False, None
+
     return True, opt1
 
 @RegisterSchedule(
@@ -3065,4 +3171,394 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
-  
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 256, 32, 2, 0, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
+    numMfma = 96
+    kernel["MfmaInitCVgprs"] = True
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = True
+
+        # LRA0 + GRIncA
+        lra0 = create_range(min_val = 0, num = 4, step = 1, repeat = 1)
+        grIncA = create_range(min_val = max(lra0)+1, num = 3, step = 1, repeat = 3)
+
+        waitLRA0 = max(grIncA)+2
+        startPACKA0 = waitLRA0
+
+        packAOffset = [ 
+            0, 0, 1, 1, 
+            4, 4,
+            5, 5, 6, 6,
+
+            2, 2, 3, 3, 
+            4, 4,
+            7, 7, 8, 8,
+            ]   
+
+       
+        packA0 = [x + startPACKA0 for x in packAOffset]
+        packA0Done = max(packA0)
+
+        # Sanity check
+        assert packA0Done < numMfma//4 , f"packA0Done {packA0Done} >= {numMfma//4}"
+
+        # 1st part of LRB0 + GRIncB
+        lrb0 = create_range(min_val = max(packA0)+1, num = 6, step = 1, repeat = 1)
+        grIncB = create_range(min_val = max(packA0)+1, num = 4, step = 1, repeat= 2)
+        grIncB += [max(grIncB)+1]
+
+        # GRA  + 2nd part of LBR0
+        grA = create_range(min_val = max(lrb0)+1, num = 4, step = 2,repeat = 2)
+        lrb0 += create_range(min_val = max(lrb0)+4, num = 2, step = 1, repeat = 1)
+
+        waitLRB0 = max(lrb0)+2
+        startPACKB0 = waitLRB0
+
+        packBOffset = [ 
+            0, 0, 1, 1, 
+            8, 8,
+            9, 9, 10, 10,
+
+            2, 2, 3, 3, 
+            8, 8,
+            11, 11, 12, 12,
+
+            4, 4, 5, 5, 
+            8, 8,
+            13, 13, 14, 14,
+
+            6, 6, 7, 7, 
+            8, 8,
+            15, 15, 16, 16,
+            ]   
+        
+        packB0 = [x + startPACKB0 for x in packBOffset]
+
+        halfMFMA = numMfma//2
+        assert max(packB0) < halfMFMA, f"max(packB0) {max(packB0)} >= halfMFMA {halfMFMA}"
+
+        # LR3
+        startLRB3 = halfMFMA
+        # Interleave GRA and LBR3
+        lrb3 = [create_range(min_val = startLRB3, num = 3, step = 2, repeat = 2),
+                create_range(min_val = startLRB3+1, num = 3, step = 2, repeat = 2)]
+
+        # Splitting LRB3 to avoid LDS Issue latency
+        lrb3[0]+= create_range(min_val = max(lrb3[0])+5, num = 1, step = 2, repeat = 2)
+        lrb3[1]+= create_range(min_val = max(lrb3[1])+5, num = 1, step = 2, repeat = 2)
+
+
+        grB = [create_range(min_val = startLRB3+1,num = 4,step = 2, repeat = 2),
+               create_range(min_val = startLRB3,num = 4,step = 2, repeat = 2)]
+        
+        
+        waitLRB3 = max(lrb3[1])+2 
+
+        # Use different PackBOffset to shift last 5 CVTs iterations after GRB/LRA3
+        packB3Offset = [ 
+            0, 0, 1, 1, 
+            8, 8,
+            9, 9, 10, 10,
+
+            2, 2, 3, 3, 
+            8, 8,
+            11, 11, 19, 19,
+
+            4, 4, 5, 5, 
+            8, 8,
+            20, 20, 21, 21,
+
+            6, 6, 7, 7, 
+            8, 8,
+            22, 22, 23, 23,
+            ]   
+
+        # PackB3
+        packB3 = [x + waitLRB3 for x in packB3Offset]
+
+        startLRA3 = (3*numMfma)//4 
+        # GRB + LRA3 (interleaved)
+        grB[0] += create_range(min_val = startLRA3,num = 4,step = 2, repeat = 2)
+        grB[1] += create_range(min_val = startLRA3+1,num = 4,step = 2, repeat = 2)
+
+        lra3 = [create_range(min_val = startLRA3+1,num=4,step=2,repeat=1),
+                create_range(min_val = startLRA3,num=4,step=2,repeat=1)]
+        
+        waitLRA3 = max(lra3[0]) + 6 
+        packA3 = [x + waitLRA3 for x in packAOffset]
+
+        syncTable = [     -1, SBarrier(comment="Sync codepath"),
+                    waitLRA0, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1st LRA0 to complete"),
+                    waitLRA0+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2nd LRA0 to complete"),
+                    waitLRA0+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3rd LRA0 to complete"),
+                    waitLRA0+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA0 to complete"),
+                    min(grIncB), SBarrier(comment="Barrier before GRA"),
+
+                    waitLRB0, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB0 to complete"),
+                    waitLRB0+1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB0 to complete"),
+                    waitLRB0+2, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB0 to complete"),
+                    waitLRB0+3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
+                    waitLRB0+4, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB0 to complete"),
+                    waitLRB0+5, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB0 to complete"),
+                    waitLRB0+6, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB0 to complete"),
+                    waitLRB0+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB0 to complete"),
+
+                    startLRB3-1,SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for previous GRA&B"),
+                    startLRB3-1,SBarrier(comment="Barrier before GRB and before LRBA3/LBRB3"),
+
+                    waitLRB3,SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB3 to complete"),
+                    waitLRB3+1,SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB3 to complete"),
+                    waitLRB3+2,SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB3 to complete"),
+                    waitLRB3+3,SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB3 to complete"),
+                    waitLRB3+4,SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB3 to complete"),
+                    waitLRB3+5,SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB3 to complete"),
+                    waitLRB3+6,SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB3 to complete"),
+                    waitLRB3+7,SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB3 to complete"),
+
+                    waitLRA3, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1/4 LRA3 to complete"),                    
+                    waitLRA3+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2/4 LRA3 to complete"),                    
+                    waitLRA3+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3/4 LRA3 to complete"),                    
+                    waitLRA3+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 4/4 LRA3 to complete"),                    
+                    ]
+
+        syncCode = syncTable[1::2]
+        
+        optSchedule = {
+
+            'SYNC': [syncTable[::2]],
+
+            'GRIncA': [grIncA],
+            'GRIncB': [grIncB],
+            'LRA0': [lra0],
+            'LRB0': [lrb0],
+            'PackA0' : [packA0],
+            'PackB0' : [packB0],
+
+            'GRA': [grA],
+            'GRB': [*grB],              
+            'LRSA': [[max(lrb0)+1]],
+            'LRSB': [[max(lrb0)+1]],
+            'LWSA': [[numMfma-2]],
+            'LWSB': [[numMfma-2]],
+            'LCC': [[numMfma-1, numMfma-1]],
+            'LRA3': [*lra3],
+            'LRB3': [*lrb3],
+            'PackB3' : [packB3],
+            'PackA3' : [packA3],
+
+        }
+        print(optSchedule)
+        nglshift = nllshift = 12 # vmcnt shift for ngl and nll
+    else:
+        return False, None
+
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
+    return True, opt1
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 256, 32, 2, 0, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
+    numMfma = 96
+    kernel["MfmaInitCVgprs"] = True
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = True
+
+        # LRA0 + GRIncA
+        lra0 = create_range(min_val = 0, num = 4, step = 1, repeat = 1)
+        grIncA = create_range(min_val = max(lra0)+1, num = 3, step = 1, repeat = 3)
+
+        waitLRA0 = max(grIncA)+2
+        startPACKA0 = waitLRA0
+
+        packAOffset = [ 
+            0, 0, 1, 1, 
+            4, 4,
+            5, 5, 6, 6,
+
+            2, 2, 3, 3, 
+            4, 4,
+            7, 7, 8, 8,
+            ]   
+
+       
+        packA0 = [x + startPACKA0 for x in packAOffset]
+        packA0Done = max(packA0)
+
+        # Sanity check
+        assert packA0Done < numMfma//4 , f"packA0Done {packA0Done} >= {numMfma//4}"
+
+        # 1st part of LRB0 + GRIncB
+        lrb0 = create_range(min_val = max(packA0)+1, num = 6, step = 1, repeat = 1)
+        grIncB = create_range(min_val = max(packA0)+1, num = 4, step = 1, repeat= 2)
+        grIncB += [max(grIncB)+1]
+
+        # GRA  + 2nd part of LBR0
+        grA = create_range(min_val = max(lrb0)+1, num = 4, step = 2,repeat = 2)
+        lrb0 += create_range(min_val = max(lrb0)+4, num = 2, step = 1, repeat = 1)
+
+        waitLRB0 = max(lrb0)+2
+        startPACKB0 = waitLRB0
+
+        packBOffset = [ 
+            0, 0, 1, 1, 
+            8, 8,
+            9, 9, 10, 10,
+
+            2, 2, 3, 3, 
+            8, 8,
+            11, 11, 12, 12,
+
+            4, 4, 5, 5, 
+            8, 8,
+            13, 13, 14, 14,
+
+            6, 6, 7, 7, 
+            8, 8,
+            15, 15, 16, 16,
+            ]   
+        
+        packB0 = [x + startPACKB0 for x in packBOffset]
+
+        halfMFMA = numMfma//2
+        assert max(packB0) < halfMFMA, f"max(packB0) {max(packB0)} >= halfMFMA {halfMFMA}"
+
+        # LR3
+        startLRB3 = halfMFMA
+        # Interleave GRA and LBR3
+        lrb3 = [create_range(min_val = startLRB3, num = 3, step = 2, repeat = 2),
+                create_range(min_val = startLRB3+1, num = 3, step = 2, repeat = 2)]
+
+        # Splitting LRB3 to avoid LDS Issue latency
+        lrb3[0]+= create_range(min_val = max(lrb3[0])+5, num = 1, step = 2, repeat = 2)
+        lrb3[1]+= create_range(min_val = max(lrb3[1])+5, num = 1, step = 2, repeat = 2)
+
+
+        grB = [create_range(min_val = startLRB3+1,num = 4,step = 2, repeat = 2),
+               create_range(min_val = startLRB3,num = 4,step = 2, repeat = 2)]
+        
+        
+        waitLRB3 = max(lrb3[1])+2 
+
+        # Use different PackBOffset to shift last 5 CVTs iterations after GRB/LRA3
+        packB3Offset = [ 
+            0, 0, 1, 1, 
+            8, 8,
+            9, 9, 10, 10,
+
+            2, 2, 3, 3, 
+            8, 8,
+            11, 11, 19, 19,
+
+            4, 4, 5, 5, 
+            8, 8,
+            20, 20, 21, 21,
+
+            6, 6, 7, 7, 
+            8, 8,
+            22, 22, 23, 23,
+            ]   
+
+        # PackB3
+        packB3 = [x + waitLRB3 for x in packB3Offset]
+
+        startLRA3 = (3*numMfma)//4 
+        # GRB + LRA3 (interleaved)
+        grB[0] += create_range(min_val = startLRA3,num = 4,step = 2, repeat = 2)
+        grB[1] += create_range(min_val = startLRA3+1,num = 4,step = 2, repeat = 2)
+
+        lra3 = [create_range(min_val = startLRA3+1,num=4,step=2,repeat=1),
+                create_range(min_val = startLRA3,num=4,step=2,repeat=1)]
+        
+        waitLRA3 = max(lra3[0]) + 6 
+        packA3 = [x + waitLRA3 for x in packAOffset]
+
+        syncTable = [     -1, SBarrier(comment="Sync codepath"),
+                    waitLRA0, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1st LRA0 to complete"),
+                    waitLRA0+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2nd LRA0 to complete"),
+                    waitLRA0+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3rd LRA0 to complete"),
+                    waitLRA0+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRA0 to complete"),
+                    min(grIncB), SBarrier(comment="Barrier before GRA"),
+
+                    waitLRB0, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB0 to complete"),
+                    waitLRB0+1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB0 to complete"),
+                    waitLRB0+2, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB0 to complete"),
+                    waitLRB0+3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
+                    waitLRB0+4, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB0 to complete"),
+                    waitLRB0+5, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB0 to complete"),
+                    waitLRB0+6, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB0 to complete"),
+                    waitLRB0+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB0 to complete"),
+
+                    startLRB3-1,SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for previous GRA&B"),
+                    startLRB3-1,SBarrier(comment="Barrier before GRB and before LRBA3/LBRB3"),
+
+                    waitLRB3,SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for 1/8 LRB3 to complete"),
+                    waitLRB3+1,SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 2/8 LRB3 to complete"),
+                    waitLRB3+2,SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 3/8 LRB3 to complete"),
+                    waitLRB3+3,SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB3 to complete"),
+                    waitLRB3+4,SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 5/8 LRB3 to complete"),
+                    waitLRB3+5,SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRB3 to complete"),
+                    waitLRB3+6,SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 7/8 LRB3 to complete"),
+                    waitLRB3+7,SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 8/8 LRB3 to complete"),
+
+                    waitLRA3, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 1/4 LRA3 to complete"),                    
+                    waitLRA3+1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 2/4 LRA3 to complete"),                    
+                    waitLRA3+2, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 3/4 LRA3 to complete"),                    
+                    waitLRA3+3, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 4/4 LRA3 to complete"),                    
+                    ]
+
+        syncCode = syncTable[1::2]
+        
+        optSchedule = {
+
+            'SYNC': [syncTable[::2]],
+
+            'GRIncA': [grIncA],
+            'GRIncB': [grIncB],
+            'LRA0': [lra0],
+            'LRB0': [lrb0],
+            'PackA0' : [packA0],
+            'PackB0' : [packB0],
+
+            'GRA': [grA],
+            'GRB': [*grB],              
+            'LRSA': [[max(lrb0)+1]],
+            'LRSB': [[max(lrb0)+1]],
+            'LWSA': [[numMfma-2]],
+            'LWSB': [[numMfma-2]],
+            'LCC': [[numMfma-1, numMfma-1]],
+            'LRA3': [*lra3],
+            'LRB3': [*lrb3],
+            'PackB3' : [packB3],
+            'PackA3' : [packA3],
+
+        }
+        print(optSchedule)
+        nglshift = nllshift = 12 # vmcnt shift for ngl and nll
+    else:
+        return False, None
+
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidation() # Disable validation as this schedule re-order pack instructions (Non-descending-order validator to be updated to allow this)
+    return True, opt1

@@ -415,11 +415,15 @@ class Pack(ValidatorInstruction):
         if self.issued_at < self.must_start_after.done_idx():
             # NOTE: Don't have to check equality case, since only 1 instruction can be issued at any point in time.
             must_start_after_at = floor(self.must_start_after.done_idx()) % self.num_vmfma
-            must_start_after_issued_at = floor(self.must_start_after.issued_at) % self.num_vmfma
+            if self.num_vmfma - 1 + 0.5 <= (self.must_start_after.issued_at % self.num_vmfma) < self.num_vmfma:
+                # Special case to handle idx=-1 which is in the range of [numVMFMA + 0.5, numVMFMA)
+                must_start_after_issued_at = -1
+            else:
+                must_start_after_issued_at = floor(self.must_start_after.issued_at) % self.num_vmfma
             return f"{self.name} @ idx={issued_at} issued too early, must be issued after idx={must_start_after_at} (because of {self.must_start_after.name} issued @ idx={must_start_after_issued_at})."
         
         # Issued too late
-        if self.issued_at > self.needed_by.issued_at:
+        if self.issued_at >= self.needed_by.issued_at:
             needed_by_at = floor(self.needed_by.issued_at) % self.num_vmfma
             return f"{self.name} @ idx={issued_at} issued too late, must be issued before {self.needed_by.name} @ idx={needed_by_at}."
         
@@ -832,7 +836,7 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
     """
 
     if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
-        return False, f"Incorrect number of VMFMA indices in mfmaReorder. Expected {timeline.num_vmfma}, given {len(mfma_reorder)}."
+        raise ValueError(f"Incorrect number of VMFMA indices in mfmaReorder. Expected {timeline.num_vmfma}, given {len(mfma_reorder)}.")
 
     n_tiles_a = kernel["MIWaveTileA"]
     n_tiles_b = kernel["MIWaveTileB"]
@@ -899,7 +903,127 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
             for _, gr in grs:
                 gr.needed_by = LR_target.issued_at
 
-def _hook_up_packs_bf16(packs: list[Pack], local_reads: list[LocalRead], needed_by_offset: int, n_tiles_a: int) -> None:
+def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reorder: list[int], num_vmfma: int, kernel: 'Solution') -> None:
+    """
+    Set the needed_by field for Pack instructions.
+    This function handles all cases (BF16 and TF32).
+    
+    For BF16: Each pack's needed_by is calculated based on its position in the pack sequence.
+    For TF32: Only the first 4 and last 4 packs in each group of 24 have needed_by set.
+        The middle 16 packs (indices 4-19) are depended on by the last 4 packs implicitly.
+    
+    Args:
+        packs: List of Pack instructions to set needed_by for.
+        pack_name: The name of the pack (e.g., "PackA0", "PackB1").
+        use_plr_pack: Whether UsePLRPack flag is set.
+        force_unroll_sub_iter: Whether ForceUnrollSubIter flag is set.
+        i_loop: The loop index (0 for MAIN_LOOP_PREV, 1 for MAIN_LOOP, etc.).
+        n_tiles_a: Number of tiles in the A dimension (MIWaveTileA).
+        n_tiles_b: Number of tiles in the B dimension (MIWaveTileB).
+        is_tf32_emulation: Whether TF32 emulation mode is enabled.
+        mfma_reorder: The reordering mapping for MFMA indices.
+        num_vmfma: Number of MFMAs per iteration.
+    """
+    force_unroll_sub_iter = kernel.get("ForceUnrollSubIter", False)
+    is_tf32_emulation = kernel.get("UseF32XEmulation", False)
+    is_pack_B = pack_name.startswith("PackB")
+    use_plr_pack = kernel.get("UsePLRPack", False)
+    n_tiles_a = kernel["MIWaveTileA"]
+    n_tiles_b = kernel["MIWaveTileB"]
+    
+    # Calculate needed_by_offset based on pack type and configuration
+    pack_0 = pack_name.endswith("0")
+    needed_by_offset = num_vmfma * i_loop
+    if force_unroll_sub_iter:
+        if pack_0:
+            if pack_name.startswith("PackA"):
+                # Needed for 2nd quarter
+                needed_by_offset += num_vmfma // 4
+            else:
+                # Needed for 3rd quarter
+                needed_by_offset += 3 * (num_vmfma // 4)
+        else:  # Pack3
+            # Both A and B are needed for 1st quarter, the flag impacts whether it's this iteration's or next iteration's 1st quarter.
+            if use_plr_pack:
+                needed_by_offset += num_vmfma
+    else:
+        if pack_0:
+            needed_by_offset += num_vmfma // 2
+        else:
+            if use_plr_pack:
+                needed_by_offset += num_vmfma
+    
+    # Extract iteration offset from needed_by_offset to apply mfma_reorder correctly
+    # mfma_reorder only applies within a single iteration
+    iteration_offset = (needed_by_offset // num_vmfma) * num_vmfma
+    base_offset = needed_by_offset % num_vmfma
+    
+    if is_tf32_emulation:
+        n_tiles_a_quarter = n_tiles_a // 4
+        for pack in packs:
+            idx_in_group = pack.issue_index % 24
+            # Middle 16 packs (4-19) don't need needed_by set
+            # They are depended on by the last 4 packs and are handled implicitly.
+            if 4 <= idx_in_group < 20:
+                continue
+
+            # Calculate base index relative to quarter start
+            pack_offset = 0
+            # 1. Find fp32 mfma (column-major indexing within each quarter)
+            fp32_delta = (idx_in_group % 20) // 4
+            if is_pack_B:
+                fp32_delta *= n_tiles_a_quarter
+            pack_offset += 3 * fp32_delta  # 3 bf16 mfmas per fp32 mfma
+
+            # 2. Adjust into bf16 approximation
+            bf16_delta = 0
+            if idx_in_group < 4:  # bf16 approximations terms
+                # A_bf16 & B_bf16 are used in mfma 1/3
+                pass
+            elif idx_in_group >= 20:  # error terms
+                # A_error is used in mfma 2/3
+                # B_error is used in mfma 3/3
+                bf16_delta = 2 if is_pack_B else 1
+            pack_offset += bf16_delta
+            
+            # Combine with quarter offset to get logical MFMA index within iteration
+            logical_index = base_offset + pack_offset
+            
+            # Apply mfma_reorder to get execution position within iteration
+            if mfma_reorder:
+                execution_index = mfma_reorder[logical_index]
+            else:
+                execution_index = logical_index
+            
+            # Add iteration offset to get final position
+            needed_by = iteration_offset + execution_index
+            pack.needed_by = MFMA(issued_at=needed_by)
+    else:
+        # BF16 case
+        # Calculate packs_per_tile dynamically based on actual pack count
+        n_tiles = n_tiles_b if is_pack_B else n_tiles_a
+        packs_per_tile = len(packs) // n_tiles
+        
+        for pack in packs:
+            # Determine which tile this pack belongs to
+            tile_index = pack.issue_index // packs_per_tile
+            # Calculate the base needed_by index (in column-major order, relative to offset)
+            pack_offset = (tile_index * n_tiles_a if is_pack_B else tile_index)
+            
+            # Combine with half-iteration offset to get logical MFMA index within iteration
+            logical_index = base_offset + pack_offset
+            
+            # Apply mfma_reorder to get execution position within iteration
+            if mfma_reorder:
+                execution_index = mfma_reorder[logical_index]
+            else:
+                execution_index = logical_index
+            
+            # Add iteration offset to get final position
+            needed_by = iteration_offset + execution_index
+            pack.needed_by = MFMA(issued_at=needed_by)
+
+def _hook_up_packs_bf16(packs: list[Pack], local_reads: list[LocalRead]) -> None:
     """
     For BF16/Half: each Pack uses the result of 2 consecutive LRs.
     Pack ordering follows the v_perm loop in LocalRead.py:
@@ -909,6 +1033,9 @@ def _hook_up_packs_bf16(packs: list[Pack], local_reads: list[LocalRead], needed_
     
     So element_idx = pack_position % num_element_pairs
     And LR indices are: elementIdx*2 and elementIdx*2+1
+    
+    This function sets the must_start_after field based on LR dependencies.
+    The needed_by field is set separately by _set_pack_needed_by.
     """
     num_element_pairs = len(local_reads) // 2
     
@@ -928,16 +1055,8 @@ def _hook_up_packs_bf16(packs: list[Pack], local_reads: list[LocalRead], needed_
         latest_lr = max(pack_to_lrs, key=lambda lr: lr.done_idx())
         if latest_lr.guaranteed_by > pack.must_start_after.done_idx():
             pack.must_start_after = latest_lr
-    
-    # Calculate needed_by for the packs
-    is_pack_B = packs[0].name.startswith("PackB")
-    for pack in packs:
-        delta = pack.issue_index // 4
-        if is_pack_B:
-            delta *= n_tiles_a
-        pack.needed_by = MFMA(issued_at=needed_by_offset + delta)
 
-def _hoop_up_packs_f32x(packs: list[Pack], all_middle_16_packs: list[Pack], local_reads: list[LocalRead], needed_by_offset: int, n_tiles_a: int) -> None:
+def _hook_up_packs_f32x(packs: list[Pack], all_middle_16_packs: list[Pack], local_reads: list[LocalRead]) -> None:
     """
     For TF32 emulation, data is loaded as fp32 and converted into pairs of bf16 values.
     Each fp32 value is converted into a bf16 approximation and an error term.
@@ -952,6 +1071,10 @@ def _hoop_up_packs_f32x(packs: list[Pack], all_middle_16_packs: list[Pack], loca
     - 4 `v_cvt_pk_bf16_f32` to calculate and pack the bf16 approximations.
     - 8 pairs of (`v_cvt_f32_bf16`, `v_sub_f32`) to calculate the error terms.
     - 4 `v_cvt_pk_bf16_f32` to pack the error terms into final registers.
+    
+    This function sets the must_start_after field based on LR and inter-pack dependencies,
+    and handles pair constraints for middle-16 packs.
+    The needed_by field is set separately by _set_pack_needed_by.
     """
     # Sort by index in the list of pack instructions rather than by the mfma_index they are placed at.
     # This is necessary to handle inter-pack dependencies.
@@ -965,10 +1088,6 @@ def _hoop_up_packs_f32x(packs: list[Pack], all_middle_16_packs: list[Pack], loca
 
     # NOTE: Assuming that all LRs are of the same width.
     vgprs_per_local_read = 8 // n_lrs_per_group
-
-    n_tiles_a_quarter = n_tiles_a // 4
-
-    is_pack_B = packs[0].name.startswith("PackB")
 
     # Partial Pack->Pack dependency graph within a group of 24.
     # Key: pack index (0-23), Value: list of pack indices it depends on.
@@ -1015,30 +1134,6 @@ def _hoop_up_packs_f32x(packs: list[Pack], all_middle_16_packs: list[Pack], loca
                 latest_dep = max((pack_group[d] for d in dependencies), key=lambda p: p.done_idx())
                 if latest_dep.done_idx() > pack.must_start_after.done_idx():
                     pack.must_start_after = latest_dep
-            # Set needed_by, but only for the first and last 4 packs
-            # The middle 16 packs are depended on by the last 4 packs and are handled implicitly.
-            if 4 <= leader_idx < 20:
-                continue
-
-            needed_by = needed_by_offset
-            # 1. Find fp32 mfma (column-major indexing within each quarter)
-            fp32_delta = (leader_idx % 20) // 4
-            if is_pack_B:
-                fp32_delta *= n_tiles_a_quarter
-            needed_by += 3 * fp32_delta  # 3 bf16 mfmas per fp32 mfma
-
-            # 2. Adjust into bf16 approximation
-            bf16_delta = 0
-            if leader_idx < 4:  # bf16 approximations terms
-                # A_bf16 & B_bf16 are used in mfma 1/3
-                pass
-            elif leader_idx >= 20:  # error terms
-                # A_error is used in mfma 2/3
-                # B_error is used in mfma 3/3
-                bf16_delta = 2 if is_pack_B else 1
-            needed_by += bf16_delta
-            
-            pack.needed_by = MFMA(issued_at=needed_by)
 
     # For the middle-16 packs, hook up the consumer Pack to the producer Pack to handle temporary register re-use.
     # Hook up the consumer Pack 
@@ -1093,41 +1188,24 @@ def _get_lrs_for_pack(timeline: Timeline, use_plr_pack: bool, pack_name: str, lo
     local_reads = timeline.get_instructions(lr_names, loop_to_use)
     return [lr for _,lr in local_reads]
 
-def hook_up_packs(timeline: Timeline, kernel: 'Solution') -> None:
+def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
     Set the needed_by and must_start_after fields of Packs based on the LR(s) they depend on.
-    """
-    def calculate_needed_by_offset(pack_name: str, use_plr_pack: bool, force_unroll_sub_iter: bool, i_loop: int, num_vmfma: int) -> int:
-        """
-        Calculate the needed_by offset for a given Pack instruction.
-        """
-        pack_0 = pack_name.endswith("0")
-        needed_by_offset = num_vmfma * i_loop
-        if force_unroll_sub_iter:
-            if pack_0:
-                if pack_name.startswith("PackA"):
-                    # Needed for 2nd quarter
-                    needed_by_offset += num_vmfma // 4
-                else:
-                    # Needed for 3rd quarter
-                    needed_by_offset += 3 * (num_vmfma // 4)
-            else:  # Pack3
-                # Both A and B are needed for 1st quarter, the flag impacts whether it's this iteration's or next iteration's 1st quartert.
-                if use_plr_pack:
-                    needed_by_offset += num_vmfma
-        else:
-            if pack_0:
-                needed_by_offset += num_vmfma // 2
-            else:
-                if use_plr_pack:
-                    needed_by_offset += num_vmfma
-        return needed_by_offset
 
+    Args:
+        timeline:       The Timeline object containing the instructions.
+        kernel:         Solution object containing the kernel metadata.
+        mfma_reorder:   Mapping between the index of a default-scheduled MFMA and its new custom assigned index.
+    """
+    if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
+        raise ValueError(f"Incorrect number of VMFMA indices in mfmaReorder. Expected {timeline.num_vmfma}, given {len(mfma_reorder)}.")
+    
     is_tf32_emulation = kernel.get("UseF32XEmulation", False)
     is_4x4mfma_tf32 = kernel.get("UseMFMAF32XEmulation", False)
 
     use_plr_pack = kernel.get("UsePLRPack", False)
     for i_loop, loop in enumerate(timeline.loops):
+        # 1. Gather all Packs in the current loop.
         packs_by_name: dict[str, list[Pack]] = {}
         for pack_name in timeline.get_instruction_names():
             if not pack_name.startswith("Pack"):
@@ -1137,6 +1215,7 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution') -> None:
                 continue
             packs_by_name[pack_name] = [pack for _, pack in packs_and_indices]
         
+        # 2. Gather all middle-16 packs in the current loop.
         if is_tf32_emulation and not is_4x4mfma_tf32:
             all_middle_16_packs = []
             for packs in packs_by_name.values():
@@ -1145,20 +1224,22 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution') -> None:
                         all_middle_16_packs.append(pack)
             all_middle_16_packs.sort(key=lambda p: p.issued_at)
 
+        # 3. Hook up the needed_by and must_start_after fields
         for pack_name, packs in packs_by_name.items():
             local_reads = _get_lrs_for_pack(timeline, use_plr_pack, pack_name, loop)
             if not local_reads:
                 continue
 
-            needed_by_offset = calculate_needed_by_offset(pack_name, use_plr_pack, kernel.get("ForceUnrollSubIter", False), i_loop, timeline.num_vmfma)
-
             if is_tf32_emulation:
                 if is_4x4mfma_tf32:
                     raise NotImplementedError("TF32 emulation mode with MFMA F32X emulation is not supported.")
                 else:
-                    _hoop_up_packs_f32x(packs, all_middle_16_packs, local_reads, needed_by_offset, n_tiles_a=kernel["MIWaveTileA"])
+                    _hook_up_packs_f32x(packs, all_middle_16_packs, local_reads)
             else:
-                _hook_up_packs_bf16(packs, local_reads, needed_by_offset, n_tiles_a=kernel["MIWaveTileA"])
+                _hook_up_packs_bf16(packs, local_reads)
+            
+            # Set needed_by for all packs in one place, handling all cases
+            _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, timeline.num_vmfma, kernel)
 
 
 def validate_timeline(timeline: Timeline) -> Optional[str]:
@@ -1542,10 +1623,6 @@ def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo',
     """
     Ensure that the Packs start and end at the correct indices.
     """
-    if schedule_info.mfmaReorder:
-        printWarning("MFMA reorder is not supported for pack validation. Skipping pack validation.")
-        return True, ""
-
     if context["kernel"].get("UseMFMAF32XEmulation", False):
         printWarning("Pack validation is not supported for MFMA F32X emulation mode.")
         return True, ""
@@ -1562,7 +1639,7 @@ def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo',
     apply_swaits(timeline)
     apply_barriers(timeline)
     set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
-    hook_up_packs(timeline, kernel)
+    hook_up_packs(timeline, kernel, schedule_info.mfmaReorder)
 
     message = validate_timeline(timeline)
 
