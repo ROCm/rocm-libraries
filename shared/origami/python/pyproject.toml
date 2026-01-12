@@ -35,7 +35,7 @@ test = [
 
 [tool.scikit-build]
 wheel.packages = ["src/origami"]
-cmake.version = ">=3.15"
+cmake.version = ">=3.25"
 build.verbose = true
 # CMake source directory - use current directory (python/) which contains CMakeLists.txt
 # The python/CMakeLists.txt will automatically build origami from parent directory
