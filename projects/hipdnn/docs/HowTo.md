@@ -226,7 +226,9 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 
 ### CI Maintenance
 
-- **TheRock Version**: The TheRock nightly releases are centralized in `.github/workflows/therock-ci.yml`. Update the `--release` arg in the `hipdnn-clang-tidy.yml` workflow to a recent release on demand. It will likely need to be updated whenever new dependency API is used that is absent from past ROCm releases. 
+- **TheRock CI**: Uses a pinned Git commit hash from the TheRock repository. `therock_ci.yml` and several other workflows need their hash updated at a frequent cadence for CI to build hipDNN with recent deps.
+- **ROCm Version (hipdnn-clang-tidy.yml)**: Uses a fixed ROCm release version from TheRock artifacts (e.g., `7.11.0a20260112`). Update on-demand by changing the `--release` arg in the `install_rocm_from_artifacts.py` call. It will **need** to be bumped when new dependency APIs are required that are absent from past ROCm releases.
+
 
 ### Debugging Tips
 
