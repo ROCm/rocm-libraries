@@ -238,6 +238,9 @@ void testing_spmm_batched_csr(Arguments argus)
                             hcsr_val_temp,
                             idx_base));
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val_temp, hcsr_val_temp.size(), 1);
+
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;
     J A_n = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m;

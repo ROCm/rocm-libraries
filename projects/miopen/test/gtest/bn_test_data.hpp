@@ -284,11 +284,14 @@ template <typename XDataType,
           typename TConfig>
 struct BNInferTestData : public BNTestData<XDataType, YDataType, AccDataType, TConfig>
 {
-    void
-    SetUpImpl(const TConfig& config, miopenBatchNormMode_t t_bnmode, miopenTensorLayout_t t_layout)
+    void SetUpImpl(const TConfig& config,
+                   miopenBatchNormMode_t t_bnmode,
+                   miopenTensorLayout_t t_layout,
+                   bool useInverseVariance_)
     {
         BNTestData<XDataType, YDataType, AccDataType, TConfig>::SetUpImpl(
             config, t_bnmode, t_layout);
+        useInverseVariance = useInverseVariance_;
         CreateTensors();
         InitTensorsWithRandValue();
         WriteToGPU();
@@ -308,6 +311,7 @@ struct BNInferTestData : public BNTestData<XDataType, YDataType, AccDataType, TC
     double activ_alpha;
     double activ_beta;
     miopenActivationMode_t activ_mode;
+    bool useInverseVariance = false;
 
 private:
     void CreateTensors()
@@ -338,10 +342,19 @@ private:
         shift.generate(uniform_signed_initializer<BiasDataType>(2e-3 /*scale*/, 1000 /*range*/));
         estMean.generate(
             uniform_signed_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
-        // estVaraince has to be +ve number otherwise 1/sqrt(-ve) would
-        // give img number
-        estVariance.generate(
-            uniform_unsigned_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        if(useInverseVariance)
+        {
+            // Given an epsilon of 1e-5, the max value is 1/sqrt(epsilon) ==> 316.228
+            // Given a max variance of 2, the min value is 1/sqrt(epsilon + 2.0) ==> 0.7
+            estVariance.generate(uniform_unsigned_initializer<MeanVarDataType>(0.7, 317));
+        }
+        else
+        {
+            // estVaraince has to be +ve number otherwise 1/sqrt(-ve) would
+            // give img number
+            estVariance.generate(
+                uniform_unsigned_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        }
     }
     void WriteToGPU()
     {

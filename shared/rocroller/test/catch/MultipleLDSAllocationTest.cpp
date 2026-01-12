@@ -57,8 +57,6 @@ namespace multipleLDSAllocTest
             , m_numLoads3(numLoads3)
         {
             auto const& arch = m_context->targetArchitecture().target();
-            if(!arch.isCDNA35GPU())
-                SKIP("Test not yet supported on " << arch);
 
             auto maxLDS = context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
             auto ldsSize
