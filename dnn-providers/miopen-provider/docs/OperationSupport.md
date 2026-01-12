@@ -1,6 +1,6 @@
-# MIOpen Legacy Plugin - Operation Support
+# MIOpen Provider Plugin - Operation Support
 
-This document provides detailed information about the operations supported by the MIOpen Legacy Plugin for hipDNN.
+This document provides detailed information about the operations supported by the MIOpen Provider Plugin for hipDNN.
 
 For general information about hipDNN's operation support, please see the [hipDNN Operation Support](../../../docs/OperationSupport.md) documentation.
 

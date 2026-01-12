@@ -26,9 +26,7 @@ hipDNN has a plugin-based architecture in order to allow contributors and users 
 
 **SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
 
-**MIOpen Legacy Plugin**: A plugin that wraps MIOpen and provides access to the existing API through hipDNN. In the future, the MIOpen Legacy Plugin will be its own separate project from hipDNN.
-
-**Other Plugins**: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.
+**Plugins**: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.
 
 ## Component Details
 
@@ -246,7 +244,7 @@ hipdnnEnginePluginExecuteOpGraph(handle, context, workspace, buffers, num_buffer
 ##### 1. Static Kernel Engines
 - Provide pre-compiled kernels for specific operations
 - Narrow support: Only handle specific configurations
-- Example: MIOpen Legacy Plugin
+- Example: MIOpen Provider Plugin
 - **Advantages:**
   - Highly optimized for supported cases
   - Predictable performance
