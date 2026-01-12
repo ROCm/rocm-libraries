@@ -256,11 +256,6 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
-        // TODO: Remove this limitation for CK Wmma instances
-        if(conv_ptr->GetTypeString().find("Wmma") != -1)
-        {
-            return false;
-        }
         auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
         auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
         if(workspace_size != 0)
