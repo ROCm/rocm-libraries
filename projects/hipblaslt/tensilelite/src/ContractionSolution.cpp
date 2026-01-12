@@ -48,6 +48,9 @@
 #include <roctracer/roctx.h>
 #endif
 
+#define TENSILELITE_TO_STR(x) #x
+#define TENSILELITE_ENUMSTR(x) x, TENSILELITE_TO_STR(x)
+
 namespace TensileLite
 {
     enum class KERNELARGTYPE
@@ -310,6 +313,24 @@ namespace TensileLite
                                  DeviceUserArguments<float>*                      args);
 
     PerfModel perf;
+
+    static const std::map<ContractionSolution::MatchingTag, const char*>& MatchingTag2StringMap()
+    {
+        static const std::map<ContractionSolution::MatchingTag, const char*> MatchingTag2String
+            = {{TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Equal)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::GridBased)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Range)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FreeSize)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Prediction)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Experimental)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Others)}};
+        return MatchingTag2String;
+    }
+
+    std::string ContractionSolution::matchingTag() const
+    {
+        return MatchingTag2StringMap().at(tag);
+    }
 
     // check if this solution is a CU-Fallback solution for current hardware
     bool ContractionSolution::isFallbackForHW(Hardware const& hardware) const
@@ -1289,14 +1310,11 @@ namespace TensileLite
         static_cast<void>(hipGetDevice(&deviceId));
         static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
         auto gpu_arch_no_prefix = removePrefix(deviceProperties.gcnArchName);
-        if(stoi(gpu_arch_no_prefix) / 100 != 12)
+        if(internalArgsSupport.version >= 1)
         {
-            if(internalArgsSupport.version >= 1)
-            {
-                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-                rv.numWorkGroups.y = 1;
-                rv.numWorkGroups.z = 1;
-            }
+            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+            rv.numWorkGroups.y = 1;
+            rv.numWorkGroups.z = 1;
         }
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
@@ -2595,6 +2613,11 @@ namespace TensileLite
                     sk.reduction = origami::reduction_t::tree;
                     sk.grid      = tiles;
                 }
+            }
+
+            if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
+            {
+                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with StreamK kernel with splitting factor < 2\n");
             }
         }
 

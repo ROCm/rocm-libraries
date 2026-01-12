@@ -35,7 +35,7 @@ jobs:
     outputs:
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
       windows_projects: ${{ steps.windows_projects.outputs.windows_projects }}
-      test_type: ${{ steps.projects.outputs.test_type }}
+      test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
     steps:
@@ -51,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 00d29d2dfe81ddbdc1908a0b992d928d498b2826 # 2025-12-05 commit
+          ref: f7add7732667fc516d0acc3ef4832e5e204925a6 # 2026-01-09 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -84,6 +84,12 @@ jobs:
           THEROCK_PACKAGE_PLATFORM: "linux"
           # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
           AMDGPU_FAMILIES: "gfx94X, gfx950"
+          # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
+          ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
+          # TODO(#2656): Migrate the organization variable to S3 file. Below code is a temporary resolution
+          # If it is a forked repo, we cannot access organization variables (so load in the file)
+          # Otherwise, we use the organization variable directly
+          LOAD_TEST_RUNNERS_FROM_VAR: ${{ github.event.pull_request.head.repo.full_name == 'ROCm/rocm-libraries' }}
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
@@ -92,6 +98,12 @@ jobs:
           THEROCK_PACKAGE_PLATFORM: "windows"
           # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
           AMDGPU_FAMILIES: "gfx1151"
+          # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
+          ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
+          # TODO(#2656): Migrate the organization variable to S3 file. Below code is a temporary resolution
+          # If it is a forked repo, we cannot access organization variables (so load in the file)
+          # Otherwise, we use the organization variable directly
+          LOAD_TEST_RUNNERS_FROM_VAR: ${{ github.event.pull_request.head.repo.full_name == 'ROCm/rocm-libraries' }}
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 

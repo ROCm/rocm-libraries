@@ -1,6 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+include(CheckCXXCompilerFlag)
+
+# We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
+check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+
 function(add_instance_library INSTANCE_NAME)
     message(DEBUG "adding instance ${INSTANCE_NAME}")
     set(result 1)
@@ -98,9 +103,24 @@ function(add_instance_library INSTANCE_NAME)
             message(DEBUG "removing gemm_wmma_universal_f8 instance ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
+        # Do not build WMMA grouped conv 3d fwd fp8 / bf8 for any targets except gfx12+
+        if(NOT INST_TARGETS MATCHES "gfx12" AND source_name MATCHES "grouped_conv3d_fwd_wmma" AND (source_name MATCHES "_fp8_" OR source_name MATCHES "_bf8_"))
+            message(DEBUG "removing grouped_conv3d_fwd_wmma fp8/bf8 instance ${source} ")
+            list(REMOVE_ITEM ARGN "${source}")
+        endif()
         # Do not build gemm_universal_preshuffle_f8 for any targets except gfx94, gfx95 and gfx12
         if(NOT (INST_TARGETS MATCHES "gfx94|gfx95|gfx12") AND (source_name MATCHES "gemm_universal_preshuffle") AND source_name MATCHES "_f8_" )
             message(DEBUG "removing gemm_universal_preshuffle_f8 instance ${source} ")
+            list(REMOVE_ITEM ARGN "${source}")
+        endif()
+        # Do not build gemm_ab_scale_f8 for any targets except gfx94, gfx95 and gfx12
+        if(NOT (INST_TARGETS MATCHES "gfx942" OR INST_TARGETS MATCHES "gfx950" OR INST_TARGETS MATCHES "gfx12") AND (source_name MATCHES "gemm_ab_scale") AND (source_name MATCHES "_f8_f8_"))
+            message(DEBUG "removing gemm_ab_scale_f8 instance ${source} ")
+            list(REMOVE_ITEM ARGN "${source}")
+        endif()
+        # Do not build gemm_blockscale_wp_f8 for any targets except gfx94, gfx95 and gfx12
+        if(NOT (INST_TARGETS MATCHES "gfx942" OR INST_TARGETS MATCHES "gfx950" OR INST_TARGETS MATCHES "gfx12") AND (source_name MATCHES "gemm_blockscale_wp") AND (source_name MATCHES "_f8_f8_"))
+            message(DEBUG "removing gemm_blockscale_wp_f8 instance ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
         # Only build tf32 instances for gfx942 & gfx950
@@ -177,8 +197,9 @@ function(add_instance_library INSTANCE_NAME)
         if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             target_compile_options(${INSTANCE_NAME} PRIVATE -gsplit-dwarf)
         endif()
+
         # flags to compress the library
-        if(NOT DISABLE_OFFLOAD_COMPRESS AND NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
+        if(NOT DISABLE_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
             message(DEBUG "Adding --offload-compress flag for ${INSTANCE_NAME}")
             target_compile_options(${INSTANCE_NAME} PRIVATE --offload-compress)
         endif()
@@ -300,7 +321,7 @@ FOREACH(subdir_path ${dir_list})
             message(DEBUG "Found gemm_multiply_multiply instances, but gfx94/gfx95/gfx11/gfx12 not on the target list. Skipping. ${cmake_instance}")
             set(add_inst 0)
         endif()
-        if(("${cmake_instance}" MATCHES "gemm_universal_preshuffle|gemm_blockscale" AND "${cmake_instance}" MATCHES "_f8_" ) AND (NOT INST_TARGETS MATCHES "gfx94|gfx95|gfx12") AND (NOT CK_USE_FP8_ON_UNSUPPORTED_ARCH))
+        if(("${cmake_instance}" MATCHES "gemm_universal_preshuffle|gemm_blockscale|gemm_ab_scale" AND "${cmake_instance}" MATCHES "_f8_" ) AND (NOT INST_TARGETS MATCHES "gfx94|gfx95|gfx12") AND (NOT CK_USE_FP8_ON_UNSUPPORTED_ARCH))
             message(DEBUG "Found gemm_f8 instances, but gfx94/gfx95 not on the target list. Skipping.")
             set(add_inst 0)
         endif()

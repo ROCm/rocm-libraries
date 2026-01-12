@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -69,13 +69,16 @@ Tests:
   orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
-  filename: [nos1, 
-             nos3, 
-             nos5, 
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
              nos7]
 
 - name: sddmm_csc
-  category: pre_checkin
+  category: nightly
   function: sddmm_csc
   indextype: *i32
   precision: *single_only_precisions

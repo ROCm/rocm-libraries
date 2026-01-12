@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <execution>
 #include <iomanip>
 #include <iostream>
 
@@ -67,10 +66,10 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
   size_t numMT_N = math::safe_ceil_div(N, MT_N);
   size_t numMTs  = numMT_M * numMT_N;
 
-  // What SK does -- we already have skGrid so just compute numWaves and splitFactor
-  auto numWaves    = skGrid > numMTs ? math::safe_ceil_div(skGrid, hardware.N_CU)
-                                     : math::safe_ceil_div(numMTs, hardware.N_CU);
-  auto splitFactor = math::safe_ceil_div(skGrid, numMTs);
+  // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
+  auto num_timesteps = skGrid > numMTs ? math::safe_ceil_div(skGrid, hardware.N_CU)
+                                       : math::safe_ceil_div(numMTs, hardware.N_CU);
+  auto split_factor  = math::safe_ceil_div(skGrid, numMTs);
 
   // -------------------
   // NonTemporal Cases
@@ -105,8 +104,8 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
     // else use the default (num_xcd)
   }
 
-  // If we are lucky that the splitFactor is a multiple of NUM_XCD -> no mapping
-  if ((splitFactor % hardware.NUM_XCD == 0) && !isWGMXCCset) {
+  // If we are lucky that the split_factor is a multiple of NUM_XCD -> no mapping
+  if ((split_factor % hardware.NUM_XCD == 0) && !isWGMXCCset) {
     out_wgmxcc  = 1;
     isWGMXCCset = true;
   }
@@ -117,11 +116,11 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
     isWGMXCCset = true;
   }
 
-  // For sizes that we have more than 2 waves of computations, we skip xcc mapping as MALL is
+  // For sizes that we have more than 2 timesteps of computations, we skip xcc mapping as MALL is
   // more important -- matrix should not be skinny
   // To avoid regressions, it's set to default, but it should actually be 1!
   bool MallIsImportant =
-      (splitFactor == 1 && batch == 1 && numMTs > 2 * hardware.N_CU && numMT_M > 8 && numMT_N > 8);
+      (split_factor == 1 && batch == 1 && numMTs > 2 * hardware.N_CU && numMT_M > 8 && numMT_N > 8);
   if (MallIsImportant && !isWGMXCCset) {
     out_wgmxcc  = defaultWGMXCC;
     isWGMXCCset = true;
@@ -159,7 +158,7 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
   }
 
   if (!isWGMset) {
-    size_t numWGs = numWaves * splitFactor * numMTs;
+    size_t numWGs = num_timesteps * split_factor * numMTs;
     size_t q      = numWGs / hardware.NUM_XCD;
     size_t r      = numWGs % hardware.NUM_XCD;
 
@@ -174,14 +173,14 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
       auto numXCD        = std::min(hardware.NUM_XCD, numWGs);
 
       // Compute unique loads per L2 tile
-      for (uint32_t x = 0; x < numWaves * numXCD; ++x) {
+      for (uint32_t x = 0; x < num_timesteps * numXCD; ++x) {
         // Range of "output tiles" that this xcd takes.
         auto xccStart = q * x + (x < r ? x : r);
         auto xccEnd   = xccStart + q - 1 + (x < r ? 1 : 0);
         // xccStart and xccEnd are supposed to be tile IDs
         // In case of splitting, they are WG IDs. Modify to get tile IDs
-        xccStart /= splitFactor;
-        xccEnd /= splitFactor;
+        xccStart /= split_factor;
+        xccEnd /= split_factor;
 
         auto slabStart = xccStart / slabTiles;
         auto slabEnd   = xccEnd / slabTiles;
@@ -227,10 +226,7 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
         bestWGM = wgm;
       }
 
-      if (get_runtime_options(config).debug_enabled) {
-        config.logger.log("WGM", wgm);
-        config.logger.log("L2Estimate", wgmL2Estimate);
-      }
+      if (get_runtime_options(config).debug_enabled) {}
     }
 
     out_wgm = bestWGM;
@@ -246,8 +242,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
   std::vector<prediction_result_t> results(configs.size());
 
-  std::transform(std::execution::seq,
-                 configs.begin(),
+  std::transform(configs.begin(),
                  configs.end(),
                  results.begin(),
                  [&](const config_t& config) -> prediction_result_t {

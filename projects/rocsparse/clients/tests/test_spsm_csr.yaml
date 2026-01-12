@@ -207,7 +207,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3]
   skip_hardware: gfx1151
-  req_memory: 14
+  device_memory_gb: 14
 
 - name: spsm_csr_file
   category: pre_checkin
@@ -416,7 +416,6 @@ Tests:
 - name: spsm_csr_file
   category: stress
   function: spsm_csr
-  hardware: [gfx90a]
   indextype: *i32
   precision: *double_only_precisions
   M: 1
@@ -438,6 +437,8 @@ Tests:
              sme3Dc,
              shipsec1,
              bmwcra_1]
+  host_memory_gb: 64
+  device_memory_gb: 32
 
 - name: spsm_csr
   category: quick

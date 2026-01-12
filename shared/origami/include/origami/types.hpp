@@ -36,7 +36,6 @@
 #include <type_traits>
 #include <unordered_map>
 
-#include "origami/log.hpp"
 #include "origami/math.hpp"
 
 namespace origami {
@@ -95,8 +94,8 @@ int datatype_to_bits(data_type_t type);
  * @param type Data type
  * @return int Number of bytes
  */
-inline int data_type_to_bytes(data_type_t type) {
-  return math::safe_ceil_div(datatype_to_bits(type), 8);
+inline double data_type_to_bytes(data_type_t type) {
+  return static_cast<double>(datatype_to_bits(type)) / 8.0;
 }
 
 /**
@@ -262,8 +261,14 @@ struct runtime_options {
 
   /**
    * @brief Get the global runtime options instance.
+   * 
+   * Inline to prevent ODR violations when included in multiple shared libraries.
+   * Static local variable ensures only one instance exists across all translation units. (PR#1862)
    */
-  static runtime_options& get();
+  static inline runtime_options& get() {
+    static runtime_options instance;
+    return instance;
+  }
 
   /**
    * @brief Read debug setting from environment variable.
@@ -300,7 +305,7 @@ struct config_t {
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
 
-  /// Occupancy (number of waves resident per CU).
+  /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
   /// Reorder workgroup id for L2 reuse.
@@ -318,12 +323,6 @@ struct config_t {
 
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
-
-  /// Runtime options (if null, uses global singleton)
-  const runtime_options* runtime_opts{nullptr};
-
-  /// Logger for analytical metrics
-  mutable logger_t logger;
 
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
@@ -388,27 +387,29 @@ struct problem_t {
 };
 
 /**
- * @brief Get runtime options from config, or global singleton if config doesn't specify.
+ * @brief Get runtime options (always uses global singleton).
  *
- * @param config Configuration struct (may contain runtime_opts pointer)
- * @return const runtime_options& Reference to runtime options
+ * @param config Configuration struct (unused, kept for API compatibility)
+ * @return const runtime_options& Reference to runtime options singleton
  */
 inline const runtime_options& get_runtime_options(const config_t& config) {
-  return config.runtime_opts ? *config.runtime_opts : runtime_options::get();
+  (void)config;  // Unused parameter - kept for API compatibility
+  return runtime_options::get();
 }
 
 }  // namespace origami
 
 // Specialization of std::hash in the std namespace for use of std::unordered_map with
 // matrix_instruction and config_t as keys.
+// Inline to prevent ODR violations when included in multiple shared libraries. (PR#1862)
 namespace std {
 template <>
 struct hash<origami::matrix_instruction> {
-  std::size_t operator()(const origami::matrix_instruction& k) const { return k.hash(); }
+  inline std::size_t operator()(const origami::matrix_instruction& k) const { return k.hash(); }
 };
 
 template <>
 struct hash<origami::config_t> {
-  std::size_t operator()(const origami::config_t& config) const noexcept { return config.hash(); }
+  inline std::size_t operator()(const origami::config_t& config) const noexcept { return config.hash(); }
 };
 }  // namespace std

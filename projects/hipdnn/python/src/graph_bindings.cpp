@@ -114,6 +114,7 @@ void graph_bindings(nb::module_& m)
                                std::shared_ptr<graph::TensorAttributes>,
                                graph::PointwiseAttributes>(&graph::Graph::pointwise))
         .def("conv_fprop", &graph::Graph::conv_fprop)
+        .def("matmul", &graph::Graph::matmul)
         .def("conv_dgrad", &graph::Graph::conv_dgrad)
         .def("conv_wgrad", &graph::Graph::conv_wgrad)
         .def("set_preferred_engine_id_ext", &graph::Graph::set_preferred_engine_id_ext)
