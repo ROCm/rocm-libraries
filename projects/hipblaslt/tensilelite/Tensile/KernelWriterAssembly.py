@@ -1369,73 +1369,69 @@ class KernelWriterAssembly(KernelWriter):
     # Split into a one-time SETUP (hoist invariants across offsets) and per-offset APPLY.
     if kernel.get("KRingShift", False) and kernel["BufferLoad"]:
       module.addComment1("KRS: KRingShift tail offset macro (reference shape)")
-      module.add(TextBlock(
-        "/* KRS: KRingShift tail offset setup (hoist invariants across offsets) */\n"
-        ".macro KRS_TAIL_OFFSET_SETUP tmp_sgpr, tmp_vgpr\n"
-        "    // tmp_sgpr layout:\n"
-        "    //   +0: n        = LoopCounterL/8\n"
-        "    //   +1: m        = KRingShift/8\n"
-        "    //   +2: nMinusM  = n - m\n"
-        "    //   +3: oobS     = srdB+2+1\n"
-        "    //   +4: c3584    = 3584\n"
-        "    //   +5: deltaS   = (nMinusM<<4) + (2*shift)\n"
-        "    //   +6:+7: maskN      (lane < n)\n"
-        "    //   +8:+9: maskRange  (lane>=nMinusM && lane<n)\n"
-        "    // tmp_vgpr layout:\n"
-        "    //   +0: lane     = vgprSerial & 0x0F\n"
-        "    //   +1: oobV     = oobS\n"
-        "    //   +2: deltaV   = deltaS\n"
-        "    //   +3: scratch\n"
-        "    // KRS: n = LoopCounterL/8\n"
-        "    s_lshr_b32 s[\\tmp_sgpr+0], s[sgprLoopCounterL], 3\n"
-        "    // KRS: lane = vgprSerial & 0x0F\n"
-        "    v_and_b32 v[\\tmp_vgpr+0], 0x0F, v[vgprSerial]\n"
-        "    // KRS: oob = srdB+2+1 (used as OOB sentinel)\n"
-        "    s_add_u32 s[\\tmp_sgpr+3], s[sgprSrdB+2], 1\n"
-        "    v_mov_b32 v[\\tmp_vgpr+1], s[\\tmp_sgpr+3]\n"
-        "    // KRS: m = shift/8; nMinusM = n - m\n"
-        "    s_lshr_b32 s[\\tmp_sgpr+1], s[sgprKRingShift], 3\n"
-        "    s_sub_u32  s[\\tmp_sgpr+2], s[\\tmp_sgpr+0], s[\\tmp_sgpr+1]\n"
-        "    // KRS: mainLoopBytes = (SizeK & ~(DepthU-1)) * bpe (bytes).\n"
-        "    // Must be in SGPR (literal operand not supported for v_add_u32 in this path).\n"
-        "    // KRS: mainLoopElems = SizeK & maskDU\n"
-        f"    s_and_b32  s[\\tmp_sgpr+4], s[sgprSizesSum+{self.states.unrollIdx}], 0x{((~(int(kernel['DepthU'])-1)) & 0xFFFFFFFF):08x}\n"
-        "    // KRS: mainLoopBytes = mainLoopElems << log2(bpe)\n"
-        f"    s_lshl_b32 s[\\tmp_sgpr+4], s[\\tmp_sgpr+4], {int(log2(int(kernel['ProblemType']['DataTypeB'].numBytes())))}\n"
-        "    // KRS: deltaS = (nMinusM<<4) + (2*shift)\n"
-        "    s_lshl_b32 s[\\tmp_sgpr+5], s[\\tmp_sgpr+2], 4\n"
-        "    s_lshl_b32 s[\\tmp_sgpr+1], s[sgprKRingShift], 1\n"
-        "    s_add_u32  s[\\tmp_sgpr+5], s[\\tmp_sgpr+5], s[\\tmp_sgpr+1]\n"
-        "    v_mov_b32  v[\\tmp_vgpr+2], s[\\tmp_sgpr+5]\n"
-        "    // KRS: maskN = (lane < n)\n"
-        "    v_cmp_lt_u32 s[\\tmp_sgpr+6:\\tmp_sgpr+7], v[\\tmp_vgpr+0], s[\\tmp_sgpr+0]\n"
-        "    // KRS: maskRange = (lane >= nMinusM) && (lane < n)\n"
-        "    v_cmp_ge_u32 s[\\tmp_sgpr+8:\\tmp_sgpr+9], v[\\tmp_vgpr+0], s[\\tmp_sgpr+2]\n"
-        "    s_and_b64    s[\\tmp_sgpr+8:\\tmp_sgpr+9], s[\\tmp_sgpr+8:\\tmp_sgpr+9], s[\\tmp_sgpr+6:\\tmp_sgpr+7]\n"
-        "    // KRS: If shift==0 (KRS disabled or no-op), force APPLY to be a true no-op.\n"
-        "    // - maskN := all-ones so Step3 keeps original offsets (no OOB sentinel writes)\n"
-        "    // - maskRange := 0 so Step4/extra-adjust do nothing\n"
-        "    s_cmp_eq_u32 s[sgprKRingShift], 0\n"
-        "    s_cselect_b32 s[\\tmp_sgpr+6], 0xffffffff, s[\\tmp_sgpr+6]\n"
-        "    s_cselect_b32 s[\\tmp_sgpr+7], 0xffffffff, s[\\tmp_sgpr+7]\n"
-        "    s_cselect_b32 s[\\tmp_sgpr+8], 0, s[\\tmp_sgpr+8]\n"
-        "    s_cselect_b32 s[\\tmp_sgpr+9], 0, s[\\tmp_sgpr+9]\n"
-        ".endm\n"
-        "\n"
-        "/* KRS: KRingShift tail offset apply (per offset_reg) */\n"
-        ".macro KRS_TAIL_OFFSET_APPLY offset_reg, tmp_sgpr, tmp_vgpr\n"
-        "    // KRS: Step 3: Identify first n lanes and set others to OOB\n"
-        "    s_mov_b64 vcc, s[\\tmp_sgpr+6:\\tmp_sgpr+7]\n"
-        "    v_cndmask_b32 v[\\offset_reg], v[\\tmp_vgpr+1], v[\\offset_reg], vcc\n"
-        "    // KRS: Step 4: In the first n lanes, select lanes [n-m, n)\n"
-        "    s_mov_b64 vcc, s[\\tmp_sgpr+8:\\tmp_sgpr+9]\n"
-        "    v_add_u32 v[\\tmp_vgpr+3], v[\\offset_reg], s[\\tmp_sgpr+4]\n"
-        "    v_cndmask_b32 v[\\offset_reg], v[\\tmp_vgpr+3], v[\\offset_reg], vcc\n"
-        "    // KRS: Extra adjust (keep reference shape)\n"
-        "    v_sub_u32 v[\\tmp_vgpr+3], v[\\offset_reg], v[\\tmp_vgpr+2]\n"
-        "    v_cndmask_b32 v[\\offset_reg], v[\\offset_reg], v[\\tmp_vgpr+3], vcc\n"
-        ".endm\n"
-      ))
+      # KRS tail offset macros:
+      depthU = int(kernel["DepthU"])
+      maskDU = (~(depthU - 1)) & 0xFFFFFFFF
+      bpeShift = int(log2(int(kernel["ProblemType"]["DataTypeB"].numBytes())))
+
+      macroSetup = Macro("KRS_TAIL_OFFSET_SETUP", ["sgprTmp:req", "vgprTmp:req"])
+      macroSetup.add(SLShiftRightB32(dst=sgpr("Tmp+0", 1, True), shiftHex=hex(3), src=sgpr("LoopCounterL"),
+                                    comment="KRS: n = LoopCounterL / 8"))
+      macroSetup.add(VAndB32(dst=vgpr("Tmp+0", 1, True), src0=0x0F, src1=vgpr("Serial"),
+                             comment="KRS: lane = vgprSerial & 0x0F"))
+      macroSetup.add(SAddU32(dst=sgpr("Tmp+3", 1, True), src0=sgpr("SrdB+2"), src1=1,
+                             comment="KRS: oobS = SrdB.limit+1 (OOB sentinel)"))
+      macroSetup.add(VMovB32(dst=vgpr("Tmp+1", 1, True), src=sgpr("Tmp+3", 1, True),
+                             comment="KRS: oobV = oobS"))
+      macroSetup.add(SLShiftRightB32(dst=sgpr("Tmp+1", 1, True), shiftHex=hex(3), src=sgpr("KRingShift"),
+                                    comment="KRS: m = KRingShift / 8"))
+      macroSetup.add(SSubU32(dst=sgpr("Tmp+2", 1, True), src0=sgpr("Tmp+0", 1, True), src1=sgpr("Tmp+1", 1, True),
+                             comment="KRS: nMinusM = n - m"))
+      macroSetup.add(SAndB32(dst=sgpr("Tmp+4", 1, True), src0=sgpr(f"SizesSum+{self.states.unrollIdx}"), src1=f"0x{maskDU:08x}",
+                             comment="KRS: mainLoopElems = SizeK & ~(DepthU-1)"))
+      macroSetup.add(SLShiftLeftB32(dst=sgpr("Tmp+4", 1, True), shiftHex=hex(bpeShift), src=sgpr("Tmp+4", 1, True),
+                                   comment="KRS: mainLoopBytes = mainLoopElems << log2(bpe)"))
+      macroSetup.add(SLShiftLeftB32(dst=sgpr("Tmp+5", 1, True), shiftHex=hex(4), src=sgpr("Tmp+2", 1, True),
+                                   comment="KRS: deltaS.part = nMinusM << 4"))
+      macroSetup.add(SLShiftLeftB32(dst=sgpr("Tmp+1", 1, True), shiftHex=hex(1), src=sgpr("KRingShift"),
+                                   comment="KRS: shiftBytes = 2*shift (bpe=2)"))
+      macroSetup.add(SAddU32(dst=sgpr("Tmp+5", 1, True), src0=sgpr("Tmp+5", 1, True), src1=sgpr("Tmp+1", 1, True),
+                             comment="KRS: deltaS = (nMinusM<<4) + (2*shift)"))
+      macroSetup.add(VMovB32(dst=vgpr("Tmp+2", 1, True), src=sgpr("Tmp+5", 1, True),
+                             comment="KRS: deltaV = deltaS"))
+      # maskN := (lane < n)
+      macroSetup.add(VCmpLtU32(dst=sgpr("Tmp+6", 2, True), src0=vgpr("Tmp+0", 1, True), src1=sgpr("Tmp+0", 1, True),
+                              comment="KRS: maskN = (lane < n)"))
+      # maskRange := (lane >= nMinusM) && (lane < n)
+      macroSetup.add(VCmpGEU32(dst=sgpr("Tmp+8", 2, True), src0=vgpr("Tmp+0", 1, True), src1=sgpr("Tmp+2", 1, True),
+                              comment="KRS: maskGE = (lane >= nMinusM)"))
+      macroSetup.add(SAndB64(dst=sgpr("Tmp+8", 2, True), src0=sgpr("Tmp+8", 2, True), src1=sgpr("Tmp+6", 2, True),
+                             comment="KRS: maskRange = maskGE & maskN"))
+      macroSetup.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: shift==0 ? (disable/no-op)"))
+      macroSetup.add(SCSelectB32(dst=sgpr("Tmp+6", 1, True), src0="0xffffffff", src1=sgpr("Tmp+6", 1, True),
+                                comment="KRS: if disabled, maskN.lo = all-ones"))
+      macroSetup.add(SCSelectB32(dst=sgpr("Tmp+7", 1, True), src0="0xffffffff", src1=sgpr("Tmp+7", 1, True),
+                                comment="KRS: if disabled, maskN.hi = all-ones"))
+      macroSetup.add(SCSelectB32(dst=sgpr("Tmp+8", 1, True), src0=0, src1=sgpr("Tmp+8", 1, True),
+                                comment="KRS: if disabled, maskRange.lo = 0"))
+      macroSetup.add(SCSelectB32(dst=sgpr("Tmp+9", 1, True), src0=0, src1=sgpr("Tmp+9", 1, True),
+                                comment="KRS: if disabled, maskRange.hi = 0"))
+      module.add(macroSetup)
+
+      macroApply = Macro("KRS_TAIL_OFFSET_APPLY", ["vgprOffsetReg:req", "sgprTmp:req", "vgprTmp:req"])
+      macroApply.add(SMovB64(dst=VCC(), src=sgpr("Tmp+6", 2, True), comment="KRS: vcc = maskN"))
+      macroApply.add(VCndMaskB32(dst=vgpr("OffsetReg", 1, True), src0=vgpr("Tmp+1", 1, True), src1=vgpr("OffsetReg", 1, True), src2=VCC(),
+                                comment="KRS: Step3 set OOB lanes to sentinel"))
+      macroApply.add(SMovB64(dst=VCC(), src=sgpr("Tmp+8", 2, True), comment="KRS: vcc = maskRange"))
+      macroApply.add(VAddU32(dst=vgpr("Tmp+3", 1, True), src0=vgpr("OffsetReg", 1, True), src1=sgpr("Tmp+4", 1, True),
+                            comment="KRS: tmp = offset + mainLoopBytes"))
+      macroApply.add(VCndMaskB32(dst=vgpr("OffsetReg", 1, True), src0=vgpr("Tmp+3", 1, True), src1=vgpr("OffsetReg", 1, True), src2=VCC(),
+                                comment="KRS: Step4 apply +mainLoopBytes in [n-m,n)"))
+      macroApply.add(VSubU32(dst=vgpr("Tmp+3", 1, True), src0=vgpr("OffsetReg", 1, True), src1=vgpr("Tmp+2", 1, True),
+                            comment="KRS: tmp = offset - deltaS"))
+      macroApply.add(VCndMaskB32(dst=vgpr("OffsetReg", 1, True), src0=vgpr("OffsetReg", 1, True), src1=vgpr("Tmp+3", 1, True), src2=VCC(),
+                                comment="KRS: extra adjust (reference shape)"))
+      module.add(macroApply)
 
     if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
       module.add(PseudoRandomGenerator())
