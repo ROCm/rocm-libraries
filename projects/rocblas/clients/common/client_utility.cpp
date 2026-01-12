@@ -447,6 +447,9 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
 
     if(arg.graph_test)
     {
+        auto stream_order_env = getenv("ROCBLAS_STREAM_ORDER_ALLOC");
+        if(stream_order_env)
+            m_stream_order_saved_status = std::string(stream_order_env);
         m_stream_order_env_set = true;
         setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
     }
@@ -528,7 +531,7 @@ rocblas_local_handle::~rocblas_local_handle()
 
     if(m_stream_order_env_set)
     {
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", "0", true);
+        setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
     }
 }
 
