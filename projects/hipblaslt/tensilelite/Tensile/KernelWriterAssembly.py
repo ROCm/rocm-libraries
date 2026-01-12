@@ -10742,17 +10742,37 @@ class KernelWriterAssembly(KernelWriter):
     # Interleave (restricted): scale StrideC1J/StrideD1J by runtime G before store vgpr math,
     # while SRD base was already computed using unscaled strides.
     if kernel.get("BAddrInterleave", False) and kernel["EnableMatrixInstruction"] and kernel["BufferStore"]:
-      labelSkip = Label(self.labels.getNameInc("BInterleave_storeStride_skip"), "")
-      module.add(SCmpGtU32(src0=sgpr("BInterleaveG"), src1=1, comment="enabled? (G>1)"))
-      module.add(SCBranchSCC0(labelName=labelSkip.getLabelName(), comment="disabled (G==1)"))
-
       packedC1 = kernel["PackedC1IndicesX"]
       strideC1 = "StrideC%s" % (self.states.indexChars[packedC1[0]])
       strideD1 = "StrideD%s" % (self.states.indexChars[packedC1[0]])
-      module.add(SMulI32(dst=sgpr(strideC1), src0=sgpr(strideC1), src1=sgpr("BInterleaveG"), comment="StrideC1 *= G"))
-      module.add(SMulI32(dst=sgpr(strideD1), src0=sgpr(strideD1), src1=sgpr("BInterleaveG"), comment="StrideD1 *= G"))
 
+      # IMPORTANT: do NOT overwrite the original stride SGPRs in-place.
+      # This kernel uses a persistent loop; the next iteration re-enters at label_PersistentLoopStart
+      # and expects the original StrideC/D values loaded from kernargs. If we multiply in-place,
+      # the stride would compound each persistent iteration.
+      #
+      # Instead, compute scaled strides into temp SGPRs, then re-alias sgprStrideC/D for the
+      # remainder of the store path to refer to the scaled temporaries.
+      tmpStrideC1 = self.sgprPool.checkOut(1, preventOverflow=False)
+      tmpStrideD1 = self.sgprPool.checkOut(1, preventOverflow=False)
+
+      labelSkip = Label(self.labels.getNameInc("BInterleave_storeStride_skip"), "")
+      labelDone = Label(self.labels.getNameInc("BInterleave_storeStride_done"), "")
+      module.add(SCmpGtU32(src0=sgpr("BInterleaveG"), src1=1, comment="enabled? (G>1)"))
+      module.add(SCBranchSCC0(labelName=labelSkip.getLabelName(), comment="disabled (G==1)"))
+      module.add(SMulI32(dst=sgpr(tmpStrideC1), src0=sgpr(strideC1), src1=sgpr("BInterleaveG"), comment="StrideC1*G (temp)"))
+      module.add(SMulI32(dst=sgpr(tmpStrideD1), src0=sgpr(strideD1), src1=sgpr("BInterleaveG"), comment="StrideD1*G (temp)"))
+      module.add(SBranch(labelName=labelDone.getLabelName()))
       module.add(labelSkip)
+      module.add(SMovB32(dst=sgpr(tmpStrideC1), src=sgpr(strideC1), comment="StrideC1 (temp)"))
+      module.add(SMovB32(dst=sgpr(tmpStrideD1), src=sgpr(strideD1), comment="StrideD1 (temp)"))
+      module.add(labelDone)
+
+      # Re-alias the stride symbols for the remainder of the emitted store code.
+      # Note: this is an assembler-time alias; it does not mutate runtime SGPR contents.
+      module.add(ValueSet(name=f"sgpr{strideC1}", value=tmpStrideC1, format=-1))
+      module.add(ValueSet(name=f"sgpr{strideD1}", value=tmpStrideD1, format=-1))
+
       # BAddrInterleave: no further uses after this point; free the sgpr alias for cleaner asm/debug.
       module.add(ValueSet(name="sgprBInterleaveG", value="UNDEF", format=-1))
 
