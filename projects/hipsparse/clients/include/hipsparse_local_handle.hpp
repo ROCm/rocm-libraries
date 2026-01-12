@@ -25,22 +25,6 @@
 #ifndef HIPSPARSE_LOCAL_HANDLE_HPP
 #define HIPSPARSE_LOCAL_HANDLE_HPP
 
-// =============================================================================
-// DIAGNOSTIC: Check HIP NVIDIA platform configuration
-// =============================================================================
-#ifdef __HIP_PLATFORM_NVIDIA__
-#pragma message("DEBUG: __HIP_PLATFORM_NVIDIA__ IS defined")
-#else
-#pragma message("DEBUG: __HIP_PLATFORM_NVIDIA__ is NOT defined")
-#endif
-
-#ifdef __HIPCC__
-#pragma message("DEBUG: __HIPCC__ IS defined")
-#else
-#pragma message("DEBUG: __HIPCC__ is NOT defined")
-#endif
-// =============================================================================
-
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
 
@@ -90,6 +74,10 @@ public:
 
     void hipsparseStreamBeginCapture()
     {
+// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by 
+// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE 
+// with g++/clang, these graph APIs cannot be called from hipSPARSE.
+#if(!defined(CUDART_VERSION))
         if(!(this->graph_testing))
         {
             return;
@@ -107,10 +95,15 @@ public:
         CHECK_HIP_ERROR(hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
 
         capture_started = true;
+#endif
     }
 
     void hipsparseStreamEndCapture(int runs = 1)
     {
+// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by 
+// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE 
+// with g++/clang, these graph APIs cannot be called from hipSPARSE.
+#if(!defined(CUDART_VERSION))
         if(!(this->graph_testing))
         {
             return;
@@ -137,6 +130,7 @@ public:
         this->graph_stream = nullptr;
 
         capture_started = false;
+#endif
     }
 
     hipStream_t get_stream()
