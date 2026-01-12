@@ -24,14 +24,14 @@ namespace miopen {
 namespace batchnorm {
 
 template <int MIoBnVariant, typename FpType, typename FpPrecType, typename FpAccumType>
-struct MIOpenBatchNormFwdTrainSpatialHIPImpl
+struct MIOpenBatchNormFwdTrainSpatialImpl
 {
     static_assert(false, "this variant is not supported.");
 };
 
 // This is the instance for MIO_BN_VARIANT == 0
 template <typename FpType, typename FpPrecType, typename FpAccumType>
-struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
 {
     // These are the configs for this variant
     static constexpr unsigned int segtmp_1 = mio_bn_config::launch_dim.grp0 / mio_bn_config::hw;
@@ -180,7 +180,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
 
 // This is the instance for MIO_BN_VARIANT == 1
 template <typename FpType, typename FpPrecType, typename FpAccumType>
-struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
 {
     // These are the configs for this variant
     static constexpr unsigned int max_read =
@@ -466,7 +466,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
 // This is the instance for MIO_BN_VARIANT == 3
 template <typename FpType, typename FpPrecType, typename FpAccumType>
-struct MIOpenBatchNormFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
 {
 
     constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
@@ -585,7 +585,7 @@ template <typename FpType,
           typename FpPrecLsType,
           typename FpAccumType,
           typename FpAccumCType>
-struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
+struct MIOpenBatchNormFwdTrainSpatialImplVar2
 {
     static constexpr unsigned int ngrps  = MIO_BN_NGRPS;
     static constexpr unsigned int ngrps2 = MIO_BN_NGRPS2;
@@ -936,15 +936,15 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
     }
 };
 
-using MIOpenBNFwdTrainSpatialHIPVar2 =
-    miopen::batchnorm::MIOpenBatchNormFwdTrainSpatialHIPImplVar2<mio_bn_config::fp_type,
-                                                                 mio_bn_config::fp_c_type,
-                                                                 mio_bn_config::fp_ls_type,
-                                                                 mio_bn_config::fp_prec_type,
-                                                                 mio_bn_config::fp_prec_c_type,
-                                                                 mio_bn_config::fp_prec_ls_type,
-                                                                 mio_bn_config::fp_accum_type,
-                                                                 mio_bn_config::fp_accum_c_type>;
+using MIOpenBNFwdTrainSpatialVar2 =
+    miopen::batchnorm::MIOpenBatchNormFwdTrainSpatialImplVar2<mio_bn_config::fp_type,
+                                                              mio_bn_config::fp_c_type,
+                                                              mio_bn_config::fp_ls_type,
+                                                              mio_bn_config::fp_prec_type,
+                                                              mio_bn_config::fp_prec_c_type,
+                                                              mio_bn_config::fp_prec_ls_type,
+                                                              mio_bn_config::fp_accum_type,
+                                                              mio_bn_config::fp_accum_c_type>;
 
 } // namespace batchnorm
 } // namespace miopen
@@ -956,7 +956,7 @@ using MIOpenBNFwdTrainSpatialHIPVar2 =
 #if(MIO_BN_VARIANT != 2)
 extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
-    MIOpenBatchNormFwdTrainSpatialHIP(
+    MIOpenBatchNormFwdTrainSpatial(
         const typename mio_bn_config::fp_type* __restrict in,
         typename mio_bn_config::fp_type* __restrict out,
         const typename mio_bn_config::fp_prec_type* __restrict scale,
@@ -991,7 +991,7 @@ extern "C" __global__ void __launch_bounds__(
     constexpr auto variant = mio_bn_config::variant;
 
     using forward_train_spatial_impl = miopen::batchnorm::
-        MIOpenBatchNormFwdTrainSpatialHIPImpl<variant, fp_type, fp_prec_type, fp_accum_type>;
+        MIOpenBatchNormFwdTrainSpatialImpl<variant, fp_type, fp_prec_type, fp_accum_type>;
 
     fp_prec_type mean, variance, invVariance;
     const unsigned int lid   = threadIdx.x;
@@ -1029,19 +1029,19 @@ extern "C" __global__ void __launch_bounds__(
 
 extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
-    MIOpenBatchNormFwdTrainSpatialHIPNorm(const mio_bn_config::fp_type* __restrict__ in,
-                                          mio_bn_config::fp_type* __restrict__ out,
-                                          const mio_bn_config::fp_prec_type* scale,
-                                          const mio_bn_config::fp_prec_type* bias,
-                                          mio_bn_config::fp_prec_type alpha,
-                                          mio_bn_config::fp_prec_type beta)
+    MIOpenBatchNormFwdTrainSpatialNorm(const mio_bn_config::fp_type* __restrict__ in,
+                                       mio_bn_config::fp_type* __restrict__ out,
+                                       const mio_bn_config::fp_prec_type* scale,
+                                       const mio_bn_config::fp_prec_type* bias,
+                                       mio_bn_config::fp_prec_type alpha,
+                                       mio_bn_config::fp_prec_type beta)
 {
-    miopen::batchnorm::MIOpenBNFwdTrainSpatialHIPVar2{}.Norm(in, out, scale, bias, alpha, beta);
+    miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.Norm(in, out, scale, bias, alpha, beta);
 }
 
 extern "C" __global__ void
 __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
-    MIOpenBatchNormFwdTrainSpatialHIPFinalMeanVariance(
+    MIOpenBatchNormFwdTrainSpatialFinalMeanVariance(
         mio_bn_config::fp_type* __restrict__ meanvarbuff,
         mio_bn_config::fp_prec_type INHW
 #if(MIO_RUNNING_RESULT == 1)
@@ -1076,7 +1076,7 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     unsigned int zgid;
     unsigned int commitID;
 
-    miopen::batchnorm::MIOpenBNFwdTrainSpatialHIPVar2{}.FinalMeanVariance(
+    miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);
     // Save mean and calculate and save running mean
     if(ygid == commitID && zgid == 0)
@@ -1104,10 +1104,10 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
 
 extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
-    MIOpenBatchNormFwdTrainSpatialHIPMeanVariance(const mio_bn_config::fp_type* __restrict__ in,
-                                                  mio_bn_config::fp_type* __restrict__ mvbuff)
+    MIOpenBatchNormFwdTrainSpatialMeanVariance(const mio_bn_config::fp_type* __restrict__ in,
+                                               mio_bn_config::fp_type* __restrict__ mvbuff)
 {
-    miopen::batchnorm::MIOpenBNFwdTrainSpatialHIPVar2{}.MeanVariance(in, mvbuff);
+    miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.MeanVariance(in, mvbuff);
 }
 
 #endif
