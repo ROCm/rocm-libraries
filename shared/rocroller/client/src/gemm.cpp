@@ -279,8 +279,9 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA = DGen::preSwizzle(hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
-                deviceScaleA   = make_shared_device(tmpScaleA);
+                auto tmpScaleA
+                    = DGen::preSwizzle(hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
             {
@@ -321,8 +322,9 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB = DGen::preSwizzle(hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
-                deviceScaleB   = make_shared_device(tmpScaleB);
+                auto tmpScaleB
+                    = DGen::preSwizzle(hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                deviceScaleB = make_shared_device(tmpScaleB);
             }
             else
             {
@@ -2176,6 +2178,9 @@ int main(int argc, const char* argv[])
 
     if(pretileScale)
     {
+        AssertFatal(types.scaleShuffleTileA.size() >= 2 && types.scaleShuffleTileB.size() >= 2,
+                    "scaleShuffleTileA and scaleShuffleTileB must have at least 2 elements when "
+                    "pretileScale is enabled");
         types.scalePretileA = {types.scaleShuffleTileA[0], types.scaleShuffleTileA[1]};
         types.scalePretileB = {types.scaleShuffleTileB[1], types.scaleShuffleTileB[0]};
     }
