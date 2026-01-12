@@ -22,9 +22,9 @@
  * ************************************************************************ */
 #pragma once
 
-#include "ir/IROpcode.hpp"
 #include "ir/asm/StinkyAsmIR.hpp" // For StinkyRegister definition
 #include "ir/asm/StinkyModifiers.hpp"
+#include "ir/logical/LogicalOpcode.hpp"
 #include "stinkytofu.hpp"
 #include <iostream>
 #include <optional>
@@ -47,19 +47,25 @@ namespace stinkytofu
      * - Holds operands, modifiers, and metadata
      * - No virtual dispatch for lowering (use visitor pattern or type switch)
      */
-    class IRInstruction : public IRBase
+    class LogicalInstruction : public IRBase
     {
     public:
         std::vector<StinkyRegister> dests; ///< Destination registers
         std::vector<StinkyRegister> srcs; ///< Source registers
         std::string                 comment; ///< Optional comment
 
-        IRInstruction(IRType type)
-            : IRBase(type)
+        LogicalInstruction()
+            : IRBase(IRType::LogicalIR)
         {
         }
 
-        virtual ~IRInstruction() = default;
+        virtual ~LogicalInstruction() = default;
+
+        /// LLVM-style casting support
+        static bool classof(const IRBase* ir)
+        {
+            return ir->getType() == IRType::LogicalIR;
+        }
 
         /**
          * @brief Get the logical name of this instruction (for lowering)
@@ -67,7 +73,7 @@ namespace stinkytofu
          */
         virtual const char* getLogicalName() const
         {
-            return "IRInstruction";
+            return "LogicalInstruction";
         }
 
         /**
@@ -141,15 +147,15 @@ namespace stinkytofu
 // ========================================================================
 //
 // All IR instruction classes are now generated from a single source of truth
-// in tools/tablegen/GenHighLevelIR.cpp. This ensures consistency across:
+// in tools/tablegen/GenLogicalIR.cpp. This ensures consistency across:
 // - IR class definitions
 // - Builder method signatures
 // - Mnemonic mappings for ToStinkyAsmPass
 //
 // To add a new instruction:
-// 1. Update getIRInstructions() in tools/tablegen/GenHighLevelIR.cpp
+// 1. Update getIRInstructions() in tools/tablegen/GenLogicalIR.cpp
 // 2. Rebuild (TableGen runs automatically)
 // 3. Done! IR class, builder, and mnemonics are all generated
 //
 // Note: The generated file has its own namespace stinkytofu block
-#include "ir/StinkyInstructions_generated.hpp"
+#include "ir/logical/LogicalInstructions_generated.hpp"

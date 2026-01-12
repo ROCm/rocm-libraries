@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <vector>
@@ -105,6 +106,7 @@ namespace stinkytofu
         };
 
         // For LiteralString type - kept separate as std::string is non-trivial
+        // Also used to store symbolic register name (e.g., "vgprLocalWriteAddrA") for Register type
         std::string literalValue;
 
         // define ordering for std::map key
@@ -213,6 +215,28 @@ namespace stinkytofu
         bool isRegister() const
         {
             return dataType == Type::Register;
+        }
+
+        // Get symbolic register name (e.g., "vgprLocalWriteAddrA")
+        // Returns empty string if no symbolic name is set
+        std::string getSymbolicName() const
+        {
+            if(dataType == Type::Register)
+                return literalValue;
+            return "";
+        }
+
+        // Set symbolic register name for Register type
+        void setSymbolicName(const std::string& name)
+        {
+            if(dataType == Type::Register)
+                literalValue = name;
+        }
+
+        // Check if register has a symbolic name
+        bool hasSymbolicName() const
+        {
+            return dataType == Type::Register && !literalValue.empty();
         }
 
         bool isOverlap(const StinkyRegister& other) const
@@ -393,6 +417,23 @@ namespace stinkytofu
         {
         }
 
+        ~StinkyInstruction()
+        {
+            // Clean up use-def chains
+            unlinkFromSources();
+            unlinkFromUsers();
+
+            // Verify that this instruction is no longer referenced by any sources
+            // After unlinkFromSources(), no source should have this in their users list
+            for(StinkyInstruction* source : sources)
+            {
+                // Check that this instruction is not in source's users list
+                auto it = std::find(source->users.begin(), source->users.end(), this);
+                assert(it == source->users.end()
+                       && "Destructor: source still references this instruction in users list");
+            }
+        }
+
         //----------------------------------------------------------------------
         // Register Operand Access (LLVM-style getters)
         //----------------------------------------------------------------------
@@ -499,6 +540,7 @@ namespace stinkytofu
         void dump(std::ostream&      out,
                   bool               printDetails = false,
                   const std::string& prefix       = "") const;
+        void dump() const;
 
         //----------------------------------------------------------------------
         // Automatic Use-Def Chain Maintenance (LLVM-style)
@@ -708,9 +750,20 @@ namespace stinkytofu
             }
         }
 
+        //----------------------------------------------------------------------
+        // Use-Def Chain Maintenance API (Public for passes that delete instructions)
+        //----------------------------------------------------------------------
+        /// Remove this instruction from all its sources' user lists.
+        /// Must be called before deleting an instruction to prevent dangling pointers.
+        void unlinkFromSources();
+
+        /// Remove this instruction from all its users' source lists.
+        /// Must be called before deleting an instruction to prevent dangling pointers.
+        void unlinkFromUsers();
+
     private:
         //----------------------------------------------------------------------
-        // Use-Def Chain Maintenance Helpers
+        // Use-Def Chain Maintenance Helpers (Private)
         //----------------------------------------------------------------------
         /// Update this->sources by scanning backwards for register definitions.
         /// Only updates for the registers currently in srcRegs.
@@ -719,15 +772,6 @@ namespace stinkytofu
         /// Update use-def chains for all instructions that use the registers
         /// defined by this instruction. Scans forward to find users.
         void updateUsersForInst();
-
-        /// Remove this instruction from all its sources' user lists.
-        void unlinkFromSources();
-
-        /// Remove this instruction from all its users' source lists.
-        void unlinkFromUsers();
-
-        // Allow builder to call private unlink methods during erase()
-        friend class StinkyInstIRBuilder;
 
         // Temporary: Allow legacy IR creation code to access private fields
         // TODO: Migrate these to use setSrcRegs/setDestRegs, then remove

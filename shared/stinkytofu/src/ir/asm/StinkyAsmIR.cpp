@@ -91,6 +91,11 @@ namespace stinkytofu
     // StinkyInstruction Use-Def Chain Maintenance Implementation
     //----------------------------------------------------------------------
 
+    void StinkyInstruction::dump() const
+    {
+        dump(std::cerr, true);
+    }
+
     void StinkyInstruction::setSrcRegs(const std::vector<StinkyRegister>& newSrcRegs)
     {
         // Remove old use-def links

@@ -33,9 +33,9 @@ namespace stinkytofu
     // It defines factory functions for creating pass instances.
     // Pass base classes (IRInstPass, Pass, etc.) are in stinkytofu.hpp.
 
-    // High-level IR pass factories
-    std::unique_ptr<IRInstTransformPass> createCompositeInstructionLoweringPass();
-    std::unique_ptr<IRInstToAsmPass>     createToStinkyAsmPass();
+    // High-level IR pass factories (now using unified Pass infrastructure)
+    std::unique_ptr<Pass> createCompositeInstructionLoweringPass();
+    std::unique_ptr<Pass> createToStinkyAsmPass();
 
     struct WaitCntConfig;
 
@@ -66,14 +66,18 @@ namespace stinkytofu
     // create dead intermediate values.
     std::unique_ptr<Pass> createDeadCodeEliminationPass();
 
-    // DuplicateEliminationPass identifies and eliminates redundant computations
-    // (Common Subexpression Elimination). Works well with DCE to clean up
-    // unused originals.
-    std::unique_ptr<Pass> createDuplicateEliminationPass();
+    // RedundantMovEliminationPass removes duplicate mov-type instructions within
+    // basic blocks. Simple and conservative, designed to handle v_mov_b32,
+    // s_mov_b32, and similar instructions.
+    std::unique_ptr<Pass> createRedundantMovEliminationPass();
 
     // DelayAluInsertionPass inserts s_delay_alu instructions for RDNA3 (gfx11xx)
     // architectures to handle ALU instruction dependencies. Only runs on gfx11xx.
     std::unique_ptr<Pass> createDelayAluInsertionPass();
+
+    // WaitCntLegalizationPass lowers deprecated s_waitcnt instructions into
+    // architecture-specific wait instructions for gfx1250. Only runs on gfx1250.
+    std::unique_ptr<Pass> createWaitCntLegalizationPass();
 
     // The following passes are used for translation between rocisa and
     // stinkytofu. They are specific to tensilelite rocisa and are therefore not

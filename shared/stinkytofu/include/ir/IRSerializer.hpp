@@ -23,7 +23,6 @@
 
 #pragma once
 
-#include "ir/IRModule.hpp"
 #include "ir/asm/PatternParser.hpp"
 #include <iostream>
 #include <string>
@@ -32,9 +31,9 @@
 namespace stinkytofu
 {
     /**
-     * @brief Serializer for IRModule to/from binary bitcode format (.st.bc)
+     * @brief Serializer for intrinsics to/from binary bitcode format (.st.bc)
      *
-     * This serializer converts high-level IRModule (containing IRInstruction*)
+     * This serializer converts intrinsic definitions (Pattern objects)
      * to a binary format for storage and later deserialization.
      *
      * Binary Format (.st.bc):

@@ -98,7 +98,7 @@ TEST_F(AsmEmitterTest, EmitSingleInstruction)
     std::string      assembly = emitter.emit(*inst);
 
     // Compare exact assembly output (no cycle info with default options)
-    std::string expected = "    ds_read_b128 v[0:3], v[40]\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -118,7 +118,7 @@ TEST_F(AsmEmitterTest, EmitWithCycleInfo)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
 
-    std::string expected = "    ds_read_b128 v[0:3], v[40] // issue=4 latency=52\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -136,7 +136,7 @@ TEST_F(AsmEmitterTest, EmitWithoutCycleInfo)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
 
-    std::string expected = "    ds_read_b128 v[0:3], v[40]\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -166,8 +166,8 @@ TEST_F(AsmEmitterTest, EmitSingleVectorRegister)
     StinkyInstruction* inst = createInstruction("v_mov_b32");
     ASSERT_NE(inst, nullptr);
 
-    inst->addDestReg(StinkyRegister("v", 5, 1)); // v[5]
-    inst->addSrcReg(StinkyRegister("v", 3, 1)); // v[3]
+    inst->addDestReg(StinkyRegister("v", 5, 1)); // v5
+    inst->addSrcReg(StinkyRegister("v", 3, 1)); // v3
 
     AsmEmitterOptions options;
     options.emitCycleInfo = false;
@@ -175,7 +175,7 @@ TEST_F(AsmEmitterTest, EmitSingleVectorRegister)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
 
-    std::string expected = "    v_mov_b32 v[5], v[3]\n";
+    std::string expected = "    v_mov_b32 v5, v3\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -282,14 +282,9 @@ TEST_F(AsmEmitterTest, EmitIRList)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(insts);
 
-    std::string expected = "// ==================================================\n"
-                           "// StinkyTofu Assembly Output\n"
-                           "// Instructions: 3\n"
-                           "// ==================================================\n"
-                           "\n"
-                           "loop_start:\n"
-                           "    ds_read_b128 v[0:3], v[40]\n"
-                           "    ds_read_b128 v[4:7], v[41]\n";
+    std::string expected = "loop_start:\n"
+                           "    ds_read_b128 v[0:3], v40\n"
+                           "    ds_read_b128 v[4:7], v41\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -307,7 +302,7 @@ TEST_F(AsmEmitterTest, EmitIRListWithoutComments)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(insts);
 
-    std::string expected = "    ds_read_b128 v[0:3], v[40]\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -350,7 +345,7 @@ TEST_F(AsmEmitterTest, EmitToStream)
     emitter.emit(oss, *inst);
 
     std::string assembly = oss.str();
-    std::string expected = "    ds_read_b128 v[0:3], v[40]\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -371,7 +366,7 @@ TEST_F(AsmEmitterTest, EmitToStreamWithCycleInfo)
     emitter.emit(oss, *inst);
 
     std::string assembly = oss.str();
-    std::string expected = "    ds_read_b128 v[0:3], v[40] // issue=4 latency=52\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -392,7 +387,7 @@ TEST_F(AsmEmitterTest, ToAssemblyUtility)
     options.emitComments = false;
 
     std::string assembly = toAssembly(insts, options);
-    std::string expected = "    ds_read_b128 v[0:3], v[40]\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -410,7 +405,7 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithCycleInfo)
     options.emitCycleInfo = true;
 
     std::string assembly = toAssembly(insts, options);
-    std::string expected = "    ds_read_b128 v[0:3], v[40] // issue=4 latency=52\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -428,7 +423,7 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithOptions)
     options.emitCycleInfo = false;
 
     std::string assembly = toAssembly(insts, options);
-    std::string expected = "    ds_read_b128 v[0:3], v[40]\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -475,7 +470,7 @@ TEST_F(AsmEmitterTest, EmitWithUserComment)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
 
-    std::string expected = "    ds_read_b128 v[0:3], v[40] // load C\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40 // load C\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -500,7 +495,7 @@ TEST_F(AsmEmitterTest, EmitWithCycleInfoAndUserComment)
     std::string      assembly = emitter.emit(*inst);
 
     // Cycle info should come first, then user comment
-    std::string expected = "    ds_read_b128 v[0:3], v[40] // issue=4 latency=52, load C\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52, load C\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -523,7 +518,7 @@ TEST_F(AsmEmitterTest, EmitUserCommentDisabled)
     std::string      assembly = emitter.emit(*inst);
 
     // User comment should not appear
-    std::string expected = "    ds_read_b128 v[0:3], v[40]\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -548,7 +543,7 @@ TEST_F(AsmEmitterTest, EmitCycleInfoOnlyWithUserComment)
     std::string      assembly = emitter.emit(*inst);
 
     // Only cycle info should appear, no user comment
-    std::string expected = "    ds_read_b128 v[0:3], v[40] // issue=4 latency=52\n";
+    std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -572,8 +567,8 @@ TEST_F(AsmEmitterTest, VOP3ModifierNegation)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
 
-    // Should render as: v_add_f32 v[0], -v[1], v[2]
-    std::string expected = "    v_add_f32 v[0], -v[1], v[2]\n";
+    // Should render as: v_add_f32 v0, -v1, v2
+    std::string expected = "    v_add_f32 v0, -v1, v2\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -597,8 +592,8 @@ TEST_F(AsmEmitterTest, VOP3ModifierAbsoluteValue)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
 
-    // Should render as: v_add_f32 v[10], abs(v[11]), v[12]
-    std::string expected = "    v_add_f32 v[10], abs(v[11]), v[12]\n";
+    // Should render as: v_add_f32 v10, abs(v11), v12
+    std::string expected = "    v_add_f32 v10, abs(v11), v12\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -623,9 +618,9 @@ TEST_F(AsmEmitterTest, VOP3ModifierNegatedAbsoluteValue)
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
 
-    // Should render as: v_add_f32 v[20], -abs(v[21]), v[22]
+    // Should render as: v_add_f32 v20, -abs(v21), v22
     // This follows LLVM syntax: "-" before "abs()" is allowed
-    std::string expected = "    v_add_f32 v[20], -abs(v[21]), v[22]\n";
+    std::string expected = "    v_add_f32 v20, -abs(v21), v22\n";
     EXPECT_EQ(assembly, expected);
 }
 
@@ -654,6 +649,6 @@ TEST_F(AsmEmitterTest, VOP3ModifierMultipleSources)
     std::string      assembly = emitter.emit(*inst);
 
     // Should render with modifiers on each source according to LLVM syntax
-    std::string expected = "    v_fma_f32 v[30], -v[31], abs(v[32]), -abs(v[33])\n";
+    std::string expected = "    v_fma_f32 v30, -v31, abs(v32), -abs(v33)\n";
     EXPECT_EQ(assembly, expected);
 }

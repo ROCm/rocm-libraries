@@ -140,7 +140,20 @@ namespace stinkytofu
         std::vector<std::string> getSearchPaths();
 
         /**
-         * @brief Get the executable/library path
+         * @brief Get the loaded shared library path
+         *
+         * Uses dladdr() on Linux to find where libstinkytofu.so is loaded from.
+         * This works correctly for both Python modules and C++ executables.
+         *
+         * @return Path to the loaded library or empty string
+         */
+        std::string getLibraryPath();
+
+        /**
+         * @brief Get the executable path
+         *
+         * Uses /proc/self/exe on Linux to find the main executable.
+         * Note: For Python modules, this returns the Python interpreter path.
          *
          * @return Path to current executable or library
          */

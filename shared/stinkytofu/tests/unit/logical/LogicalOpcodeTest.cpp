@@ -21,9 +21,9 @@
  *
  * ************************************************************************ */
 
-#include "ir/IROpcode.hpp"
+#include "ir/logical/LogicalOpcode.hpp"
 #include "TestHelpers.hpp"
-#include "ir/StinkyInstructions.hpp"
+#include "ir/logical/LogicalInstructions.hpp"
 #include <gtest/gtest.h>
 
 using namespace stinkytofu;

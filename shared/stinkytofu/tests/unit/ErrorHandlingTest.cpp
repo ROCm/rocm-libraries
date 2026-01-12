@@ -24,6 +24,7 @@
 // Unit tests for error handling mechanisms in StinkyTofu
 // Tests Expected<T> and STINKY_UNREACHABLE() functionality
 
+#include <chrono>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>

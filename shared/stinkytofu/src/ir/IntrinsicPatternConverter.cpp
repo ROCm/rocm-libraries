@@ -119,7 +119,7 @@ namespace stinkytofu
         {
             auto irInst = std::make_shared<GenericIRInstruction>(
                 inst.destReg, inst.operation, inst.operands);
-            irModule.module->add(irInst);
+            irModule.instructions.push_back(irInst);
         }
 
         return irModule;
@@ -135,7 +135,7 @@ namespace stinkytofu
         pattern.pythonBinding = irModule.pythonBinding;
 
         // Convert GenericIRInstructions back to text
-        for(const auto& irInst : irModule.module->getInstructions())
+        for(const auto& irInst : irModule.instructions)
         {
             // Cast to GenericIRInstruction
             auto genericInst = std::static_pointer_cast<GenericIRInstruction>(irInst);

@@ -35,7 +35,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/ConfigurableWaitCntPassTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DelayAluInsertionPassTest.cpp
-    unit/asm/DuplicateEliminationPassTest.cpp
+    unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
@@ -43,16 +43,17 @@ set(UNIT_ASM_TEST_FILES
 )
 
 # High-Level IR Tests
-set(UNIT_IR_TEST_FILES
-    unit/ir/CommutativeTest.cpp
-    unit/ir/HexLiteralTest.cpp
-    unit/ir/HighLevelPeepholePassTest.cpp
-    unit/ir/IRBuilderTest.cpp
-    unit/ir/IRModuleTest.cpp
-    unit/ir/IROpcodeTest.cpp
-    unit/ir/IRToAsmPipelineTest.cpp
-    unit/ir/IntrinsicFlowTest.cpp
-    unit/ir/PassManagerTest.cpp
+set(UNIT_LOGICAL_TEST_FILES
+    unit/logical/LogicalCommutativeTest.cpp
+    unit/logical/LogicalHexLiteralTest.cpp
+    unit/logical/LogicalPeepholePassTest.cpp
+    unit/logical/LogicalBuilderTest.cpp
+    unit/logical/LogicalModuleTest.cpp
+    unit/logical/LogicalModuleOwnershipTest.cpp
+    unit/logical/LogicalOpcodeTest.cpp
+    unit/logical/LogicalToAsmPipelineTest.cpp
+    unit/logical/LogicalIntrinsicFlowTest.cpp
+    unit/logical/LogicalPassManagerTest.cpp
 )
 
 # Common/Shared Tests
@@ -64,7 +65,7 @@ set(UNIT_COMMON_TEST_FILES
 # Combine all unit tests
 set(UNIT_TEST_FILES
     ${UNIT_ASM_TEST_FILES}
-    ${UNIT_IR_TEST_FILES}
+    ${UNIT_LOGICAL_TEST_FILES}
     ${UNIT_COMMON_TEST_FILES}
 )
 list(TRANSFORM UNIT_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")

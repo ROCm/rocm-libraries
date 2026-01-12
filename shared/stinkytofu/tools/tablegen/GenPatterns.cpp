@@ -81,7 +81,7 @@ namespace stinkytofu
 
     std::string PatternCodeGen::generateHeader(PatternType type)
     {
-        if(type == PatternType::HighLevelIR)
+        if(type == PatternType::LogicalIR)
         {
             return R"(/* ************************************************************************
  * Copyright (C) 2025 Advanced Micro Devices, Inc.
@@ -91,8 +91,7 @@ namespace stinkytofu
 
 #pragma once
 
-#include "ir/IRModule.hpp"
-#include "ir/StinkyInstructions.hpp"
+#include "ir/logical/LogicalInstructions.hpp"
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -128,20 +127,20 @@ inline double NegateConstant(double a) { return -a; }
 //===----------------------------------------------------------------------===//
 
 /// Base class for all high-level IR pattern matchers
-/// Operates on IRInstruction* (architecture-independent IR)
+/// Operates on LogicalInstruction* (architecture-independent IR)
 class PatternMatcher {
 public:
     virtual ~PatternMatcher() = default;
 
     /// Context provided to pattern matchers
     struct MatchContext {
-        const std::unordered_map<StinkyRegister, IRInstruction*>& defMap;
+        const std::unordered_map<StinkyRegister, LogicalInstruction*>& defMap;
         const std::unordered_map<StinkyRegister, int>& useCount;
     };
 
     /// Result of a successful pattern match and rewrite
     struct RewriteResult {
-        std::vector<IRInstruction*> instructionsToRemove;
+        std::vector<LogicalInstruction*> instructionsToRemove;
         bool applied = false;
     };
 
@@ -149,7 +148,7 @@ public:
     /// Returns nullopt if pattern doesn't match
     /// If pattern matches, performs rewrite in-place and returns instructions to remove
     virtual std::optional<RewriteResult> tryMatchAndRewrite(
-        IRInstruction* inst,
+        LogicalInstruction* inst,
         const MatchContext& context) = 0;
 
     /// Get the name of this pattern (for debugging)
@@ -265,7 +264,7 @@ public:
         oss << "}\n\n";
 
         // Use correct namespace based on pattern type
-        if(type == PatternType::HighLevelIR)
+        if(type == PatternType::LogicalIR)
         {
             oss << "} // namespace hlir_patterns\n";
         }
@@ -585,7 +584,7 @@ public:
         std::ostringstream oss;
 
         oss << "    std::optional<RewriteResult> tryMatchAndRewrite(\n";
-        oss << "        IRInstruction* inst,\n";
+        oss << "        LogicalInstruction* inst,\n";
         oss << "        const MatchContext& context) override\n";
         oss << "    {\n";
         oss << "        const auto& defMap = context.defMap;\n";
@@ -601,7 +600,7 @@ public:
 
         // Assign the root instruction to its variable name
         oss << "        // Root instruction\n";
-        oss << "        IRInstruction* " << lastMatch.instVar << " = inst;\n\n";
+        oss << "        LogicalInstruction* " << lastMatch.instVar << " = inst;\n\n";
 
         oss << "        // Extract operands from " << lastMatch.opcode << "\n";
         oss << "        const auto& destRegs = " << lastMatch.instVar << "->dests;\n";
@@ -639,7 +638,8 @@ public:
                 oss << "        auto defIt = defMap.find(" << resultVar << ");\n";
                 oss << "        if (defIt == defMap.end())\n";
                 oss << "            return std::nullopt;\n";
-                oss << "        IRInstruction* " << matchStmt.instVar << " = defIt->second;\n\n";
+                oss << "        LogicalInstruction* " << matchStmt.instVar
+                    << " = defIt->second;\n\n";
 
                 oss << "        // Check opcode: " << matchStmt.opcode << "\n";
                 oss << "        if (" << matchStmt.instVar
@@ -888,9 +888,9 @@ public:
 
         // Determine output file name based on pattern type
         std::string outputPath;
-        if(type == PatternType::HighLevelIR)
+        if(type == PatternType::LogicalIR)
         {
-            outputPath = outputDir + "/HighLevelIRPatterns.inc";
+            outputPath = outputDir + "/LogicalIRPatterns.inc";
         }
         else if(type == PatternType::Peephole)
         {
@@ -912,7 +912,7 @@ public:
         out << generateHeader(type);
 
         // Generate pattern matchers based on type
-        if(type == PatternType::HighLevelIR)
+        if(type == PatternType::LogicalIR)
         {
             // Generate matchers for high-level IR (architecture-independent)
             for(const auto& pattern : filteredPatterns)
@@ -963,7 +963,7 @@ public:
         // Generate matchers for both pattern types
         bool success = true;
         success &= codegen.generateMatchers(patterns, PatternType::Peephole);
-        success &= codegen.generateMatchers(patterns, PatternType::HighLevelIR);
+        success &= codegen.generateMatchers(patterns, PatternType::LogicalIR);
 
         return success;
     }

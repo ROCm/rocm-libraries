@@ -39,6 +39,7 @@ namespace stinkytofu
 {
     // Forward declarations
     class PassContext;
+    class LogicalInstruction;
     enum class GfxArchID : uint32_t;
 
     // Error codes for StinkyIRConverter operations
@@ -101,11 +102,13 @@ namespace stinkytofu
         // conceptually similar to MLIR but in much simpler framework.
         enum class IRType
         {
-            StinkyTofu,
+            StinkyTofu, // Assembly-level IR (StinkyInstruction)
+            LogicalIR, // High-level, architecture-independent IR (LogicalInstruction)
         };
 
         IRBase(IRType type)
             : irType(type)
+            , ownedExternally(false)
         {
         }
 
@@ -120,8 +123,31 @@ namespace stinkytofu
             return irType;
         }
 
+        // Mark this instruction as externally owned (e.g., by shared_ptr in Python's LogicalModule)
+        //
+        // IMPORTANT: This flag is specifically for Python/LogicalModule integration.
+        // When Python creates a LogicalModule with shared_ptr<LogicalInstruction>,
+        // those instructions are marked as externally owned so that C++ passes
+        // don't delete them (they're owned by Python's shared_ptr).
+        //
+        // When true, IRList/passes should NOT delete this instruction
+        // When false, IRList owns and will delete this instruction
+        void setExternallyOwned(bool owned)
+        {
+            ownedExternally = owned;
+        }
+
+        bool isExternallyOwned() const
+        {
+            return ownedExternally;
+        }
+
     private:
         const IRType irType;
+
+        // Ownership flag: true if owned by shared_ptr (Python/LogicalModule),
+        // false if owned by IRList (C++ direct creation)
+        bool ownedExternally;
     };
 
     using IRList = IntrusiveList<IRBase>;
@@ -258,7 +284,11 @@ namespace stinkytofu
             {
                 IRBase* irNode = ir.begin().getNodePtr();
                 ir.erase(ir.begin());
-                delete irNode;
+                // Only delete if not externally owned (e.g., by Python's shared_ptr)
+                if(!irNode->isExternallyOwned())
+                {
+                    delete irNode;
+                }
             }
         }
 
@@ -279,6 +309,20 @@ namespace stinkytofu
         BasicBlockList basicBlocks;
         BasicBlock*    entryBlock = nullptr;
         GemmTileConfig gemmConfig;
+
+        // Storage for shared_ptr ownership of LogicalInstructions from Python's LogicalModule
+        //
+        // IMPORTANT: This is specifically for Python/LogicalModule integration.
+        //
+        // When Python creates a LogicalModule with shared_ptr<LogicalInstruction>,
+        // LogicalToFunctionConverter extracts raw pointers and adds them to IRList.
+        // To prevent double-free, we store the original shared_ptrs here to keep
+        // the instructions alive. The raw pointers in IRList are marked as
+        // "externally owned" so passes don't delete them.
+        //
+        // After lowering (ToStinkyAsmPass), call releaseLogicalInstructionOwnership()
+        // to free this memory and complete the decoupling.
+        std::vector<std::shared_ptr<LogicalInstruction>> logicalInstructionOwners;
 
     public:
         explicit Function(const std::string& name = "")
@@ -417,6 +461,41 @@ namespace stinkytofu
             }
         }
 
+        // Keep LogicalInstruction shared_ptrs alive to prevent double-free
+        //
+        // IMPORTANT: This is specifically for Python/LogicalModule integration.
+        // Used by LogicalToFunctionConverter when converting from Python's LogicalModule.
+        //
+        // Do NOT call this for C++-created LogicalInstructions - those should be
+        // directly owned by IRList (not marked as externally owned).
+        void keepLogicalInstructionAlive(std::shared_ptr<LogicalInstruction> inst)
+        {
+            logicalInstructionOwners.push_back(std::move(inst));
+        }
+
+        void keepLogicalInstructionsAlive(std::vector<std::shared_ptr<LogicalInstruction>> insts)
+        {
+            logicalInstructionOwners.insert(logicalInstructionOwners.end(),
+                                            std::make_move_iterator(insts.begin()),
+                                            std::make_move_iterator(insts.end()));
+        }
+
+        // Release logical instruction ownership after lowering to assembly
+        //
+        // IMPORTANT: This is specifically for Python/LogicalModule integration.
+        //
+        // After ToStinkyAsmPass completes, the LogicalInstructions are no longer
+        // needed (they've been lowered to StinkyInstructions). Call this method
+        // to free the LogicalInstruction memory and complete the decoupling from
+        // Python's LogicalModule.
+        //
+        // This is optional but recommended for memory efficiency.
+        // If not called, LogicalInstructions will be freed when Function is destroyed.
+        void releaseLogicalInstructionOwnership()
+        {
+            logicalInstructionOwners.clear();
+        }
+
         void dump(std::ostream& out) const;
     };
 
@@ -550,94 +629,6 @@ namespace stinkytofu
     // the AnalysisManager.
     class AnalysisPass : public Pass
     {
-    };
-
-    //----------------------------------------------------------------------
-    // High-Level IR Pass Infrastructure
-    //----------------------------------------------------------------------
-
-    // Forward declaration for IR instruction type
-    class IRInstruction;
-    class StinkyInstruction;
-
-    /**
-     * @brief Base class for all high-level IR passes
-     *
-     * IRInstPass operates on IRInstruction (high-level IR) as opposed to
-     * Pass which operates on StinkyInstruction (assembly IR).
-     *
-     * Passes can be composed into pipelines using IRInstPassManager for
-     * optimization and lowering sequences.
-     *
-     * Naming convention:
-     * - IRInstPass - operates on IRInstruction (high-level IR)
-     * - Pass       - operates on StinkyInstruction (assembly IR)
-     */
-    class IRInstPass
-    {
-    public:
-        virtual ~IRInstPass() = default;
-
-        /**
-         * @brief Get the name of this pass (for debugging/logging)
-         */
-        virtual const char* getName() const = 0;
-
-        /**
-         * @brief Check if this pass produces assembly instructions
-         *
-         * Most passes produce IRInstruction*, but the final lowering pass
-         * (ToStinkyAsmPass) produces StinkyInstruction*.
-         */
-        virtual bool producesAsm() const
-        {
-            return false;
-        }
-    };
-
-    /**
-     * @brief Pass that transforms IRInstructions to other IRInstructions
-     *
-     * Example: CompositeInstructionLoweringPass expands VAddPKF32 -> VAddF32
-     */
-    class IRInstTransformPass : public IRInstPass
-    {
-    public:
-        /**
-         * @brief Transform an IR instruction
-         * @param irInst Input IR instruction
-         * @param arch Target architecture for capability queries
-         * @return Vector of output IR instructions (may be 0, 1, or many)
-         */
-        virtual std::vector<IRInstruction*> transform(IRInstruction* irInst, GfxArchID arch) = 0;
-
-        bool producesAsm() const override
-        {
-            return false;
-        }
-    };
-
-    /**
-     * @brief Pass that converts IRInstructions to assembly instructions
-     *
-     * This is the final lowering pass in the pipeline.
-     * Example: ToStinkyAsmPass converts VAddF32 (IRInstruction) -> v_add_f32 (StinkyInstruction)
-     */
-    class IRInstToAsmPass : public IRInstPass
-    {
-    public:
-        /**
-         * @brief Lower an IR instruction to assembly
-         * @param irInst Input IR instruction
-         * @param arch Target architecture for mnemonic mapping
-         * @return Vector of output assembly instructions (typically 1)
-         */
-        virtual std::vector<StinkyInstruction*> lower(IRInstruction* irInst, GfxArchID arch) = 0;
-
-        bool producesAsm() const override
-        {
-            return true;
-        }
     };
 
     // AnalysisManager manages analysis passes and their results.

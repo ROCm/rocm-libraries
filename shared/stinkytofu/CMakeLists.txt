@@ -60,21 +60,22 @@ configure_file(include/Config.h.in include/Config/Config.h)
 # => MSVC: /GR- /EHs-c-
 set(STINKYTOFU_SOURCE_FILES
     stinkytofu.cpp
-    ir/IRModule.cpp
+    ir/python/PyLogicalModule.cpp
+    ir/logical/LogicalToFunctionConverter.cpp
     ir/IRSerializer.cpp
     ir/IntrinsicLibrary.cpp
     ir/IntrinsicRegistry.cpp
     ir/IntrinsicPatternConverter.cpp
-    ir/passes/PassManager.cpp
     # ir/passes/IntrinsicExpansionPass.cpp  # TODO: Fix API compatibility
-    ir/passes/ToStinkyAsmPass.cpp
-    ir/passes/CompositeInstructionLoweringPass.cpp
-    ir/passes/HighLevelPeepholePass.cpp
+    ir/logical/passes/ToStinkyAsmPass.cpp
+    ir/logical/passes/CompositeInstructionLoweringPass.cpp
+    ir/logical/passes/LogicalPeepholePass.cpp
     ir/asm/CFGBuilderPass.cpp
     ir/asm/PeepholeOptimizationPass.cpp
     ir/asm/DeadCodeEliminationPass.cpp
-    ir/asm/DuplicateEliminationPass.cpp
+    ir/asm/RedundantMovEliminationPass.cpp
     ir/asm/DelayAluInsertionPass.cpp
+    ir/asm/WaitCntLegalizationPass.cpp
     ir/asm/OptimizationPipeline.cpp
     ir/asm/ScheduleLastLRsPass.cpp
     ir/asm/StinkyDAGSchedulerPass.cpp
@@ -138,7 +139,7 @@ endif()
 # Now create stinkytofu library which depends on tablegen_generated
 # Add generated source files
 set(STINKYTOFU_GENERATED_SOURCES
-    "${TABLEGEN_OUTPUT_DIR}/ir/IROpcode.cpp"
+    "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalOpcode.cpp"
 )
 
 # Mark generated files so CMake knows they will be created during build
@@ -178,14 +179,16 @@ install(TARGETS stinkytofu
     RUNTIME DESTINATION bin
 )
 
-# Install public header files
+# Install public header files with stinkytofu/ namespace
+# Exclude ir/python/ (Python-specific, internal headers)
 install(DIRECTORY include/
-    DESTINATION include
+    DESTINATION include/stinkytofu
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    PATTERN "ir/python" EXCLUDE
 )
 
 # Install generated header files
 install(FILES
-    ${PROJECT_BINARY_DIR}/ir/StinkyInstructions_generated.hpp
-    DESTINATION include/ir
+    ${PROJECT_BINARY_DIR}/ir/logical/LogicalInstructions_generated.hpp
+    DESTINATION include/stinkytofu/ir/logical
 )

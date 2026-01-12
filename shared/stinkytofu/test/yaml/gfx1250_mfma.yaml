@@ -49,7 +49,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [1]
+        - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [1]
         - StoreRemapVectorWidth: [0]

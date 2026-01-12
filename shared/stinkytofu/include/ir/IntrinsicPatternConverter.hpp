@@ -23,9 +23,8 @@
 
 #pragma once
 
-#include "ir/IRModule.hpp"
-#include "ir/StinkyInstructions.hpp"
 #include "ir/asm/PatternParser.hpp"
+#include "ir/logical/LogicalInstructions.hpp"
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -41,9 +40,9 @@ namespace stinkytofu
      * information. It serves as an intermediate representation before full
      * IR instruction types (VAddF32, VMaxF32, etc.) are implemented.
      *
-     * Future: Replace with concrete IRInstruction subclasses.
+     * Future: Replace with concrete LogicalInstruction subclasses.
      */
-    class GenericIRInstruction : public IRInstruction
+    class GenericIRInstruction : public LogicalInstruction
     {
     public:
         std::string                   destReg; ///< Destination register name
@@ -53,7 +52,7 @@ namespace stinkytofu
         GenericIRInstruction(const std::string&                   dest,
                              const std::string&                   op,
                              const std::vector<IntrinsicOperand>& ops)
-            : IRInstruction(IRType::StinkyTofu)
+            : LogicalInstruction()
             , destReg(dest)
             , operation(op)
             , operands(ops)
@@ -101,19 +100,19 @@ namespace stinkytofu
     /**
      * @brief Metadata container for intrinsic definitions
      *
-     * Wraps an IRModule with additional metadata (arguments, comment, python_binding).
+     * Holds a vector of LogicalInstructions with additional metadata (arguments, comment, python_binding).
+     * This is for the intrinsic compiler (C++ tool), not Python.
      */
     struct IntrinsicIRModule
     {
-        std::string                    name;
-        std::vector<IntrinsicArgument> arguments;
-        std::shared_ptr<IRModule>      module;
-        std::string                    comment;
-        bool                           pythonBinding;
+        std::string                                      name;
+        std::vector<IntrinsicArgument>                   arguments;
+        std::vector<std::shared_ptr<LogicalInstruction>> instructions; // Intrinsic body
+        std::string                                      comment;
+        bool                                             pythonBinding;
 
         IntrinsicIRModule(const std::string& n)
             : name(n)
-            , module(std::make_shared<IRModule>(n))
             , pythonBinding(false)
         {
         }

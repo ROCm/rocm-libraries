@@ -24,6 +24,11 @@
 #include "ir/asm/OptimizationPipeline.hpp"
 #include "stinkytofu.hpp"
 
+#ifdef ENABLE_DUMP_ASM_TO_FILE_PASS
+#include "ir/asm/StinkyAsmEmitter.hpp"
+#include <fstream>
+#endif // ENABLE_DUMP_ASM_TO_FILE_PASS
+
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
 
@@ -31,6 +36,81 @@ namespace nb = nanobind;
 
 namespace rocisa
 {
+// DumpAsmToFilePass is disabled by default. Define ENABLE_DUMP_ASM_TO_FILE_PASS to enable it.
+// This is a temporary test pass used for debugging StinkyAsmEmitter during the rocisa-to-stinkytofu
+// transition period. It will be removed once we can convert all rocisa IR to StinkyAsm IR and no
+// longer need to convert back to rocisa IR.
+#ifdef ENABLE_DUMP_ASM_TO_FILE_PASS
+    // Pass that dumps StinkyTofu IR as assembly to a file
+    class DumpAsmToFilePass : public stinkytofu::Pass
+    {
+    public:
+        static char ID;
+
+        DumpAsmToFilePass(const std::string& filename)
+            : filename_(filename)
+        {
+        }
+
+        stinkytofu::Pass::PassID getPassID() const override
+        {
+            return &ID;
+        }
+
+        const char* getName() const override
+        {
+            return "DumpAsmToFilePass";
+        }
+
+        void run(stinkytofu::Function& func, stinkytofu::PassContext& passCtx) override
+        {
+            // Open the output file in append mode
+            std::ofstream outFile(filename_, std::ios::app);
+            if(!outFile.is_open())
+            {
+                std::cerr << "Error: Failed to open file '" << filename_ << "' for writing"
+                          << std::endl;
+                return;
+            }
+
+            // Configure the emitter with default options
+            stinkytofu::AsmEmitterOptions options;
+            options.emitComments     = true;
+            options.emitCycleInfo    = false;
+            options.indent           = 0;
+            options.emitBlankLines   = false;
+            options.useSymbolicNames = true; // Enable symbolic register names
+
+            stinkytofu::StinkyAsmEmitter emitter(options);
+
+            // Emit assembly for all basic blocks in the function
+            for(stinkytofu::BasicBlock& bb : func)
+            {
+                // if(!bb.getLabel().empty())
+                // {
+                //     outFile << bb.getLabel() << ":\n";
+                // }
+                emitter.emit(outFile, bb.getIR());
+            }
+
+            outFile.close();
+            std::cout << "Assembly appended to: " << filename_ << std::endl;
+        }
+
+    private:
+        std::string filename_;
+    };
+
+    // Define the static ID
+    char DumpAsmToFilePass::ID = 0;
+
+    // Factory function to create the pass
+    std::unique_ptr<stinkytofu::Pass> createDumpAsmToFilePass(const std::string& filename)
+    {
+        return std::make_unique<DumpAsmToFilePass>(filename);
+    }
+#endif // ENABLE_DUMP_ASM_TO_FILE_PASS
+
     rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>& kernel, const rocIsaPassOption& option)
     {
         rocIsaPassResult result;
@@ -118,6 +198,14 @@ namespace rocisa
 
                         // Add StinkyAsm-to-Rocisa conversion pass after the built-in pipeline
                         config.addPassAfter(stinkytofu::createStinkyAsmToRocisaPass());
+
+                        // Add WaitCnt legalization pass to lower s_waitcnt to gfx1250 wait instructions
+                        config.addPassAfter(stinkytofu::createWaitCntLegalizationPass());
+
+#ifdef ENABLE_DUMP_ASM_TO_FILE_PASS
+                        // Add the dump assembly pass at the very end to test StinkyAsmEmitter
+                        config.addPassAfter(createDumpAsmToFilePass("st.asm"));
+#endif // ENABLE_DUMP_ASM_TO_FILE_PASS
 
                         // Built-in pipeline includes (in order):
                         // Phase 1: CFGBuilderPass

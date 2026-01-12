@@ -22,11 +22,11 @@
  * ************************************************************************ */
 
 /**
- * @file GenHighLevelIR.cpp
+ * @file GenLogicalIR.cpp
  * @brief Generates high-level IR instruction class definitions and builder methods
  *
  * This generator creates:
- * 1. IR instruction class definitions (StinkyInstructions_generated.inc)
+ * 1. IR instruction class definitions (LogicalInstructions_generated.hpp)
  * 2. Builder method forward declarations (StinkyBuilder_decls_generated.inc)
  * 3. Builder method implementations (StinkyBuilder_impls_generated.inc)
  * 4. Mnemonic-to-IR mappings for ToStinkyAsmPass (IRMnemonics_generated.inc)
@@ -86,7 +86,7 @@ namespace stinkytofu
     static std::vector<IRInstDef> getIRInstructions()
     {
         return {
-#include "IRInstructionDefs.inc"
+#include "LogicalInstructionDefs.inc"
         };
     }
 
@@ -103,7 +103,7 @@ namespace stinkytofu
         out << "    /**\n";
         out << "     * @brief MFMA (Matrix Fused Multiply-Add) instruction\n";
         out << "     */\n";
-        out << "    class MFMA : public IRInstruction\n";
+        out << "    class MFMA : public LogicalInstruction\n";
         out << "    {\n";
         out << "    public:\n";
         out << "        std::string instType;      ///< Input data type (bf16, f16, i8, etc.)\n";
@@ -132,7 +132,7 @@ namespace stinkytofu
         out << "             const StinkyRegister* acc2 = nullptr,\n";
         out << "             bool neg = false,\n";
         out << "             const std::string& comment_ = \"\")\n";
-        out << "            : IRInstruction(IRType::StinkyTofu)\n";
+        out << "            : LogicalInstruction()\n";
         out << "            , instType(instType)\n";
         out << "            , accType(accType)\n";
         out << "            , m(m)\n";
@@ -163,7 +163,7 @@ namespace stinkytofu
         out << "    /**\n";
         out << "     * @brief MXMFMA (MX format MFMA with scale factors) instruction\n";
         out << "     */\n";
-        out << "    class MXMFMA : public IRInstruction\n";
+        out << "    class MXMFMA : public LogicalInstruction\n";
         out << "    {\n";
         out << "    public:\n";
         out << "        std::string instType;         ///< Input data type (f8, f4, bf8, etc.)\n";
@@ -200,7 +200,7 @@ namespace stinkytofu
         out << "               bool reuseA = false,\n";
         out << "               bool reuseB = false,\n";
         out << "               const std::string& comment_ = \"\")\n";
-        out << "            : IRInstruction(IRType::StinkyTofu)\n";
+        out << "            : LogicalInstruction()\n";
         out << "            , instType(instType)\n";
         out << "            , accType(accType)\n";
         out << "            , mxScaleATypeStr(mxScaleATypeStr)\n";
@@ -235,7 +235,7 @@ namespace stinkytofu
         out << "    /**\n";
         out << "     * @brief SMFMA (Sparse MFMA) instruction\n";
         out << "     */\n";
-        out << "    class SMFMA : public IRInstruction\n";
+        out << "    class SMFMA : public LogicalInstruction\n";
         out << "    {\n";
         out << "    public:\n";
         out << "        std::string instType;      ///< Input data type (bf16, f16, i8, etc.)\n";
@@ -264,7 +264,7 @@ namespace stinkytofu
         out << "              const StinkyRegister& metadata,\n";
         out << "              bool neg = false,\n";
         out << "              const std::string& comment_ = \"\")\n";
-        out << "            : IRInstruction(IRType::StinkyTofu)\n";
+        out << "            : LogicalInstruction()\n";
         out << "            , instType(instType)\n";
         out << "            , accType(accType)\n";
         out << "            , m(m)\n";
@@ -304,7 +304,7 @@ namespace stinkytofu
         out << "     * Loads tensor data to LDS (Local Data Share). Takes 2-4 SGPR groups.\n";
         out << "     * All groups must be scalar registers (SGPRs).\n";
         out << "     */\n";
-        out << "    class TensorLoadToLds : public IRInstruction\n";
+        out << "    class TensorLoadToLds : public LogicalInstruction\n";
         out << "    {\n";
         out << "    public:\n";
         out << "        TensorLoadToLds(const StinkyRegister& group0,\n";
@@ -312,7 +312,7 @@ namespace stinkytofu
         out << "                        const StinkyRegister* group2 = nullptr,\n";
         out << "                        const StinkyRegister* group3 = nullptr,\n";
         out << "                        const std::string& comment_ = \"\")\n";
-        out << "            : IRInstruction(IRType::StinkyTofu)\n";
+        out << "            : LogicalInstruction()\n";
         out << "        {\n";
         out << "            // No destination register for this instruction\n";
         out << "            srcs.push_back(group0);\n";
@@ -346,13 +346,13 @@ namespace stinkytofu
         out << "     * Defines a label that can be used as a branch target.\n";
         out << "     * Labels have no operands and do not produce output.\n";
         out << "     */\n";
-        out << "    class Label : public IRInstruction\n";
+        out << "    class Label : public LogicalInstruction\n";
         out << "    {\n";
         out << "    public:\n";
         out << "        std::string label_name;\n";
         out << "\n";
         out << "        explicit Label(const std::string& name)\n";
-        out << "            : IRInstruction(IRType::StinkyTofu)\n";
+        out << "            : LogicalInstruction()\n";
         out << "            , label_name(name)\n";
         out << "        {\n";
         out << "            // Labels have no operands\n";
@@ -373,10 +373,10 @@ namespace stinkytofu
     // Generate opcode enum values
     bool genOpcodeEnum(const std::string& outdir)
     {
-        std::ofstream out(outdir + "/IROpcodes_generated.inc");
+        std::ofstream out(outdir + "/LogicalOpcodes_generated.inc");
         if(!out)
         {
-            std::cerr << "Failed to open IROpcodes_generated.inc for writing\n";
+            std::cerr << "Failed to open LogicalOpcodes_generated.inc for writing\n";
             return false;
         }
 
@@ -392,17 +392,18 @@ namespace stinkytofu
             count++;
         }
 
-        std::cout << "Generated " << count << " opcode enum values -> IROpcodes_generated.inc\n";
+        std::cout << "Generated " << count
+                  << " opcode enum values -> LogicalOpcodes_generated.inc\n";
         return true;
     }
 
     // Generate opcode to string mapping tables
     bool genOpcodeMappings(const std::string& outdir)
     {
-        std::ofstream out(outdir + "/ir/IROpcode.cpp");
+        std::ofstream out(outdir + "/ir/logical/LogicalOpcode.cpp");
         if(!out)
         {
-            std::cerr << "Failed to open IROpcode.cpp for writing\n";
+            std::cerr << "Failed to open LogicalOpcode.cpp for writing\n";
             return false;
         }
 
@@ -410,10 +411,10 @@ namespace stinkytofu
         out << "/* ************************************************************************\n";
         out << " * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.\n";
         out << " * AUTO-GENERATED FILE - DO NOT EDIT\n";
-        out << " * Generated by: tools/tablegen/GenHighLevelIR.cpp\n";
+        out << " * Generated by: tools/tablegen/GenLogicalIR.cpp\n";
         out << " * ************************************************************************ */\n\n";
 
-        out << "#include \"ir/IROpcode.hpp\"\n\n";
+        out << "#include \"ir/logical/LogicalOpcode.hpp\"\n\n";
         out << "namespace stinkytofu\n";
         out << "{\n";
         out << "namespace HLIR\n";
@@ -460,16 +461,16 @@ namespace stinkytofu
         out << "} // namespace HLIR\n";
         out << "} // namespace stinkytofu\n";
 
-        std::cout << "Generated opcode mapping functions -> IROpcode.cpp\n";
+        std::cout << "Generated opcode mapping functions -> LogicalOpcode.cpp\n";
         return true;
     }
 
     bool genIRClasses(const std::string& outdir)
     {
-        std::ofstream out(outdir + "/ir/StinkyInstructions_generated.hpp");
+        std::ofstream out(outdir + "/ir/logical/LogicalInstructions_generated.hpp");
         if(!out)
         {
-            std::cerr << "Failed to open StinkyInstructions_generated.hpp for writing\n";
+            std::cerr << "Failed to open LogicalInstructions_generated.hpp for writing\n";
             return false;
         }
 
@@ -512,11 +513,11 @@ namespace stinkytofu
                "ir/StinkyRegister.hpp)\n";
         out << "// to fix the inverted dependency. StinkyRegister is a shared primitive used by "
                "both\n";
-        out << "// high-level IR (IRInstruction) and assembly IR (StinkyInstruction).\n";
+        out << "// high-level IR (LogicalInstruction) and assembly IR (StinkyInstruction).\n";
         out << "#include <vector>\n\n";
         out << "namespace stinkytofu\n";
         out << "{\n\n";
-        out << "    // NOTE: IRInstruction base class must be defined before including this "
+        out << "    // NOTE: LogicalInstruction base class must be defined before including this "
                "file\n\n";
 
         std::string currentCategory = "";
@@ -540,7 +541,7 @@ namespace stinkytofu
             out << "    /**\n";
             out << "     * @brief " << inst.comment << "\n";
             out << "     */\n";
-            out << "    class " << inst.className << " : public IRInstruction\n";
+            out << "    class " << inst.className << " : public LogicalInstruction\n";
             out << "    {\n";
             out << "    public:\n";
 
@@ -609,7 +610,7 @@ namespace stinkytofu
             }
 
             out << "const std::string& comment = \"\")\n";
-            out << "            : IRInstruction(IRType::StinkyTofu)\n";
+            out << "            : LogicalInstruction()\n";
 
             // Add initializer list for modifiers
             if(inst.supportsDPP)
@@ -700,9 +701,9 @@ namespace stinkytofu
         out << "\n} // namespace stinkytofu\n";
 
         std::cout << "Generated " << getIRInstructions().size()
-                  << " IR instruction classes + 5 special classes "
+                  << " LogicalInstruction classes + 5 special classes "
                      "(MFMA/MXMFMA/SMFMA/TensorLoadToLds/Label) -> "
-                     "StinkyInstructions_generated.hpp\n";
+                     "LogicalInstructions_generated.hpp\n";
         return true;
     }
 
@@ -905,6 +906,187 @@ namespace stinkytofu
         return true;
     }
 
+    // Generate C++ factory functions for all IR instructions
+    bool genFactoryFunctions(const std::string& outdir)
+    {
+        std::ofstream out(outdir + "/ir/LogicalInstructionFactory_generated.inc");
+        if(!out)
+        {
+            std::cerr << "Failed to open LogicalInstructionFactory_generated.inc for writing\n";
+            return false;
+        }
+
+        out << "// Auto-generated C++ factory functions for LogicalInstructions\n";
+        out << "// DO NOT EDIT - Generated by GenLogicalIR.cpp\n";
+        out << "//\n";
+        out << "// These factory functions return raw pointers for use by:\n";
+        out << "// 1. C++ projects - add directly to IRList\n";
+        out << "// 2. Python bindings - wrap in shared_ptr\n\n";
+
+        int count = 0;
+
+        // Generate factory functions for all regular IR instructions
+        for(const auto& inst : getIRInstructions())
+        {
+            std::string className = inst.className;
+
+            // Function signature
+            out << "inline LogicalInstruction* create" << className << "(";
+
+            // Parameter list
+            std::vector<std::string> paramTypes;
+            std::vector<std::string> paramNames;
+
+            // Add destination register (if instruction has one)
+            if(inst.hasDest)
+            {
+                paramTypes.push_back("const StinkyRegister&");
+                paramNames.push_back("dest");
+            }
+
+            // Add source operands
+            for(int i = 0; i < inst.numSrcs; i++)
+            {
+                paramTypes.push_back("const StinkyRegister&");
+                paramNames.push_back("src" + std::to_string(i));
+            }
+
+            // Add optional modifiers
+            if(inst.supportsDPP && inst.supportsSDWA)
+            {
+                paramTypes.push_back("std::optional<DPPModifiers>");
+                paramNames.push_back("dpp");
+
+                paramTypes.push_back("std::optional<SDWAModifiers>");
+                paramNames.push_back("sdwa");
+            }
+            else if(inst.hasDS)
+            {
+                paramTypes.push_back("std::optional<DSModifiers>");
+                paramNames.push_back("ds");
+            }
+
+            // Add comment parameter
+            paramTypes.push_back("const std::string&");
+            paramNames.push_back("comment");
+
+            // Output parameter list
+            for(size_t i = 0; i < paramTypes.size(); i++)
+            {
+                out << paramTypes[i] << " " << paramNames[i];
+                if(i + 1 < paramTypes.size())
+                    out << ", ";
+            }
+            out << ")\n";
+            out << "{\n";
+
+            // Return new instance
+            out << "    return new " << className << "(";
+            for(size_t i = 0; i < paramNames.size(); i++)
+            {
+                out << paramNames[i];
+                if(i + 1 < paramNames.size())
+                    out << ", ";
+            }
+            out << ");\n";
+            out << "}\n\n";
+
+            count++;
+        }
+
+        // Generate factory functions for special instructions
+        // These have complex constructors that don't follow the regular pattern
+
+        // MFMA
+        out << "inline LogicalInstruction* createMFMA(\n";
+        out << "    const std::string& instType,\n";
+        out << "    const std::string& accType,\n";
+        out << "    int m, int n, int k, int blocks, bool mfma1k,\n";
+        out << "    const StinkyRegister& acc,\n";
+        out << "    const StinkyRegister& a,\n";
+        out << "    const StinkyRegister& b,\n";
+        out << "    const StinkyRegister* acc2 = nullptr,\n";
+        out << "    bool neg = false,\n";
+        out << "    const std::string& comment = \"\")\n";
+        out << "{\n";
+        out << "    return new MFMA(instType, accType, m, n, k, blocks, mfma1k, acc, a, b, acc2, "
+               "neg, comment);\n";
+        out << "}\n\n";
+        count++;
+
+        // MXMFMA
+        out << "inline LogicalInstruction* createMXMFMA(\n";
+        out << "    const std::string& instType,\n";
+        out << "    const std::string& accType,\n";
+        out << "    const std::string& mxScaleATypeStr,\n";
+        out << "    const std::string& mxScaleBTypeStr,\n";
+        out << "    int m, int n, int k, int block,\n";
+        out << "    const StinkyRegister& acc,\n";
+        out << "    const StinkyRegister& a,\n";
+        out << "    const StinkyRegister& b,\n";
+        out << "    const StinkyRegister& acc2,\n";
+        out << "    const StinkyRegister& mxsa,\n";
+        out << "    const StinkyRegister& mxsb,\n";
+        out << "    bool reuseA = false,\n";
+        out << "    bool reuseB = false,\n";
+        out << "    const std::string& comment = \"\")\n";
+        out << "{\n";
+        out << "    return new MXMFMA(instType, accType, mxScaleATypeStr, mxScaleBTypeStr, m, n, "
+               "k, block, acc, a, b, acc2, mxsa, mxsb, reuseA, reuseB, comment);\n";
+        out << "}\n\n";
+        count++;
+
+        // SMFMA
+        out << "inline LogicalInstruction* createSMFMA(\n";
+        out << "    const std::string& instType,\n";
+        out << "    const std::string& accType,\n";
+        out << "    int m, int n, int k, int blocks, bool mfma1k,\n";
+        out << "    const StinkyRegister& acc,\n";
+        out << "    const StinkyRegister& a,\n";
+        out << "    const StinkyRegister& b,\n";
+        out << "    const StinkyRegister& metadata,\n";
+        out << "    bool neg = false,\n";
+        out << "    const std::string& comment = \"\")\n";
+        out << "{\n";
+        out << "    return new SMFMA(instType, accType, m, n, k, blocks, mfma1k, acc, a, b, "
+               "metadata, neg, comment);\n";
+        out << "}\n\n";
+        count++;
+
+        // TensorLoadToLds
+        out << "inline LogicalInstruction* createTensorLoadToLds(\n";
+        out << "    const StinkyRegister& group0,\n";
+        out << "    const StinkyRegister& group1,\n";
+        out << "    const StinkyRegister* group2 = nullptr,\n";
+        out << "    const StinkyRegister* group3 = nullptr,\n";
+        out << "    const std::string& comment = \"\")\n";
+        out << "{\n";
+        out << "    return new TensorLoadToLds(group0, group1, group2, group3, comment);\n";
+        out << "}\n\n";
+        count++;
+
+        // Label
+        out << "inline LogicalInstruction* createLabel(const std::string& labelName)\n";
+        out << "{\n";
+        out << "    return new Label(labelName);\n";
+        out << "}\n\n";
+        count++;
+
+        // IntrinsicCall
+        out << "inline LogicalInstruction* createIntrinsicCall(\n";
+        out << "    const std::string& name,\n";
+        out << "    const std::vector<StinkyRegister>& args)\n";
+        out << "{\n";
+        out << "    return new IntrinsicCall(name, args);\n";
+        out << "}\n\n";
+        count++;
+
+        std::cout << "Generated " << count
+                  << " C++ factory functions (including 6 special instructions) -> "
+                     "LogicalInstructionFactory_generated.inc\n";
+        return true;
+    }
+
     // Generate Python bindings for all IR instructions
     bool genPythonBindings(const std::string& outdir)
     {
@@ -916,7 +1098,7 @@ namespace stinkytofu
         }
 
         out << "// Auto-generated Python bindings for IR instructions\n";
-        out << "// DO NOT EDIT - Generated by GenHighLevelIR.cpp\n\n";
+        out << "// DO NOT EDIT - Generated by GenLogicalIR.cpp\n\n";
 
         int count = 0;
 
@@ -981,9 +1163,8 @@ namespace stinkytofu
             }
             out << ") {\n";
 
-            // Return std::make_shared as base class pointer
-            out << "        return std::shared_ptr<IRInstruction>(std::make_shared<" << className
-                << ">(";
+            // Return factory function wrapped in shared_ptr
+            out << "        return std::shared_ptr<LogicalInstruction>(create" << className << "(";
             for(size_t i = 0; i < paramNames.size(); i++)
             {
                 out << paramNames[i];
@@ -1015,7 +1196,7 @@ namespace stinkytofu
     }
 
     // Generate all high-level IR artifacts
-    bool genHighLevelIR(const std::string& outdir)
+    bool genLogicalIR(const std::string& outdir)
     {
         bool success = true;
 
@@ -1027,6 +1208,7 @@ namespace stinkytofu
         success &= genBuilderDecls(outdir);
         success &= genBuilderImpls(outdir);
         success &= genMnemonicMappings(outdir);
+        success &= genFactoryFunctions(outdir);
         success &= genPythonBindings(outdir);
 
         if(success)

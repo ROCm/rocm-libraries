@@ -110,7 +110,7 @@ def test_unknown_intrinsic():
 
 def test_module_integration():
     """Test that intrinsics work in a complete module."""
-    module = st.IRModule("test_kernel")
+    module = st.LogicalModule("test_kernel")
 
     v0, v1, v2 = st.vgpr(0), st.vgpr(1), st.vgpr(2)
 

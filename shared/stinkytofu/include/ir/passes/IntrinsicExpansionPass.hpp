@@ -23,9 +23,9 @@
 
 #pragma once
 
-#include "ir/IRModule.hpp"
 #include "ir/IntrinsicLibrary.hpp"
 #include "ir/asm/StinkyAsmIR.hpp" // For StinkyRegister
+#include "ir/python/PyLogicalModule.hpp"
 #include <memory>
 #include <unordered_map>
 
@@ -64,7 +64,7 @@ namespace stinkytofu
          * @param module IR module to transform
          * @return true if any expansions were performed, false otherwise
          */
-        bool run(IRModule* module);
+        bool run(PyLogicalModule* module);
 
     private:
         std::shared_ptr<IntrinsicLibrary> library_;
@@ -75,16 +75,16 @@ namespace stinkytofu
          * @param call IntrinsicCall instruction to expand
          * @return Vector of expanded IR instructions, or empty on error
          */
-        std::vector<IRInstruction*> expandIntrinsic(IRInstruction* call);
+        std::vector<LogicalInstruction*> expandIntrinsic(LogicalInstruction* call);
 
         /**
          * @brief Create an IR instruction from intrinsic body instruction
          *
          * @param inst Intrinsic instruction definition
          * @param regMap Map from intrinsic argument names to actual registers
-         * @return Created IRInstruction, or nullptr on error
+         * @return Created LogicalInstruction, or nullptr on error
          */
-        IRInstruction*
+        LogicalInstruction*
             createInstruction(const IntrinsicInstruction&                            inst,
                               const std::unordered_map<std::string, StinkyRegister>& regMap);
 

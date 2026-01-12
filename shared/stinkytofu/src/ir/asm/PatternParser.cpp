@@ -137,7 +137,7 @@ namespace stinkytofu
         }
         else if(lexer.peek().kind == TokenKind::KW_ir)
         {
-            pattern.type = PatternType::HighLevelIR;
+            pattern.type = PatternType::LogicalIR;
             lexer.consume(); // consume 'ir' keyword
             skipNewlines();
         }

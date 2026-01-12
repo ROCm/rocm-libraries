@@ -27,6 +27,7 @@
 #include <iostream>
 
 #ifndef _WIN32
+#include <dlfcn.h>
 #include <linux/limits.h>
 #include <unistd.h>
 #else
@@ -129,53 +130,96 @@ namespace stinkytofu
     {
         std::vector<std::string> paths;
 
-        // 1. Environment variable override
+        // 1. Environment variable override (highest priority)
         const char* envPath = std::getenv("STINKYTOFU_INTRINSICS_PATH");
         if(envPath)
         {
             paths.push_back(envPath);
         }
 
-        // 2. Current directory
-        paths.push_back("intrinsics.st.bc");
-        paths.push_back("./intrinsics.st.bc");
-
-        // 3. Build directory (relative to current location)
-        paths.push_back("../intrinsics.st.bc");
-        paths.push_back("../../intrinsics.st.bc");
-        paths.push_back("../build/intrinsics.st.bc");
-        paths.push_back("../../build/intrinsics.st.bc");
-
-        // 4. Get executable/library path and search relative to it
-        std::string execPath = getExecutablePath();
-        if(!execPath.empty())
+        // 2. Relative to the loaded shared library (PRIMARY)
+        std::string libPath = getLibraryPath();
+        if(!libPath.empty())
         {
-            // Assuming libstinkytofu.so is in <install>/lib/
-            // intrinsics.st.bc should be in <install>/lib/stinkytofu/
-            size_t lastSlash = execPath.find_last_of("/\\");
+            size_t lastSlash = libPath.find_last_of("/\\");
             if(lastSlash != std::string::npos)
             {
-                std::string libDir = execPath.substr(0, lastSlash);
-                paths.push_back(libDir + "/stinkytofu/intrinsics.st.bc");
-                paths.push_back(libDir + "/intrinsics.st.bc");
+                std::string libDir = libPath.substr(0, lastSlash);
 
-                // Also try going up one level (lib/ -> prefix/)
-                size_t secondLastSlash = libDir.find_last_of("/\\");
-                if(secondLastSlash != std::string::npos)
+                // FIRST: Search same directory and child directories
+                // This is the typical install layout:
+                //   /usr/local/lib/libstinkytofu.so
+                //   /usr/local/lib/stinkytofu/intrinsics.st.bc  <- child directory
+                paths.push_back(libDir + "/intrinsics.st.bc"); // Same dir
+                paths.push_back(libDir + "/stinkytofu/intrinsics.st.bc"); // Child dir
+                paths.push_back(libDir + "/Intrinsics/intrinsics.st.bc"); // Child dir
+
+                // SECOND: Walk up directory tree
+                // This handles the build directory layout:
+                //   build/lib/stinkytofu/_stinkytofu.so
+                //   build/intrinsics.st.bc  <- 3 levels up
+                std::string current = libDir;
+                for(int level = 0; level < 5; ++level)
                 {
-                    std::string prefix = libDir.substr(0, secondLastSlash);
-                    paths.push_back(prefix + "/lib/stinkytofu/intrinsics.st.bc");
-                    paths.push_back(prefix + "/share/stinkytofu/intrinsics.st.bc");
+                    // Go up one level
+                    size_t slash = current.find_last_of("/\\");
+                    if(slash == std::string::npos)
+                        break;
+                    current = current.substr(0, slash);
+
+                    // Check at this parent level
+                    paths.push_back(current + "/intrinsics.st.bc");
+                    paths.push_back(current + "/Intrinsics/intrinsics.st.bc");
+                    paths.push_back(current + "/lib/Intrinsics/intrinsics.st.bc");
+                    paths.push_back(current + "/lib/stinkytofu/intrinsics.st.bc");
+                    paths.push_back(current + "/share/stinkytofu/intrinsics.st.bc");
                 }
             }
         }
 
-        // 5. Standard installation paths (Linux)
+        // 3. Current working directory (fallback)
+        paths.push_back("intrinsics.st.bc");
+
+        // 4. Standard system installation paths (fallback)
         paths.push_back("/usr/local/lib/stinkytofu/intrinsics.st.bc");
+        paths.push_back("/usr/local/share/stinkytofu/intrinsics.st.bc");
         paths.push_back("/usr/lib/stinkytofu/intrinsics.st.bc");
         paths.push_back("/opt/rocm/lib/stinkytofu/intrinsics.st.bc");
 
         return paths;
+    }
+
+    std::string IntrinsicRegistry::getLibraryPath()
+    {
+        // Get the path of the loaded shared library (not the Python interpreter!)
+#ifndef _WIN32
+        Dl_info info;
+        // Use dladdr with a known symbol from this library
+        if(dladdr((void*)&IntrinsicRegistry::instance, &info) && info.dli_fname)
+        {
+            char resolved[PATH_MAX];
+            if(realpath(info.dli_fname, resolved))
+            {
+                return std::string(resolved);
+            }
+            return std::string(info.dli_fname);
+        }
+#else
+        HMODULE hModule;
+        if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                                  | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              (LPCSTR)&IntrinsicRegistry::instance,
+                              &hModule))
+        {
+            char  result[MAX_PATH];
+            DWORD count = GetModuleFileNameA(hModule, result, MAX_PATH);
+            if(count != 0)
+            {
+                return std::string(result);
+            }
+        }
+#endif
+        return "";
     }
 
     std::string IntrinsicRegistry::getExecutablePath()

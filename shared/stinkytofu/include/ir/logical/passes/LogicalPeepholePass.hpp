@@ -23,12 +23,11 @@
 
 #pragma once
 
-#include <cstddef> // for size_t
+#include <memory>
 
 namespace stinkytofu
 {
-    // Forward declaration
-    class IRModule;
+    class Pass;
 
     /// High-level IR peephole optimization pass
     ///
@@ -39,37 +38,20 @@ namespace stinkytofu
     ///   - Instruction fusion (e.g., add+mul -> fma)
     ///   - Dead move elimination
     ///
-    /// This pass operates on IRInstruction objects before they are lowered
-    /// to StinkyInstruction (assembly IR).
+    /// This pass operates on LogicalInstruction objects in IRList before they
+    /// are lowered to StinkyInstruction (assembly IR).
     ///
-    /// NOTE: This is a module-level pass, not part of IRInstPassManager.
-    ///       It should be called directly on an IRModule.
-    class HighLevelPeepholePass
-    {
-    public:
-        HighLevelPeepholePass() = default;
-
-        const char* name() const
-        {
-            return "HighLevelPeepholePass";
-        }
-
-        /// Run the pass on the given IRModule
-        /// @param module The IRModule to optimize
-        /// @return true if any changes were made, false otherwise
-        bool run(IRModule& module);
-
-        /// Get statistics about optimizations applied
-        size_t getOptimizationCount() const
-        {
-            return optimizationCount;
-        }
-
-    private:
-        size_t optimizationCount = 0;
-
-        // TODO: When full pattern matching is implemented, these will be used
-        // bool applyPatterns(IRModule& module, IRInstruction* inst);
-    };
+    /// Now uses the unified Pass infrastructure:
+    ///   - Operates on Function -> BasicBlock -> IRList
+    ///   - Works with raw LogicalInstruction* pointers
+    ///   - Integrates with PassManager
+    ///
+    /// Usage:
+    /// ```cpp
+    /// PassManager pm;
+    /// pm.addPass(createLogicalPeepholePass());
+    /// pm.run();
+    /// ```
+    std::unique_ptr<Pass> createLogicalPeepholePass();
 
 } // namespace stinkytofu

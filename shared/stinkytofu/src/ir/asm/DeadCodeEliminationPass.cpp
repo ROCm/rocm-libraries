@@ -99,107 +99,138 @@ namespace
 
         int runOnBasicBlock(BasicBlock& bb, Function& func)
         {
-            // Collect ALL instructions from entire function
-            std::vector<StinkyInstruction*> allInstructions;
-            collectAllInstructions(func, allInstructions);
+            // Simple DCE with two rules:
+            // Rule 1: If only one assignment to a register in this block -> DON'T delete (next block might use it)
+            // Rule 2: If assigned again, and register NOT used between assignments -> DELETE first assignment
 
-            // Track registers that are redefined and used later (backward scan)
-            std::set<StinkyRegister> redefinedRegs; // Registers redefined later
-            std::set<StinkyRegister> usedRegs; // Registers used later
+            std::vector<StinkyInstruction*> blockInstructions;
+            for(IRBase& irNode : bb.getIR())
+            {
+                if(irNode.getType() == IRBase::IRType::StinkyTofu)
+                {
+                    blockInstructions.push_back(cast<StinkyInstruction>(&irNode));
+                }
+            }
 
-            // Mark instructions to remove
             std::set<StinkyInstruction*> toRemove;
 
-            // Backward scan through ALL instructions (O(n))
-            for(auto it = allInstructions.rbegin(); it != allInstructions.rend(); ++it)
+            // For each instruction that writes to a register
+            for(size_t i = 0; i < blockInstructions.size(); ++i)
             {
-                StinkyInstruction* inst = *it;
+                StinkyInstruction* inst = blockInstructions[i];
 
-                // Always preserve side-effecting instructions
+                // Never remove side-effecting instructions (barriers, branches, memory ops, etc.)
                 if(mustPreserveInstruction(*inst))
+                    continue;
+
+                // Never remove instructions with no explicit destination registers
+                // (these include: comparisons, waits, delays, etc.)
+                if(inst->getDestRegs().empty())
+                    continue;
+
+                // Never remove instructions that write to dummy registers (dependency tracking only)
+                // These include: SCC (condition codes), BARRIER (waits/barriers), DS_WRITE, TENSOR_LOAD
+                bool hasDummyDest = false;
+                for(const StinkyRegister& destReg : inst->getDestRegs())
                 {
-                    // Record that sources are used
+                    if(destReg.reg.type == RegType::SCC || destReg.reg.type == RegType::BARRIER
+                       || destReg.reg.type == RegType::DS_WRITE
+                       || destReg.reg.type == RegType::TENSOR_LOAD)
+                    {
+                        hasDummyDest = true;
+                        break;
+                    }
+                }
+                if(hasDummyDest)
+                    continue;
+
+                // Skip in-place operations (ANY dest is also a source)
+                // e.g., s_add_u32 s10, s10, s20 - these are NOT dead stores!
+                bool isInPlace = false;
+                for(const StinkyRegister& destReg : inst->getDestRegs())
+                {
+                    if(!destReg.isRegister())
+                        continue;
                     for(const StinkyRegister& srcReg : inst->getSrcRegs())
                     {
-                        if(srcReg.isRegister())
+                        if(srcReg.isRegister() && srcReg.reg.type == destReg.reg.type
+                           && srcReg.reg.idx == destReg.reg.idx)
                         {
-                            usedRegs.insert(srcReg);
+                            isInPlace = true;
+                            break;
                         }
                     }
-                    // Record that destinations are redefined
-                    for(const StinkyRegister& destReg : inst->getDestRegs())
-                    {
-                        if(destReg.isRegister())
-                        {
-                            redefinedRegs.insert(destReg);
-                        }
-                    }
-                    continue;
+                    if(isInPlace)
+                        break;
                 }
+                if(isInPlace)
+                    continue; // Skip entire instruction
 
-                // Check if this is a dead store
-                bool isDeadStore = false;
-                if(!inst->getDestRegs().empty())
+                // Check each destination register
+                for(const StinkyRegister& destReg : inst->getDestRegs())
                 {
-                    // A dead store is when a destination is:
-                    // 1. Redefined later (in redefinedRegs)
-                    // 2. NOT used before that redefinition (NOT in usedRegs)
-                    for(const StinkyRegister& destReg : inst->getDestRegs())
+                    if(!destReg.isRegister())
+                        continue;
+
+                    // First, count how many times this register is assigned in this block
+                    int assignmentCount = 0;
+                    for(size_t k = 0; k < blockInstructions.size(); ++k)
                     {
-                        if(destReg.isRegister())
+                        for(const StinkyRegister& kDestReg : blockInstructions[k]->getDestRegs())
                         {
-                            if(redefinedRegs.count(destReg) > 0 && usedRegs.count(destReg) == 0)
+                            if(kDestReg.isRegister() && kDestReg.reg.type == destReg.reg.type
+                               && kDestReg.reg.idx == destReg.reg.idx)
                             {
-                                // Overwritten before use -> dead store!
-                                isDeadStore = true;
+                                assignmentCount++;
                                 break;
                             }
                         }
                     }
-                }
 
-                if(isDeadStore)
-                {
-                    // Mark for removal (don't update tracking sets)
-                    toRemove.insert(inst);
-                }
-                else
-                {
-                    // Not a dead store - update tracking sets
-                    // Record sources as used
-                    for(const StinkyRegister& srcReg : inst->getSrcRegs())
+                    // Rule 1: If only one assignment in this block, DON'T delete
+                    if(assignmentCount <= 1)
+                        continue;
+
+                    // Rule 2: Multiple assignments exist, check if register is used before next assignment
+                    bool foundNextAssignment      = false;
+                    bool usedBeforeNextAssignment = false;
+
+                    for(size_t j = i + 1; j < blockInstructions.size(); ++j)
                     {
-                        if(srcReg.isRegister())
+                        StinkyInstruction* laterInst = blockInstructions[j];
+
+                        // Check if this register is used as a source
+                        for(const StinkyRegister& srcReg : laterInst->getSrcRegs())
                         {
-                            usedRegs.insert(srcReg);
+                            if(srcReg.isRegister() && srcReg.reg.type == destReg.reg.type
+                               && srcReg.reg.idx == destReg.reg.idx)
+                            {
+                                usedBeforeNextAssignment = true;
+                                break;
+                            }
                         }
+
+                        // Check if this register is reassigned
+                        for(const StinkyRegister& laterDestReg : laterInst->getDestRegs())
+                        {
+                            if(laterDestReg.isRegister()
+                               && laterDestReg.reg.type == destReg.reg.type
+                               && laterDestReg.reg.idx == destReg.reg.idx)
+                            {
+                                foundNextAssignment = true;
+                                break;
+                            }
+                        }
+
+                        if(foundNextAssignment)
+                            break;
                     }
-                    // Record destinations as redefined
-                    // IMPORTANT: Only clear from usedRegs if NOT also a source (in-place ops!)
-                    for(const StinkyRegister& destReg : inst->getDestRegs())
+
+                    // Delete if: found next assignment AND register NOT used between
+                    if(foundNextAssignment && !usedBeforeNextAssignment)
                     {
-                        if(destReg.isRegister())
-                        {
-                            redefinedRegs.insert(destReg);
-
-                            // Check if this destination is also a source (in-place operation)
-                            bool isAlsoSource = false;
-                            for(const StinkyRegister& srcReg : inst->getSrcRegs())
-                            {
-                                if(srcReg.isRegister() && srcReg.reg.type == destReg.reg.type
-                                   && srcReg.reg.idx == destReg.reg.idx)
-                                {
-                                    isAlsoSource = true;
-                                    break;
-                                }
-                            }
-
-                            // Only erase if NOT in-place (destination must be used first)
-                            if(!isAlsoSource)
-                            {
-                                usedRegs.erase(destReg);
-                            }
-                        }
+                        toRemove.insert(inst);
+                        break; // No need to check other destinations of this instruction
                     }
                 }
             }
@@ -223,6 +254,10 @@ namespace
 
                 if(inThisBlock)
                 {
+                    // Clean up use-def chains before deletion to prevent dangling pointers
+                    inst->unlinkFromSources();
+                    inst->unlinkFromUsers();
+
                     irList.remove(inst);
                     delete inst;
                     removedInBB++;
