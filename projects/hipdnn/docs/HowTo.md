@@ -226,7 +226,7 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 
 ### CI Maintenance
 
-- **Clang-Tidy Release Version**: The clang-tidy workflow (`.github/workflows/hipdnn-clang-tidy.yml`) uses a pinned ROCm release version for `install_rocm_from_artifacts.py`. This may need to be bumped periodically. Available releases can be found at https://therock-nightly-tarball.s3.amazonaws.com/
+- **TheRock Version**: The TheRock commit ref is centralized in `.github/workflows/therock-ci.yml` (the `THEROCK_REF` env variable). Update this single value when bumping TheRock version - it propagates to all dependent workflows including hipDNN clang-tidy.
 
 ### Debugging Tips
 
