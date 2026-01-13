@@ -34,156 +34,104 @@
 #include "conv_common.hpp"
 #include "gtest_common.hpp"
 
-namespace group_conv_deterministic {
+namespace {
 
 using Direction = miopen::conv::Direction;
 
-// Small test configurations for fast execution
-struct DeterministicTestConfig2D
+// Small test configurations for fast execution - deterministic split_k tests
+struct DeterministicSplitKTestConfig
 {
     size_t G;
     size_t N;
     size_t C;
     size_t K;
-    size_t H;
-    size_t W;
-    size_t y; // filter height
-    size_t x; // filter width
-    size_t pad_h;
-    size_t pad_w;
-    size_t stride_h;
-    size_t stride_w;
-    size_t dilation_h;
-    size_t dilation_w;
+    std::vector<size_t> img; // H, W for 2D or D, H, W for 3D
+    std::vector<size_t> filter;
+    std::vector<size_t> pad;
+    std::vector<size_t> stride;
+    std::vector<size_t> dilation;
+    bool is_3d;
 
-    std::vector<size_t> GetInput() const { return {N, C, H, W}; }
-
-    std::vector<size_t> GetWeights() const { return {K, C / G, y, x}; }
-
-    miopen::ConvolutionDescriptor GetConv() const
+    friend std::ostream& operator<<(std::ostream& os, const DeterministicSplitKTestConfig& tc)
     {
-        auto conv = miopen::ConvolutionDescriptor{
-            2,
-            miopenConvolution,
-            miopenPaddingDefault,
-            {static_cast<int>(pad_h), static_cast<int>(pad_w)},
-            {static_cast<int>(stride_h), static_cast<int>(stride_w)},
-            {static_cast<int>(dilation_h), static_cast<int>(dilation_w)},
-            {0, 0},
-            static_cast<int>(G),
-            1.0};
-
-        // Enable deterministic mode
-        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
-
-        return conv;
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const DeterministicTestConfig2D& tc)
-    {
-        return os << "G:" << tc.G << " N:" << tc.N << " C:" << tc.C << " K:" << tc.K
-                  << " H:" << tc.H << " W:" << tc.W << " y:" << tc.y << " x:" << tc.x
-                  << " pad_h:" << tc.pad_h << " pad_w:" << tc.pad_w << " stride_h:" << tc.stride_h
-                  << " stride_w:" << tc.stride_w << " dilation_h:" << tc.dilation_h
-                  << " dilation_w:" << tc.dilation_w;
+        os << "G:" << tc.G << " N:" << tc.N << " C:" << tc.C << " K:" << tc.K;
+        if(tc.is_3d)
+        {
+            os << " D:" << tc.img[0] << " H:" << tc.img[1] << " W:" << tc.img[2];
+            os << " z:" << tc.filter[0] << " y:" << tc.filter[1] << " x:" << tc.filter[2];
+        }
+        else
+        {
+            os << " H:" << tc.img[0] << " W:" << tc.img[1];
+            os << " y:" << tc.filter[0] << " x:" << tc.filter[1];
+        }
+        return os;
     }
 };
 
-struct DeterministicTestConfig3D
+// Test configurations - small sizes for fast execution
+std::vector<DeterministicSplitKTestConfig> GetDeterministicTestConfigs2D()
 {
-    size_t G;
-    size_t N;
-    size_t C;
-    size_t K;
-    size_t D;
-    size_t H;
-    size_t W;
-    size_t z; // filter depth
-    size_t y; // filter height
-    size_t x; // filter width
-    size_t pad_d;
-    size_t pad_h;
-    size_t pad_w;
-    size_t stride_d;
-    size_t stride_h;
-    size_t stride_w;
-    size_t dilation_d;
-    size_t dilation_h;
-    size_t dilation_w;
+    return {// G  N  C   K   img     filter  pad   stride dilation 3d
+            {8, 1, 16, 16, {14, 14}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false},
+            {4, 2, 8, 8, {16, 16}, {2, 2}, {1, 1}, {1, 1}, {1, 1}, false}};
+}
 
-    std::vector<size_t> GetInput() const { return {N, C, D, H, W}; }
+std::vector<DeterministicSplitKTestConfig> GetDeterministicTestConfigs3D()
+{
+    return {// G  N  C  K  img        filter    pad       stride    dilation  3d
+            {4, 1, 8, 8, {8, 14, 14}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true},
+            {2, 2, 4, 4, {6, 12, 12}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true}};
+}
 
-    std::vector<size_t> GetWeights() const { return {K, C / G, z, y, x}; }
-
-    miopen::ConvolutionDescriptor GetConv() const
-    {
-        auto conv = miopen::ConvolutionDescriptor{
-            3,
-            miopenConvolution,
-            miopenPaddingDefault,
-            {static_cast<int>(pad_d), static_cast<int>(pad_h), static_cast<int>(pad_w)},
-            {static_cast<int>(stride_d), static_cast<int>(stride_h), static_cast<int>(stride_w)},
-            {static_cast<int>(dilation_d),
-             static_cast<int>(dilation_h),
-             static_cast<int>(dilation_w)},
-            {0, 0, 0},
-            static_cast<int>(G),
-            1.0};
-
-        // Enable deterministic mode
-        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
-
-        return conv;
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const DeterministicTestConfig3D& tc)
-    {
-        return os << "G:" << tc.G << " N:" << tc.N << " C:" << tc.C << " K:" << tc.K
-                  << " D:" << tc.D << " H:" << tc.H << " W:" << tc.W << " z:" << tc.z
-                  << " y:" << tc.y << " x:" << tc.x << " pad_d:" << tc.pad_d
-                  << " pad_h:" << tc.pad_h << " pad_w:" << tc.pad_w << " stride_d:" << tc.stride_d
-                  << " stride_h:" << tc.stride_h << " stride_w:" << tc.stride_w
-                  << " dilation_d:" << tc.dilation_d << " dilation_h:" << tc.dilation_h
-                  << " dilation_w:" << tc.dilation_w;
-    }
-};
-
-template <typename T, typename ConfigType, Direction CONV_DIR, typename SolverType>
-class DeterministicTest : public ::testing::Test
+template <typename T, Direction CONV_DIR, typename SolverType, bool IS_3D>
+class GPU_GroupConvDeterministicSplitK
+    : public ::testing::TestWithParam<DeterministicSplitKTestConfig>
 {
 protected:
     static constexpr int NUM_ITERATIONS = 10;
 
-    void RunDeterministicTest(const ConfigType& config)
+    void SetUp() override { prng::reset_seed(); }
+
+    void RunTest()
     {
+        const auto& config = GetParam();
         std::cout << "Testing configuration: " << config << std::endl;
 
         auto& handle = get_handle();
 
-        // Create tensors with appropriate layout based on dimensionality
-        miopenTensorLayout_t layout;
-        if constexpr(std::is_same_v<ConfigType, DeterministicTestConfig2D>)
-        {
-            layout = miopenTensorNCHW; // Use NCHW for 2D for better determinism
-        }
-        else
-        {
-            layout = miopenTensorNCDHW; // Use NCDHW for 3D
-        }
+        // Create tensors with appropriate layout
+        miopenTensorLayout_t layout = IS_3D ? miopenTensorNCDHW : miopenTensorNCHW;
 
-        tensor<T> input{layout, config.GetInput()};
-        tensor<T> weights{layout, config.GetWeights()};
+        std::vector<size_t> input_dims  = {config.N, config.C};
+        std::vector<size_t> weight_dims = {config.K, config.C / config.G};
+        input_dims.insert(input_dims.end(), config.img.begin(), config.img.end());
+        weight_dims.insert(weight_dims.end(), config.filter.begin(), config.filter.end());
 
-        auto conv_desc = config.GetConv();
+        tensor<T> input{layout, input_dims};
+        tensor<T> weights{layout, weight_dims};
 
-        // Verify deterministic mode is enabled
+        // Create convolution descriptor with deterministic mode enabled
+        auto conv_desc = miopen::ConvolutionDescriptor{
+            static_cast<int>(config.pad.size()),
+            miopenConvolution,
+            miopenPaddingDefault,
+            std::vector<int>(config.pad.begin(), config.pad.end()),
+            std::vector<int>(config.stride.begin(), config.stride.end()),
+            std::vector<int>(config.dilation.begin(), config.dilation.end()),
+            std::vector<int>(config.pad.size(), 0),
+            static_cast<int>(config.G),
+            1.0};
+
+        // Enable deterministic mode
+        conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
         ASSERT_TRUE(conv_desc.attribute.deterministic.Get() == 1);
 
         miopen::TensorDescriptor output_desc =
             conv_desc.GetForwardOutputTensor(input.desc, weights.desc, miopen_type<T>{});
         tensor<T> output{layout, output_desc.GetLengths()};
 
-        // Initialize input tensors with random data
+        // Initialize tensors
         auto gen_value = [](auto...) {
             return prng::gen_A_to_B(static_cast<T>(-3.0), static_cast<T>(3.0));
         };
@@ -194,7 +142,7 @@ protected:
             weights.generate(gen_value);
             std::fill(input.begin(), input.end(), T(0));
         }
-        else if constexpr(CONV_DIR == Direction::BackwardWeights)
+        else // BackwardWeights
         {
             input.generate([](auto...) {
                 return prng::gen_A_to_B(static_cast<T>(-0.1), static_cast<T>(0.1));
@@ -209,44 +157,36 @@ protected:
         auto wei_dev = handle.Write(weights.data);
         auto out_dev = handle.Write(output.data);
 
-        // Create solver and problem description
+        // Create solver and problem
         SolverType solv{};
         auto ctx = miopen::ExecutionContext{};
         ctx.SetStream(&handle);
 
-        miopen::conv::ProblemDescription problem;
-        if constexpr(CONV_DIR == Direction::BackwardData)
-        {
-            problem = miopen::conv::ProblemDescription{
-                output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
-        }
-        else // BackwardWeights
-        {
-            problem = miopen::conv::ProblemDescription{
-                output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
-        }
+        miopen::conv::ProblemDescription problem{
+            CONV_DIR == Direction::BackwardData ? output.desc : output.desc,
+            weights.desc,
+            CONV_DIR == Direction::BackwardData ? input.desc : input.desc,
+            conv_desc,
+            CONV_DIR};
 
         if(!solv.IsApplicable(ctx, problem))
         {
-            GTEST_SKIP() << solv.SolverDbId() << " Not Applicable for this problem";
+            GTEST_SKIP() << solv.SolverDbId() << " Not Applicable";
         }
 
         std::cout << "Using solver: " << solv.SolverDbId() << std::endl;
 
-        // Allocate workspace if needed
         Workspace wspace{};
         if(solv.MayNeedWorkspace())
         {
             wspace.resize(solv.GetWorkspaceSize(ctx, problem));
         }
 
-        // Get solution and create invoker
         auto perf_config = solv.GetDefaultPerformanceConfig(ctx, problem);
         auto sol         = solv.GetSolution(ctx, problem, perf_config);
         ASSERT_TRUE(sol.Succeeded());
         ASSERT_TRUE(sol.invoker_factory);
 
-        // Log the performance config to verify split_k and other parameters
         std::cout << "Performance config: " << perf_config << std::endl;
 
         const auto invoker = handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
@@ -255,7 +195,6 @@ protected:
         std::vector<std::vector<T>> results;
         results.reserve(NUM_ITERATIONS);
 
-        // Run the solver NUM_ITERATIONS times
         for(int i = 0; i < NUM_ITERATIONS; ++i)
         {
             // Reset output buffer
@@ -264,13 +203,13 @@ protected:
                 std::fill(input.begin(), input.end(), T(0));
                 in_dev = handle.Write(input.data);
             }
-            else // BackwardWeights
+            else
             {
                 std::fill(weights.begin(), weights.end(), T(0));
                 wei_dev = handle.Write(weights.data);
             }
 
-            // Execute the kernel
+            // Execute kernel
             if constexpr(CONV_DIR == Direction::BackwardData)
             {
                 auto invoke_params =
@@ -285,7 +224,7 @@ protected:
                                                    false};
                 (invoker)(handle, invoke_params);
             }
-            else // BackwardWeights
+            else
             {
                 auto invoke_params =
                     miopen::conv::WrWInvokeParams{miopen::ConvWrwTensors{output.desc,
@@ -302,32 +241,28 @@ protected:
 
             handle.Finish();
 
-            // Read back results
+            // Read results
             if constexpr(CONV_DIR == Direction::BackwardData)
             {
                 handle.ReadToVec(in_dev, input.data);
                 results.push_back(input.data);
             }
-            else // BackwardWeights
+            else
             {
                 handle.ReadToVec(wei_dev, weights.data);
                 results.push_back(weights.data);
             }
         }
 
-        // Verify all results are bit-exact
+        // Verify bit-exact determinism
         const auto& reference = results[0];
-
         for(int i = 1; i < NUM_ITERATIONS; ++i)
         {
             const auto& current = results[i];
+            ASSERT_EQ(reference.size(), current.size());
 
-            ASSERT_EQ(reference.size(), current.size()) << "Size mismatch at iteration " << i;
-
-            // Perform bit-exact comparison
             bool match            = true;
             size_t first_mismatch = 0;
-
             for(size_t j = 0; j < reference.size(); ++j)
             {
                 if(std::memcmp(&reference[j], &current[j], sizeof(T)) != 0)
@@ -338,149 +273,109 @@ protected:
                 }
             }
 
-            ASSERT_TRUE(match) << "Bit-exact mismatch found at iteration " << i << ", element "
+            ASSERT_TRUE(match) << "Bit-exact mismatch at iteration " << i << ", element "
                                << first_mismatch << ": reference = " << reference[first_mismatch]
                                << ", current = " << current[first_mismatch];
         }
+
+        std::cout << "✓ All " << NUM_ITERATIONS << " iterations produced bit-exact results"
+                  << std::endl;
     }
 };
 
-// 2D BWD Tests
-using DeterministicTest2D_BWD_FP32 =
-    DeterministicTest<float,
-                      DeterministicTestConfig2D,
-                      Direction::BackwardData,
-                      miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>;
+// 2D BWD
+using GPU_GroupConv2D_Deterministic_BWD_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::BackwardData,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops,
+                                     false>;
+using GPU_GroupConv2D_Deterministic_BWD_FP16 =
+    GPU_GroupConvDeterministicSplitK<half,
+                                     Direction::BackwardData,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops,
+                                     false>;
+using GPU_GroupConv2D_Deterministic_BWD_BFP16 =
+    GPU_GroupConvDeterministicSplitK<bfloat16,
+                                     Direction::BackwardData,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops,
+                                     false>;
 
-using DeterministicTest2D_BWD_FP16 =
-    DeterministicTest<half,
-                      DeterministicTestConfig2D,
-                      Direction::BackwardData,
-                      miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>;
+// 2D WRW
+using GPU_GroupConv2D_Deterministic_WRW_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops,
+                                     false>;
+using GPU_GroupConv2D_Deterministic_WRW_FP16 =
+    GPU_GroupConvDeterministicSplitK<half,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops,
+                                     false>;
+using GPU_GroupConv2D_Deterministic_WRW_BFP16 =
+    GPU_GroupConvDeterministicSplitK<bfloat16,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops,
+                                     false>;
 
-using DeterministicTest2D_BWD_BFP16 =
-    DeterministicTest<bfloat16,
-                      DeterministicTestConfig2D,
-                      Direction::BackwardData,
-                      miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>;
+// 3D WRW
+using GPU_GroupConv3D_Deterministic_WRW_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops,
+                                     true>;
+using GPU_GroupConv3D_Deterministic_WRW_FP16 =
+    GPU_GroupConvDeterministicSplitK<half,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops,
+                                     true>;
+using GPU_GroupConv3D_Deterministic_WRW_BFP16 =
+    GPU_GroupConvDeterministicSplitK<bfloat16,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops,
+                                     true>;
 
-// 2D WRW Tests
-using DeterministicTest2D_WRW_FP32 =
-    DeterministicTest<float,
-                      DeterministicTestConfig2D,
-                      Direction::BackwardWeights,
-                      miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>;
+// Test definitions
+TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP32, Test) { RunTest(); }
+TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP16, Test) { RunTest(); }
+TEST_P(GPU_GroupConv2D_Deterministic_BWD_BFP16, Test) { RunTest(); }
 
-using DeterministicTest2D_WRW_FP16 =
-    DeterministicTest<half,
-                      DeterministicTestConfig2D,
-                      Direction::BackwardWeights,
-                      miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>;
+TEST_P(GPU_GroupConv2D_Deterministic_WRW_FP32, Test) { RunTest(); }
+TEST_P(GPU_GroupConv2D_Deterministic_WRW_FP16, Test) { RunTest(); }
+TEST_P(GPU_GroupConv2D_Deterministic_WRW_BFP16, Test) { RunTest(); }
 
-using DeterministicTest2D_WRW_BFP16 =
-    DeterministicTest<bfloat16,
-                      DeterministicTestConfig2D,
-                      Direction::BackwardWeights,
-                      miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>;
+TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP32, Test) { RunTest(); }
+TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP16, Test) { RunTest(); }
+TEST_P(GPU_GroupConv3D_Deterministic_WRW_BFP16, Test) { RunTest(); }
 
-// 3D WRW Tests
-using DeterministicTest3D_WRW_FP32 =
-    DeterministicTest<float,
-                      DeterministicTestConfig3D,
-                      Direction::BackwardWeights,
-                      miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops>;
+// Test instantiations
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_BWD_FP32,
+                         testing::ValuesIn(GetDeterministicTestConfigs2D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_BWD_FP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs2D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_BWD_BFP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs2D()));
 
-using DeterministicTest3D_WRW_FP16 =
-    DeterministicTest<half,
-                      DeterministicTestConfig3D,
-                      Direction::BackwardWeights,
-                      miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops>;
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_WRW_FP32,
+                         testing::ValuesIn(GetDeterministicTestConfigs2D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_WRW_FP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs2D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_WRW_BFP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs2D()));
 
-using DeterministicTest3D_WRW_BFP16 =
-    DeterministicTest<bfloat16,
-                      DeterministicTestConfig3D,
-                      Direction::BackwardWeights,
-                      miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops>;
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_WRW_FP32,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_WRW_FP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_WRW_BFP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
 
-// 2D BWD Test Cases
-TEST_F(DeterministicTest2D_BWD_FP32, SmallConfig1)
-{
-    // g   n   C   K   H   W   y  x  pad_h pad_w stride_h stride_w dilation_h dilation_w
-    RunDeterministicTest({8, 1, 16, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_BWD_FP16, SmallConfig1)
-{
-    RunDeterministicTest({8, 1, 16, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_BWD_BFP16, SmallConfig1)
-{
-    RunDeterministicTest({8, 1, 16, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_BWD_FP32, SmallConfig2)
-{
-    RunDeterministicTest({4, 2, 8, 8, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_BWD_FP16, SmallConfig2)
-{
-    RunDeterministicTest({4, 2, 8, 8, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1});
-}
-
-// 2D WRW Test Cases
-TEST_F(DeterministicTest2D_WRW_FP32, SmallConfig1)
-{
-    RunDeterministicTest({8, 1, 16, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_WRW_FP16, SmallConfig1)
-{
-    RunDeterministicTest({8, 1, 16, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_WRW_BFP16, SmallConfig1)
-{
-    RunDeterministicTest({8, 1, 16, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_WRW_FP32, SmallConfig2)
-{
-    RunDeterministicTest({4, 2, 8, 8, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest2D_WRW_FP16, SmallConfig2)
-{
-    RunDeterministicTest({4, 2, 8, 8, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1});
-}
-
-// 3D WRW Test Cases
-TEST_F(DeterministicTest3D_WRW_FP32, SmallConfig1)
-{
-    // g  n  C  K  D  H   W   z  y  x  pad_d pad_h pad_w stride_d stride_h stride_w dilation_d
-    // dilation_h dilation_w
-    RunDeterministicTest({4, 1, 8, 8, 8, 14, 14, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest3D_WRW_FP16, SmallConfig1)
-{
-    RunDeterministicTest({4, 1, 8, 8, 8, 14, 14, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest3D_WRW_BFP16, SmallConfig1)
-{
-    RunDeterministicTest({4, 1, 8, 8, 8, 14, 14, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest3D_WRW_FP32, SmallConfig2)
-{
-    RunDeterministicTest({2, 2, 4, 4, 6, 12, 12, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1});
-}
-
-TEST_F(DeterministicTest3D_WRW_FP16, SmallConfig2)
-{
-    RunDeterministicTest({2, 2, 4, 4, 6, 12, 12, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1});
-}
-
-} // namespace group_conv_deterministic
+} // namespace
