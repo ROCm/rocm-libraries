@@ -142,69 +142,69 @@ namespace rocRoller
 
             auto tile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
-            auto sdimMIXTile = sdim[0];
-            auto sdimMIYTile = sdim[1];
+            auto sdimPTXTile = sdim[0];
+            auto sdimPTYTile = sdim[1];
             auto sdimX       = sdim[2];
             auto sdimY       = sdim[3];
 
-            auto numMITilesX = graph.coordinates.get<SubDimension>(sdimMIXTile)->size;
-            auto numMITilesY = graph.coordinates.get<SubDimension>(sdimMIYTile)->size;
+            auto numPTTilesX = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
+            auto numPTTilesY = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
 
-            auto sizeMITileXExpr = graph.coordinates.get<SubDimension>(sdimX)->size;
+            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimX)->size;
             AssertFatal(
-                evaluationTimes(sizeMITileXExpr)[ET::Translate],
+                evaluationTimes(sizePTTileXExpr)[ET::Translate],
                 "Size of pre-tile tile must be known at translate time (ie, must be literal).");
 
-            auto sizeMITileYExpr = graph.coordinates.get<SubDimension>(sdimY)->size;
+            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimY)->size;
             AssertFatal(
-                evaluationTimes(sizeMITileYExpr)[ET::Translate],
+                evaluationTimes(sizePTTileYExpr)[ET::Translate],
                 "Size of pre-tile tile must be known at translate time (ie, must be literal).");
 
-            auto sizeMITileX = getUnsignedInt(evaluate(sizeMITileXExpr));
-            auto sizeMITileY = getUnsignedInt(evaluate(sizeMITileYExpr));
+            auto sizePTTileX = getUnsignedInt(evaluate(sizePTTileXExpr));
+            auto sizePTTileY = getUnsignedInt(evaluate(sizePTTileYExpr));
 
-            auto nMIX = graph.coordinates.addElement(CT::WaveTileNumber(0, numMITilesX, nullptr));
-            auto nMIY = graph.coordinates.addElement(CT::WaveTileNumber(1, numMITilesY, nullptr));
-            auto iMIX
-                = graph.coordinates.addElement(CT::WaveTileIndex(0, literal(sizeMITileX), nullptr));
-            auto iMIY
-                = graph.coordinates.addElement(CT::WaveTileIndex(1, literal(sizeMITileY), nullptr));
+            auto nPTX = graph.coordinates.addElement(CT::WaveTileNumber(0, numPTTilesX, nullptr));
+            auto nPTY = graph.coordinates.addElement(CT::WaveTileNumber(1, numPTTilesY, nullptr));
+            auto iPTX
+                = graph.coordinates.addElement(CT::WaveTileIndex(0, literal(sizePTTileX), nullptr));
+            auto iPTY
+                = graph.coordinates.addElement(CT::WaveTileIndex(1, literal(sizePTTileY), nullptr));
 
-            graph.coordinates.addElement(PassThrough(), {sdimMIXTile}, {nMIX});
-            graph.coordinates.addElement(PassThrough(), {sdimMIYTile}, {nMIY});
+            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {nPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {nPTY});
 
-            graph.coordinates.addElement(PassThrough(), {sdimX}, {iMIX});
-            graph.coordinates.addElement(PassThrough(), {sdimY}, {iMIY});
+            graph.coordinates.addElement(PassThrough(), {sdimX}, {iPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {iPTY});
 
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));
 
-            auto numTilesX = tileCeilDivide(numMITilesX * literal(sizeMITileX), tile.sizes[0]);
-            auto numTilesY = tileCeilDivide(numMITilesY * literal(sizeMITileY), tile.sizes[1]);
+            auto numTilesX = tileCeilDivide(numPTTilesX * literal(sizePTTileX), tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(numPTTilesY * literal(sizePTTileY), tile.sizes[1]);
 
             auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
             auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
             auto iX = graph.coordinates.addElement(tile.tileIndex(0));
             auto iY = graph.coordinates.addElement(tile.tileIndex(1));
 
-            AssertFatal(tile.sizes[0] % sizeMITileX == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[1] % sizeMITileY == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[0] / sizeMITileX > 0, "Bad pre-tile size.");
-            AssertFatal(tile.sizes[1] / sizeMITileY > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[0] % sizePTTileX == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[1] % sizePTTileY == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[0] / sizePTTileX > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[1] / sizePTTileY > 0, "Bad pre-tile size.");
 
-            auto numMITilesPerTileX = tile.sizes[0] / sizeMITileX;
-            auto numMITilesPerTileY = tile.sizes[1] / sizeMITileY;
+            auto numPTTilesPerTileX = tile.sizes[0] / sizePTTileX;
+            auto numPTTilesPerTileY = tile.sizes[1] / sizePTTileY;
 
-            auto nMISubX = graph.coordinates.addElement(
-                CT::WaveTileNumber(0, literal(numMITilesPerTileX), nullptr));
-            auto nMISubY = graph.coordinates.addElement(
-                CT::WaveTileNumber(1, literal(numMITilesPerTileY), nullptr));
+            auto nPTSubX = graph.coordinates.addElement(
+                CT::WaveTileNumber(0, literal(numPTTilesPerTileX), nullptr));
+            auto nPTSubY = graph.coordinates.addElement(
+                CT::WaveTileNumber(1, literal(numPTTilesPerTileY), nullptr));
 
-            graph.coordinates.addElement(Tile(), {nMIX}, {nX, nMISubX});
-            graph.coordinates.addElement(Tile(), {nMIY}, {nY, nMISubY});
+            graph.coordinates.addElement(Tile(), {nPTX}, {nX, nPTSubX});
+            graph.coordinates.addElement(Tile(), {nPTY}, {nY, nPTSubY});
 
-            graph.coordinates.addElement(Flatten(), {nMISubX, iMIX}, {iX});
-            graph.coordinates.addElement(Flatten(), {nMISubY, iMIY}, {iY});
+            graph.coordinates.addElement(Flatten(), {nPTSubX, iPTX}, {iX});
+            graph.coordinates.addElement(Flatten(), {nPTSubY, iPTY}, {iY});
 
             connections.push_back(DC<MacroTileNumber>(nX, 0));
             connections.push_back(DC<MacroTileNumber>(nY, 1));
