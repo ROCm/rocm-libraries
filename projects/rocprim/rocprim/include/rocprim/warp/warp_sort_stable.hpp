@@ -37,568 +37,225 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief The warp_sort class provides warp-wide methods for computing a parallel
-/// sort of items across thread warps. This class currently implements parallel
-/// bitonic sort, and only accepts warp sizes that are powers of two.
+/// \brief Available algorithms for warp_sort_stable primitive.
+enum class warp_sort_stable_algorithm
+{
+    /// \brief A merge-path based algorithm using Shared Memory (LDS).
+    using_merge_path,
+
+    /// \brief A bitonic-sort based algorithm using Register Shuffles.
+    /// This implementation tracks original indices to maintain stability.
+    /// It consumes no Shared Memory but may have higher register pressure.
+    using_shuffle
+};
+
+namespace detail
+{
+
+// Helper trait to determine the best default algorithm based on Benchmark results.
+// Logic:
+// 1. Key-Only (Value is empty_type): Merge Path (LDS) is usually faster.
+// 2. Key-Value: Shuffle is usually faster.
+template<class Value>
+struct default_warp_sort_stable_algo
+{
+    static constexpr warp_sort_stable_algorithm value =
+        std::is_same<Value, ::rocprim::empty_type>::value
+            ? warp_sort_stable_algorithm::using_merge_path
+            : warp_sort_stable_algorithm::using_shuffle;
+};
+
+// Selector for warp_sort_stable algorithm which gives implementation
+// type based on passed warp_sort_stable_algorithm enum
+template<warp_sort_stable_algorithm Algorithm>
+struct select_warp_sort_stable_impl;
+
+template<>
+struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::using_merge_path>
+{
+    template<class Key,
+             unsigned int BlockSize,
+             unsigned int VirtualWaveSize,
+             unsigned int ItemsPerThread,
+             class Value>
+    using type = detail::warp_sort_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
+};
+
+template<>
+struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::using_shuffle>
+{
+    template<class Key,
+             unsigned int BlockSize,
+             unsigned int VirtualWaveSize,
+             unsigned int ItemsPerThread,
+             class Value>
+    using type = detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
+};
+
+} // end namespace detail
+
+/// \brief The warp_sort_stable class provides stable sort methods for items partitioned 
+/// across a thread warp. 
 ///
 /// \tparam Key Data type for parameter Key
-/// \tparam VirtualWaveSize [optional] The number of threads in a warp
-/// \tparam Value [optional] Data type for parameter Value. By default, it's empty_type
+/// \tparam BlockSize The number of threads in a block (required for shared memory allocation in some algorithms)
+/// \tparam VirtualWaveSize [optional] The number of threads in a warp. Must be power of 2.
+/// \tparam ItemsPerThread [optional] The number of items processed by each thread.
+/// \tparam Value [optional] Data type for parameter Value. By default, it's empty_type.
+/// \tparam Algorithm [optional] Selected sort algorithm.
 ///
 /// \par Overview
 /// * \p VirtualWaveSize must be power of two.
-/// * \p VirtualWaveSize must be equal to or less than the size of hardware warp (see
-/// rocprim::arch::wavefront::max_size()). If it is less, sort is performed separately within groups
-/// determined by VirtualWaveSize.
-/// For example, if \p VirtualWaveSize is 4, hardware warp is 64, sort will be performed in logical
-/// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`
-/// (thread is represented here by its id within hardware warp).
-/// * Accepts custom compare_functions for sorting across a warp.
-/// * Number of threads executing warp_sort's function must be a multiple of \p VirtualWaveSize.
+/// * \p VirtualWaveSize must be equal to or less than the size of hardware warp.
+/// * \p BlockSize must be passed because the default algorithm (merge path) requires block-wide shared memory allocation.
+/// * Stable sort preserves the relative order of elements with equivalent keys.
 ///
-/// \par Stability
-/// \p warp_sort is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
-/// of equivalent keys.
-/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
-///   * \p a precedes \p b in the input keys, and
-///   * op(a, b) and op(b, a) are both false,
-/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output
-/// (ordered) keys.
-///
-/// \par Example:
+/// \par Examples
 /// \parblock
-/// Every thread within the warp uses the warp_sort class by first specializing the
-/// warp_sort type, and instantiating an object that will be used to invoke a
-/// member function.
-///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
-///     const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-///
-///     int value = input[i];
-///     rocprim::warp_sort<int, 64> wsort;
-///     wsort.sort(value);
-///     input[i] = value;
-/// }
-/// \endcode
-///
-/// Below is a snippet demonstrating how to pass a custom compare function:
-/// \code{.cpp}
-/// __device__ bool customCompare(const int& a, const int& b)
-/// {
-///     return a < b;
-/// }
-/// ...
-/// __global__ void example_kernel(...)
-/// {
-///     const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-///
-///     int value = input[i];
-///     rocprim::warp_sort<int, 64> wsort;
-///     wsort.sort(value, customCompare);
-///     input[i] = value;
+///     // Specializing for int key, float value, 256 threads per block, logical warp of 64, 4 items per thread
+///     using wsort_t = rocprim::warp_sort_stable<int, 256, 64, 4, float>;
+///     
+///     __shared__ wsort_t::storage_type storage;
+///     
+///     int keys[4] = ...;
+///     float values[4] = ...;
+///     
+///     wsort_t().sort(keys, values, storage);
 /// }
 /// \endcode
 /// \endparblock
 template<class Key,
-         unsigned int VirtualWaveSize           = arch::wavefront::min_size(),
-         class Value                            = empty_type,
-         arch::wavefront::target TargetWaveSize = arch::wavefront::get_target()>
-class warp_sort : detail::warp_sort_shuffle<Key, VirtualWaveSize, Value>
+         unsigned int BlockSize,
+         unsigned int VirtualWaveSize = arch::wavefront::min_size(),
+         unsigned int ItemsPerThread = 1,
+         class Value = empty_type,
+         warp_sort_stable_algorithm Algorithm = detail::default_warp_sort_stable_algo<Value>::value>
+class warp_sort_stable
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    : private detail::select_warp_sort_stable_impl<Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>
+#endif
 {
-    using base_type = typename detail::warp_sort_shuffle<Key, VirtualWaveSize, Value>;
-
-    // Check if VirtualWaveSize is valid for the targets
-    static_assert(VirtualWaveSize <= ROCPRIM_MAX_WARP_SIZE,
-                  "VirtualWaveSize can't be greater than hardware warp size.");
+    using base_type = typename detail::select_warp_sort_stable_impl<Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
-    ///
-    /// Depending on the implemention the operations exposed by parallel primitive may
-    /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords \p __shared__. It can be aliased to
-    /// an externally allocated memory, or be a part of a union with other storage types
-    /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
 
-    /// \brief Warp sort for any data type.
-    ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_key input/output to pass to other threads
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    /// \brief Stable sort for Key only (Per-thread single value).
+    template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key& thread_key, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
+    void sort(Key& thread_key, BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
         base_type::sort(thread_key, compare_function);
     }
 
-    /// \brief Warp sort for any data type.
-    /// Invalid Warp Size
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    /// \brief Stable sort for Key only with storage (Per-thread single value).
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key& thread_key, storage_type& storage, BinaryFunction compare_function = BinaryFunction())
     {
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        base_type::sort(thread_key, storage, compare_function);
     }
 
-    /// \brief Warp sort for any data type.
-    ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_keys input/output keys to pass to other threads
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
+    /// \brief Stable sort for Key Array (Per-thread array).
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
         base_type::sort(thread_keys, compare_function);
     }
 
-    /// \brief Warp sort for any data type.
-    /// Invalid Warp Size
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    /// \brief Stable sort for Key Array with storage (Per-thread array).
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              storage_type& storage,
+              BinaryFunction compare_function = BinaryFunction())
     {
-        (void)thread_keys; // disables unused parameter warning
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        base_type::sort(thread_keys, storage, compare_function);
     }
 
-    /// \brief Warp sort for any data type using temporary storage.
+    /// \brief Stable sort for Key Array with storage and valid input size.
     ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_key input/output to pass to other threads
-    /// \param storage temporary storage for inputs
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    ///
-    /// \par Storage reusage
-    /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
-    ///
-    /// \par Example.
-    /// \code{.cpp}
-    /// __global__ void example_kernel(...)
-    /// {
-    ///     int value = ...;
-    ///     using warp_sort_int = rp::warp_sort<int, 64>;
-    ///     warp_sort_int wsort;
-    ///     __shared__ typename warp_sort_int::storage_type storage;
-    ///     wsort.sort(value, storage);
-    ///     ...
-    /// }
-    /// \endcode
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key&           thread_key,
-              storage_type&  storage,
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
+    /// \param input_size The number of valid items in the warp. 
+    /// Note: If Algorithm is using_shuffle, input_size < VirtualWaveSize * ItemsPerThread may not be strictly supported without manual padding.
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              storage_type& storage,
+              const unsigned int input_size,
+              BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
-        base_type::sort(
-            thread_key, storage, compare_function
-        );
+        base_type::sort(thread_keys, storage, input_size, compare_function);
     }
 
-    /// \brief Warp sort for any data type using temporary storage.
-    /// Invalid Warp Size
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key&, storage_type&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    /// \brief Stable sort for Key-Value pair (Per-thread single value).
+    template<class BinaryFunction = ::rocprim::less<Key>, class V = Value>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function = BinaryFunction())
     {
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        base_type::sort(thread_key, thread_value, compare_function);
     }
 
-    /// \brief Warp sort for any data type using temporary storage.
-    ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_keys input/output keys to pass to other threads
-    /// \param storage temporary storage for inputs
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    ///
-    /// \par Storage reusage
-    /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
-    ///
-    /// \par Example.
-    /// \code{.cpp}
-    /// __global__ void example_kernel(...)
-    /// {
-    ///     int value = ...;
-    ///     using warp_sort_int = rp::warp_sort<int, 64>;
-    ///     warp_sort_int wsort;
-    ///     __shared__ typename warp_sort_int::storage_type storage;
-    ///     wsort.sort(value, storage);
-    ///     ...
-    /// }
-    /// \endcode
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
-              storage_type&  storage,
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
+    /// \brief Stable sort for Key-Value pair with storage (Per-thread single value).
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key& thread_key,
+              Value& thread_value,
+              storage_type& storage,
+              BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
-        base_type::sort(
-            thread_keys, storage, compare_function
-        );
+        base_type::sort(thread_key, thread_value, storage, compare_function);
+    }
+    
+    /// \brief Stable sort for Key-Value pair with storage and valid input size (Per-thread single value).
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key& thread_key,
+              Value& thread_value,
+              storage_type& storage,
+              const unsigned int input_size,
+              BinaryFunction compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_key, thread_value, storage, input_size, compare_function);
     }
 
-    /// \brief Warp sort for any data type using temporary storage.
-    /// Invalid Warp Size
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
-              storage_type&,
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
-    {
-        (void)thread_keys; // disables unused parameter warning
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
-    }
-
-    /// \brief Warp sort by key for any data type.
-    ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_key input/output key to pass to other threads
-    /// \param thread_value input/output value to pass to other threads
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key&           thread_key,
-              Value&         thread_value,
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
-    {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
-        base_type::sort(
-            thread_key, thread_value, compare_function
-        );
-    }
-
-    /// \brief Warp sort by key for any data type.
-    /// Invalid Warp Size
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key&, Value&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
-    {
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
-    }
-
-    /// \brief Warp sort by key for any data type.
-    ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_keys input/output keys to pass to other threads
-    /// \param thread_values input/outputs values to pass to other threads
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
+    /// \brief Stable sort for Key-Value Arrays (Per-thread array).
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
+              BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
-        base_type::sort(
-            thread_keys, thread_values, compare_function
-        );
+        base_type::sort(thread_keys, thread_values, compare_function);
     }
 
-    /// \brief Warp sort by key for any data type.
-    /// Invalid Warp Size
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
+    /// \brief Stable sort for Key-Value Arrays with storage (Per-thread array).
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+              storage_type& storage,
+              BinaryFunction compare_function = BinaryFunction())
     {
-        (void)thread_keys; // disables unused parameter warning
-        (void)thread_values; // disables unused parameter warning
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        base_type::sort(thread_keys, thread_values, storage, compare_function);
     }
 
-    /// \brief Warp sort by key for any data type using temporary storage.
-    ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_key input/output key to pass to other threads
-    /// \param thread_value input/output value to pass to other threads
-    /// \param storage temporary storage for inputs
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    ///
-    /// \par Storage reusage
-    /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
-    ///
-    /// \par Example.
-    /// \code{.cpp}
-    /// __global__ void example_kernel(...)
-    /// {
-    ///     int value = ...;
-    ///     using warp_sort_int = rp::warp_sort<int, 64>;
-    ///     warp_sort_int wsort;
-    ///     __shared__ typename warp_sort_int::storage_type storage;
-    ///     wsort.sort(key, value, storage);
-    ///     ...
-    /// }
-    /// \endcode
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key&           thread_key,
-              Value&         thread_value,
-              storage_type&  storage,
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
-    {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
-        base_type::sort(
-            thread_key, thread_value, storage, compare_function
-        );
-    }
-
-    /// \brief Warp sort by key for any data type using temporary storage.
-    /// Invalid Warp Size
-    template<class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key&, Value&, storage_type&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
-    {
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
-    }
-
-    /// \brief Warp sort by key for any data type using temporary storage.
-    ///
-    /// \tparam BinaryFunction type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param thread_keys input/output keys to pass to other threads
-    /// \param thread_values input/output values to pass to other threads
-    /// \param storage temporary storage for inputs
-    /// \param compare_function binary operation function object that will be used for sort.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    ///
-    /// \par Storage reusage
-    /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
-    ///
-    /// \par Example.
-    /// \code{.cpp}
-    /// __global__ void example_kernel(...)
-    /// {
-    ///     int value = ...;
-    ///     using warp_sort_int = rp::warp_sort<int, 64>;
-    ///     warp_sort_int wsort;
-    ///     __shared__ typename warp_sort_int::storage_type storage;
-    ///     wsort.sort(key, value, storage);
-    ///     ...
-    /// }
-    /// \endcode
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
+    /// \brief Stable sort for Key-Value Arrays with storage and valid input size.
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
-              storage_type&  storage,
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
-                                void>::type
+              storage_type& storage,
+              const unsigned int input_size,
+              BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
-        {
-            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
-            }
-        }
-        base_type::sort(
-            thread_keys, thread_values, storage, compare_function
-        );
-    }
-
-    /// \brief Warp sort by key for any data type using temporary storage.
-    /// Invalid Warp Size
-    template<unsigned int ItemsPerThread,
-             class BinaryFunction                 = ::rocprim::less<Key>,
-             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto sort(Key (&thread_keys)[ItemsPerThread],
-              Value (&thread_values)[ItemsPerThread],
-              storage_type&,
-              BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
-    {
-        (void)thread_keys; // disables unused parameter warning
-        (void)thread_values; // disables unused parameter warning
-        (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        base_type::sort(thread_keys, thread_values, storage, input_size, compare_function);
     }
 };
 

@@ -35,7 +35,11 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Key, unsigned int VirtualWaveSize, class Value>
+template<class Key, 
+         unsigned int BlockSize, 
+         unsigned int VirtualWaveSize, 
+         unsigned int ItemsPerThread, 
+         class Value>
 struct warp_sort_shuffle_stable
 {
 public:
@@ -80,7 +84,7 @@ private:
 
 public:
 
-    template<unsigned int ItemsPerThread, class BinaryFunction>
+    template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_values)[ItemsPerThread], BinaryFunction compare_function)
     {
@@ -113,8 +117,16 @@ public:
     void sort(Key& thread_value, BinaryFunction compare_function)
     {
         Key temp_arr[1] = { thread_value };
-        sort<1>(temp_arr, compare_function);
-        thread_value = temp_arr[0];
+        
+        stable_key_t item;
+        item.key = thread_value;
+        item.index = detail::logical_lane_id<VirtualWaveSize>();
+        
+        warp_shuffle_sort_impl<VirtualWaveSize, 1>::bitonic_sort(
+            stable_comparator<BinaryFunction>(compare_function),
+            item
+        );
+        thread_value = item.key;
     }
 
     template<class BinaryFunction>
@@ -125,7 +137,7 @@ public:
         sort(thread_value, compare_function);
     }
 
-    template<unsigned int ItemsPerThread, class BinaryFunction>
+    template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_values)[ItemsPerThread],
               storage_type&  storage,
@@ -135,7 +147,33 @@ public:
         sort(thread_values, compare_function);
     }
 
-    template<unsigned int ItemsPerThread, class BinaryFunction, class V = Value>
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key (&thread_values)[ItemsPerThread],
+              storage_type&  storage,
+              const unsigned int input_size,
+              BinaryFunction compare_function)
+    {
+        (void)storage;
+        (void)input_size;
+
+        sort(thread_values, compare_function);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key& thread_value, 
+              storage_type& storage, 
+              const unsigned int input_size,
+              BinaryFunction compare_function)
+    {
+        (void)storage;
+        (void)input_size;
+
+        sort(thread_value, compare_function);
+    }
+
+    template<class BinaryFunction, class V = Value>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
@@ -180,10 +218,9 @@ public:
         for(unsigned int dst_item = 0; dst_item < ItemsPerThread; ++dst_item)
         {
             unsigned int src_idx = stable_items[dst_item].index;
-            
             unsigned int src_lane = src_idx / ItemsPerThread;
             unsigned int src_item_offset = src_idx % ItemsPerThread;
-
+            
             ROCPRIM_UNROLL
             for(unsigned int k = 0; k < ItemsPerThread; ++k)
             {
@@ -192,12 +229,12 @@ public:
                 // be faster. This may require an extra memory fence since the previous
                 // duplication into 'copy' must be finalized and we can't reuse
                 // registers as freely.
-                V val = warp_shuffle(source_values[k], src_lane, VirtualWaveSize);
+                 V val = warp_shuffle(source_values[k], src_lane, VirtualWaveSize);
 
-                if(k == src_item_offset)
-                {
-                    thread_values[dst_item] = val;
-                }
+                 if(k == src_item_offset)
+                 {
+                     thread_values[dst_item] = val;
+                 }
             }
         }
     }
@@ -208,23 +245,34 @@ public:
     {
         Key k_arr[1] = { thread_key };
         Value v_arr[1] = { thread_value };
-        sort<1>(k_arr, v_arr, compare_function);
-        thread_key = k_arr[0];
-        thread_value = v_arr[0];
+
+        stable_key_t item;
+        item.key = thread_key;
+        item.index = detail::logical_lane_id<VirtualWaveSize>();
+        
+        warp_shuffle_sort_impl<VirtualWaveSize, 1>::bitonic_sort(
+             stable_comparator<BinaryFunction>(compare_function),
+             item
+        );
+        thread_key = item.key;
+
+        // Shuffle value
+        unsigned int src_lane = item.index; // index is just lane_id here
+        thread_value = warp_shuffle(thread_value, src_lane, VirtualWaveSize);
     }
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void sort(Key&           thread_key,
-              Value&         thread_value,
-              storage_type&  storage,
+    void sort(Key& thread_key,
+              Value& thread_value,
+              storage_type& storage,
               BinaryFunction compare_function)
     {
         (void)storage;
         sort(thread_key, thread_value, compare_function);
     }
 
-    template<unsigned int ItemsPerThread, class BinaryFunction, class V = Value>
+    template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
@@ -233,6 +281,32 @@ public:
     {
         (void)storage;
         sort(thread_keys, thread_values, compare_function);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              Value (&thread_values)[ItemsPerThread],
+              storage_type& storage,
+              const unsigned int input_size,
+              BinaryFunction compare_function)
+    {
+        (void)storage;
+        (void)input_size;
+        sort(thread_keys, thread_values, compare_function);
+    }
+    
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key& thread_key,
+              Value& thread_value,
+              storage_type& storage,
+              const unsigned int input_size,
+              BinaryFunction compare_function)
+    {
+        (void)storage;
+        (void)input_size;
+        sort(thread_key, thread_value, compare_function);
     }
 };
 
