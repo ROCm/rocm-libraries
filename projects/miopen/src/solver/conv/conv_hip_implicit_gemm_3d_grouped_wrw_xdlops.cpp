@@ -579,6 +579,10 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
     [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    // Database validation: Reject configurations with split_k > 1 in deterministic mode.
+    // This is necessary because the performance database may contain configurations
+    // from non-deterministic tuning runs that used split_k > 1, which are not valid
+    // for deterministic execution even though CK could technically run them.
     if(problem.GetConv().attribute.deterministic)
     {
         size_t plus_pos = kernel_id.find_last_of('+');

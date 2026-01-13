@@ -550,10 +550,13 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    // Database validation: Reject configurations with split_k > 1 in deterministic mode.
+    // This is necessary because the performance database may contain configurations
+    // from non-deterministic tuning runs that used split_k > 1, which are not valid
+    // for deterministic execution even though CK could technically run them.
     if(problem.GetConv().attribute.deterministic)
     {
-        // Extract split_k from kernel_id
-        // kernel_id format: "KernelName+split_k"
+        // Extract split_k from kernel_id (format: "KernelName+split_k")
         size_t plus_pos = kernel_id.find_last_of('+');
         if(plus_pos != std::string::npos)
         {
@@ -569,7 +572,6 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
             }
             catch(const std::exception&)
             {
-                // If parsing fails, reject the configuration
                 MIOPEN_LOG_E("Failed to parse split_k from kernel_id: " << kernel_id);
                 return false;
             }
