@@ -49,7 +49,7 @@
 #define ASSERT_FALSE(predicate)                                                            \
     if(predicate)                                                                          \
     {                                                                                      \
-        std::cerr << "Predicate '" #predicate << "' was true, which is out of expectation" \
+        std::cerr << "Predicate '" #predicate << "' was true, expected false" \
                   << std::endl;                                                            \
         exit(1);                                                                           \
     }
