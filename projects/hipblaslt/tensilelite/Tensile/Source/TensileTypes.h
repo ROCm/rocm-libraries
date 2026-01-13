@@ -182,12 +182,37 @@ constexpr __host__ __device__ bool operator==(tensile_complex<T> const& a,
 {
     return (a.x == b.x) && (a.y == b.y);
 }
+template <typename T>
+constexpr __host__ __device__ bool operator!=(tensile_complex<T> const& a,
+                                              tensile_complex<T> const& b)
+{
+    return (a.x != b.x) || (a.y != b.y);
+}
 
 using tensile_float_complex  = tensile_complex<float>;
 using tensile_double_complex = tensile_complex<double>;
 
 #define TensileComplexFloat tensile_float_complex
 #define TensileComplexDouble tensile_double_complex
+
+template <typename t>
+struct tensile_complex2
+{
+    tensile_complex<t> x;
+    tensile_complex<t> y;
+
+    __host__ __device__ tensile_complex2() = default;
+
+    constexpr __host__ __device__ tensile_complex2(tensile_complex<t> x, tensile_complex<t> y)
+        : x{x}
+        , y{y}
+    {
+    }
+};
+
+using tensile_float_complex2 = tensile_complex2<float>;
+
+#define TensileComplexFloat2 tensile_float_complex2
 #endif // HIP
 
 #define TensileInt8x4 uint32_t

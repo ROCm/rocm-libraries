@@ -61,8 +61,8 @@ BenchmarkProblems:
           # - [16, 16, 4, 1, 1, 2, 2, 2, 2]
         - ScheduleIterAlg: [1, 3] #,3]
         - MIArchVgpr: [0] #, 1]
-        - GlobalSplitU: [1] #, 3]
-        # - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         # - StreamK: [3]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
@@ -116,7 +116,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
@@ -156,7 +157,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
@@ -196,7 +198,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
@@ -236,7 +239,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
@@ -276,7 +280,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
@@ -316,7 +321,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
@@ -356,7 +362,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
@@ -396,7 +403,8 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
         - ScheduleIterAlg: [1, 3]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2, 4, 8]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
         - PrefetchLocalRead: [0, 1]
         - PrefetchGlobalRead: [0, 2]
         - DepthU: [8]
