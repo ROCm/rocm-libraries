@@ -123,15 +123,15 @@ namespace rocRoller
                         // Check if this control node is a Barrier connected to LDS
                         if(graph.control.get<Barrier>(ctrl) && isBarrierForLDS(graph, ctrl))
                         {
-                            Log::debug(
-                                fmt::format("FORWARD: Found LDS Barrier({}) at index {} between index "
-                                            "{} (tag: {}) and index {} (tag: {})",
-                                            ctrl,
-                                            i,
-                                            firstOpRecordIndex,
-                                            firstOpTag,
-                                            secondOpRecordIndex,
-                                            secondOpTag));
+                            Log::debug(fmt::format(
+                                "FORWARD: Found LDS Barrier({}) at index {} between index "
+                                "{} (tag: {}) and index {} (tag: {})",
+                                ctrl,
+                                i,
+                                firstOpRecordIndex,
+                                firstOpTag,
+                                secondOpRecordIndex,
+                                secondOpTag));
                             return true;
                         }
                     }
@@ -196,16 +196,16 @@ namespace rocRoller
                         auto containingNodes = graph.control.nodesContaining(ctrl).to<std::set>();
                         if(containingNodes.contains(commonAncestorLoopTag))
                         {
-                            Log::debug(
-                                fmt::format("LOOP-CARRIED: Found LDS Barrier({}) at index {} in loop {}"
-                                            "between index {} (tag: {}) and index {} (tag: {})",
-                                            ctrl,
-                                            i,
-                                            commonAncestorLoopTag,
-                                            firstOpRecordIndex,
-                                            firstOpTag,
-                                            secondOpRecordIndex,
-                                            secondOpTag));
+                            Log::debug(fmt::format(
+                                "LOOP-CARRIED: Found LDS Barrier({}) at index {} in loop {}"
+                                "between index {} (tag: {}) and index {} (tag: {})",
+                                ctrl,
+                                i,
+                                commonAncestorLoopTag,
+                                firstOpRecordIndex,
+                                firstOpTag,
+                                secondOpRecordIndex,
+                                secondOpTag));
                             return true;
                         }
                     }
@@ -222,16 +222,16 @@ namespace rocRoller
                         auto containingNodes = graph.control.nodesContaining(ctrl).to<std::set>();
                         if(containingNodes.contains(commonAncestorLoopTag))
                         {
-                            Log::debug(
-                                fmt::format("LOOP-CARRIED: Found LDS Barrier({}) at index {} in loop {}"
-                                            "between index {} (tag: {}) and index {} (tag: {})",
-                                            ctrl,
-                                            i,
-                                            commonAncestorLoopTag,
-                                            firstOpRecordIndex,
-                                            firstOpTag,
-                                            secondOpRecordIndex,
-                                            secondOpTag));
+                            Log::debug(fmt::format(
+                                "LOOP-CARRIED: Found LDS Barrier({}) at index {} in loop {}"
+                                "between index {} (tag: {}) and index {} (tag: {})",
+                                ctrl,
+                                i,
+                                commonAncestorLoopTag,
+                                firstOpRecordIndex,
+                                firstOpTag,
+                                secondOpRecordIndex,
+                                secondOpTag));
                             return true;
                         }
                     }
