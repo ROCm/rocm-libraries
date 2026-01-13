@@ -107,9 +107,9 @@ inline bool ShouldIncludeTestCase(const Pooling2dTestCase& test_case,
     auto idx_sz  = sizeof(uint8_t);
     int spt_dim  = static_cast<int>(test_case.input_dims.size()) - 2;
     const bool skip_many_configs_with_non_int8_index =
-        apply_index_type_limits;     // dataset_id == 0 && full_set
+        apply_index_type_limits;               // dataset_id == 0 && full_set
     const bool wide_dataset = is_wide_dataset; // dataset_id == 2 && full_set
-    const bool full_set     = true;  // Always true for Dataset 0
+    const bool full_set     = true;            // Always true for Dataset 0
 
     // Match ctest run() order exactly:
     // 1. wsidx == 0 && spt_dim == 3 && max && full_set (not applicable for 2D)
@@ -276,7 +276,7 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                                  std::vector<Pooling2dTestCase>& test_cases,
                                  bool skip_wide_check         = false,
                                  bool apply_index_type_limits = true,
-                                 bool is_wide_dataset          = false)
+                                 bool is_wide_dataset         = false)
 {
     // Match ctest order exactly: index_type -> mode -> lens -> strides -> pads -> wsidx
     // This matches the order parameters are added in pooling_driver (base class adds index_type,
@@ -302,8 +302,10 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                                 mode,
                                 wsidx};
 
-                            if(ShouldIncludeTestCase(
-                                   test_case, skip_wide_check, apply_index_type_limits, is_wide_dataset))
+                            if(ShouldIncludeTestCase(test_case,
+                                                     skip_wide_check,
+                                                     apply_index_type_limits,
+                                                     is_wide_dataset))
                             {
                                 test_cases.push_back(test_case);
                             }

@@ -43,31 +43,33 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
 
     // Dataset 2 uses only uint32 (matching ctest behavior)
     std::vector<miopenIndexType_t> dataset2_index_types = {miopenIndexUint32};
-    std::vector<miopenPoolingMode_t> modes = {
+    std::vector<miopenPoolingMode_t> modes              = {
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
     // Generate cartesian product for dataset 2
     // This matches the original ctest test_pooling2d behavior with --dataset 2
-    // IMPORTANT: Order must match ctest exactly: index_type -> mode -> input_shape -> lens -> strides -> pads -> wsidx
-    // This is the order in which test_driver processes test cases (based on add() call order)
+    // IMPORTANT: Order must match ctest exactly: index_type -> mode -> input_shape -> lens ->
+    // strides -> pads -> wsidx This is the order in which test_driver processes test cases (based
+    // on add() call order)
     for(const auto& index_type : dataset2_index_types)
     {
         for(const auto& mode : modes)
         {
             for(const auto& input_dims : dataset2_inputs)
             {
-                AddTestCasesForInput(input_dims,
-                                     dataset2_lens,
-                                     dataset2_strides,
-                                     dataset2_pads,
-                                     {index_type}, // Single index_type for this iteration
-                                     {mode},       // Single mode for this iteration
-                                     wsidx_values,
-                                     test_cases,
-                                     false,  // skip_wide_check=false for Dataset 2 (wide window)
-                                     false,  // apply_index_type_limits=false for Dataset 2 (matching ctest)
-                                     true);  // is_wide_dataset=true for Dataset 2 (wide window)
+                AddTestCasesForInput(
+                    input_dims,
+                    dataset2_lens,
+                    dataset2_strides,
+                    dataset2_pads,
+                    {index_type}, // Single index_type for this iteration
+                    {mode},       // Single mode for this iteration
+                    wsidx_values,
+                    test_cases,
+                    false, // skip_wide_check=false for Dataset 2 (wide window)
+                    false, // apply_index_type_limits=false for Dataset 2 (matching ctest)
+                    true); // is_wide_dataset=true for Dataset 2 (wide window)
             }
         }
     }

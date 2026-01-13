@@ -48,8 +48,9 @@ std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
 
     // Generate cartesian product for dataset 1
     // This matches the original ctest test_pooling2d behavior with --dataset 1
-    // IMPORTANT: Order must match ctest exactly: index_type -> mode -> input_shape -> lens -> strides -> pads -> wsidx
-    // This is the order in which test_driver processes test cases (based on add() call order)
+    // IMPORTANT: Order must match ctest exactly: index_type -> mode -> input_shape -> lens ->
+    // strides -> pads -> wsidx This is the order in which test_driver processes test cases (based
+    // on add() call order)
     for(const auto& index_type : dataset1_index_types)
     {
         for(const auto& mode : modes)
