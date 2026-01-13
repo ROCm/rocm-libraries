@@ -44,16 +44,31 @@ inline int64_t engineNameToId(std::string_view engineName)
     return static_cast<int64_t>(fnv1aHash(engineName));
 }
 
-inline std::set<std::string_view>& getAllEngineNames()
+// Internal namespace for mutable access (used only by EngineRegistrar)
+namespace detail
+{
+inline std::set<std::string_view>& getMutableEngineNames()
 {
     static std::set<std::string_view> s_allEngines;
     return s_allEngines;
 }
 
-inline std::unordered_map<int64_t, std::string_view>& getEngineIdToNameMap()
+inline std::unordered_map<int64_t, std::string_view>& getMutableEngineIdToNameMap()
 {
     static std::unordered_map<int64_t, std::string_view> s_engineIdToNameMap;
     return s_engineIdToNameMap;
+}
+} // namespace detail
+
+// Public const access functions
+inline const std::set<std::string_view>& getAllEngineNames()
+{
+    return detail::getMutableEngineNames();
+}
+
+inline const std::unordered_map<int64_t, std::string_view>& getEngineIdToNameMap()
+{
+    return detail::getMutableEngineIdToNameMap();
 }
 
 // Helper function to check if an engine name is registered
@@ -80,9 +95,9 @@ struct EngineRegistrar
 {
     EngineRegistrar(std::string_view name)
     {
-        getAllEngineNames().insert(name);
+        detail::getMutableEngineNames().insert(name);
         auto id = engineNameToId(name.data());
-        getEngineIdToNameMap()[id] = name;
+        detail::getMutableEngineIdToNameMap()[id] = name;
 
         // Check for collisions
         for(const auto& [existingId, existingName] : getEngineIdToNameMap())
