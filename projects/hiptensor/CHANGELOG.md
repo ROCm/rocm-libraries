@@ -2,7 +2,15 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## (Unreleased) hipTensor 2.2.0 for ROCm 7.2.0
+## (Unreleased) hipTensor 2.3.0
+
+### Added
+
+* Added support for the following new GPU targets:
+  * gfx11: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153.
+  * gfx12: gfx1200, gfx1201.
+
+## hipTensor 2.2.0 for ROCm 7.2.0
 
 ### Added
 

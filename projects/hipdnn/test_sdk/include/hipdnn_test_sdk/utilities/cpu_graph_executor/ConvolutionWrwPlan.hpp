@@ -6,8 +6,8 @@
 #include <functional>
 #include <variant>
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
@@ -21,14 +21,14 @@ namespace hipdnn_test_sdk::utilities
 struct ConvolutionWrwParams
 {
     ConvolutionWrwParams() = default;
-    ConvolutionWrwParams(const hipdnn_sdk::data_objects::TensorAttributes& xAttributes,
-                         const hipdnn_sdk::data_objects::TensorAttributes& dwAttributes,
-                         const hipdnn_sdk::data_objects::TensorAttributes& dyAttributes,
+    ConvolutionWrwParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
+                         const hipdnn_data_sdk::data_objects::TensorAttributes& dwAttributes,
+                         const hipdnn_data_sdk::data_objects::TensorAttributes& dyAttributes,
                          const std::vector<int64_t>& prePadding,
                          const std::vector<int64_t>& postPadding,
                          const std::vector<int64_t>& stride,
                          const std::vector<int64_t>& dilation,
-                         const hipdnn_sdk::data_objects::ConvMode convolutionMode)
+                         const hipdnn_data_sdk::data_objects::ConvMode convolutionMode)
         : xTensor(unpackTensorAttributes(xAttributes))
         , dwTensor(unpackTensorAttributes(dwAttributes))
         , dyTensor(unpackTensorAttributes(dyAttributes))
@@ -40,14 +40,14 @@ struct ConvolutionWrwParams
     {
     }
 
-    hipdnn_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT dwTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT dyTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT dwTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT dyTensor;
     std::vector<int64_t> prePadding;
     std::vector<int64_t> postPadding;
     std::vector<int64_t> stride;
     std::vector<int64_t> dilation;
-    hipdnn_sdk::data_objects::ConvMode convMode;
+    hipdnn_data_sdk::data_objects::ConvMode convMode;
 };
 
 template <typename XDataType,
@@ -86,10 +86,10 @@ private:
     ConvolutionWrwParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType DyDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
 class ConvolutionWrwPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -99,8 +99,8 @@ public:
     using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_data_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         const auto* nodeAttributes = node.attributes_as_ConvolutionWrwAttributes();
@@ -121,8 +121,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_plugin::IGraph& graph,
-                      const hipdnn_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_plugin_sdk::IGraph& graph,
+                      const hipdnn_data_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_ConvolutionWrwAttributes();
         if(nodeAttributes == nullptr)
@@ -131,17 +131,18 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        ConvolutionWrwParams params(
-            *tensorMap.at(nodeAttributes->x_tensor_uid()),
-            *tensorMap.at(nodeAttributes->dw_tensor_uid()),
-            *tensorMap.at(nodeAttributes->dy_tensor_uid()),
-            hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(
-                nodeAttributes->pre_padding()),
-            hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(
-                nodeAttributes->post_padding()),
-            hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(nodeAttributes->stride()),
-            hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
-            nodeAttributes->conv_mode());
+        ConvolutionWrwParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->dw_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->dy_tensor_uid()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->pre_padding()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->post_padding()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->stride()),
+                                    hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                                        nodeAttributes->dilation()),
+                                    nodeAttributes->conv_mode());
 
         return std::make_unique<
             ConvolutionWrwPlan<XDataType, DyDataType, OutputDataType, ComputeDataType>>(

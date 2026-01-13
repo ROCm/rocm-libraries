@@ -102,7 +102,7 @@ hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
                       "GraphDescriptor::getSerializedGraph: graph is null");
 
         flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(hipdnn_sdk::data_objects::Graph::Pack(builder, _graph.get()));
+        builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, _graph.get()));
 
         _graphSerializedBuffer = builder.Release();
     }
@@ -119,6 +119,16 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
 {
     THROW_IF_NULL(_handle, HIPDNN_STATUS_BAD_PARAM, "GraphDescriptor::getHandle: handle is null");
     return _handle;
+}
+
+std::string GraphDescriptor::toString() const
+{
+    std::string str = "GraphDescriptor: {handle=";
+    str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
+    str += ", serializedGraphSize="
+           + std::to_string(_graphSerializedBuffer.size() > 0 ? _graphSerializedBuffer.size() : 0);
+    str += "}";
+    return str;
 }
 
 } // namespace hipdnn_backend

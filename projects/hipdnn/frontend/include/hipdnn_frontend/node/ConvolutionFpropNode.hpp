@@ -3,12 +3,12 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -63,11 +63,6 @@ public:
         // Validate input tensor dimensions and strides
         auto& xDims = x->get_dim();
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionFpropNode: Input tensor dimensions and strides must be set and positive");
-
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
@@ -76,11 +71,6 @@ public:
 
         // Validate weight tensor dimensions and strides
         auto& wDims = w->get_dim();
-
-        HIPDNN_RETURN_IF_FALSE(
-            w->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionFpropNode: Weight tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(
             wDims.size(),
@@ -111,7 +101,6 @@ public:
 
         // Validate output tensor dimensions and strides if they are set
         auto& yDims = y->get_dim();
-        auto& yStrides = y->get_stride();
 
         if(!yDims.empty())
         {
@@ -135,19 +124,6 @@ public:
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionFpropNode: Output tensor channels must match weight "
                                 "tensor output channels");
-
-            HIPDNN_RETURN_IF_FALSE(
-                y->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionFpropNode: Output tensor dimensions must be set and positive");
-        }
-
-        if(!yStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(y->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionFpropNode: Output tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         // Validate spatial parameter counts match spatial dimensions
@@ -369,10 +345,10 @@ public:
                 "ConvolutionFpropNode: Stride dimension mismatch between input and output tensors");
 
             // Extract stride order from input tensor and apply to output tensor
-            auto strideOrder = hipdnn_sdk::utilities::extractStrideOrder(xStrides);
+            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
 
             // Generate Y strides using the extracted stride order and Y dimensions
-            auto yStrides = hipdnn_sdk::utilities::generateStrides(yDimsFinal, strideOrder);
+            auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDimsFinal, strideOrder);
 
             y->set_stride(yStrides);
         }
@@ -380,14 +356,14 @@ public:
         return {};
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

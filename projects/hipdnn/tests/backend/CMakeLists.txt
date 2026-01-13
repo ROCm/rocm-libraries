@@ -17,6 +17,7 @@ add_executable(
     IntegrationExecutionPlanApi.cpp
     IntegrationGetLastErrorString.cpp
     IntegrationHandleApi.cpp
+    IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationVariantPackApi.cpp
@@ -30,6 +31,7 @@ target_link_libraries(
     GTest::gtest_main
     Threads::Threads
     hipdnn_test_sdk
+    hipdnn_plugin_sdk
     hipdnn_backend
     hip::host
 )
