@@ -3316,26 +3316,26 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
                   8,8,9,9, 10,10, 19,19,20,20
                   ]
         lra0   = [0,1,2,3,4,5,6,7]
-        syncs.add(                 12, dscnt=4, comment="wait for LRA0 before pack to complete")
+        syncs.add(                 12, dscnt=4, barrier=True, comment="wait for LRA0 before pack to complete + barrier for GRA")
         pack_a0 = [                i+13 for i in pack_a]  ## last element = 13 + 16 = 29
 
-        lrb0   = [               8,9,10,11,12,13,14,15,16,17]
-        syncs.add(                                                   23, dscnt=0, barrier=True, comment="wait for LRB0 before pack to complete + barrier for GR")
-        pack_b0 = [                                                  i+28 for i in pack_b]  ## last element = 28 + 20 = 48
+        lrb0   = [               8,9,10,11, 13,14,15,16, 18,19]
+        syncs.add(                                               24, dscnt=0, comment="wait for LRB0 before pack to complete")
+        pack_b0 = [                                                  i+30 for i in pack_b]  ## last element = 30 + 20 = 50
 
-        gra    = [                                    24,28,32,36, 46,50,54,58] # one index for two instructions
-        grb    = [                                                             68,72,76,80, 90,94,98,102, 112,116] # one index for two instructions
+        gra    = [                                    17,22,27,32, 42,47,52,57] # one index for two instructions
+        grb    = [                                                               67,71,75,79, 89,93,97,101, 112,116] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
-        syncs.add(                                                            59, vlcnt=8, barrier=True, comment="wait for previous set of global reads")
+        syncs.add(                                                            59, vlcnt=8, barrier=True, comment="wait for previous set of global reads + barrier for GRB")
 
         lra1   = [60,61,62,63,64,65,66,67]
         syncs.add(                          72, dscnt=4, comment="wait for LRA1 before pack to complete")
         pack_a1 = [                         i+73 for i in pack_a]  ## last element = 73 + 16 = 89
 
-        lrb1   = [                        68,69,70,71,72,73,74,75,76,77]
-        syncs.add(                                                            83, dscnt=0, comment="wait for LRB1 before pack to complete")
-        pack_b1 = [                                                           i+88 for i in pack_b]  ## last element = 88 + 20 = 108
+        lrb1   = [                        68,69,70,71, 73,74,75,76, 78,79]
+        syncs.add(                                                            85, dscnt=0, comment="wait for LRB1 before pack to complete")
+        pack_b1 = [                                                           i+90 for i in pack_b]  ## last element = 90 + 20 = 110
 
         optSchedule = {
             'SYNC':   [syncs.get_indicies()],
@@ -3345,8 +3345,10 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
             'LRB0':   [lrb0],
             'PackA0': [pack_a0],
             'PackB0': [pack_b0],
-            'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
-            'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
+            'GRA':    [duplicate_list_items(gra, 2, gr_inc_step),
+                       duplicate_list_items([x+1 for x in gra], 2, gr_inc_step)],
+            'GRB':    [duplicate_list_items(grb, 2, gr_inc_step),
+                       duplicate_list_items([x+1 for x in grb], 2, gr_inc_step)],
             'LRSA':   [lrsa],
             'LRSB':   [lrsb],
             'LWSA':   [lwsa],
@@ -3361,7 +3363,7 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
         syncCode = syncs.get_code()
         nglshift = nllshift = num_gr
 
-        opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
         return True, opt1
 
     else:
