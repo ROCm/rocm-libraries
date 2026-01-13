@@ -17,10 +17,10 @@ class TestEngineNames : public ::testing::Test
 TEST_F(TestEngineNames, MacroGeneratesCorrectConstants)
 {
     // Check that the string constants are defined
-    EXPECT_STREQ(MIOPEN_PLUGIN_NAME, "MIOPEN_PLUGIN");
+    EXPECT_STREQ(MIOPEN_ENGINE_NAME, "MIOPEN_ENGINE");
 
     // Check that the ID constants are defined and match the hash function
-    EXPECT_EQ(MIOPEN_PLUGIN_ID, engineNameToId("MIOPEN_PLUGIN"));
+    EXPECT_EQ(MIOPEN_ENGINE_ID, engineNameToId("MIOPEN_ENGINE"));
 }
 
 TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
@@ -41,7 +41,7 @@ TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
 TEST_F(TestEngineNames, IsEngineNameRegistered)
 {
     // Test with known registered names
-    EXPECT_TRUE(isEngineNameRegistered(MIOPEN_PLUGIN_NAME));
+    EXPECT_TRUE(isEngineNameRegistered(MIOPEN_ENGINE_NAME));
 
     // Test with unregistered names
     EXPECT_FALSE(isEngineNameRegistered("UNKNOWN_ENGINE"));
@@ -52,7 +52,7 @@ TEST_F(TestEngineNames, IsEngineNameRegistered)
 TEST_F(TestEngineNames, GetEngineNameFromId)
 {
     // Test with registered engines
-    EXPECT_EQ(getEngineNameFromId(MIOPEN_PLUGIN_ID), "MIOPEN_PLUGIN");
+    EXPECT_EQ(getEngineNameFromId(MIOPEN_ENGINE_ID), "MIOPEN_ENGINE");
 
     // Test with non-existent ID - should throw
     int64_t nonExistentId = 0xDEADBEEF;
@@ -79,9 +79,9 @@ TEST_F(TestEngineNames, EngineCountMatches)
 
 TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
 {
-    auto engineIdCString = engineNameToId(MIOPEN_PLUGIN_NAME);
-    auto engineIdString = engineNameToId(std::string(MIOPEN_PLUGIN_NAME));
-    auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_PLUGIN_NAME));
+    auto engineIdCString = engineNameToId(MIOPEN_ENGINE_NAME);
+    auto engineIdString = engineNameToId(std::string(MIOPEN_ENGINE_NAME));
+    auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_ENGINE_NAME));
 
     EXPECT_EQ(engineIdCString, engineIdString);
     EXPECT_EQ(engineIdCString, engineIdStringView);

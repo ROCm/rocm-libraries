@@ -105,7 +105,10 @@ struct EngineRegistrar
     inline const int64_t name##_ID = engineNameToId(value); \
     inline const EngineRegistrar name##_registrar{value};
 
+//Note: Once an engine is named here, it should never be renamed.  Renaming an engine will
+// change the generated uint64_t ID.
+
 // Define all engines using the macro
-HIPDNN_REGISTER_ENGINE(MIOPEN_PLUGIN, "MIOPEN_PLUGIN")
+HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE")
 
 } // namespace hipdnn_data_sdk::utilities

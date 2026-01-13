@@ -89,17 +89,23 @@ TEST_F(TestStringUtil, Fnv1aHashLongStringHandling)
 
 TEST_F(TestStringUtil, Fnv1aHashSpecialCharacters)
 {
-    // Test with various special characters
-    std::vector<std::string> specialStrings = {"STRING_WITH_UNDERSCORE",
-                                               "STRING-WITH-DASH",
-                                               "STRING.WITH.DOT",
-                                               "STRING:WITH:COLON",
-                                               "STRING/WITH/SLASH",
-                                               "STRING WITH SPACE",
-                                               "STRING@WITH@AT",
-                                               "STRING#WITH#HASH",
-                                               "STRING$WITH$DOLLAR",
-                                               "STRING%WITH%PERCENT"};
+    // Test that special characters are treated as distinct regular characters
+    // All strings have same base but different special character in the middle
+    std::vector<std::string> specialStrings = {"STRING_CHAR_END",
+                                               "STRING-CHAR-END",
+                                               "STRING.CHAR.END",
+                                               "STRING:CHAR:END",
+                                               "STRING/CHAR/END",
+                                               "STRING CHAR END",
+                                               "STRING@CHAR@END",
+                                               "STRING#CHAR#END",
+                                               "STRING$CHAR$END",
+                                               "STRING%CHAR%END",
+                                               "STRING&CHAR&END",
+                                               "STRING*CHAR*END",
+                                               "STRING+CHAR+END",
+                                               "STRING=CHAR=END",
+                                               "STRING!CHAR!END"};
 
     std::unordered_set<uint64_t> hashes;
     for(const auto& str : specialStrings)
