@@ -50,3 +50,11 @@ install(TARGETS origami_python
     LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
     COMPONENT tests
 )
+
+# Windows: Install origami DLL alongside Python module so it can be found at runtime
+if(WIN32)
+    install(TARGETS origami
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
+        COMPONENT tests
+    )
+endif()
