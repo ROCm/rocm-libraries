@@ -36,7 +36,7 @@ table FloatConstraint {
 }
 
 table StringConstraint {
-    max_length: int32;
+    max_length: int32;            // Maximum string length
     valid_values: [string];       // Optional: enum-like string choices
 }
 
