@@ -298,13 +298,13 @@ struct TypeTriplet
     using Third = T3;
 };
 
-using TypesBackwardNchw
-    = ::testing::Types<TypeTriplet<float, float, float>,
-                       TypeTriplet<hip_bfloat16, float, float>,
-                       TypeTriplet<half, float, float>,
-                       TypeTriplet<int8_t, float, float>,
-                       TypePair<hip_fp8_e4m3, float, float> TypeTriplet<half, hip_bfloat16, float>,
-                       TypeTriplet<double, double, double>>;
+using TypesBackwardNchw = ::testing::Types<TypeTriplet<float, float, float>,
+                                           TypeTriplet<hip_bfloat16, float, float>,
+                                           TypeTriplet<half, float, float>,
+                                           TypeTriplet<int8_t, float, float>,
+                                           TypeTriplet<hip_fp8_e4m3, float, float>,
+                                           TypeTriplet<half, hip_bfloat16, float>,
+                                           TypeTriplet<double, double, double>>;
 
 template <typename T>
 class CpuFpReferenceBatchnormBackwardNchw : public ::testing::Test
