@@ -71,7 +71,9 @@ inline std::string_view getEngineNameFromId(int64_t id)
     {
         return it->second;
     }
-    return "";
+
+    HIPDNN_LOG_WARN("Engine ID 0x{:016X} not found in registered engines.", id);
+    throw std::out_of_range("Engine ID not found");
 }
 
 struct EngineRegistrar

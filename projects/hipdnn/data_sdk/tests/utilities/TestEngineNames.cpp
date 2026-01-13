@@ -54,9 +54,9 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     // Test with registered engines
     EXPECT_EQ(getEngineNameFromId(MIOPEN_PLUGIN_ID), "MIOPEN_PLUGIN");
 
-    // Test with non-existent ID
+    // Test with non-existent ID - should throw
     int64_t nonExistentId = 0xDEADBEEF;
-    EXPECT_EQ(getEngineNameFromId(nonExistentId), "");
+    EXPECT_THROW(getEngineNameFromId(nonExistentId), std::out_of_range);
 }
 
 TEST_F(TestEngineNames, EngineCountMatches)
