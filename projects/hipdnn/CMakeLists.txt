@@ -240,7 +240,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        "\(.*deps.*\)|\(.*tests.*\)|\(.*data_sdk/include/hipdnn_data_sdk/data_objects.*\)"
+        ".*deps.*|.*tests.*|.*data_sdk.*data_objects.*|.*HipErrorHandler.*"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -282,17 +282,17 @@ if(HIPDNN_ENABLE_COVERAGE)
             COMMAND
                 ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
                 -instr-profile=./coverage-report/hipdnn.profdata
-                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} >
                 ./coverage-report/code_cov_hipdnn.report
             COMMAND
                 ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
                 -instr-profile=./coverage-report/hipdnn.profdata
-                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=html
                 --output-dir=coverage-report
             COMMAND
                 ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
                 -instr-profile=./coverage-report/hipdnn.profdata
-                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=lcov >
+                -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=lcov >
                 ./coverage-report/coverage.info
             ${DEPENDS_CLAUSE}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
