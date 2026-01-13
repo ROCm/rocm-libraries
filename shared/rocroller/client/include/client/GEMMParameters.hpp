@@ -33,11 +33,9 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
-#include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
-#include <DataGenerator.hpp>
-#include <common/SourceMatcher.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
 
 namespace rocRoller
 {

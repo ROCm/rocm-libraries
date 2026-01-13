@@ -57,7 +57,7 @@
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
-#include <PreSwizzle.hpp>
+#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <CLI/CLI.hpp>
 

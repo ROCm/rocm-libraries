@@ -39,7 +39,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include <data_generation_utils.hpp>
+#include "data_generation_utils.hpp"
 
 #if defined(__clang__)
 #include <type_traits>

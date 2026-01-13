@@ -27,6 +27,7 @@
 #include <regex>
 
 #include "client/GEMMParameters.hpp"
+#include <common/SourceMatcher.hpp>
 
 #include <functional>
 

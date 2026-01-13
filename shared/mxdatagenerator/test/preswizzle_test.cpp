@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include <PreSwizzle.hpp>
+#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <gtest/gtest.h>
 
