@@ -45,7 +45,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_bsrmm_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int                  mb        = 100;
     int                  n         = 100;
     int                  kb        = 100;
