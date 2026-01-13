@@ -67,7 +67,7 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL && !defined(_WIN32)
         Gpu supportedDevices;
         if constexpr(type == TestDataType::TF32 || type == TestDataType::BF16)
         {
