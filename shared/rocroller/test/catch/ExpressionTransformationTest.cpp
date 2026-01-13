@@ -544,7 +544,7 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
             ->expression()};
 
     std::vector<Expression::ExpressionPtr> r32{
-        3,
+        4,
         Register::Value::Placeholder(context.get(), Register::Type::Vector, Int32, 1)
             ->expression()};
 
@@ -660,6 +660,24 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 
         CHECK_THAT(convertPropagation(convert(Int32, (r64[0] / r64[1]))),
                    IdenticalTo(convert(Int32, convert(Int32, (r64[0] / r64[1])))));
+    }
+
+    SECTION("Other expressions")
+    {
+        {
+            const auto inner = std::make_shared<Expression::Expression>(
+                Expression::ScaledMatrixMultiply{r64[0], r32[0], r32[1], r32[2], r32[3]});
+            auto expr = convertPropagation(convert(Int32, inner));
+            CHECK_THAT(
+                expr,
+                IdenticalTo(convert(
+                    Int32,
+                    std::make_shared<Expression::Expression>(Expression::ScaledMatrixMultiply{
+                        convert(Int32, r64[0]), r32[0], r32[1], r32[2], r32[3]}))));
+        }
+
+        CHECK_THAT(Expression::convertPropagation(Expression::convert(Int32, -r64[0])),
+                   IdenticalTo(Expression::convert(Int32, -Expression::convert(Int32, r64[0]))));
     }
 }
 
