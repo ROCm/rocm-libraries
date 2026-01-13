@@ -332,7 +332,7 @@ struct config_t {
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
 
-  /// Occupancy (number of waves resident per CU).
+  /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
   /// Reorder workgroup id for L2 reuse.
@@ -356,6 +356,8 @@ struct config_t {
 
   /// Target backend for kernel execution.
   target_t target = target_t::tensilelite;
+  /// Grid selection algorithm.
+  grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&

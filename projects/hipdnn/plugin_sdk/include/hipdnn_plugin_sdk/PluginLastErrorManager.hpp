@@ -5,10 +5,10 @@
 
 #include <string>
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 // NOTE: The last_error variable must be defined in one of the plugin source files.
 //       We also need to nolint it to avoid issues since thread_local static confused clang-tidy.
@@ -36,7 +36,7 @@ public:
 
         HIPDNN_LOG_ERROR("Error occured in status:{} message:{}", status, message);
 
-        hipdnn_sdk::utilities::copyMaxSizeWithNullTerminator(
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             s_lastError, message, sizeof(s_lastError));
 
         return status;

@@ -161,9 +161,11 @@ double compute_tile_latency(const problem_t& problem,
                             std::size_t splitting_factor);
 
 /**
- * @brief Computes the latency per K-complete MT wave.
- * A wave is defined as the time it takes for one CU to complete one
- * K-complete output tile
+ * @brief Computes the latency per K-complete macro-tile timestep.
+ * A timestep is defined as the time it takes for one set of concurrent
+ * K-complete output tiles to be computed on one or more CUs. Typically,
+ * this is simply the time it takes for one CU to complete one K-complete 
+ * output tile.
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
@@ -179,9 +181,8 @@ double compute_timestep_latency(const problem_t& problem,
                                 std::size_t splitting_factor);
 
 /**
- * @brief Compute the total latency of a gemm based on the latency of one wave multiplied by the
- * number of waves A wave is defined as the time it takes for one CU to complete one K-complete
- * output tile.
+ * @brief Compute the total latency of a gemm based on the latency of one timestep multiplied by the
+ * number of timesteps. (@see compute_timestep_latency)
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
