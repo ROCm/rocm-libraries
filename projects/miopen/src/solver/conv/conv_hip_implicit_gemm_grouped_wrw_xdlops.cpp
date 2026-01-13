@@ -175,11 +175,6 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
     {
-        // TODO: Remove this limitation for CK Wmma instances
-        if(conv_ptr->GetTypeString().find("Wmma") != -1)
-        {
-            return false;
-        }
         auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
         auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
         if(workspace_size != 0)
@@ -450,6 +445,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     kernel_id = "";
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    std::cout << "Trying AI heuristic for ConvHipImplicitGemmGroupWrwXdlops\n";
     if(IsModelApplicable(ctx, problem))
     {
         if(problem.GetInDataType() == miopenFloat)
@@ -469,6 +465,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
         }
     }
 #endif
+    std::cout << "Using default heuristic for ConvHipImplicitGemmGroupWrwXdlops\n";
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
@@ -535,6 +532,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    std::cout << "Validating kernel_id: " << kernel_id << "\n";
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
