@@ -48,32 +48,32 @@
 #define END_GRAPH_CAPTURE()
 #endif
 
-#define TESTING_TEMPLATE(NAME_)                                                  \
-    template <typename... P>                                                     \
-    hipsparseStatus_t hipsparse##NAME_(hipsparseLocalHandle_t& handle, P&&... p) \
-    {                                                                            \
-        hipsparseStatus_t status;                                                \
-        BEGIN_GRAPH_CAPTURE();                                                   \
-                                                                                 \
-        status = ::hipsparse##NAME_(handle, std::forward<P>(p)...);              \
-                                                                                 \
-        END_GRAPH_CAPTURE();                                                     \
-                                                                                 \
-        return status;                                                           \
-    };
-
-#define TESTING_COMPUTE_TEMPLATE(NAME_)                                           \
-    template <typename T, typename... P>                                          \
-    hipsparseStatus_t hipsparseX##NAME_(hipsparseLocalHandle_t& handle, P&&... p) \
+#define TESTING_TEMPLATE(NAME_)                                                   \
+    template <typename... P>                                                      \
+    hipsparseStatus_t hipsparse##NAME_(hipsparseLocalHandle_t& handle, P&& ... p) \
     {                                                                             \
         hipsparseStatus_t status;                                                 \
         BEGIN_GRAPH_CAPTURE();                                                    \
                                                                                   \
-        status = hipsparse::hipsparseX##NAME_<T>(handle, std::forward<P>(p)...);  \
+        status = ::hipsparse##NAME_(handle, std::forward<P>(p)...);               \
                                                                                   \
         END_GRAPH_CAPTURE();                                                      \
                                                                                   \
         return status;                                                            \
+    };
+
+#define TESTING_COMPUTE_TEMPLATE(NAME_)                                            \
+    template <typename T, typename... P>                                           \
+    hipsparseStatus_t hipsparseX##NAME_(hipsparseLocalHandle_t& handle, P&& ... p) \
+    {                                                                              \
+        hipsparseStatus_t status;                                                  \
+        BEGIN_GRAPH_CAPTURE();                                                     \
+                                                                                   \
+        status = hipsparse::hipsparseX##NAME_<T>(handle, std::forward<P>(p)...);   \
+                                                                                   \
+        END_GRAPH_CAPTURE();                                                       \
+                                                                                   \
+        return status;                                                             \
     };
 
 namespace testing
@@ -120,4 +120,66 @@ namespace testing
     TESTING_TEMPLATE(SDDMM_bufferSize)
     TESTING_TEMPLATE(SDDMM_preprocess)
 #endif
+
+    /*
+    * ===========================================================================
+    *    conversion SPARSE
+    * ===========================================================================
+    */
+
+    // coo2csr and csr2coo are not templated on T
+    TESTING_TEMPLATE(Xcoo2csr)
+    TESTING_TEMPLATE(Xcsr2coo)
+
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+    // csr2csc_ex2 available from CUDA 10.1
+    TESTING_TEMPLATE(Csr2cscEx2_bufferSize)
+    TESTING_TEMPLATE(Csr2cscEx2)
+#endif
+
+    // bsr2csr
+    TESTING_COMPUTE_TEMPLATE(bsr2csr)
+
+    // csr2gebsr and gebsr2csr
+    TESTING_TEMPLATE(Xcsr2gebsrNnz)
+    TESTING_COMPUTE_TEMPLATE(csr2gebsr)
+    TESTING_COMPUTE_TEMPLATE(gebsr2csr)
+
+    // gebsr2gebsr and gebsr2gebsc
+    TESTING_TEMPLATE(Xgebsr2gebsrNnz)
+    TESTING_COMPUTE_TEMPLATE(gebsr2gebsr)
+    TESTING_COMPUTE_TEMPLATE(gebsr2gebsc)
+
+    // csr2csr_compress
+    TESTING_COMPUTE_TEMPLATE(nnz_compress)
+    TESTING_COMPUTE_TEMPLATE(csr2csr_compress)
+
+    // dense to sparse
+    TESTING_COMPUTE_TEMPLATE(dense2csr)
+    TESTING_COMPUTE_TEMPLATE(dense2csc)
+    TESTING_COMPUTE_TEMPLATE(csr2dense)
+    TESTING_COMPUTE_TEMPLATE(csc2dense)
+
+    // prune routines
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csr_bufferSize)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csrNnz)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csr)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csr_bufferSize)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csrNnz)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csr)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csr_bufferSizeExt)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csr_bufferSizeExt)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csrByPercentage_bufferSize)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csrByPercentage_bufferSizeExt)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csrNnzByPercentage)
+    TESTING_COMPUTE_TEMPLATE(pruneDense2csrByPercentage)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csrByPercentage_bufferSize)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csrByPercentage_bufferSizeExt)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csrNnzByPercentage)
+    TESTING_COMPUTE_TEMPLATE(pruneCsr2csrByPercentage)
+#endif
+
+    // nnz routines
+    TESTING_COMPUTE_TEMPLATE(nnz)
 }
