@@ -37,4 +37,5 @@ TEST_ROUTINE(bsrmm,
              arg.transA,
              arg.transB,
              arg.dirA,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);

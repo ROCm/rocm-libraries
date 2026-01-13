@@ -95,6 +95,7 @@ Tests:
              nos5,
              nos6,
              nos7]
+  graph_test: [true]
 
 - name: bsrmm
   category: nightly
