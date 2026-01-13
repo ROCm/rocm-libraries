@@ -519,12 +519,8 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     case miopenDouble: break;
     }
 
-    if(is_deterministic && split_k != 1)
-    {
-        split_k = 1;
-        if(!valid_kernels.empty())
-            kernel_id = valid_kernels[index] + "+1";
-    }
+    // Invariant: split_k must always be 1 in deterministic mode
+    assert(!is_deterministic || split_k == 1);
 #endif
 }
 
