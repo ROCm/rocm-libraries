@@ -24,6 +24,7 @@
 #include "fft_enums.h"
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <optional>
