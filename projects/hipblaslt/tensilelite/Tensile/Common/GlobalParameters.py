@@ -373,8 +373,9 @@ defaultBenchmarkCommonParameters = [
     {"AssertFree0ElementMultiple": [1]},
     {"AssertFree1ElementMultiple": [1]},
     # Address-interleave restriction (default disabled):
-    # When >0, the solution requires (SizeJ / value) to be a power-of-two, where value is typically MT1.
-    {"AssertFree1DivByMT1Pow2": [0]},
+    # When >0, the solution requires tiles1=(SizeJ/value) to have lowbit(tiles1)>1 (i.e. G>1),
+    # where value is typically MT1.
+    {"AssertFree1DivByMT1LowbitGT1": [0]},
     {"AssertAIGreaterThanEqual": [-1]},
     {"AssertAILessThanEqual": [-1]},
     {"StaggerU": [32]},  # recommend [0,32]

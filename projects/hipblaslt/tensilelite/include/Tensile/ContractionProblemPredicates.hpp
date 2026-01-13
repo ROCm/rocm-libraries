@@ -134,10 +134,11 @@ namespace TensileLite
             };
 
             // Address-interleave restriction:
-            // Require tiles1 (=Free1Size/value) to be a power-of-two (and divisible by value).
-            // Typically value == MT1 for the solution.
-            struct Free1SizeDivByValuePow2
-                : public Predicate_CRTP<Free1SizeDivByValuePow2, ContractionProblemGemm>
+            // Require tiles1 (=Free1Size/value) to have lowbit(tiles1) > 1 (i.e. even),
+            // and require Free1Size % value == 0.
+            // This matches the kernel's initBInterleaveG enable condition that G=min(lowbit, LVCB) must be > 1.
+            struct Free1SizeDivByValueLowbitGT1
+                : public Predicate_CRTP<Free1SizeDivByValueLowbitGT1, ContractionProblemGemm>
             {
                 enum
                 {
@@ -147,8 +148,8 @@ namespace TensileLite
                 size_t index;
                 size_t value;
 
-                Free1SizeDivByValuePow2() = default;
-                Free1SizeDivByValuePow2(size_t index, size_t value)
+                Free1SizeDivByValueLowbitGT1() = default;
+                Free1SizeDivByValueLowbitGT1(size_t index, size_t value)
                     : index(index)
                     , value(value)
                 {
@@ -156,7 +157,7 @@ namespace TensileLite
 
                 static std::string Type()
                 {
-                    return "Free1SizeDivByValuePow2";
+                    return "Free1SizeDivByValueLowbitGT1";
                 }
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
@@ -168,8 +169,10 @@ namespace TensileLite
                     if(freeSize % value != 0)
                         return false;
                     size_t tiles1 = freeSize / value;
-                    // tiles1 must be power-of-two: tiles1 != 0 && (tiles1 & (tiles1-1)) == 0
-                    return tiles1 && ((tiles1 & (tiles1 - 1)) == 0);
+                    if(tiles1 == 0)
+                        return false;
+                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
+                    return lowbit > 1;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -179,7 +182,8 @@ namespace TensileLite
                                                               : problem.freeSizeA(index));
                     bool   okDiv    = (value != 0) && (freeSize % value == 0);
                     size_t tiles1   = okDiv ? (freeSize / value) : 0;
-                    bool   okPow2   = tiles1 && ((tiles1 & (tiles1 - 1)) == 0);
+                    size_t lowbit   = tiles1 ? (tiles1 & (~tiles1 + 1)) : 0;
+                    bool   ok       = okDiv && (lowbit > 1);
                     return debugEvalCmp(problem,
                                         stream,
                                         "free1",
@@ -187,11 +191,11 @@ namespace TensileLite
                                         "%",
                                         "value",
                                         value,
-                                        "tiles1_pow2",
-                                        okPow2 ? size_t(1) : size_t(0),
-                                        "==",
-                                        "sol",
-                                        size_t(1));
+                                        "lowbit",
+                                        lowbit,
+                                        ">",
+                                        "1",
+                                        size_t(1)) && ok;
                 }
             };
 

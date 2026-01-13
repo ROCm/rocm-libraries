@@ -434,8 +434,12 @@ validParameters = { # we need to make sure this matches develop
     # 1 indicates no assertion (since all sizes are multiples of 1)
     "AssertFree1ElementMultiple": [1, 2, 4, 8, 16],
     # Address-interleave restriction (value is typically MT1):
-    # If >0, require (Free1Size / value) to be a power-of-two.
-    "AssertFree1DivByMT1Pow2": -1,
+    # If >0, require tiles1=(Free1Size / value) to have lowbit(tiles1)>1 (i.e. G>1).
+    # This matches the kernel's initBInterleaveG logic:
+    #   - require Free1Size % value == 0
+    #   - compute lowbit(tiles1)
+    #   - enable only if min(lowbit, LVCB) > 1
+    "AssertFree1DivByMT1LowbitGT1": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
