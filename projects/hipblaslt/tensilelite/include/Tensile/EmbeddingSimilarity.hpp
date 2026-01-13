@@ -99,7 +99,6 @@ namespace TensileLite
                 return "Encoder";
             }
 
-            bool           apply_log;
             StandardScaler scaler;
             Network        network;
         };

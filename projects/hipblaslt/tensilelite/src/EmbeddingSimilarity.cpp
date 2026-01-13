@@ -130,7 +130,7 @@ namespace TensileLite
                     float out4 = input[k + 4] * weights[offset + 4];
                     float out5 = input[k + 5] * weights[offset + 5];
                     float out6 = input[k + 6] * weights[offset + 6];
-                    float out7 = input[k + 7] * weights[widx + 7];
+                    float out7 = input[k + 7] * weights[offset + 7];
                     output[j] += out0 + out1 + out2 + out3 + out4 + out5 + out6 + out7;
                 }
                 for(; k < input_dim; k++, offset++)
@@ -204,14 +204,6 @@ namespace TensileLite
         std::vector<dtype> Encoder::forward(std::vector<float>& gemm_features) const
 
         {
-            if(apply_log)
-            {
-                for(auto& feature : gemm_features)
-                {
-                    feature = std::log(feature + 1e-6);
-                }
-            }
-
             scaler(gemm_features);
 
             std::vector<dtype> encoded_gemm= network(gemm_features);

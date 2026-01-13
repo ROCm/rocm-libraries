@@ -65,7 +65,6 @@ namespace TensileLite
             {
                 iot::mapRequired(io, "state_dict", encoder.network);
                 iot::mapRequired(io, "scaler", encoder.scaler);
-                iot::mapRequired(io, "apply_log", encoder.apply_log);
             }
 
             const static bool flow = false;
@@ -198,12 +197,12 @@ namespace TensileLite
                         "ERROR: EmbeddingSimilarity library solution embeddings size "
                         "does not match the network output size.");
 
-                if(lib.encoder->network.weights[0].size() != (13 * lib.encoder->network.bias[0].size()))
+                if(lib.encoder->network.weights[0].size() != (91 * lib.encoder->network.bias[0].size()))
                 {
                     throw std::runtime_error(
                         "ERROR: EmbeddingSimilarity network input size ("
                         + std::to_string((int) (lib.encoder->network.weights[0].size() / lib.encoder->network.bias[0].size()))
-                        + ") does not match the input vector size (13)");
+                        + ") does not match the input vector size (91)");
                 }
             }
 
