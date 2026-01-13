@@ -3464,6 +3464,119 @@ TEST_F(TestGraph, GetTensorsByNameReturnsMap)
     EXPECT_EQ(notFound, tensorsByName.end());
 }
 
+TEST_F(TestGraph, GetTensorsByUidAndNameIncludePeerStatTensors)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputX")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("ScaleTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3)
+        .set_name("BiasTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4);
+
+    // Create peer stat tensors (these go in the separate peer_stats vector, not outputs)
+    auto peerStat1 = std::make_shared<TensorAttributes>();
+    peerStat1->set_uid(20).set_name("PeerStat1");
+
+    auto peerStat2 = std::make_shared<TensorAttributes>();
+    peerStat2->set_uid(21).set_name("PeerStat2");
+
+    BatchnormAttributes bnAttrs;
+    bnAttrs.set_name("BN");
+    bnAttrs.set_epsilon(epsilon);
+    bnAttrs.set_peer_stats({peerStat1, peerStat2}); // Set peer stats separately
+
+    auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
+        = graph.batchnorm(x, scale, bias, bnAttrs);
+
+    // Assign UIDs to output tensors
+    y->set_uid(10);
+    savedMean->set_uid(11);
+    savedInvVariance->set_uid(12);
+
+    // Test getTensorsByUid()
+    auto tensorsByUid = graph.getTensorsByUid();
+
+    // Should have:
+    // Inputs: x(1), scale(2), bias(3), epsilon(4) = 4
+    // Outputs: y(10), savedMean(11), savedInvVariance(12) = 3
+    // Peer stats: peerStat1(20), peerStat2(21) = 2
+    // Total = 9
+    EXPECT_EQ(tensorsByUid.size(), 9);
+
+    // Verify input tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(1), tensorsByUid.end()); // x
+    EXPECT_NE(tensorsByUid.find(2), tensorsByUid.end()); // scale
+    EXPECT_NE(tensorsByUid.find(3), tensorsByUid.end()); // bias
+    EXPECT_NE(tensorsByUid.find(4), tensorsByUid.end()); // epsilon
+
+    // Verify output tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(10), tensorsByUid.end()); // y
+    EXPECT_NE(tensorsByUid.find(11), tensorsByUid.end()); // savedMean
+    EXPECT_NE(tensorsByUid.find(12), tensorsByUid.end()); // savedInvVariance
+
+    // Verify peer stat tensors are present by UID (tests the specialized gather override)
+    EXPECT_NE(tensorsByUid.find(20), tensorsByUid.end()); // peerStat1
+    EXPECT_NE(tensorsByUid.find(21), tensorsByUid.end()); // peerStat2
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByUid[1], x);
+    EXPECT_EQ(tensorsByUid[10], y);
+    EXPECT_EQ(tensorsByUid[20], peerStat1);
+    EXPECT_EQ(tensorsByUid[21], peerStat2);
+
+    // Test getTensorsByName()
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Should have all named tensors:
+    // Inputs with names: InputX, ScaleTensor, BiasTensor (3) - epsilon has no name
+    // Outputs with names: BN::Y, BN::MEAN, BN::INV_VARIANCE (3)
+    // Peer stats with names: PeerStat1, PeerStat2 (2)
+    // Total = 8
+    EXPECT_EQ(tensorsByName.size(), 8);
+
+    // Verify input tensors are present by name
+    EXPECT_NE(tensorsByName.find("InputX"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("ScaleTensor"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BiasTensor"), tensorsByName.end());
+
+    // Verify output tensors are present by name
+    EXPECT_NE(tensorsByName.find("BN::Y"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::MEAN"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::INV_VARIANCE"), tensorsByName.end());
+
+    // Verify peer stat tensors are present by name (tests the specialized gather override)
+    EXPECT_NE(tensorsByName.find("PeerStat1"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("PeerStat2"), tensorsByName.end());
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByName["InputX"], x);
+    EXPECT_EQ(tensorsByName["BN::Y"], y);
+    EXPECT_EQ(tensorsByName["PeerStat1"], peerStat1);
+    EXPECT_EQ(tensorsByName["PeerStat2"], peerStat2);
+}
+
 TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
 {
     ::testing::FLAGS_gmock_verbose = "error";

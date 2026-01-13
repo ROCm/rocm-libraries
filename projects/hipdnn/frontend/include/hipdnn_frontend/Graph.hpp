@@ -669,6 +669,7 @@ public:
     }
 
     /// Returns a map of UID -> TensorAttributes for all tensors in the graph.
+    /// Tensors without UIDs are skipped (no error is generated).
     /// @return Map from tensor UID to tensor attributes
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> getTensorsByUid() const
     {
@@ -689,6 +690,7 @@ public:
     }
 
     /// Returns a map of name -> TensorAttributes for all tensors in the graph.
+    /// Tensors without names are skipped (no error is generated).
     /// @return Map from tensor name to tensor attributes
     std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> getTensorsByName() const
     {

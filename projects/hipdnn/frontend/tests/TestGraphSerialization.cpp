@@ -38,6 +38,19 @@ std::shared_ptr<TensorAttributes>
 }
 
 //==============================================================================
+// Parametrized Test Framework
+//==============================================================================
+
+// Serialization formats supported for round-trip testing
+enum class SerializationFormat
+{
+    JSON,
+    BINARY,
+    FLATBUFFER_DETACHED,
+    FLATBUFFER_OBJECT
+};
+
+//==============================================================================
 // Graph Comparison Helpers
 //==============================================================================
 
@@ -100,13 +113,75 @@ void expectGraphsEqual(Graph& expected, Graph& actual)
     }
 }
 
+// Parametrized test fixture for serialization round-trip tests
+class TestGraphSerializationRoundTrip : public ::testing::TestWithParam<SerializationFormat>
+{
+protected:
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    void roundTripAndCompare(Graph& graph)
+    {
+        Graph restored;
+
+        switch(GetParam())
+        {
+        case SerializationFormat::JSON:
+        {
+            auto json = graph.toJson();
+            restored.deserialize(json);
+            break;
+        }
+        case SerializationFormat::BINARY:
+        {
+            auto binary = graph.toBinary();
+            const std::vector<uint8_t>& binaryCopy = binary;
+            restored.deserialize(nullptr, binaryCopy);
+            break;
+        }
+        case SerializationFormat::FLATBUFFER_DETACHED:
+        {
+            auto fb = graph.toFlatBuffer();
+            restored.deserialize(fb);
+            break;
+        }
+        case SerializationFormat::FLATBUFFER_OBJECT:
+        {
+            auto fb = graph.toFlatBuffer();
+            auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(fb.data());
+            restored.deserialize(fbGraph);
+            break;
+        }
+        default:
+            FAIL() << "Unknown serialization format";
+        }
+
+        expectGraphsEqual(graph, restored);
+    }
+};
+
+// Custom name generator for better test names
+std::string serializationFormatToString(const ::testing::TestParamInfo<SerializationFormat>& info)
+{
+    switch(info.param)
+    {
+    case SerializationFormat::JSON:
+        return "Json";
+    case SerializationFormat::BINARY:
+        return "Binary";
+    case SerializationFormat::FLATBUFFER_DETACHED:
+        return "FlatBufferDetached";
+    case SerializationFormat::FLATBUFFER_OBJECT:
+        return "FlatBufferObject";
+    default:
+        return "Unknown";
+    }
+}
+
 //==============================================================================
-// Basic JSON Serialization Tests
+// Parametrized Round-Trip Tests
 //==============================================================================
 
-TEST(TestGraphSerialization, SerializeDeserializeJson)
+TEST_P(TestGraphSerializationRoundTrip, SimpleConvolution)
 {
-    // Create a simple graph
     Graph graph;
     graph.set_name("test_serialization_graph");
     graph.set_compute_data_type(DataType::FLOAT);
@@ -132,19 +207,10 @@ TEST(TestGraphSerialization, SerializeDeserializeJson)
 
     graph.conv_fprop(x, w, convAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-//==============================================================================
-// Graph Attribute Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, GraphAttributesPreserved)
+TEST_P(TestGraphSerializationRoundTrip, GraphAttributes)
 {
     Graph graph;
     graph.set_name("attribute_test_graph");
@@ -152,41 +218,18 @@ TEST(TestGraphSerialization, GraphAttributesPreserved)
     graph.set_io_data_type(DataType::HALF);
     graph.set_intermediate_data_type(DataType::BFLOAT16);
 
-    auto json = graph.toJson();
-
-    Graph newGraph;
-    newGraph.deserialize(json);
-
-    EXPECT_EQ(newGraph.get_name(), "attribute_test_graph");
-    EXPECT_EQ(newGraph.get_compute_data_type(), DataType::FLOAT);
-    EXPECT_EQ(newGraph.get_io_data_type(), DataType::HALF);
-    EXPECT_EQ(newGraph.get_intermediate_data_type(), DataType::BFLOAT16);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, PreferredEngineIdPreserved)
+TEST_P(TestGraphSerializationRoundTrip, PreferredEngineId)
 {
     Graph graph;
     graph.set_preferred_engine_id_ext(42);
 
-    auto json = graph.toJson();
-
-    EXPECT_TRUE(json.contains("preferred_engine_id"));
-    EXPECT_EQ(json["preferred_engine_id"], 42);
-
-    Graph newGraph;
-    newGraph.deserialize(json);
-
-    // Re-serialize to verify the value was restored
-    auto newJson = newGraph.toJson();
-    EXPECT_TRUE(newJson.contains("preferred_engine_id"));
-    EXPECT_EQ(newJson["preferred_engine_id"], 42);
+    roundTripAndCompare(graph);
 }
 
-//==============================================================================
-// Tensor Attribute Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, TensorAttributesPreserved)
+TEST_P(TestGraphSerializationRoundTrip, TensorAttributes)
 {
     Graph graph;
     graph.set_name("tensor_attr_test");
@@ -204,28 +247,10 @@ TEST(TestGraphSerialization, TensorAttributesPreserved)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
 
-    auto json = graph.toJson();
-
-    // Find the input tensor in JSON
-    bool foundInputTensor = false;
-    for(const auto& tensor : json["tensors"])
-    {
-        if(tensor["name"] == "input_tensor")
-        {
-            foundInputTensor = true;
-            EXPECT_EQ(tensor["uid"], 100);
-            auto dims = tensor["dims"].get<std::vector<int64_t>>();
-            EXPECT_EQ(dims, (std::vector<int64_t>{2, 64, 32, 32}));
-            auto strides = tensor["strides"].get<std::vector<int64_t>>();
-            EXPECT_EQ(strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
-            EXPECT_EQ(tensor["data_type"].get<std::string>(), "float");
-            break;
-        }
-    }
-    EXPECT_TRUE(foundInputTensor);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, VirtualTensorsSerialized)
+TEST_P(TestGraphSerializationRoundTrip, VirtualTensors)
 {
     Graph graph;
     graph.set_name("virtual_tensor_test");
@@ -306,11 +331,7 @@ TEST(TestGraphSerialization, VirtualTensorsSerialized)
     expectGraphsEqual(graph, restored);
 }
 
-//==============================================================================
-// Pointwise Node Tests (removed redundant looping tests)
-//==============================================================================
-
-TEST(TestGraphSerialization, TernaryPointwiseSerialization)
+TEST_P(TestGraphSerializationRoundTrip, TernaryPointwise)
 {
     Graph graph;
     graph.set_name("ternary_pointwise_test");
@@ -324,19 +345,10 @@ TEST(TestGraphSerialization, TernaryPointwiseSerialization)
     pwAttrs.set_mode(PointwiseMode::BINARY_SELECT);
     graph.pointwise(condition, x, y, pwAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-//==============================================================================
-// Multi-Node Graph Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, ConvReluFusionDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, ConvReluFusion)
 {
     Graph graph;
     graph.set_name("conv_relu_fusion_test");
@@ -356,15 +368,10 @@ TEST(TestGraphSerialization, ConvReluFusionDeepComparison)
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(convOut, reluAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, ConvBiasReluFusionDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, ConvBiasReluFusion)
 {
     Graph graph;
     graph.set_name("conv_bias_relu_fusion_test");
@@ -391,15 +398,10 @@ TEST(TestGraphSerialization, ConvBiasReluFusionDeepComparison)
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(biasOut, reluAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, ResidualBlockSerialization)
+TEST_P(TestGraphSerializationRoundTrip, ResidualBlock)
 {
     Graph graph;
     graph.set_name("residual_block_test");
@@ -436,15 +438,10 @@ TEST(TestGraphSerialization, ResidualBlockSerialization)
     relu2Attrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(addOut, relu2Attrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, BnTrainingActivFusionDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, BnTrainingActivFusion)
 {
     Graph graph;
     graph.set_name("bn_training_activ_fusion_test");
@@ -469,15 +466,10 @@ TEST(TestGraphSerialization, BnTrainingActivFusionDeepComparison)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(y, pwAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, BnInfDReluBnBwdFusionDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, BnInfDReluBnBwdFusion)
 {
     Graph graph;
     graph.set_name("bn_inf_drelu_bn_bwd_fusion_test");
@@ -506,12 +498,7 @@ TEST(TestGraphSerialization, BnInfDReluBnBwdFusionDeepComparison)
     bnBwdAttrs.set_saved_mean_and_inv_variance(savedMean, savedInvVariance);
     graph.batchnorm_backward(dxDrelu, x, scale, bnBwdAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
 //==============================================================================
@@ -650,39 +637,6 @@ TEST(TestGraphSerialization, FromFlatBufferRestoresGraph)
     EXPECT_EQ(err.get_code(), ErrorCode::OK);
 
     // Verify full round-trip correctness
-    expectGraphsEqual(graph, newGraph);
-}
-
-TEST(TestGraphSerialization, FlatBufferRoundTripPreservesNodes)
-{
-    Graph graph;
-    graph.set_name("flatbuffer_nodes_test");
-    graph.set_compute_data_type(DataType::FLOAT);
-    graph.set_io_data_type(DataType::FLOAT);
-    graph.set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
-    auto w = createTensor("w", {128, 64, 3, 3}, DataType::FLOAT, 2);
-
-    ConvFpropAttributes convAttrs;
-    convAttrs.set_name("ConvNode");
-    convAttrs.set_padding({1, 1}).set_stride({2, 2}).set_dilation({1, 1});
-    auto convOut = graph.conv_fprop(x, w, convAttrs);
-
-    PointwiseAttributes reluAttrs;
-    reluAttrs.set_name("ReluNode");
-    reluAttrs.set_mode(PointwiseMode::RELU_FWD);
-    graph.pointwise(convOut, reluAttrs);
-
-    // Round-trip through flatbuffer (assigns UIDs if needed)
-    auto buffer = graph.toFlatBuffer();
-    auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
-
-    Graph newGraph;
-    auto err = newGraph.fromFlatBuffer(fbGraph);
-    EXPECT_EQ(err.get_code(), ErrorCode::OK);
-
-    // Full verification - ensure complete round-trip correctness
     expectGraphsEqual(graph, newGraph);
 }
 
@@ -1025,11 +979,7 @@ TEST(TestGraphSerialization, ConstBinarySerializeReturnsErrorWithoutUids)
     expectGraphsEqual(graph, restored);
 }
 
-//==============================================================================
-// Edge Case Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, LargeDimensionsSerialization)
+TEST_P(TestGraphSerializationRoundTrip, LargeDimensions)
 {
     Graph graph;
     graph.set_name("large_dims_test");
@@ -1041,15 +991,10 @@ TEST(TestGraphSerialization, LargeDimensionsSerialization)
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(x, pwAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, SingleElementTensorSerialization)
+TEST_P(TestGraphSerializationRoundTrip, SingleElementTensor)
 {
     Graph graph;
     graph.set_name("single_element_test");
@@ -1062,15 +1007,10 @@ TEST(TestGraphSerialization, SingleElementTensorSerialization)
     pwAttrs.set_mode(PointwiseMode::ABS);
     graph.pointwise(x, pwAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, MultipleIndependentBranches)
+TEST_P(TestGraphSerializationRoundTrip, MultipleIndependentBranches)
 {
     // Test a graph with multiple independent operations (DAG structure)
     Graph graph;
@@ -1096,15 +1036,10 @@ TEST(TestGraphSerialization, MultipleIndependentBranches)
     addAttrs.set_mode(PointwiseMode::ADD);
     graph.pointwise(branch1, branch2, addAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, DeepChainSerialization)
+TEST_P(TestGraphSerializationRoundTrip, DeepChain)
 {
     // Test a deeply chained graph (many sequential operations)
     Graph graph;
@@ -1123,15 +1058,10 @@ TEST(TestGraphSerialization, DeepChainSerialization)
         current = graph.pointwise(current, reluAttrs);
     }
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, UniqueUidsPreserved)
+TEST_P(TestGraphSerializationRoundTrip, UniqueUidsPreserved)
 {
     Graph graph;
     graph.set_name("unique_uids_test");
@@ -1145,25 +1075,26 @@ TEST(TestGraphSerialization, UniqueUidsPreserved)
     addAttrs.set_mode(PointwiseMode::ADD);
     graph.pointwise(x, y, addAttrs);
 
-    auto json = graph.toJson();
-
-    // Verify UIDs are in the JSON
-    std::set<int64_t> foundUids;
-    for(const auto& tensor : json["tensors"])
+    // Only verify UIDs for JSON format (other formats will also preserve them)
+    if(GetParam() == SerializationFormat::JSON)
     {
-        if(tensor.contains("uid"))
+        auto json = graph.toJson();
+
+        // Verify UIDs are in the JSON
+        std::set<int64_t> foundUids;
+        for(const auto& tensor : json["tensors"])
         {
-            foundUids.insert(tensor["uid"].get<int64_t>());
+            if(tensor.contains("uid"))
+            {
+                foundUids.insert(tensor["uid"].get<int64_t>());
+            }
         }
+        EXPECT_TRUE(foundUids.count(42) > 0);
+        EXPECT_TRUE(foundUids.count(99) > 0);
     }
-    EXPECT_TRUE(foundUids.count(42) > 0);
-    EXPECT_TRUE(foundUids.count(99) > 0);
 
-    // Also verify full round-trip equality
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    // Verify full round-trip equality
+    roundTripAndCompare(graph);
 }
 
 //==============================================================================
@@ -1285,11 +1216,7 @@ TEST(TestGraphSerialization, DeserializeMalformedJsonReturnsError)
                 || err.get_message().find("Deserialization failed") != std::string::npos);
 }
 
-//==============================================================================
-// Pass-by-Value Tensor Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, PassByValueTensorSerialization)
+TEST_P(TestGraphSerializationRoundTrip, PassByValueTensor)
 {
     Graph graph;
     graph.set_name("pass_by_value_test");
@@ -1306,19 +1233,10 @@ TEST(TestGraphSerialization, PassByValueTensorSerialization)
     mulAttrs.set_mode(PointwiseMode::MUL);
     graph.pointwise(x, alpha, mulAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-//==============================================================================
-// tensor_like Utility Test
-//==============================================================================
-
-TEST(TestGraphSerialization, TensorLikeSerialization)
+TEST_P(TestGraphSerializationRoundTrip, TensorLike)
 {
     Graph graph;
     graph.set_name("tensor_like_test");
@@ -1334,19 +1252,10 @@ TEST(TestGraphSerialization, TensorLikeSerialization)
     addAttrs.set_mode(PointwiseMode::ADD);
     graph.pointwise(original, copy, addAttrs);
 
-    auto json = graph.toJson();
-
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-//==============================================================================
-// Matmul Node Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, MatmulNodeSerialization)
+TEST_P(TestGraphSerializationRoundTrip, MatmulNode)
 {
     Graph graph;
     graph.set_name("matmul_test");
@@ -1361,23 +1270,18 @@ TEST(TestGraphSerialization, MatmulNodeSerialization)
     auto c = graph.matmul(a, b, matmulAttrs);
     c->set_uid(3);
 
-    auto json = graph.toJson();
+    // Only verify counts for JSON format
+    if(GetParam() == SerializationFormat::JSON)
+    {
+        auto json = graph.toJson();
+        EXPECT_EQ(json["nodes"].size(), 1);
+        EXPECT_EQ(json["tensors"].size(), 3); // a, b, c
+    }
 
-    EXPECT_EQ(json["nodes"].size(), 1);
-    EXPECT_EQ(json["tensors"].size(), 3); // a, b, c
-
-    Graph newGraph;
-    newGraph.deserialize(json);
-
-    // Use deep comparison
-    expectGraphsEqual(graph, newGraph);
+    roundTripAndCompare(graph);
 }
 
-//==============================================================================
-// BatchnormInferenceVarianceExt Node Tests
-//==============================================================================
-
-TEST(TestGraphSerialization, BatchnormInferenceNodeVarianceExtSerialization)
+TEST_P(TestGraphSerializationRoundTrip, BatchnormInferenceNodeVarianceExt)
 {
     Graph graph;
     graph.set_name("batchnorm_inference_variance_ext_test");
@@ -1395,23 +1299,18 @@ TEST(TestGraphSerialization, BatchnormInferenceNodeVarianceExtSerialization)
     auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, bnInfVarAttrs);
     y->set_uid(6);
 
-    auto json = graph.toJson();
+    // Only verify counts for JSON format
+    if(GetParam() == SerializationFormat::JSON)
+    {
+        auto json = graph.toJson();
+        EXPECT_EQ(json["nodes"].size(), 1);
+        EXPECT_EQ(json["tensors"].size(), 6); // x, mean, variance, scale, bias, y
+    }
 
-    EXPECT_EQ(json["nodes"].size(), 1);
-    EXPECT_EQ(json["tensors"].size(), 6); // x, mean, variance, scale, bias, y
-
-    Graph newGraph;
-    newGraph.deserialize(json);
-
-    // Use deep comparison
-    expectGraphsEqual(graph, newGraph);
+    roundTripAndCompare(graph);
 }
 
-//==============================================================================
-// Deep Comparison Tests for All Node Types
-//==============================================================================
-
-TEST(TestGraphSerialization, ConvFpropDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, ConvFprop)
 {
     Graph graph;
     graph.set_name("conv_fprop_deep_test");
@@ -1432,14 +1331,10 @@ TEST(TestGraphSerialization, ConvFpropDeepComparison)
     auto y = graph.conv_fprop(x, w, convAttrs);
     y->set_uid(3);
 
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, PointwiseWithParamsDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, PointwiseWithParams)
 {
     Graph graph;
     graph.set_name("pointwise_params_deep_test");
@@ -1455,14 +1350,10 @@ TEST(TestGraphSerialization, PointwiseWithParamsDeepComparison)
     auto y = graph.pointwise(x, eluAttrs);
     y->set_uid(2);
 
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, BatchnormBackwardDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, BatchnormBackward)
 {
     Graph graph;
     graph.set_name("batchnorm_backward_deep_test");
@@ -1481,14 +1372,10 @@ TEST(TestGraphSerialization, BatchnormBackwardDeepComparison)
 
     graph.batchnorm_backward(dy, x, scale, bnBwdAttrs);
 
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, ConvDgradDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, ConvDgrad)
 {
     Graph graph;
     graph.set_name("conv_dgrad_deep_test");
@@ -1509,14 +1396,10 @@ TEST(TestGraphSerialization, ConvDgradDeepComparison)
     auto dx = graph.conv_dgrad(dy, w, dgradAttrs);
     dx->set_uid(3);
 
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, ConvWgradDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, ConvWgrad)
 {
     Graph graph;
     graph.set_name("conv_wgrad_deep_test");
@@ -1537,14 +1420,10 @@ TEST(TestGraphSerialization, ConvWgradDeepComparison)
     auto dw = graph.conv_wgrad(dy, x, wgradAttrs);
     dw->set_uid(3);
 
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, BatchnormDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, Batchnorm)
 {
     Graph graph;
     graph.set_name("batchnorm_deep_test");
@@ -1563,14 +1442,10 @@ TEST(TestGraphSerialization, BatchnormDeepComparison)
 
     graph.batchnorm(x, scale, bias, bnAttrs);
 
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
 
-TEST(TestGraphSerialization, BatchnormInferenceDeepComparison)
+TEST_P(TestGraphSerializationRoundTrip, BatchnormInference)
 {
     Graph graph;
     graph.set_name("batchnorm_inference_deep_test");
@@ -1589,9 +1464,17 @@ TEST(TestGraphSerialization, BatchnormInferenceDeepComparison)
     auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnInfAttrs);
     y->set_uid(6);
 
-    auto json = graph.toJson();
-    Graph restored;
-    restored.deserialize(json);
-
-    expectGraphsEqual(graph, restored);
+    roundTripAndCompare(graph);
 }
+
+//==============================================================================
+// Test Suite Instantiation
+//==============================================================================
+
+INSTANTIATE_TEST_SUITE_P(AllFormats,
+                         TestGraphSerializationRoundTrip,
+                         ::testing::Values(SerializationFormat::JSON,
+                                           SerializationFormat::BINARY,
+                                           SerializationFormat::FLATBUFFER_DETACHED,
+                                           SerializationFormat::FLATBUFFER_OBJECT),
+                         serializationFormatToString);
