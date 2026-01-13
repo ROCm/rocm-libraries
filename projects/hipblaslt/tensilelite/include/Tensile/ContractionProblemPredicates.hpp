@@ -199,6 +199,108 @@ namespace TensileLite
                 }
             };
 
+            // KRingShift restriction:
+            // Require (K * BPE(B) * G) % cacheLineBytes == 0, where:
+            //   tiles1 = Free1Size / MT1
+            //   G = min(lowbit(tiles1), LVCB)
+            //
+            // The packed 'value' format (size_t) is:
+            //   [63:48]=cacheLineBytes, [47:40]=bpeB, [39:32]=lvcb, [31:0]=mt1
+            struct KRingShiftAlignedK
+                : public Predicate_CRTP<KRingShiftAlignedK, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                ssize_t index;
+                size_t  value;
+
+                KRingShiftAlignedK() = default;
+                KRingShiftAlignedK(size_t index, size_t value)
+                    : index(static_cast<ssize_t>(index))
+                    , value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "KRingShiftAlignedK";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value == 0)
+                        return false;
+
+                    size_t mt1           = (value & 0xFFFFFFFFu);
+                    size_t lvcb          = ((value >> 32) & 0xFFu);
+                    size_t bpeB          = ((value >> 40) & 0xFFu);
+                    size_t cacheLineByte = ((value >> 48) & 0xFFFFu);
+
+                    if(mt1 == 0 || lvcb == 0 || bpeB == 0 || cacheLineByte == 0)
+                        return false;
+
+                    // Compute runtime G from Free1 size and MT1.
+                    size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
+                                                           : problem.freeSizeA(0));
+                    if(free1 % mt1 != 0)
+                        return false;
+                    size_t tiles1 = free1 / mt1;
+                    if(tiles1 == 0)
+                        return false;
+                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
+                    size_t G      = (lowbit <= lvcb) ? lowbit : lvcb;
+                    if(G <= 1)
+                        return false;
+
+                    // K is the (last) bound index (typically the summation dimension).
+                    size_t k = 0;
+                    if(index < 0)
+                        k = problem.boundSize(problem.boundIndices().size() + index);
+                    else
+                        k = problem.boundSize(index);
+
+                    // Check congruence in bytes:
+                    // (K * bpeB * G) % cacheLineBytes == 0
+                    // Use 64-bit to avoid overflow.
+                    uint64_t prod = static_cast<uint64_t>(k) * static_cast<uint64_t>(bpeB)
+                                    * static_cast<uint64_t>(G);
+                    return (prod % static_cast<uint64_t>(cacheLineByte)) == 0;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    size_t mt1           = (value & 0xFFFFFFFFu);
+                    size_t lvcb          = ((value >> 32) & 0xFFu);
+                    size_t bpeB          = ((value >> 40) & 0xFFu);
+                    size_t cacheLineByte = ((value >> 48) & 0xFFFFu);
+
+                    size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
+                                                           : problem.freeSizeA(0));
+                    size_t tiles1 = (mt1 && (free1 % mt1 == 0)) ? (free1 / mt1) : 0;
+                    size_t lowbit = tiles1 ? (tiles1 & (~tiles1 + 1)) : 0;
+                    size_t G      = (lowbit && (lowbit <= lvcb)) ? lowbit : lvcb;
+
+                    int index_mod = index < 0 ? problem.boundIndices().size() + index : index;
+                    size_t k      = problem.boundSize(index_mod);
+
+                    uint64_t prod = static_cast<uint64_t>(k) * static_cast<uint64_t>(bpeB)
+                                    * static_cast<uint64_t>(G);
+                    bool ok = (cacheLineByte != 0) && ((prod % static_cast<uint64_t>(cacheLineByte)) == 0);
+
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "K*bpe*G%CL",
+                                        ok ? size_t(1) : size_t(0),
+                                        "==",
+                                        "sol",
+                                        size_t(1));
+                }
+            };
+
             struct BatchSizeMultiple
                 : public Predicate_CRTP<BatchSizeMultiple, ContractionProblemGemm>
             {

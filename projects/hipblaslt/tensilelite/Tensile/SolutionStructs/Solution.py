@@ -961,6 +961,22 @@ class Solution(collections.abc.Mapping):
     if state["BAddrInterleave"]:
       state["AssertFree1DivByMT1LowbitGT1"] = state["MacroTile1"]
 
+    # KRingShift host-side restriction (aligned-K congruence):
+    # When KRingShift is enabled, require the cacheline congruence condition to hold:
+    #   (K * BPE(B) * G) % cachelineBytes == 0
+    # where G = min(lowbit(SizeJ/MT1), LVCB).
+    # This matches the kernel-side runtime restriction and avoids selecting KRS kernels for
+    # incompatible K values.
+    if state["KRingShift"]:
+      isa = tuple(state["ISA"])
+      cacheLineBytes = int(isaInfoMap[isa].archCaps["vL1DCacheLineBytes"])
+      bpeB = int(state["ProblemType"]["DataTypeB"].numBytes())
+      mt1 = int(state["MacroTile1"])
+      lvcb = int(state["LVCB"])
+      # Pack into a single integer for serialization:
+      # [63:48]=cacheLineBytes, [47:40]=bpeB, [39:32]=lvcb, [31:0]=mt1
+      state["AssertKRingShiftAlignedK"] = ((cacheLineBytes & 0xFFFF) << 48) | ((bpeB & 0xFF) << 40) | ((lvcb & 0xFF) << 32) | (mt1 & 0xFFFFFFFF)
+
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
       #   Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
