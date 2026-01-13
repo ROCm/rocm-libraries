@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <gtest/gtest.h>
-#include <hipdnn_plugin_sdk/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+
+using namespace hipdnn_data_sdk::utilities;
 
 class TestEngineNames : public ::testing::Test
 {
@@ -14,9 +16,6 @@ class TestEngineNames : public ::testing::Test
 
 TEST_F(TestEngineNames, MacroGeneratesCorrectConstants)
 {
-    // Verify the macro-generated constants exist and are correct
-    using namespace hipdnn_plugin_sdk::engine_names;
-
     // Check that the string constants are defined
     EXPECT_STREQ(MIOPEN_PLUGIN_NAME, "MIOPEN_PLUGIN");
 
@@ -27,12 +26,12 @@ TEST_F(TestEngineNames, MacroGeneratesCorrectConstants)
 TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
 {
     // Get the ID to name map
-    const auto& idToName = hipdnn_plugin_sdk::engine_names::getEngineIdToNameMap();
+    const auto& idToName = getEngineIdToNameMap();
 
     // Verify each mapping is consistent
     for(const auto& [id, name] : idToName)
     {
-        auto calculatedId = hipdnn_plugin_sdk::engine_names::engineNameToId(name.data());
+        auto calculatedId = engineNameToId(name.data());
         EXPECT_EQ(id, calculatedId)
             << "ID mismatch for engine: " << name << " (stored: 0x" << std::hex << id
             << ", calculated: 0x" << calculatedId << std::dec << ")";
@@ -42,33 +41,29 @@ TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
 TEST_F(TestEngineNames, IsEngineNameRegistered)
 {
     // Test with known registered names
-    EXPECT_TRUE(hipdnn_plugin_sdk::engine_names::isEngineNameRegistered(
-        hipdnn_plugin_sdk::engine_names::MIOPEN_PLUGIN_NAME));
+    EXPECT_TRUE(isEngineNameRegistered(MIOPEN_PLUGIN_NAME));
 
     // Test with unregistered names
-    EXPECT_FALSE(hipdnn_plugin_sdk::engine_names::isEngineNameRegistered("UNKNOWN_ENGINE"));
-    EXPECT_FALSE(hipdnn_plugin_sdk::engine_names::isEngineNameRegistered("NOT_REGISTERED"));
-    EXPECT_FALSE(hipdnn_plugin_sdk::engine_names::isEngineNameRegistered(""));
+    EXPECT_FALSE(isEngineNameRegistered("UNKNOWN_ENGINE"));
+    EXPECT_FALSE(isEngineNameRegistered("NOT_REGISTERED"));
+    EXPECT_FALSE(isEngineNameRegistered(""));
 }
 
 TEST_F(TestEngineNames, GetEngineNameFromId)
 {
-    using namespace hipdnn_plugin_sdk::engine_names;
-
     // Test with registered engines
-    EXPECT_EQ(hipdnn_plugin_sdk::engine_names::getEngineNameFromId(MIOPEN_PLUGIN_ID),
-              "MIOPEN_PLUGIN");
+    EXPECT_EQ(getEngineNameFromId(MIOPEN_PLUGIN_ID), "MIOPEN_PLUGIN");
 
     // Test with non-existent ID
     int64_t nonExistentId = 0xDEADBEEF;
-    EXPECT_EQ(hipdnn_plugin_sdk::engine_names::getEngineNameFromId(nonExistentId), "");
+    EXPECT_EQ(getEngineNameFromId(nonExistentId), "");
 }
 
 TEST_F(TestEngineNames, EngineCountMatches)
 {
     // Verify that the number of engines in getAllEngineNames matches getEngineIdToNameMap
-    const auto& allEngines = hipdnn_plugin_sdk::engine_names::getAllEngineNames();
-    const auto& idToName = hipdnn_plugin_sdk::engine_names::getEngineIdToNameMap();
+    const auto& allEngines = getAllEngineNames();
+    const auto& idToName = getEngineIdToNameMap();
 
     EXPECT_EQ(allEngines.size(), idToName.size())
         << "Mismatch between getAllEngineNames and getEngineIdToNameMap sizes";
@@ -76,7 +71,7 @@ TEST_F(TestEngineNames, EngineCountMatches)
     // Also verify all names in one are in the other
     for(const auto& name : allEngines)
     {
-        auto id = hipdnn_plugin_sdk::engine_names::engineNameToId(name.data());
+        auto id = engineNameToId(name.data());
         EXPECT_NE(idToName.find(id), idToName.end())
             << "Engine '" << name << "' is in getAllEngineNames but not in getEngineIdToNameMap";
     }
@@ -84,8 +79,6 @@ TEST_F(TestEngineNames, EngineCountMatches)
 
 TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
 {
-    using namespace hipdnn_plugin_sdk::engine_names;
-
     auto engineIdCString = engineNameToId(MIOPEN_PLUGIN_NAME);
     auto engineIdString = engineNameToId(std::string(MIOPEN_PLUGIN_NAME));
     auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_PLUGIN_NAME));

@@ -14,7 +14,6 @@ find_package(Threads REQUIRED)
 
 add_executable(hipdnn_plugin_sdk_tests
     main.cpp
-    TestEngineNames.cpp
     TestPluginDataTypeHelpers.cpp
     TestPluginException.cpp
     TestPluginHelpers.cpp
