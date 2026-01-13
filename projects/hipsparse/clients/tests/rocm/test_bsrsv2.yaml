@@ -141,6 +141,7 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos7]
+  graph_test: [true]
 
 - name: bsrsv2
   category: nightly
