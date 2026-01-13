@@ -241,9 +241,14 @@ protected:
         }
 
         // Get solution and create invoker
-        auto sol = solv.GetSolution(ctx, problem, solv.GetDefaultPerformanceConfig(ctx, problem));
+        auto perf_config = solv.GetDefaultPerformanceConfig(ctx, problem);
+        auto sol         = solv.GetSolution(ctx, problem, perf_config);
         ASSERT_TRUE(sol.Succeeded());
         ASSERT_TRUE(sol.invoker_factory);
+
+        // Log the performance config to verify split_k and other parameters
+        std::cout << "Performance config: " << perf_config << std::endl;
+
         const auto invoker = handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
 
         // Store results from each iteration

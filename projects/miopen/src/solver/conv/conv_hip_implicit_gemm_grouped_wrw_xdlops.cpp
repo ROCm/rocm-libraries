@@ -303,6 +303,11 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyToken(
         {
             if(!std::all_of(value.begin(), value.end(), ::isdigit))
                 return false;
+
+            // Parse the AI-predicted split_k value and update member variable
+            // This is necessary so that the deterministic override check in HeuristicInit() can
+            // work
+            split_k            = std::stoi(value);
             kernel_id          = valid_kernels[heuristic_indexes[0]] + "+" + value;
             index              = heuristic_indexes[0];
             bool valid_split_k = false;
@@ -327,6 +332,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyToken(
             {
                 kernel_id = "";
                 index     = 0;
+                split_k   = 1; // Reset to default on failure
                 return false;
             }
         }
