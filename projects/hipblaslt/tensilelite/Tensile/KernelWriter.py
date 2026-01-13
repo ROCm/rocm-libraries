@@ -3281,7 +3281,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
         else:
           # Keep per-tensor tail branching for tc2 when tc1 uses tailLoopOpt.
-          if kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc2 in ("A", "B"):
+          if kernel["KRingShift"] and kernel["BufferLoad"] and tc2 in ("A", "B"):
             labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc2}"), "")
             labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc2}"), "")
             labelNoKRS.comment = f"KRS: tail no-KRS path for {tc2} (sgprKRingShift==0)"
@@ -3299,8 +3299,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # KRS: If both tail global-read blocks (A/B) are eligible for KRS, do ONE runtime branch and
         # share ONE set of labels for A/B. When sgprKRingShift==0, force both tail blocks down the
         # original "load-only" path (no KRS_TAIL_OFFSET_* at all).
-        krsTailBranchable1 = kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc1 in ("A", "B")
-        krsTailBranchable2 = kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc2 in ("A", "B") \
+        krsTailBranchable1 = kernel["KRingShift"] and kernel["BufferLoad"] and tc1 in ("A", "B")
+        krsTailBranchable2 = kernel["KRingShift"] and kernel["BufferLoad"] and tc2 in ("A", "B") \
                              and not (tailLoopOpt2nd and (globalReadMode2nd == 2))
         if krsTailBranchable1 and krsTailBranchable2:
           labelNoKRS = Label(self.labels.getNameInc("KRS_tail_noop_AB"), "")
@@ -3353,7 +3353,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if tailLoopOpt2nd and (globalReadMode2nd == 2):
             module.add(self.doTailLoopOpt(kernel, tensorParameters2nd))
           else:
-            if kernel.get("KRingShift", False) and kernel["BufferLoad"] and tc2 in ("A", "B"):
+            if kernel["KRingShift"] and kernel["BufferLoad"] and tc2 in ("A", "B"):
               labelNoKRS = Label(self.labels.getNameInc(f"KRS_tail_noop_{tc2}"), "")
               labelDoneKRS = Label(self.labels.getNameInc(f"KRS_tail_done_{tc2}"), "")
               labelNoKRS.comment = f"KRS: tail no-KRS path for {tc2} (sgprKRingShift==0)"
@@ -3534,7 +3534,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # KRS: tail is finished; sgprKRingShift must not be remapped (e.g. to 0) and can be released now.
       # Emit an explicit UNDEF here so it lands right after the tail VALU vgpr UNDEF block.
-      if kernel.get("KRingShift", False) and kernel["BufferLoad"]:
+      if kernel["KRingShift"] and kernel["BufferLoad"]:
         module.add(TextBlock(".set sgprKRingShift, UNDEF\n"))
 
       # Check in VGPR for DTV

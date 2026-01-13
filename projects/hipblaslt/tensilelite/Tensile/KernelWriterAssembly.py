@@ -2631,7 +2631,8 @@ class KernelWriterAssembly(KernelWriter):
     # Default disabled: shift=0.
     module.add(SMovB32(dst=sgpr("KRingShift"), src=0, comment="KRS: disabled (shift=0)"))
 
-    cacheLineBytes = int(self.states.archCaps.get("vL1DCacheLineBytes", 0) or 0)
+    # vL1DCacheLineBytes is provided by rocisa archCaps (see rocisa/include/hardware_caps.hpp).
+    cacheLineBytes = int(self.states.archCaps["vL1DCacheLineBytes"])
     if cacheLineBytes <= 0:
       module.addComment0("KRingShift: no arch cacheline info; keep shift=0")
       return module
@@ -9019,7 +9020,7 @@ class KernelWriterAssembly(KernelWriter):
       # KRingShift: in tail loop, patch each vgprGlobalReadOffset{A,B}+i just-in-time right before
       # its corresponding buffer_load. This allows interleaving apply/load and avoids a big apply-only block.
       krTailJIT = (not krTailForceDisable and self.states.inTailLoop and kernel["KRingShift"] and kernel["BufferLoad"]
-                   and tc in ("A", "B") and not kernel.get("_UseSgprForGRO", False))
+                   and tc in ("A", "B") and not kernel["_UseSgprForGRO"])
       if krTailJIT:
         # Must be even-aligned since macros use b64 SGPR pairs.
         krTmpS = self.sgprPool.checkOutAligned(10, 2, f"krTailJITTmpS{tc}", preventOverflow=False)
