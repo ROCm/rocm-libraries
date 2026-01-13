@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-// This file's definitions are duplicated by HipdnnBackendCallbackTypes.h.
+// This file's definitions are duplicated from the data_sdk CallbackTypes.h.
 // Please ensure any updates are synced between the two files!
 
 // Definition guard to avoid redefinition
