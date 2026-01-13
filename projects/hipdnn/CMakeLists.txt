@@ -278,21 +278,22 @@ if(HIPDNN_ENABLE_COVERAGE)
         add_custom_target(
             ${TARGET_NAME}
             COMMAND find . -name "*.profraw" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge
-                    -sparse -o ./coverage_report/hipdnn.profdata
+                    -sparse -o ./coverage-report/hipdnn.profdata
             COMMAND
                 ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage_report/hipdnn.profdata
+                -instr-profile=./coverage-report/hipdnn.profdata
                 -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
-                ./coverage_report/code_cov_hipdnn.report
+                ./coverage-report/code_cov_hipdnn.report
             COMMAND
                 ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage_report/hipdnn.profdata
+                -instr-profile=./coverage-report/hipdnn.profdata
                 -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
-                --output-dir=coverage_report
+                --output-dir=coverage-report
             COMMAND
                 ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage_report/hipdnn.profdata --format=lcov >
-                ./coverage_report/coverage.info
+                -instr-profile=./coverage-report/hipdnn.profdata
+                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=lcov >
+                ./coverage-report/coverage.info
             ${DEPENDS_CLAUSE}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             COMMENT "Generating code coverage report"

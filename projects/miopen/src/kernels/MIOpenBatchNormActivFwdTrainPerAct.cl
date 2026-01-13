@@ -105,7 +105,14 @@ __kernel void MIOpenBatchNormActivFwdTrainPerActivation(
             pvt_bias    = *(bias + adjIndex);
 
 #if(MIO_RUNNING_RESULT == 1)
-            running_stash_pa(runningMean, runningVariance, expAvgFactor, mean, variance, adjIndex);
+            running_stash_pa(runningMean,
+                             runningVariance,
+                             runningMean,
+                             runningVariance,
+                             expAvgFactor,
+                             mean,
+                             variance,
+                             adjIndex);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)

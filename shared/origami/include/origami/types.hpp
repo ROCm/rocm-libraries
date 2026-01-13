@@ -261,7 +261,7 @@ struct runtime_options {
 
   /**
    * @brief Get the global runtime options instance.
-   * 
+   *
    * Inline to prevent ODR violations when included in multiple shared libraries.
    * Static local variable ensures only one instance exists across all translation units. (PR#1862)
    */
@@ -323,6 +323,9 @@ struct config_t {
 
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
+
+  /// Grid selection algorithm.
+  grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
@@ -410,6 +413,8 @@ struct hash<origami::matrix_instruction> {
 
 template <>
 struct hash<origami::config_t> {
-  inline std::size_t operator()(const origami::config_t& config) const noexcept { return config.hash(); }
+  inline std::size_t operator()(const origami::config_t& config) const noexcept {
+    return config.hash();
+  }
 };
 }  // namespace std
