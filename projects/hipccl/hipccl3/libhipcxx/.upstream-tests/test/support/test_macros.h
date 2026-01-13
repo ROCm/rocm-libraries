@@ -29,6 +29,7 @@
 #define SUPPORT_TEST_MACROS_HPP
 
 #include <cuda/std/detail/__config>
+#include <cuda/std/cassert>
 
 // Use the CCCL compiler detection
 #define TEST_COMPILER(...)      _CCCL_COMPILER(__VA_ARGS__)

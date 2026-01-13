@@ -56,7 +56,7 @@
 #  include <math.h>
 #endif // _CCCL_COMPILER(MSVC) || _CCCL_CUDA_COMPILER(CLANG)
 
-#if _CCCL_COMPILER(NVRTC)
+#if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #  ifndef FP_NAN
 #    define FP_NAN 0
 #  endif // ! FP_NAN

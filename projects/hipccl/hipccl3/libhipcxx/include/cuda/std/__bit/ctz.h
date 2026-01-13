@@ -96,7 +96,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __constexpr_ctz(_Tp __x) noexcept
   }
 }
 
-#if !_CCCL_COMPILER(NVRTC)
+#if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
 template <typename _Tp>
 _LIBCUDACXX_HIDE_FROM_ABI constexpr int __host_constexpr_ctz(_Tp __x) noexcept

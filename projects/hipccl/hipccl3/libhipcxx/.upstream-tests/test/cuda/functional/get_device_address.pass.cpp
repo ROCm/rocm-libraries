@@ -45,7 +45,7 @@ __device__ const int const_scalar_object = 42;
 __device__ int array_object[]             = {42, 1337, -1};
 __device__ const int const_array_object[] = {42, 1337, -1};
 
-#if !TEST_COMPILER(NVRTC)
+#if !TEST_COMPILER(NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 template <class T>
 void test_host(T& object)
 {

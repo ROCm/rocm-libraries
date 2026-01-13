@@ -63,12 +63,14 @@ namespace libhipcxx
   __device__ inline int __FFS<int32_t>(int32_t v) {
     return __ffs(v);
   }
-  
+  // NOTE(HIP/AMD): hiprtc defines long long as int64_t, 
+  // therefore, this specialization is not needed.
+  #if !defined(_CCCL_COMPILER_HIPRTC)
   template <>
   __device__ inline int __FFS<int64_t>(int64_t v) {
     return __ffsll(static_cast<unsigned long long int>(v));
   }
-  
+  #endif
   template <>
   __device__ inline int __FFS<uint32_t>(uint32_t v) {
     return __ffs(v);

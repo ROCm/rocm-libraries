@@ -190,6 +190,11 @@ __device__ inline int __FFS<unsigned long long>(unsigned long long v) {
   return __ffsll(static_cast<unsigned long long int>(v));
 }
 
+__host__ __device__ __half __double2half(const double& __value) noexcept
+{
+  return __float2half(static_cast<float>(__value));
+}
+
 __host__ __device__ int fake_main(int argc, char ** argv);
 #if defined(__HIP_PLATFORM_AMD__)
 #define main __device__ __host__ fake_main

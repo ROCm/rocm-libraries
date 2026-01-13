@@ -10,7 +10,7 @@
 
 // MIT License
 //
-// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,7 +47,7 @@
 #include <cuda/std/__cstdlib/malloc.h>
 #include <cuda/std/cstring>
 
-#if !_CCCL_COMPILER(NVRTC)
+#if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <cstdlib>
 #endif // !_CCCL_COMPILER(NVRTC)
 
@@ -59,7 +59,7 @@ extern "C" _CCCL_DEVICE void* __cuda_syscall_aligned_malloc(size_t, size_t);
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
-#if !_CCCL_COMPILER(NVRTC)
+#if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 _CCCL_NODISCARD _CCCL_HIDE_FROM_ABI _CCCL_HOST void* __aligned_alloc_host(size_t __nbytes, size_t __align) noexcept
 {
 #  if _CCCL_COMPILER(MSVC)

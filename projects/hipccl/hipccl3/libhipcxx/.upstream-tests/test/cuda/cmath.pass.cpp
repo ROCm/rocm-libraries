@@ -73,7 +73,7 @@ __host__ __device__ constexpr void test()
   test<T, long long>();
   test<T, unsigned long long>();
 
-#if !TEST_COMPILER(NVRTC)
+#if !TEST_COMPILER(NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   // cstdint types:
   test<T, std::size_t>();
   test<T, std::ptrdiff_t>();

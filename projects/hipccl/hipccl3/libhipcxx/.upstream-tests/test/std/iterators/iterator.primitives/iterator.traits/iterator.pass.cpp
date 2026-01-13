@@ -60,7 +60,7 @@ struct test_iterator
   typedef cuda::std::forward_iterator_tag iterator_category;
 };
 
-#if !TEST_COMPILER(NVRTC)
+#if !TEST_COMPILER(NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 struct specialized_test_iterator
 {};
 

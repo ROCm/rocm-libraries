@@ -307,7 +307,12 @@ int main(int argc, char** argv)
   
   // Write any needed kernel launch data to file for later
   RunConfig runConfig = parse_run_config(testCu);
-  
+
+  // NOTE(HIP/AMD): We need to define CCCL_ENABLE_OPTIONAL_REF
+  // otherwise 20 tests related to the optional header fail. Issue #149.
+  nvrtcArguments.emplace_back("-DCCCL_ENABLE_OPTIONAL_REF");
+  nvrtcArguments.emplace_back("-DCCCL_ENABLE_ASSERTIONS");
+
   if (!skipOutput)
   {
     std::ofstream ostr(outputTemplate + ".build.yml");

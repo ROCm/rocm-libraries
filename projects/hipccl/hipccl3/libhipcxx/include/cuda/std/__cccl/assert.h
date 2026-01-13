@@ -49,7 +49,7 @@
 #include <cuda/std/__cccl/execution_space.h>
 #include <cuda/std/__cccl/preprocessor.h>
 
-#if !_CCCL_COMPILER(NVRTC)
+#if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <assert.h>
 #endif // !_CCCL_COMPILER(NVRTC)
 
@@ -157,7 +157,7 @@ _CCCL_HOST_DEVICE
 #    define _CCCL_ASSERT(expression, message) ((void) 0)
 #  endif
 #elif _CCCL_HAS_CUDA_COMPILER()
-#  if defined(__CUDA_ARCH__) or defined(__HIP_DEVICE_COMPILE__)
+#  if defined(__CUDA_ARCH__)
 #    define _CCCL_VERIFY(expression, message) _CCCL_ASSERT_IMPL_DEVICE(expression, message)
 #    define _CCCL_ASSERT(expression, message) _CCCL_ASSERT_DEVICE(expression, message)
 #  else // ^^^ __CUDA_ARCH__ ^^^ / vvv !__CUDA_ARCH__ vvv

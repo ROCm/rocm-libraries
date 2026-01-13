@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -184,7 +184,7 @@ _CCCL_REQUIRES(_IsSame<_Iter, ::__gnu_debug::_Safe_iterator<_Ty*, _Range>>::valu
 _LIBCUDACXX_HIDE_FROM_ABI auto __iter_concept_fn(::__gnu_debug::_Safe_iterator<_Ty*, _Range>, __priority_tag<3>)
   -> contiguous_iterator_tag;
 #endif // _GLIBCXX_DEBUG
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(_CCCL_COMPILER_HIPRTC)
 _CCCL_TEMPLATE(class _Iter, class _Ty, class _Range)
 _CCCL_REQUIRES(_IsSame<_Iter, ::__gnu_cxx::__normal_iterator<_Ty*, _Range>>::value)
 _LIBCUDACXX_HIDE_FROM_ABI auto __iter_concept_fn(::__gnu_cxx::__normal_iterator<_Ty*, _Range>, __priority_tag<3>)
@@ -480,7 +480,7 @@ template <class>
 struct __iterator_traits
 {};
 
-#  if !_CCCL_COMPILER(NVRTC)
+#  if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 // We need to properly accept specializations of `std::iterator_traits`
 template <__specialized_from_std _Ip>
 struct __iterator_traits<_Ip> : public ::std::iterator_traits<_Ip>
@@ -772,7 +772,7 @@ template <class, class = void>
 struct __iterator_traits
 {};
 
-#  if !_CCCL_COMPILER(NVRTC)
+#  if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 template <class _Ip>
 struct __iterator_traits<_Ip, enable_if_t<__specialized_from_std<_Ip>>> : public ::std::iterator_traits<_Ip>
 {};

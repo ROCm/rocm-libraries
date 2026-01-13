@@ -43,7 +43,7 @@
 #  pragma system_header
 #endif // no system header
 
-// NOTE(HIPRTC): We need to keep the include otherwise we get undefined symbol errors
+// NOTE(AMD/HIP): We need to keep the include otherwise we get undefined symbol errors
 // Internal issue #72. Once issue is fixed we should enable the guard
 #if !_CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #  include <cassert>

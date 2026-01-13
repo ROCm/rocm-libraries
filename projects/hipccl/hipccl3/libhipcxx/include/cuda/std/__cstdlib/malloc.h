@@ -46,7 +46,7 @@
 #include <cuda/std/__cstddef/types.h>
 #include <cuda/std/cstring>
 
-#if !_CCCL_COMPILER(NVRTC)
+#if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <cstdlib>
 #endif // !_CCCL_COMPILER(NVRTC)
 
