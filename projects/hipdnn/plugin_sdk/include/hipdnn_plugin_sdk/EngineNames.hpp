@@ -25,7 +25,7 @@ namespace hipdnn_plugin_sdk::engine_names
  */
 inline int64_t engineNameToId(const char* engineName)
 {
-    return hipdnn_data_sdk::utilities::fnv1aHash(engineName);
+    return static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(engineName));
 }
 
 /**
@@ -33,7 +33,7 @@ inline int64_t engineNameToId(const char* engineName)
  */
 inline int64_t engineNameToId(const std::string& engineName)
 {
-    return hipdnn_data_sdk::utilities::fnv1aHash(engineName);
+    return static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(engineName));
 }
 
 /**
@@ -41,7 +41,7 @@ inline int64_t engineNameToId(const std::string& engineName)
  */
 inline int64_t engineNameToId(std::string_view engineName)
 {
-    return hipdnn_data_sdk::utilities::fnv1aHash(engineName);
+    return static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(engineName));
 }
 
 inline std::set<std::string_view>& getAllEngineNames()

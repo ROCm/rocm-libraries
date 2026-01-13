@@ -18,13 +18,13 @@ namespace hipdnn_data_sdk::utilities
  * @brief Computes a FNV-1a hash of a string
  *
  * This function implements a FNV-1a hash algorithm to convert strings
- * to deterministic int64_t values. The hash is deterministic - the same
+ * to deterministic uint64_t values. The hash is deterministic - the same
  * input will always produce the same output.
  *
  * @param str The string to hash
- * @return int64_t The hash value
+ * @return uint64_t The hash value
  */
-inline int64_t fnv1aHash(const char* str)
+inline uint64_t fnv1aHash(const char* str)
 {
     if(str == nullptr || str[0] == '\0')
     {
@@ -43,14 +43,13 @@ inline int64_t fnv1aHash(const char* str)
         hash *= FNV_PRIME;
     }
 
-    // Cast to int64_t for the return value
-    return static_cast<int64_t>(hash);
+    return hash;
 }
 
 /**
  * @brief Overload for std::string
  */
-inline int64_t fnv1aHash(const std::string& str)
+inline uint64_t fnv1aHash(const std::string& str)
 {
     return fnv1aHash(str.c_str());
 }
@@ -58,7 +57,7 @@ inline int64_t fnv1aHash(const std::string& str)
 /**
  * @brief Overload for std::string_view
  */
-inline int64_t fnv1aHash(std::string_view str)
+inline uint64_t fnv1aHash(std::string_view str)
 {
     return fnv1aHash(std::string(str).c_str());
 }

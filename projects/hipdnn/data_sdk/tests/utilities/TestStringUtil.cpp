@@ -33,7 +33,7 @@ TEST_F(TestStringUtil, Fnv1aHashDifferentStringsDifferentHashes)
                                             "CUSTOM_ENGINE_2",
                                             "AMD_ROCM_ENGINE"};
 
-    std::unordered_set<int64_t> hashes;
+    std::unordered_set<uint64_t> hashes;
     for(const auto& str : testStrings)
     {
         auto hash = hipdnn_data_sdk::utilities::fnv1aHash(str);
@@ -47,14 +47,14 @@ TEST_F(TestStringUtil, Fnv1aHashHandlesNullPointer)
     // Null pointer should return 0
     const char* nullStr = nullptr;
     auto hash = hipdnn_data_sdk::utilities::fnv1aHash(nullStr);
-    EXPECT_EQ(hash, 0);
+    EXPECT_EQ(hash, 0u);
 }
 
 TEST_F(TestStringUtil, Fnv1aHashHandlesEmptyString)
 {
     // Empty string should return 0
     auto hash = hipdnn_data_sdk::utilities::fnv1aHash("");
-    EXPECT_EQ(hash, 0);
+    EXPECT_EQ(hash, 0u);
 }
 
 TEST_F(TestStringUtil, Fnv1aHashStringOverloadsConsistent)
@@ -101,7 +101,7 @@ TEST_F(TestStringUtil, Fnv1aHashSpecialCharacters)
                                                "STRING$WITH$DOLLAR",
                                                "STRING%WITH%PERCENT"};
 
-    std::unordered_set<int64_t> hashes;
+    std::unordered_set<uint64_t> hashes;
     for(const auto& str : specialStrings)
     {
         auto hash = hipdnn_data_sdk::utilities::fnv1aHash(str);
@@ -145,8 +145,8 @@ TEST_F(TestStringUtil, Fnv1aHashKnownValues)
     auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash("VENDOR_FAST_CONV");
 
     // Just verify they're non-zero and different from each other
-    EXPECT_NE(hash1, 0);
-    EXPECT_NE(hash2, 0);
+    EXPECT_NE(hash1, 0u);
+    EXPECT_NE(hash2, 0u);
     EXPECT_NE(hash1, hash2);
 }
 
