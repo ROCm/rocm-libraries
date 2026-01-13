@@ -1047,7 +1047,9 @@ def tuning_suite():
 
 def partial_pass():
     for length in [(64, 64, 128), (64, 64, 64), (64, 64, 52), (60, 60, 60),
-                   (32, 32, 128), (32, 32, 64), (64, 32, 128)]:
+                   (32, 32, 128), (32, 32, 64), (64, 32, 128), (160, 72, 72),
+                   (72, 72, 72), (160, 80, 72), (160, 80, 80), (96, 96, 96),
+                   (108, 108, 80), (72, 72, 52), (80, 80, 80), (84, 84, 72)]:
         for direction in [-1, 1]:
             for precision in ['single', 'double']:
                 for place in all_inplaces:
@@ -1057,7 +1059,7 @@ def partial_pass():
                     ]:
 
                         yield Problem(length,
-                                      tag=mktag("partial_pass", 1, precision,
+                                      tag=mktag("partial_pass", 3, precision,
                                                 direction, place, False),
                                       nbatch=batch,
                                       direction=direction,
