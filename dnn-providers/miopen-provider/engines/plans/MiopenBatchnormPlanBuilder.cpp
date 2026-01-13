@@ -292,6 +292,83 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
     }
 }
 
+void batchnormFwdFusionCheckTensors(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD};
+
+    if(s_supportedActivations.count(actAttr.operation()) == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm fusion currently only supports RELU_FWD activation");
+    }
+
+    // in_0 must be the batchnorm inference output (forward path)
+    if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation in_0 must be the batchnorm inference output tensor (y)");
+    }
+
+    // Check for virtual tensors
+    const auto& bnInfTensorX
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
+    const auto& bnInfTensorMean
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
+    const auto& bnInfTensorVariance
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.variance_tensor_uid());
+    const auto& bnInfTensorScale
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
+    const auto& bnInfTensorBias
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
+    const auto& bnInfTensorY
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
+
+    if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorVariance.virtual_()
+       || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
+    }
+
+    const auto& actTensorIn0
+        = miopen_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
+    const auto& actTensorOut
+        = miopen_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
+
+    if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation input from batchnorm must be virtual, output must be non virtual");
+    }
+}
+
+bool batchnormFwdFusionCheckTensorsLogErrors(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    try
+    {
+        batchnormFwdFusionCheckTensors(bnInfAttr, actAttr, tensorMap);
+        return true;
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_LOG_INFO(e.what());
+        return false;
+    }
+}
+
 } // namespace
 
 bool MiopenBatchnormPlanBuilder::isApplicable(
@@ -448,8 +525,10 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             const auto& actAttr
                 = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
-            // TODO: Add tensor check for variance ext fusion if needed, or reuse existing if compatible
-            // For now, we rely on the applicability check which we just added support for.
+            if(!batchnormFwdFusionCheckTensorsLogErrors(bnInfAttr, actAttr, opGraph.getTensorMap()))
+            {
+                return false;
+            }
 
             try
             {
