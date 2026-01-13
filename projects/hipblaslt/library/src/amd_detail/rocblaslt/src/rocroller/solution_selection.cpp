@@ -44,7 +44,7 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
  * compile-time known.
  */
 
-constexpr size_t possibleTileSizesCount = 35;
+constexpr size_t possibleTileSizesCount = 34;
 
 constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSizes
     = {{{256, 256, 128}, {256, 192, 128}, {256, 128, 128}, {256, 64, 128}, {256, 32, 128},
@@ -53,7 +53,7 @@ constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSize
         {64, 256, 128},  {64, 192, 128},  {64, 128, 128},  {64, 64, 128},  {64, 32, 128},
         {32, 256, 128},  {32, 192, 128},  {32, 128, 128},  {32, 64, 128},  {32, 32, 128},
         {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},  {32, 16, 128},
-        {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256},  {128, 128, 256}}};
+        {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
 
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
 auto generateTileList()
