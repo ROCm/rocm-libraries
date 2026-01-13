@@ -224,6 +224,12 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 - **Error Handling**: Implement proper error reporting through the plugin API
 - **Performance**: Optimization is critical for facilitating plugin adoption
 
+### CI Maintenance
+
+- **TheRock CI**: Uses a pinned Git commit hash from the TheRock repository. `therock_ci.yml` and several other workflows need their hash updated at a frequent cadence for CI to build hipDNN with recent deps.
+- **ROCm Version (hipdnn-clang-tidy.yml)**: Uses a fixed ROCm release version from TheRock artifacts (e.g., `7.11.0a20260112`). Update on-demand by changing the `--release` arg in the `install_rocm_from_artifacts.py` call. It will **need** to be bumped when new dependency APIs are required that are absent from past ROCm releases.
+
+
 ### Debugging Tips
 
 - Enable logging with environment variables (see [Environment Configuration](./Environment.md))
