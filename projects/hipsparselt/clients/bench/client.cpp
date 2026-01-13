@@ -96,6 +96,8 @@ struct perf_sparse<
             && std::is_same<Tc, int32_t>{})
         || (std::is_same<Ti, int8_t>{} && (std::is_same<To, hip_bfloat16>{})
             && std::is_same<Tc, int32_t>{})
+        || (std::is_same<Ti, int8_t>{} && (std::is_same<To, int32_t>{})
+            && std::is_same<Tc, int32_t>{})            
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
         || (std::is_same<Ti, hipsparselt_fp8_e4m3>{} && (std::is_same<To, float>{})
             && std::is_same<Tc, float>{})

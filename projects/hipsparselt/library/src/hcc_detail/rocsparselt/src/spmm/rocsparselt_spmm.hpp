@@ -138,6 +138,8 @@ inline rocsparselt_status rocsparselt_spmm_template(const char*                 
         return spmm_typecasting<int8_t, __half, float>(EX_TYPECASTING_PARM);
     case MATMUL_DATATYPE_I8_B_S:
         return spmm_typecasting<int8_t, hip_bfloat16, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_I8_I_S:
+        return spmm_typecasting<int8_t, int, float>(EX_TYPECASTING_PARM);        
     case MATMUL_DATATYPE_E4M3_S_S:
         return spmm_typecasting<__hip_fp8_e4m3, float, float>(EX_TYPECASTING_PARM);
     case MATMUL_DATATYPE_E5M2_S_S:

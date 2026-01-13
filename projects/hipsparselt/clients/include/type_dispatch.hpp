@@ -130,6 +130,11 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
         {
             return TEST<int8_t, hip_bfloat16, int32_t, float>{}(arg);
         }
+        else if(Ti == HIP_R_8I && To == HIP_R_32I && Tc == HIPSPARSELT_COMPUTE_32I
+                && TBias == HIP_R_32F)
+        {
+            return TEST<int8_t, int32_t, int32_t, float>{}(arg);
+        }        
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)

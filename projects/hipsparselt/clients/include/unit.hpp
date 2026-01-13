@@ -340,6 +340,19 @@ inline void unit_check_general(int64_t       M,
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_EQ);
 }
 
+template <>
+inline void unit_check_general(int64_t       M,
+                               int64_t       N,
+                               int64_t       lda,
+                               int64_t       strideA,
+                               const int32_t* hCPU,
+                               const int32_t* hGPU,
+                               int64_t       batch_count)
+{
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_EQ);
+}
+
+
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 template <>
 inline void unit_check_general(int64_t               M,
