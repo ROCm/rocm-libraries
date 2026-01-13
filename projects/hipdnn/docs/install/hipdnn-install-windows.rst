@@ -21,9 +21,8 @@ hipDNN supports Windows 10 and Windows 11 (recommended).
 
 
 To do a standalone build of hipDNN, you will need to set up a number of prerequisites.
-
-> [!NOTE]
-> The standalone build of hipDNN requires a subset of the full environment required for building TheRock. Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
+The standalone build of hipDNN requires a subset of the full environment required for building TheRock. 
+Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
 
 #### Automated Setup Script (Optional)
 An automated PowerShell script is available to perform the steps outlined below. This script is provided as a convenience and may not work in all environments. Review the script before running it to ensure it meets your needs: [windows_build_setup.ps1](../scripts/windows/windows_build_setup.ps1).
@@ -190,25 +189,3 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
 * To reduce build time, the `-DENABLE_CLANG_TIDY=OFF` option can be used to disable clang-tidy check during development. Similarly the `-DENABLE_CLANG_FORMAT=OFF` option can be used to disable clang-format.
 
-## Troubleshooting
-
-### Common Build Issues
-
-* **Out of memory during build**
-   ```bash
-   # Reduce parallel jobs
-   ninja -j4  # or even -j2 for systems with limited RAM
-   ```
-
-* **Docker GPU access issues**
-   - Ensure ROCm is installed on the host system
-   - Verify GPU is visible: `rocm-smi` or `rocminfo`
-   - Check user is in `video` and `render` groups:
-     ```bash
-     sudo usermod -a -G video,render $USER
-     # Log out and back in for changes to take effect
-     ```
-
-## Verifying Installation
-
-See [samples README](../samples/README.md) for detailed instructions on building test sample programs using hipDNN.

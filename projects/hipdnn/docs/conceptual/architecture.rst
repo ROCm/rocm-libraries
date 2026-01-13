@@ -1,6 +1,8 @@
 .. meta::
-  :description: Component concept
-  :keywords: Component, ROCm, API, 
+  :description: hipDNN high-level architecture
+  :keywords: hipDNN, ROCm, API, 
+
+.. _architecture:
 
 ******************************************
 hipDNN high-level architecture

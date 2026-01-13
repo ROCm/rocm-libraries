@@ -2,6 +2,8 @@
   :description: Build and execute operation graphs in hipDNN
   :keywords: hipDNN, ROCm, API, how-to 
 
+.. _build-execute:
+
 ********************************************
 Build and execute operation graphs in hipDNN
 ********************************************

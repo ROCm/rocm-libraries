@@ -1,41 +1,51 @@
 .. meta::
-  :description: Component reference
-  :keywords: Component, ROCm, install, reference
+  :description: hipDNN environment variables
+  :keywords: hipDNN, ROCm, environment, API, variables
 
-******************************************
+.. _variables:
+
+****************************
 hipDNN environment variables
-******************************************
+****************************
 
-### Logging Configuration
+Logging configuration
+=====================
 
 hipDNN provides two environment variables to control logging behavior:
-#### HIPDNN_LOG_LEVEL
+
+- ``HIPDNN_LOG_LEVEL``
+- ``HIPDNN_LOG_FILE``
+
+``HIPDNN_LOG_LEVEL``
+--------------------
 
 Sets the minimum severity that will be emitted. Levels are inclusive: choosing a level enables messages at that level and all higher severities.
 
-| Level  | Description                                                |
-|--------|------------------------------------------------------------|
-| `off`  | Disables all logging (default)                             |
-| `info` | General informational messages                             |
-| `warn` | Potential issues that do not interrupt execution           |
-| `error`| Recoverable errors that may affect results or performance  |
-| `fatal`| Unrecoverable errors; the operation will not continue      |
+- ``off``: Disables all logging (default)
+- ``info``: General informational messages
+- ``warn``: Potential issues that do not interrupt execution
+- ``error``: Recoverable errors that may affect results or performance
+- ``fatal``: Unrecoverable errors; the operation will not continue
 
-**Example:**
-```bash
-export HIPDNN_LOG_LEVEL=info
-```
+Here's an example:
 
-#### HIPDNN_LOG_FILE
+.. code:: bash
 
-Specifies the file path where logs will be **appended**. If not set, logs are written to `stderr`.
+  export HIPDNN_LOG_LEVEL=info
 
-**Example:**
-```bash
-export HIPDNN_LOG_FILE=/path/to/hipdnn.log
-```
+``HIPDNN_LOG_FILE``
+-------------------
 
-### Frontend and Plugin Logging
+Specifies the file path where logs will be appended. If not set, logs are written to ``stderr``.
+
+Here's an example:
+
+.. code:: bash
+
+  export HIPDNN_LOG_FILE=/path/to/hipdnn.log
+
+Frontend and plugin logging
+===========================
 
 The frontend and plugins can be configured to use the same logging destination as the backend, which is lazy-initialized automatically:
 
@@ -43,63 +53,73 @@ The frontend and plugins can be configured to use the same logging destination a
 2. Pass `hipdnnLoggingCallback_ext` as the callback function (accessible via plugin API or backend header)
 3. This ensures all components log to the same destination
 
-### MIOpen Plugin Logging
+MIOpen plugin logging
+=====================
 
-> [!TIP]
-> 💡 When using the MIOpen legacy plugin, you can use MIOpen-specific environment variables to control the underlying library's logging behavior.
+.. tip::
 
-For more details about MIOpen logging, see the latest [MIOpen Debug and Logging documentation](https://rocm.docs.amd.com/projects/MIOpen/en/develop/how-to/debug-log.html). All MIOpen environment variables remain compatible with hipDNN's MIOpen legacy plugin.
+  When using the MIOpen legacy plugin, you can use MIOpen-specific environment variables to control the underlying library's logging behavior.
 
-### Test Configuration
+For more details about MIOpen logging, see the latest `MIOpen Debug and Logging documentation <https://rocm.docs.amd.com/projects/MIOpen/en/develop/how-to/debug-log.html>`_. 
+All MIOpen environment variables remain compatible with hipDNN's MIOpen legacy plugin.
 
-#### HIPDNN_GLOBAL_TEST_SEED
+Test configuration
+==================
+
+``HIPDNN_GLOBAL_TEST_SEED``
+---------------------------
 
 Controls the random number generator seed used across hipDNN tests. This allows for reproducible test runs or full randomization when needed.
 
-| Value        | Description                                                |
-|--------------|------------------------------------------------------------|
-| (not set)    | Uses default seed value of `1` (default behavior)         |
-| `<number>`   | Uses the specified numeric seed (e.g., `42`, `12345`)     |
-| `RANDOM`     | Generates a random seed using `std::random_device`        |
+- No set value: Uses default seed value of ``1`` (default behavior)
+- ``<number>``: Uses the specified numeric seed (for example, ``42``, ``12345``)
+- ``RANDOM``: Generates a random seed using ``std::random_device``
 
-> [!NOTE]
-> The `RANDOM` value is case-insensitive (`random`, `Random`, `RANDOM` all work).
+.. note::
 
-**Examples:**
-```bash
-# Use a specific seed for consistent results
-export HIPDNN_GLOBAL_TEST_SEED=42
+  The ``RANDOM`` value is case-insensitive (``random``, ``Random``, ``RANDOM`` all work).
 
-# Use default seed (1) for reproducible tests
-unset HIPDNN_GLOBAL_TEST_SEED
+Here are some examples:
 
-# Use random seed for each test run
-export HIPDNN_GLOBAL_TEST_SEED=RANDOM
-```
+.. code:: bash
 
-**Best Practices:**
+  # Use a specific seed for consistent results
+  export HIPDNN_GLOBAL_TEST_SEED=42
+
+  # Use default seed (1) for reproducible tests
+  unset HIPDNN_GLOBAL_TEST_SEED
+
+  # Use random seed for each test run
+  export HIPDNN_GLOBAL_TEST_SEED=RANDOM
+
+
+Best practices
+--------------
+
 - Use the default seed (1) for CI/CD pipelines to ensure consistent test results
 - Use a specific numeric seed when debugging to reproduce exact test conditions
 - Use `RANDOM` during development to catch edge cases with different data patterns
 
----
-
-## Error Handling
+Error handling
+==============
 
 hipDNN provides functions for retrieving error information:
 
-### Getting Error Strings
+Getting error strings
+---------------------
 
-```c
-// Convert status code to string
-const char* error_str = hipdnnGetErrorString(status);
+.. code:: c
 
-// Get detailed error message for the current thread
-char message[HIPDNN_ERROR_STRING_MAX_LENGTH];
-hipdnnGetLastErrorString(message, sizeof(message));
-```
+  // Convert status code to string
+  const char* error_str = hipdnnGetErrorString(status);
 
-### Best Practices
+  // Get detailed error message for the current thread
+  char message[HIPDNN_ERROR_STRING_MAX_LENGTH];
+  hipdnnGetLastErrorString(message, sizeof(message));
+
+
+Best practices
+--------------
 
 1. Check return status codes from all hipDNN API calls
 2. Use `hipdnnGetLastErrorString` for detailed error context

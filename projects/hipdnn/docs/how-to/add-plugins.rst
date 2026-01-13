@@ -1,6 +1,8 @@
 .. meta::
-  :description: Component how-to
-  :keywords: Component, ROCm, API, how-to 
+  :description: Add new plugins and operations to hipDNN
+  :keywords: hipDNN, ROCm, API, how-to 
+
+.. _plugins:
 
 ***************************************************
 Add new plugins and operations to hipDNN (Advanced)
