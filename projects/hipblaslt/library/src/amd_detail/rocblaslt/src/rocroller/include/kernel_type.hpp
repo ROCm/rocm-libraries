@@ -36,7 +36,7 @@
  * Scale parameters for a matrix (A or B).
  * - preSwizzleTile: Pre-swizzle tile configuration {tileMN, tileK, subTileK}
  *   Similar to scaleShuffleTileA/B in rocRoller's TypeParameters.
- * - preTile: Pre-tile configuration {tileK, tileM} for A or {tileK, tileN} for B
+ * - preTile: Pre-tile configuration {tileM, tileK} for A or {tileK, tileN} for B
  */
 struct ScaleType
 {
