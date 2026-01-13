@@ -982,6 +982,10 @@ namespace
                     gtest_info << "\nContent of error log :\n " << log_content;
                 GTEST_FAIL() << gtest_info.str();
             }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
+            }
             catch(...)
             {
                 std::ostringstream gtest_info;
@@ -1983,6 +1987,10 @@ namespace
             {
                 GTEST_SKIP() << e.what();
             }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
+            }
         }
         void TearDown() override
         {
@@ -2091,6 +2099,10 @@ namespace
                 if(!log_content.empty())
                     gtest_info << "\nContent of error log:\n" << log_content;
                 GTEST_FAIL() << gtest_info.str();
+            }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
             }
             catch(...)
             {
@@ -2731,6 +2743,10 @@ namespace
             {
                 GTEST_SKIP() << e.what();
             }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
+            }
         }
         void TearDown() override
         {
@@ -2986,6 +3002,10 @@ namespace
             catch(const std::runtime_error& e)
             {
                 GTEST_FAIL() << e.what();
+            }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
             }
             catch(...)
             {
