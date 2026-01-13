@@ -442,6 +442,12 @@ class ProblemPredicate(Properties.Predicate):
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
 
+        # Address-interleave restriction:
+        # Require tiles1 = Free1Size / value to be a power-of-two (and divisible).
+        # value is typically MT1 for the solution.
+        if key == "AssertFree1DivByMT1Pow2":
+            return cls("Free1SizeDivByValuePow2", index=0, value=value) if value > 0 else None
+
         if key.endswith('Multiple'):
             if value == 1:
                 return None

@@ -949,9 +949,15 @@ class Solution(collections.abc.Mapping):
 
     # KRingShift is defined to operate only in conjunction with BAddrInterleave (BInterleaveG).
     # If BAddrInterleave is not enabled, do not allow KRingShift to be enabled.
-    if state.get("KRingShift", False) and (not state.get("BAddrInterleave", False)):
+    if state["KRingShift"] and (not state["BAddrInterleave"]):
       reject(state, printRejectionReason, "KRingShift requires BAddrInterleave (BInterleaveG)")
       return
+
+    # BAddrInterleave runtime restriction:
+    # Only enable the address-interleave solution when tiles1 (=SizeJ/MT1) is a power-of-two.
+    # Encode this as a selection predicate (not codegen) so non-pow2 tiles fall back to other solutions.
+    if state["BAddrInterleave"]:
+      state["AssertFree1DivByMT1Pow2"] = state["MacroTile1"]
 
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:

@@ -133,6 +133,68 @@ namespace TensileLite
                 }
             };
 
+            // Address-interleave restriction:
+            // Require tiles1 (=Free1Size/value) to be a power-of-two (and divisible by value).
+            // Typically value == MT1 for the solution.
+            struct Free1SizeDivByValuePow2
+                : public Predicate_CRTP<Free1SizeDivByValuePow2, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                size_t index;
+                size_t value;
+
+                Free1SizeDivByValuePow2() = default;
+                Free1SizeDivByValuePow2(size_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "Free1SizeDivByValuePow2";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value == 0)
+                        return false;
+                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
+                                                              : problem.freeSizeA(index));
+                    if(freeSize % value != 0)
+                        return false;
+                    size_t tiles1 = freeSize / value;
+                    // tiles1 must be power-of-two: tiles1 != 0 && (tiles1 & (tiles1-1)) == 0
+                    return tiles1 && ((tiles1 & (tiles1 - 1)) == 0);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
+                                                              : problem.freeSizeA(index));
+                    bool   okDiv    = (value != 0) && (freeSize % value == 0);
+                    size_t tiles1   = okDiv ? (freeSize / value) : 0;
+                    bool   okPow2   = tiles1 && ((tiles1 & (tiles1 - 1)) == 0);
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "free1",
+                                        freeSize,
+                                        "%",
+                                        "value",
+                                        value,
+                                        "tiles1_pow2",
+                                        okPow2 ? size_t(1) : size_t(0),
+                                        "==",
+                                        "sol",
+                                        size_t(1));
+                }
+            };
+
             struct BatchSizeMultiple
                 : public Predicate_CRTP<BatchSizeMultiple, ContractionProblemGemm>
             {
