@@ -1,6 +1,6 @@
 .. meta::
-  :description: Component how-to
-  :keywords: Component, ROCm, API, how-to 
+  :description: Build and execute operation graphs in hipDNN
+  :keywords: hipDNN, ROCm, API, how-to 
 
 ********************************************
 Build and execute operation graphs in hipDNN

@@ -20,7 +20,6 @@ The component public repository is located at `https://github.com/ROCm/rocm-libr
     * :doc:`hipDNN prerequisites <./install/hipdnn-prerequisites>`
     * :doc:`hipDNN installation (Linux) <./install/hipdnn-install>`
     * :doc:`ipDNN installation (Windows) <./install/hipdnn-install-windows>`
-    * :doc:`Configure hipDNN builds <./install/hipdnn-configure-build>`
 
 .. grid:: 2
   :gutter: 3

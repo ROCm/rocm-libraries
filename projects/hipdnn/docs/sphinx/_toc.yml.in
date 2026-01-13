@@ -15,8 +15,6 @@ subtrees:
     title: hipDNN installation (Linux)
   - file: install/hipdnn-install-windows.rst
     title: hipDNN installation (Windows)
-  - file: install/hipdnn-configure-build.rst
-    title: Configure builds
 
 - caption: Conceptual
   entries:

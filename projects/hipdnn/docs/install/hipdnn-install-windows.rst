@@ -2,20 +2,25 @@
   :description: hipDNN install 
   :keywords: Component, ROCm, install
 
+.. _windows:
+
 ******************************
 hipDNN installation on Windows
 ******************************
 
-Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies). 
-Refer to the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) section later in this document for approaches to manage the multiple Clang toolchain versions required for hipDNN.
+This guide demonstrates how to install hipDNN on Windows systems. Before you begin, ensure the required dependencies are installed on your system as outlined in :ref:`prerequisites`.
+hipDNN supports Windows 10 and Windows 11 (recommended).
+
+.. warning::
+
+   Some GPU functionality and HIP-related tests are not currently supported on Windows.
+
+.. note::
+
+   Refer to the :ref:`llvm` section for approaches on how to manage the multiple Clang toolchain versions required for hipDNN.
 
 
-Windows 10 and Windows 11 are supported. Windows 11 is recommended.
-
-> [!WARNING]
-> Some GPU functionality and HIP-related tests are not currently supported on Windows.
-
-To do a standalone build of hipDNN, you will need to set up a number of pre-requisites.
+To do a standalone build of hipDNN, you will need to set up a number of prerequisites.
 
 > [!NOTE]
 > The standalone build of hipDNN requires a subset of the full environment required for building TheRock. Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
