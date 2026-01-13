@@ -39,6 +39,7 @@ enum BNApiType
 {
     testBNAPIV1,
     testBNAPIV2,
+    testBNAPIInvVar,
 };
 
 // Assuming miopenTensorLayout_t and testAPI_t are the types of your enums
@@ -60,6 +61,7 @@ static std::string ApiVerisonToString(int api_version)
     {
     case testBNAPIV1: return "testBNAPIV1";
     case testBNAPIV2: return "testBNAPIV2";
+    case testBNAPIInvVar: return "testBNAPIInvVar";
     default: return "UnknownAPIVersion";
     }
 }
@@ -157,7 +159,8 @@ protected:
     {
         std::tie(bn_config, tensor_layout, bn_mode, api_type, bn_infer_test_data.activ_mode) =
             this->GetParam();
-        bn_infer_test_data.SetUpImpl(bn_config, bn_mode, tensor_layout);
+        bn_infer_test_data.SetUpImpl(
+            bn_config, bn_mode, tensor_layout, (api_type == BNApiType::testBNAPIInvVar));
 
         bn_infer_test_data.activ_alpha = 0.1;
         bn_infer_test_data.activ_beta  = 0.3;
@@ -173,29 +176,60 @@ protected:
                                           bn_infer_test_data.activ_alpha,
                                           bn_infer_test_data.activ_beta,
                                           0.0);
+
             if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
             {
                 miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
             }
-            res =
-                miopenBatchNormForwardInferenceActivation(&handle,
-                                                          bn_mode,
-                                                          &bn_infer_test_data.alpha,
-                                                          &bn_infer_test_data.beta,
-                                                          &bn_infer_test_data.input.desc,
-                                                          bn_infer_test_data.in_dev.get(),
-                                                          &bn_infer_test_data.output.desc,
-                                                          bn_infer_test_data.out_dev.get(),
-                                                          &bn_infer_test_data.scale.desc,
-                                                          &bn_infer_test_data.shift.desc,
-                                                          &bn_infer_test_data.estMean.desc,
-                                                          &bn_infer_test_data.estVariance.desc,
-                                                          bn_infer_test_data.scale_dev.get(),
-                                                          bn_infer_test_data.shift_dev.get(),
-                                                          bn_infer_test_data.estMean_dev.get(),
-                                                          bn_infer_test_data.estVariance_dev.get(),
-                                                          bn_infer_test_data.epsilon,
-                                                          activ_desc);
+
+            if(api_type == BNApiType::testBNAPIV1)
+            {
+                res = miopenBatchNormForwardInferenceActivation(
+                    &handle,
+                    bn_mode,
+                    &bn_infer_test_data.alpha,
+                    &bn_infer_test_data.beta,
+                    &bn_infer_test_data.input.desc,
+                    bn_infer_test_data.in_dev.get(),
+                    &bn_infer_test_data.output.desc,
+                    bn_infer_test_data.out_dev.get(),
+                    &bn_infer_test_data.scale.desc,
+                    &bn_infer_test_data.shift.desc,
+                    &bn_infer_test_data.estMean.desc,
+                    &bn_infer_test_data.estVariance.desc,
+                    bn_infer_test_data.scale_dev.get(),
+                    bn_infer_test_data.shift_dev.get(),
+                    bn_infer_test_data.estMean_dev.get(),
+                    bn_infer_test_data.estVariance_dev.get(),
+                    bn_infer_test_data.epsilon,
+                    activ_desc);
+            }
+            else if(api_type == BNApiType::testBNAPIInvVar)
+            {
+                res = miopenBatchNormForwardInferenceActivationInvVariance(
+                    &handle,
+                    bn_mode,
+                    &bn_infer_test_data.alpha,
+                    &bn_infer_test_data.beta,
+                    &bn_infer_test_data.input.desc,
+                    bn_infer_test_data.in_dev.get(),
+                    &bn_infer_test_data.output.desc,
+                    bn_infer_test_data.out_dev.get(),
+                    &bn_infer_test_data.scale.desc,
+                    &bn_infer_test_data.shift.desc,
+                    &bn_infer_test_data.estMean.desc,
+                    &bn_infer_test_data.estVariance.desc,
+                    bn_infer_test_data.scale_dev.get(),
+                    bn_infer_test_data.shift_dev.get(),
+                    bn_infer_test_data.estMean_dev.get(),
+                    bn_infer_test_data.estVariance_dev.get(),
+                    activ_desc);
+            }
+            else
+            {
+                GTEST_FAIL() << "ERROR: unknown bn api type!!";
+            }
+
             if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
             {
                 miopenSetTuningPolicy(&handle,
@@ -205,12 +239,12 @@ protected:
         }
         else
         {
+            if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+            {
+                miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
+            }
             if(api_type == BNApiType::testBNAPIV1)
             {
-                if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
-                {
-                    miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
-                }
                 res = miopenBatchNormalizationForwardInference(
                     &handle,
                     bn_mode,
@@ -226,18 +260,9 @@ protected:
                     bn_infer_test_data.estMean_dev.get(),
                     bn_infer_test_data.estVariance_dev.get(),
                     bn_infer_test_data.epsilon);
-                if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
-                {
-                    miopenSetTuningPolicy(
-                        &handle, miopenTuningPolicy_t::miopenTuningPolicyNone); // unset tuning
-                }
             }
             else if(api_type == BNApiType::testBNAPIV2)
             {
-                if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
-                {
-                    miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
-                }
                 res = miopenBatchNormalizationForwardInference_V2(
                     &handle,
                     bn_mode,
@@ -256,14 +281,37 @@ protected:
                     bn_infer_test_data.estMean_dev.get(),
                     bn_infer_test_data.estVariance_dev.get(),
                     bn_infer_test_data.epsilon);
-                if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
-                {
-                    miopenSetTuningPolicy(
-                        &handle, miopenTuningPolicy_t::miopenTuningPolicyNone); // unset tuning
-                }
+            }
+            else if(api_type == BNApiType::testBNAPIInvVar)
+            {
+                res = miopenBatchNormalizationForwardInferenceInvVariance(
+                    &handle,
+                    bn_mode,
+                    &bn_infer_test_data.alpha,
+                    &bn_infer_test_data.beta,
+                    &bn_infer_test_data.input.desc,
+                    bn_infer_test_data.in_dev.get(),
+                    &bn_infer_test_data.output.desc,
+                    bn_infer_test_data.out_dev.get(),
+                    &bn_infer_test_data.scale.desc,
+                    &bn_infer_test_data.shift.desc,
+                    &bn_infer_test_data.estMean.desc,
+                    &bn_infer_test_data.estVariance.desc,
+                    bn_infer_test_data.scale_dev.get(),
+                    bn_infer_test_data.shift_dev.get(),
+                    bn_infer_test_data.estMean_dev.get(),
+                    bn_infer_test_data.estVariance_dev.get());
             }
             else
+            {
                 GTEST_FAIL() << "ERROR: unknown bn api type!!";
+            }
+
+            if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+            {
+                miopenSetTuningPolicy(&handle,
+                                      miopenTuningPolicy_t::miopenTuningPolicyNone); // unset tuning
+            }
         }
         if(res != miopenStatusSuccess)
         {

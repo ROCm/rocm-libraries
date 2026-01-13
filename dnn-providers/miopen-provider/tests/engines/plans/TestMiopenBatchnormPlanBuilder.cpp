@@ -768,6 +768,17 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNod
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
+TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceWithVarianceNode)
+{
+    // Use a real flatbuffer graph with a valid batchnorm variance node
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    HipdnnEnginePluginExecutionContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedBackwardNode)
 {
     // Use a real flatbuffer graph with a valid batchnorm backward node
