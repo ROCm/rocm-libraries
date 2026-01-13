@@ -12,7 +12,7 @@
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
-- [Example: MIOpen Legacy Plugin](#example-miopen-legacy-plugin)
+- [Example: MIOpen Provider Plugin](#example-miopen-provider-plugin)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -90,7 +90,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
 1. **Create Plugin Structure**
    - Create a new project/repository for your plugin
    - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-   - See [MIOpen Legacy Plugin](../../../dnn-providers/miopen-provider/) as a reference implementation.
+   - See [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/) as a reference implementation.
 
 2. **Implement Plugin API Functions**
 
@@ -399,9 +399,9 @@ For a comprehensive example of an integration test, see: [`dnn-providers/miopen-
 
 Moreover, see our [general testing requirements](./testing/TestingStrategy.md#general-testing-requirements).
 
-## Example: [MIOpen Legacy Plugin](../../../dnn-providers/miopen-provider/)
+## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 
-The MIOpen Legacy Plugin is a complete example of a kernel engine plugin. It demonstrates how a plugin integrates with hipDNN and delegates execution to a backend. Furthermore, it incorporates the recommended structure and best practices for kernel engine plugins.
+The MIOpen Provider Plugin is a complete example of a kernel engine plugin. It demonstrates how a plugin integrates with hipDNN and delegates execution to a backend. Furthermore, it incorporates the recommended structure and best practices for kernel engine plugins.
 
 At a high level, it:
 - Initializes and manages the GPU context using MIOpen handles
