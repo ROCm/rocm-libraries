@@ -537,20 +537,22 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
 
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
+    // Deterministic mode: only iterate over kernels (index), split_k is always 1
+    if(is_deterministic)
+    {
+        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        {
+            return false; // All kernels exhausted
+        }
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+1";
+        return true;
+    }
+
+    // General (non-deterministic) mode: iterate over both split_k and kernels
     do
     {
         bool flag = NextCKSplitkValue<1, 128>(split_k);
-
-        if(is_deterministic && split_k > 1)
-        {
-            if(!NextLinear(0, valid_kernels.size() - 1, index))
-            {
-                return false;
-            }
-            split_k   = 1;
-            kernel_id = valid_kernels[index] + "+1";
-            break;
-        }
 
         if(!flag)
         {
