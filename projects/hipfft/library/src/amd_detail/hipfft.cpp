@@ -1707,7 +1707,7 @@ try
     if(!plan || plan->initialized())
         return HIPFFT_INVALID_PLAN;
     int dev_count = 0;
-    if(hipGetDeviceCount(&dev_count) != HIP_SUCCESS || dev_count <= 0)
+    if(hipGetDeviceCount(&dev_count) != hipSuccess || dev_count <= 0)
         return HIPFFT_INTERNAL_ERROR;
     if(std::any_of(
            gpus, gpus + count, [=](int gpu_id) { return gpu_id < 0 || gpu_id >= dev_count; }))
