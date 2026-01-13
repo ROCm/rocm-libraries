@@ -979,6 +979,56 @@ TEST(TestGraphSerialization, ConstBinarySerializeReturnsErrorWithoutUids)
     expectGraphsEqual(graph, restored);
 }
 
+TEST(TestGraphSerialization, ConstJsonSerializeSucceedsWithUids)
+{
+    Graph graph;
+    graph.set_name("const_json_success_test");
+
+    // Create tensor with UID already set
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(2); // Set UID on output tensor
+
+    // Const JSON serialize should succeed when UIDs are set
+    const Graph& constGraph = graph;
+    nlohmann::json json;
+    auto err = constGraph.serialize(json);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+
+    // Deserialize and verify round-trip correctness
+    Graph restored;
+    restored.deserialize(json);
+    expectGraphsEqual(graph, restored);
+}
+
+TEST(TestGraphSerialization, ConstFlatBufferSerializeSucceedsWithUids)
+{
+    Graph graph;
+    graph.set_name("const_flatbuffer_success_test");
+
+    // Create tensor with UID already set
+    auto x = createTensor("x", {1, 16}, DataType::FLOAT, 1);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(2); // Set UID on output tensor
+
+    // Const FlatBuffer serialize should succeed when UIDs are set
+    const Graph& constGraph = graph;
+    flatbuffers::DetachedBuffer buffer;
+    auto err = constGraph.serialize(buffer);
+    EXPECT_EQ(err.get_code(), ErrorCode::OK);
+
+    // Deserialize and verify round-trip correctness
+    Graph restored;
+    restored.fromFlatBuffer(buffer);
+    expectGraphsEqual(graph, restored);
+}
+
 TEST_P(TestGraphSerializationRoundTrip, LargeDimensions)
 {
     Graph graph;
