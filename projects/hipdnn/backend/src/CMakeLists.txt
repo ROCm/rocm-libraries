@@ -64,7 +64,7 @@ target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 # different name.
 target_compile_definitions(hipdnn_backend PRIVATE HIPDNN_BACKEND_COMPILATION)
 target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
-# Export dependencies for consumers - backend public API only needs HIP
+# Export dependencies for consumers because backend public API needs HIP runtime dep
 target_link_libraries(hipdnn_backend INTERFACE hip::host)
 # HIDE symbols from linked static libs
 target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")

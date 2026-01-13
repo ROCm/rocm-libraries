@@ -10,8 +10,8 @@ extern "C" {
 // This file's definitions are duplicated from the data_sdk CallbackTypes.h.
 // Please ensure any updates are synced between the two files!
 
-// Definition guard to avoid redefinition
 #ifndef HIPDNN_CALLBACK_TYPES_DEFINED
+#define HIPDNN_CALLBACK_TYPES_DEFINED
 
 /**
  * @brief Severity levels for logging in hipDNN
@@ -34,9 +34,6 @@ typedef enum
 typedef void (*hipdnnCallback_t)(hipdnnSeverity_t severity, const char* message);
 
 #endif // HIPDNN_CALLBACK_TYPES_DEFINED
-
-// Mark that callback types are defined, so other headers can check this
-#define HIPDNN_CALLBACK_TYPES_DEFINED
 
 #ifdef __cplusplus
 }
