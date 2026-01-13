@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -206,7 +206,7 @@ static void test_errors(kernel_type_t kern_type)
         }
         catch(miopen::Exception& e)
         {
-            EXPECT_TRUE(!std::string(e.what()).empty());
+            EXPECT_FALSE(std::string(e.what()).empty());
         }
     }
     else if(kern_type == miopenHIPKernelType)
@@ -235,12 +235,11 @@ static void test_errors(kernel_type_t kern_type)
         }
         catch(miopen::Exception& e)
         {
-            EXPECT_TRUE(!std::string(e.what()).empty());
+            EXPECT_FALSE(std::string(e.what()).empty());
         }
     }
 }
 
-#if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
 static std::string WriteNop(kernel_type_t kern_type)
 {
     if(kern_type == miopenOpenCLKernelType)
@@ -262,9 +261,8 @@ static std::string WriteNop(kernel_type_t kern_type)
         MIOPEN_THROW("Unsupported kernel type");
     }
 }
-#endif
 
-static void test_warnings(kernel_type_t kern_type)
+static void test_warnings([[maybe_unused]] kernel_type_t kern_type)
 {
 #if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
     auto&& h = get_handle();
@@ -285,8 +283,6 @@ static void test_warnings(kernel_type_t kern_type)
                                      0,
                                      WriteNop(kern_type)));
     }
-#else
-    (void)kern_type;
 #endif
 }
 
@@ -306,7 +302,10 @@ static void test_arch_name()
                              "gfx1100",
                              "gfx1101",
                              "gfx1102",
+                             "gfx1150",
                              "gfx1151",
+                             "gfx1152",
+                             "gfx1153",
                              "gfx1200",
                              "gfx1201"};
 
@@ -379,7 +378,7 @@ struct TestNameGenerator
         str = ss.str();
 
         // Name format only supports letters, numbers and underscores.
-        std::transform(str.begin(), str.end(), str.begin(), [](char c) {
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
             return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
         });
 

@@ -53,20 +53,11 @@ concept PrintableElement = requires(std::ostream& os, T t)
 
 // Concept for iterable containers.
 template <typename T>
-concept Container = requires(T t)
-{
-    // clang-format off
-    {
-        std::size(t)
-    } -> std::same_as<std::size_t>;
-    {
-        std::begin(t)
-    } -> std::same_as<typename T::iterator>;
-    {
-        std::end(t)
-    } -> std::same_as<typename T::iterator>;
-    // clang-format on
-};
+concept Container = std::ranges::range<T>;
+
+// Concept for non container types.
+template <typename T>
+concept NotContainer = !Container<T>;
 
 // Template wrapper around a test parameter.
 // It defines the << operator as required by GTest, and the cast operator that returns the wrapped
@@ -88,7 +79,7 @@ struct NamedParameter
 
     friend std::ostream& operator<<(std::ostream& os, const NamedParameter<T>& param)
     {
-        return os << param.name << ": " << param.value;
+        return os << param.name << ": " << std::boolalpha << param.value << std::noboolalpha;
     }
 
     std::string name{};
@@ -128,7 +119,7 @@ struct NamedContainer
 
             for(auto it = param.value.begin() + 1; it != param.value.end(); ++it)
             {
-                os << param.separator << *it;
+                os << param.separator << std::boolalpha << *it << std::noboolalpha;
             }
         }
 
@@ -176,9 +167,10 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
 // NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
 //
 template <typename T>
+requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
 static auto MakeNamedParameterCollectionValues(const std::string& name,
                                                const std::ranges::range auto& collection,
-                                               std::string separator = " ")
+                                               const std::string& separator = " ")
 {
     std::vector<NamedContainer<T>> v;
 
@@ -192,6 +184,23 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
     return testing::ValuesIn(v);
 }
 
+template <typename T>
+requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
+static auto MakeNamedParameterCollectionValues(const std::string& name,
+                                               const std::ranges::range auto& collection)
+{
+    std::vector<NamedParameter<T>> v;
+
+    v.reserve(collection.size());
+
+    for(const auto& x : collection)
+    {
+        v.emplace_back(name, x);
+    }
+
+    return testing::ValuesIn(v);
+}
+
 // The 'GetRangeAsString()' function Returns the string representation of the input collection,
 // using the user-supplied separator. The returned string meets the GTest requirements for test
 // names: only alphanumeric characters and underscores are allowed. Any dot character (i.e. '.') is
@@ -200,7 +209,7 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 // Examples:
 //
 //      GetRangeAsString(std::vector<int>{1, 2, 3, 4}, "x") returns "1x2x3x4"
-//      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ", ") returns "1p1, 2p2, 3p3, 4p4"
+//      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ",") returns "1p1_2p2_3p3_4p4"
 //
 static std::string GetRangeAsString(const std::ranges::range auto& r,
                                     std::string_view separator = " ")
@@ -215,14 +224,15 @@ static std::string GetRangeAsString(const std::ranges::range auto& r,
 
         for(auto it = r.begin() + 1; it != r.end(); ++it)
         {
-            ss << separator << *it;
+            ss << separator << std::boolalpha << *it << std::noboolalpha;
         }
 
         str = ss.str();
 
         // Name format only supports letters, numbers and underscores.
-        std::transform(
-            str.begin(), str.end(), str.begin(), [](char c) { return (c == '.') ? 'p' : c; });
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
+            return std::isalnum(c) ? c : ((c == '.') ? 'p' : '_');
+        });
     }
 
     return str;
