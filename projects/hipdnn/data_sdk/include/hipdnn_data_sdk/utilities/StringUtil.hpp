@@ -4,13 +4,63 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities
 {
+
+/**
+ * @brief Computes a FNV-1a hash of a string
+ *
+ * This function implements a FNV-1a hash algorithm to convert strings
+ * to deterministic uint64_t values. The hash is deterministic - the same
+ * input will always produce the same output.
+ *
+ * @param str The string to hash
+ * @return uint64_t The hash value
+ */
+inline uint64_t fnv1aHash(const char* str)
+{
+    if(str == nullptr || str[0] == '\0')
+    {
+        return 0;
+    }
+
+    // FNV-1a hash algorithm constants for 64-bit
+    constexpr uint64_t FNV_OFFSET_BASIS = 0xcbf29ce484222325ULL;
+    constexpr uint64_t FNV_PRIME = 0x100000001b3ULL;
+
+    uint64_t hash = FNV_OFFSET_BASIS;
+
+    for(const char* p = str; *p != '\0'; ++p)
+    {
+        hash ^= static_cast<uint64_t>(static_cast<unsigned char>(*p));
+        hash *= FNV_PRIME;
+    }
+
+    return hash;
+}
+
+/**
+ * @brief Overload for std::string
+ */
+inline uint64_t fnv1aHash(const std::string& str)
+{
+    return fnv1aHash(str.c_str());
+}
+
+/**
+ * @brief Overload for std::string_view
+ */
+inline uint64_t fnv1aHash(std::string_view str)
+{
+    return fnv1aHash(std::string(str).c_str());
+}
 
 inline void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
 {
