@@ -138,7 +138,9 @@ TEST(TestMigratableMemory, MigrateToDevice)
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
     std::cout << "Checking buffer\n";
-    checkBuffer(static_cast<float*>(memory.deviceData()), memory.count());
+    initBuffer(memory.hostData(), memory.count(), 0.0f);
+    memory.markDeviceModified();
+    checkBuffer(static_cast<float*>(memory.hostData()), memory.count());
 }
 
 TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
