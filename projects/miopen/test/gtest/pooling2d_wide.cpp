@@ -24,7 +24,11 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
     std::vector<Pooling2dTestCase> test_cases;
 
     // Dataset 2: Wide window configurations
-    // Input: {{1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}}
+    // Input shapes matching ctest behavior with --dataset 2
+    // From pooling2d.hpp: get_2d_pooling_input_shapes_wide()
+    // NOTE: Even when TEST_GET_INPUT_TENSOR=1, dataset 2 uses the predefined wide window shapes
+    //       because dataset_id is determined by lens/strides/pads selection, and dataset 2
+    //       is specifically for wide window testing with these predefined shapes
     std::vector<std::vector<int>> dataset2_inputs = {
         {1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
 
@@ -37,28 +41,35 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
     // Pads: {{0, 0}} - no padding for wide windows
     std::vector<std::vector<int>> dataset2_pads = {{0, 0}};
 
-    std::vector<miopenIndexType_t> dataset2_index_types = {
-        miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
+    // Dataset 2 uses only uint32 (matching ctest behavior)
+    std::vector<miopenIndexType_t> dataset2_index_types = {miopenIndexUint32};
     std::vector<miopenPoolingMode_t> modes = {
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
     // Generate cartesian product for dataset 2
     // This matches the original ctest test_pooling2d behavior with --dataset 2
-    // Filter invalid combinations at generation time instead of skipping at runtime
-    for(const auto& input_dims : dataset2_inputs)
+    // IMPORTANT: Order must match ctest exactly: index_type -> mode -> input_shape -> lens -> strides -> pads -> wsidx
+    // This is the order in which test_driver processes test cases (based on add() call order)
+    for(const auto& index_type : dataset2_index_types)
     {
-        AddTestCasesForInput(input_dims,
-                             dataset2_lens,
-                             dataset2_strides,
-                             dataset2_pads,
-                             dataset2_index_types,
-                             modes,
-                             wsidx_values,
-                             test_cases,
-                             false,  // skip_wide_check=false for Dataset 2 (wide window)
-                             false,  // apply_index_type_limits=false for Dataset 2
-                             true);  // is_wide_dataset=true for Dataset 2 (wide window)
+        for(const auto& mode : modes)
+        {
+            for(const auto& input_dims : dataset2_inputs)
+            {
+                AddTestCasesForInput(input_dims,
+                                     dataset2_lens,
+                                     dataset2_strides,
+                                     dataset2_pads,
+                                     {index_type}, // Single index_type for this iteration
+                                     {mode},       // Single mode for this iteration
+                                     wsidx_values,
+                                     test_cases,
+                                     false,  // skip_wide_check=false for Dataset 2 (wide window)
+                                     false,  // apply_index_type_limits=false for Dataset 2 (matching ctest)
+                                     true);  // is_wide_dataset=true for Dataset 2 (wide window)
+            }
+        }
     }
 
     // Cache the results
@@ -74,9 +85,9 @@ std::vector<Pooling2dTestCase> GetPooling2dWideTestCases()
 using GPU_WidePooling2d_FP32 = Pooling2dCommon<float>;
 using GPU_WidePooling2d_FP16 = Pooling2dCommon<half_float::half>;
 
-TEST_P(GPU_WidePooling2d_FP32, FloatTest_pooling2d_wide) { RunTest(); }
+TEST_P(GPU_WidePooling2d_FP32, FloatTest_pooling2d_wide) { this->RunTest(); }
 
-TEST_P(GPU_WidePooling2d_FP16, HalfTest_pooling2d_wide) { RunTest(); }
+TEST_P(GPU_WidePooling2d_FP16, HalfTest_pooling2d_wide) { this->RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_WidePooling2d_FP32,

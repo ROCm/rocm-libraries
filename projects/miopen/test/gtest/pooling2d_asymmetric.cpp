@@ -48,19 +48,26 @@ std::vector<Pooling2dTestCase> GetPooling2dAsymmetricTestCases()
 
     // Generate cartesian product for dataset 1
     // This matches the original ctest test_pooling2d behavior with --dataset 1
-    // Filter invalid combinations at generation time instead of skipping at runtime
-    for(const auto& input_dims : dataset1_inputs)
+    // IMPORTANT: Order must match ctest exactly: index_type -> mode -> input_shape -> lens -> strides -> pads -> wsidx
+    // This is the order in which test_driver processes test cases (based on add() call order)
+    for(const auto& index_type : dataset1_index_types)
     {
-        AddTestCasesForInput(input_dims,
-                             dataset1_lens,
-                             dataset1_strides,
-                             dataset1_pads,
-                             dataset1_index_types,
-                             modes,
-                             wsidx_values,
-                             test_cases,
-                             true,   // skip_wide_check=true for Dataset 1 (asymmetric)
-                             false); // apply_index_type_limits=false for Dataset 1
+        for(const auto& mode : modes)
+        {
+            for(const auto& input_dims : dataset1_inputs)
+            {
+                AddTestCasesForInput(input_dims,
+                                     dataset1_lens,
+                                     dataset1_strides,
+                                     dataset1_pads,
+                                     {index_type}, // Single index_type for this iteration
+                                     {mode},       // Single mode for this iteration
+                                     wsidx_values,
+                                     test_cases,
+                                     true,   // skip_wide_check=true for Dataset 1 (asymmetric)
+                                     false); // apply_index_type_limits=false for Dataset 1
+            }
+        }
     }
 
     // Cache the results

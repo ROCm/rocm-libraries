@@ -7,14 +7,9 @@
 #include "../network_data.hpp"
 #include "pooling2d_common.hpp"
 
-// Configuration define matching the original ctest behavior
-// These can be overridden at compile time via -D flags
-// TEST_GET_INPUT_TENSOR: When 0, uses all 18 predefined input shapes (matching ctest with --all).
-//                        When 1, uses get_inputs() function to generate input shapes from
-//                        network_data.
-#ifndef TEST_GET_INPUT_TENSOR
-#define TEST_GET_INPUT_TENSOR 0
-#endif
+// TEST_GET_INPUT_TENSOR is defined in pooling2d_common.hpp
+// When 0: uses all 18 predefined input shapes (matching ctest with --all)
+// When 1: uses get_inputs() function to generate input shapes from network_data
 
 namespace {
 
@@ -76,19 +71,26 @@ std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 
     // Generate cartesian product for dataset 0
     // This matches the original ctest test_pooling2d behavior (default dataset, dataset_id=0)
-    // Filter invalid combinations at generation time instead of skipping at runtime
-    for(const auto& input_dims : dataset0_inputs)
+    // IMPORTANT: Order must match ctest exactly: index_type -> mode -> input_shape -> lens -> strides -> pads -> wsidx
+    // This is the order in which test_driver processes test cases (based on add() call order)
+    for(const auto& index_type : dataset0_index_types)
     {
-        AddTestCasesForInput(input_dims,
-                             dataset0_lens,
-                             dataset0_strides,
-                             dataset0_pads,
-                             dataset0_index_types,
-                             modes,
-                             wsidx_values,
-                             test_cases,
-                             false, // skip_wide_check=false for Dataset 0
-                             true); // apply_index_type_limits=true for Dataset 0
+        for(const auto& mode : modes)
+        {
+            for(const auto& input_dims : dataset0_inputs)
+            {
+                AddTestCasesForInput(input_dims,
+                                     dataset0_lens,
+                                     dataset0_strides,
+                                     dataset0_pads,
+                                     {index_type}, // Single index_type for this iteration
+                                     {mode},       // Single mode for this iteration
+                                     wsidx_values,
+                                     test_cases,
+                                     false, // skip_wide_check=false for Dataset 0
+                                     true); // apply_index_type_limits=true for Dataset 0
+            }
+        }
     }
 
     // Note: Dataset 1 (asymmetric) and Dataset 2 (wide window) are tested separately
