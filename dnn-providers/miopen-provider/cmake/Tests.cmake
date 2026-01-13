@@ -169,7 +169,7 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
         set(TARGET_EXE "${TARGET_EXE}${CMAKE_EXECUTABLE_SUFFIX}")
     endif()
 
-    message(STATUS "Appending unclassified check target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
+    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
 
     # Track the dependencies for test name validation
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
