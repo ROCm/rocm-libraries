@@ -25,8 +25,8 @@
  *******************************************************************************/
 
 #include "mxDataGen.hpp"
-#include <DataGenerator.hpp>
-#include <PreSwizzle.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
+#include <mxDataGenerator/PreSwizzle.hpp>
 #include <cblas.h>
 
 
