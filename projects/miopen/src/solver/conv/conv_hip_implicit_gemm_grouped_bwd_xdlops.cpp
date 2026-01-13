@@ -414,9 +414,10 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(IsModelApplicable(ctx, problem))
     {
-        if(problem.GetInDataType() == miopenFloat)
-        {
-            if(RunParameterPredictionModel<float>(ctx, problem))
+        // Helper lambda to run AI model and enforce deterministic constraints
+        auto try_ai_model = [&](auto data_type_tag) -> bool {
+            using T = decltype(data_type_tag);
+            if(RunParameterPredictionModel<T>(ctx, problem))
             {
                 // Enforce split_k == 1 for deterministic mode
                 if(is_deterministic && split_k != 1)
@@ -427,41 +428,23 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
                     if(!valid_kernels.empty())
                         kernel_id = valid_kernels[index] + "+1";
                 }
-                return;
+                return true;
             }
-        }
-        else if(problem.GetInDataType() == miopenBFloat16)
+            return false;
+        };
+
+        // Try AI prediction for the appropriate data type
+        bool ai_succeeded = false;
+        switch(problem.GetInDataType())
         {
-            if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
-            {
-                // Enforce split_k == 1 for deterministic mode
-                if(is_deterministic && split_k != 1)
-                {
-                    MIOPEN_LOG_W("Deterministic mode: Overriding AI-predicted split_k="
-                                 << split_k << " to split_k=1");
-                    split_k = 1;
-                    if(!valid_kernels.empty())
-                        kernel_id = valid_kernels[index] + "+1";
-                }
-                return;
-            }
+        case miopenFloat: ai_succeeded = try_ai_model(float{}); break;
+        case miopenBFloat16: ai_succeeded = try_ai_model(ck::bhalf_t{}); break;
+        case miopenHalf: ai_succeeded = try_ai_model(ck::half_t{}); break;
+        default: break;
         }
-        else
-        {
-            if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
-            {
-                // Enforce split_k == 1 for deterministic mode
-                if(is_deterministic && split_k != 1)
-                {
-                    MIOPEN_LOG_W("Deterministic mode: Overriding AI-predicted split_k="
-                                 << split_k << " to split_k=1");
-                    split_k = 1;
-                    if(!valid_kernels.empty())
-                        kernel_id = valid_kernels[index] + "+1";
-                }
-                return;
-            }
-        }
+
+        if(ai_succeeded)
+            return;
     }
 #endif
     switch(problem.GetInDataType())
