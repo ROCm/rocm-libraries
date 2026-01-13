@@ -23,8 +23,6 @@ Checks: >
   -readability-avoid-unconditional-preprocessor-if,
   -readability-use-anyofallof,
   -readability-function-cognitive-complexity,
-  # Our repo is setup for clang tidy version 20, newer versions of clang-tidy trigger
-  # these new warnings below, disable them until we upgrade to the latest clang-tidy
   -portability-avoid-pragma-once,
   -modernize-use-scoped-lock,
   -readability-use-concise-preprocessor-directives,
