@@ -228,6 +228,7 @@ Conv3DKernelTuningTestName(const ::testing::TestParamInfo<Conv3DKernelTuningTest
 
 // Helper function for metadata encoding validation
 // Validates that all CK kernel instances can be encoded without errors
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 void ValidateMetadataEncoding(const std::string& solver_name,
                               const std::vector<std::string>& all_ck_kernels,
                               const std::string& device_arch)
@@ -384,7 +385,7 @@ void ValidateMetadataEncoding(const std::string& solver_name,
     EXPECT_EQ(nan_count, 0) << "Found " << nan_count
                             << " NaN encodings - indicates missing metadata entries";
 }
-
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 } // anonymous namespace
 
 // ------------------- Base Test Fixture -------------------
