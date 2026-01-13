@@ -476,7 +476,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
             MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
             if(is_deterministic && split_k != 1)
             {
-                MIOPEN_LOG_W("Deterministic mode: Overriding AI-predicted split_k="
+                MIOPEN_LOG_I("Deterministic mode: Overriding AI-predicted split_k="
                              << split_k << " to split_k=1");
                 split_k = 1;
                 if(!valid_kernels.empty())
