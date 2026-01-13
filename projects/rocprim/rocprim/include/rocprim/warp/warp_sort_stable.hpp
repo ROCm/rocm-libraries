@@ -26,8 +26,8 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
-#include "../intrinsics.hpp"
 #include "../functional.hpp"
+#include "../intrinsics.hpp"
 
 #include "detail/warp_sort_shuffle_stable.hpp"
 #include "detail/warp_sort_stable.hpp"
@@ -59,10 +59,10 @@ namespace detail
 template<class Value>
 struct default_warp_sort_stable_algo
 {
-    static constexpr warp_sort_stable_algorithm value =
-        std::is_same<Value, ::rocprim::empty_type>::value
-            ? warp_sort_stable_algorithm::using_merge_path
-            : warp_sort_stable_algorithm::using_shuffle;
+    static constexpr warp_sort_stable_algorithm value
+        = std::is_same<Value, ::rocprim::empty_type>::value
+              ? warp_sort_stable_algorithm::using_merge_path
+              : warp_sort_stable_algorithm::using_shuffle;
 };
 
 // Selector for warp_sort_stable algorithm which gives implementation
@@ -89,13 +89,14 @@ struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::using_shuffle>
              unsigned int VirtualWaveSize,
              unsigned int ItemsPerThread,
              class Value>
-    using type = detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
+    using type
+        = detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
 };
 
 } // end namespace detail
 
-/// \brief The warp_sort_stable class provides stable sort methods for items partitioned 
-/// across a thread warp. 
+/// \brief The warp_sort_stable class provides stable sort methods for items partitioned
+/// across a thread warp.
 ///
 /// \tparam Key Data type for parameter Key
 /// \tparam BlockSize The number of threads in a block (required for shared memory allocation in some algorithms)
@@ -117,28 +118,30 @@ struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::using_shuffle>
 /// {
 ///     // Specializing for int key, float value, 256 threads per block, logical warp of 64, 4 items per thread
 ///     using wsort_t = rocprim::warp_sort_stable<int, 256, 64, 4, float>;
-///     
+///
 ///     __shared__ wsort_t::storage_type storage;
-///     
+///
 ///     int keys[4] = ...;
 ///     float values[4] = ...;
-///     
+///
 ///     wsort_t().sort(keys, values, storage);
 /// }
 /// \endcode
 /// \endparblock
 template<class Key,
          unsigned int BlockSize,
-         unsigned int VirtualWaveSize = arch::wavefront::min_size(),
-         unsigned int ItemsPerThread = 1,
-         class Value = empty_type,
+         unsigned int VirtualWaveSize         = arch::wavefront::min_size(),
+         unsigned int ItemsPerThread          = 1,
+         class Value                          = empty_type,
          warp_sort_stable_algorithm Algorithm = detail::default_warp_sort_stable_algo<Value>::value>
 class warp_sort_stable
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_warp_sort_stable_impl<Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>
+    : private detail::select_warp_sort_stable_impl<
+          Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>
 #endif
 {
-    using base_type = typename detail::select_warp_sort_stable_impl<Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
+    using base_type = typename detail::select_warp_sort_stable_impl<
+        Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
@@ -155,15 +158,17 @@ public:
 
     /// \brief Stable sort for Key only with storage (Per-thread single value).
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
-    void sort(Key& thread_key, storage_type& storage, BinaryFunction compare_function = BinaryFunction())
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key&           thread_key,
+              storage_type&  storage,
+              BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, storage, compare_function);
     }
 
     /// \brief Stable sort for Key Array (Per-thread array).
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction())
     {
@@ -172,9 +177,9 @@ public:
 
     /// \brief Stable sort for Key Array with storage (Per-thread array).
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
-              storage_type& storage,
+              storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_keys, storage, compare_function);
@@ -182,52 +187,54 @@ public:
 
     /// \brief Stable sort for Key Array with storage and valid input size.
     ///
-    /// \param input_size The number of valid items in the warp. 
+    /// \param input_size The number of valid items in the warp.
     /// Note: If Algorithm is using_shuffle, input_size < VirtualWaveSize * ItemsPerThread may not be strictly supported without manual padding.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
-              storage_type& storage,
+              storage_type&      storage,
               const unsigned int input_size,
-              BinaryFunction compare_function = BinaryFunction())
+              BinaryFunction     compare_function = BinaryFunction())
     {
         base_type::sort(thread_keys, storage, input_size, compare_function);
     }
 
     /// \brief Stable sort for Key-Value pair (Per-thread single value).
     template<class BinaryFunction = ::rocprim::less<Key>, class V = Value>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
-    void sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function = BinaryFunction())
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key&           thread_key,
+              Value&         thread_value,
+              BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, thread_value, compare_function);
     }
 
     /// \brief Stable sort for Key-Value pair with storage (Per-thread single value).
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
-    void sort(Key& thread_key,
-              Value& thread_value,
-              storage_type& storage,
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key&           thread_key,
+              Value&         thread_value,
+              storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, thread_value, storage, compare_function);
     }
-    
+
     /// \brief Stable sort for Key-Value pair with storage and valid input size (Per-thread single value).
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
-    void sort(Key& thread_key,
-              Value& thread_value,
-              storage_type& storage,
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key&               thread_key,
+              Value&             thread_value,
+              storage_type&      storage,
               const unsigned int input_size,
-              BinaryFunction compare_function = BinaryFunction())
+              BinaryFunction     compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, thread_value, storage, input_size, compare_function);
     }
 
     /// \brief Stable sort for Key-Value Arrays (Per-thread array).
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction())
@@ -237,10 +244,10 @@ public:
 
     /// \brief Stable sort for Key-Value Arrays with storage (Per-thread array).
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
-              storage_type& storage,
+              storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_keys, thread_values, storage, compare_function);
@@ -248,12 +255,12 @@ public:
 
     /// \brief Stable sort for Key-Value Arrays with storage and valid input size.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
-              storage_type& storage,
+              storage_type&      storage,
               const unsigned int input_size,
-              BinaryFunction compare_function = BinaryFunction())
+              BinaryFunction     compare_function = BinaryFunction())
     {
         base_type::sort(thread_keys, thread_values, storage, input_size, compare_function);
     }
