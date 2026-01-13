@@ -13,6 +13,8 @@
 #include <bitset>
 #include <set>
 #include <spdlog/fmt/fmt.h>
+#include <string>
+#include <variant>
 
 namespace hipdnn_frontend
 {
@@ -103,6 +105,14 @@ enum class BuildPlanPolicy
     ALL // Build all available plans (currently unused)
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; // NOLINT(readability-identifier-naming)
+
+enum class KnobValueType
+{
+    INT64,
+    FLOAT64,
+    STRING,
+};
+typedef KnobValueType KnobValueType_t; // NOLINT(readability-identifier-naming)
 
 template <typename T>
 DataType getDataTypeEnumFromType()
@@ -379,6 +389,49 @@ inline std::ostream& operator<<(std::ostream& os, const HeuristicMode& mode)
     return os << to_string(mode);
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const KnobValueType& type)
+{
+    switch(type)
+    {
+    case KnobValueType::INT64:
+        return "int64";
+    case KnobValueType::FLOAT64:
+        return "float64";
+    case KnobValueType::STRING:
+        return "string";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const KnobValueType& type)
+{
+    return os << to_string(type);
+}
+
+// Helper function to get KnobValueType from a variant
+template <typename... Ts>
+inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& value)
+{
+    KnobValueType ret = KnobValueType::INT64;
+
+    if(std::holds_alternative<int64_t>(value))
+    {
+        ret = KnobValueType::INT64;
+    }
+    else if(std::holds_alternative<double>(value))
+    {
+        ret = KnobValueType::FLOAT64;
+    }
+    else if(std::holds_alternative<std::string>(value))
+    {
+        ret = KnobValueType::STRING;
+    }
+
+    return ret;
+}
+
 // Frontend functions delegate to SDK for single source of truth
 // Convert frontend PointwiseMode to SDK type and call SDK validation functions
 
@@ -442,5 +495,15 @@ struct fmt::formatter<hipdnn_frontend::HeuristicMode> : fmt::formatter<const cha
     auto format(hipdnn_frontend::HeuristicMode mode, FormatContext& ctx) const
     {
         return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(mode), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_frontend::KnobValueType> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::KnobValueType type, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(type), ctx);
     }
 };

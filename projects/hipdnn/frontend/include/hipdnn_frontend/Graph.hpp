@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <hipdnn_frontend/Knob.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
@@ -509,6 +510,42 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    // Get knobs for a specific engine
+    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    Error get_knobs_for_engine(int64_t engineId, std::unordered_map<int64_t, Knob>& knobs) const
+    {
+        // TODO: Implement once flatbuffer schemas and backend support are available
+        // This method will:
+        // 1. Query the backend for engine details using HIPDNN_ATTR_ENGINE_KNOB_INFO
+        // 2. Deserialize the EngineDetails flatbuffer
+        // 3. Extract the supported_knobs array
+        // 4. Convert each flatbuffer Knob to a frontend Knob object using Knob::fromFlatbuffer()
+        // 5. Populate the knobs vector
+
+        (void)engineId; // Suppress unused parameter warning
+        (void)knobs; // Suppress unused parameter warning
+
+        return {ErrorCode::OK, "get_knobs_for_engine not yet implemented"};
+    }
+
+    // Get ranked list of engine IDs based on heuristics
+    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
+                                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    {
+        // TODO: Implement once backend heuristics support is available
+        // This method will:
+        // 1. Initialize heuristic descriptor with the provided modes
+        // 2. Query all available engine configurations
+        // 3. Extract engine IDs in ranked order
+        // 4. Populate rankedEngineIds vector
+
+        (void)rankedEngineIds; // Suppress unused parameter warning
+        (void)modes; // Suppress unused parameter warning
+
+        return {ErrorCode::OK, "get_ranked_engine_ids not yet implemented"};
+    }
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
                                  = {HeuristicMode::FALLBACK})
@@ -538,6 +575,42 @@ public:
         }
 
         return {ErrorCode::OK, ""};
+    }
+
+    // Create execution plan with int64 knobs (compatibility method)
+    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    Error create_execution_plan(int64_t engineId,
+                                const std::unordered_map<KnobType_t, int64_t>& knobs) const
+    {
+        // Convert int64 knobs to KnobSetting objects
+        std::unordered_map<int64_t, KnobSetting> knobSettings;
+        for(const auto& [knobId, value] : knobs)
+        {
+            knobSettings.emplace(knobId, KnobSetting(knobId, value));
+        }
+
+        return create_execution_plan(engineId, knobSettings, false);
+    }
+
+    // Create execution plan with typed knob settings
+    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    Error create_execution_plan(int64_t engineId,
+                                const std::unordered_map<int64_t, KnobSetting>& userKnobs,
+                                bool filterByKnobs = false) const
+    {
+        // TODO: Implement once flatbuffer schemas and backend support are available
+        // This method will:
+        // 1. Validate knob settings against engine's supported knobs
+        // 2. Apply default values for any knobs not specified by the user
+        // 3. Create an EngineConfig with the engine ID and knob settings
+        // 4. Serialize the EngineConfig to flatbuffer
+        // 5. Create and finalize an execution plan with the engine config
+
+        (void)engineId; // Suppress unused parameter warning
+        (void)userKnobs; // Suppress unused parameter warning
+        (void)filterByKnobs; // Suppress unused parameter warning
+
+        return {ErrorCode::OK, "create_execution_plan with knobs not yet implemented"};
     }
 
     Error check_support() // NOLINT(readability-identifier-naming)

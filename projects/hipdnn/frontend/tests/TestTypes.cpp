@@ -129,3 +129,54 @@ TEST(TestTypes, DataTypeStreamOperator)
     oss << DataType::NOT_SET;
     EXPECT_EQ(oss.str(), "unknown");
 }
+
+TEST(TestTypes, KnobValueTypeToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(KnobValueType::INT64), "int64");
+    EXPECT_STREQ(to_string(KnobValueType::FLOAT64), "float64");
+    EXPECT_STREQ(to_string(KnobValueType::STRING), "string");
+}
+
+TEST(TestTypes, KnobValueTypeStreamOperator)
+{
+    using namespace hipdnn_frontend;
+
+    std::ostringstream oss;
+
+    oss << KnobValueType::INT64;
+    EXPECT_EQ(oss.str(), "int64");
+    oss.str("");
+
+    oss << KnobValueType::FLOAT64;
+    EXPECT_EQ(oss.str(), "float64");
+    oss.str("");
+
+    oss << KnobValueType::STRING;
+    EXPECT_EQ(oss.str(), "string");
+}
+
+TEST(TestTypes, GetKnobValueTypeFromVariantInt64)
+{
+    using namespace hipdnn_frontend;
+
+    std::variant<int64_t, double, std::string> value = static_cast<int64_t>(42);
+    EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::INT64);
+}
+
+TEST(TestTypes, GetKnobValueTypeFromVariantFloat64)
+{
+    using namespace hipdnn_frontend;
+
+    std::variant<int64_t, double, std::string> value = 3.14;
+    EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::FLOAT64);
+}
+
+TEST(TestTypes, GetKnobValueTypeFromVariantString)
+{
+    using namespace hipdnn_frontend;
+
+    std::variant<int64_t, double, std::string> value = std::string("test");
+    EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::STRING);
+}
