@@ -18,7 +18,7 @@ TEST_F(TestEngineNames, MacroGeneratesCorrectConstants)
     using namespace hipdnn_plugin_sdk::engine_names;
 
     // Check that the string constants are defined
-    EXPECT_STREQ(MIOPEN_PLUGIN, "MIOPEN_PLUGIN");
+    EXPECT_STREQ(MIOPEN_PLUGIN_NAME, "MIOPEN_PLUGIN");
 
     // Check that the ID constants are defined and match the hash function
     EXPECT_EQ(MIOPEN_PLUGIN_ID, engineNameToId("MIOPEN_PLUGIN"));
@@ -43,7 +43,7 @@ TEST_F(TestEngineNames, IsEngineNameRegistered)
 {
     // Test with known registered names
     EXPECT_TRUE(hipdnn_plugin_sdk::engine_names::isEngineNameRegistered(
-        hipdnn_plugin_sdk::engine_names::MIOPEN_PLUGIN));
+        hipdnn_plugin_sdk::engine_names::MIOPEN_PLUGIN_NAME));
 
     // Test with unregistered names
     EXPECT_FALSE(hipdnn_plugin_sdk::engine_names::isEngineNameRegistered("UNKNOWN_ENGINE"));
@@ -86,9 +86,9 @@ TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
 {
     using namespace hipdnn_plugin_sdk::engine_names;
 
-    auto engineIdCString = engineNameToId(MIOPEN_PLUGIN);
-    auto engineIdString = engineNameToId(std::string(MIOPEN_PLUGIN));
-    auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_PLUGIN));
+    auto engineIdCString = engineNameToId(MIOPEN_PLUGIN_NAME);
+    auto engineIdString = engineNameToId(std::string(MIOPEN_PLUGIN_NAME));
+    auto engineIdStringView = engineNameToId(std::string_view(MIOPEN_PLUGIN_NAME));
 
     EXPECT_EQ(engineIdCString, engineIdString);
     EXPECT_EQ(engineIdCString, engineIdStringView);

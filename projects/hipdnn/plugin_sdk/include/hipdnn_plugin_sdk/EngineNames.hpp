@@ -99,7 +99,7 @@ struct EngineRegistrar
 
 // Macro that defines engine and automatically registers it
 #define HIPDNN_REGISTER_ENGINE(name, value)                 \
-    inline constexpr const char* name = value;              \
+    inline constexpr const char* name##_NAME = value;       \
     inline const int64_t name##_ID = engineNameToId(value); \
     inline const EngineRegistrar name##_registrar{value};
 
