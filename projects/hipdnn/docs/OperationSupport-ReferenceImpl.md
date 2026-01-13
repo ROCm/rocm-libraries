@@ -18,9 +18,10 @@ The following table lists all operations currently supported in the CPU Referenc
 
 | Operation | Datatypes | Layouts | Implementation | Notes |
 |-----------|-----------|---------|----------------|-------|
-| BatchNorm Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | BatchNorm Forward Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
+| BatchNorm Forward Inference with Variance | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | BatchNorm Forward Training | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
+| BatchNorm Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Data | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Weights | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
@@ -34,6 +35,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Operation | Plan Builder | Signature Key | Description |
 |-----------|-------------|---------------|-------------|
 | BatchNorm Forward Inference | `BatchnormFwdInferencePlanBuilder` | `BatchnormFwdInferenceSignatureKey` | Inference-mode forward pass |
+| BatchNorm Forward Inference with Variance | `BatchnormFwdInferenceWithVariancePlanBuilder` | `BatchnormFwdInferenceWithVarianceSignatureKey` | Inference-mode with variance forward pass |
 | BatchNorm Forward Training | `BatchnormTrainPlanBuilder` | `BatchnormTrainSignatureKey` | Training-mode forward pass with statistics |
 | BatchNorm Backward | `BatchnormBwdPlanBuilder` | `BatchnormBwdSignatureKey` | Gradient computation |
 

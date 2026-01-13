@@ -10,10 +10,11 @@ The following table lists all operations currently supported in hipDNN:
 
 | Operation | Datatypes | Layouts | Notes |
 |-----------|-----------|---------|-------|
-| Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
+| Batchnorm Inference with Variance | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
 | Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
 | Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹, No running stats⁴ |
 | Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³⁴ |
+| Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Forward + (Bias) + Activation⁵ | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
