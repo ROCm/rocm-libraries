@@ -455,4 +455,82 @@ namespace ExpressionTest
             }
         }
     }
+
+    TEST_CASE("Convert propagation with ScaledMatrixMultiply", "[gpu][convert-propagation]")
+    {
+        auto context = TestContext::ForTestDevice();
+
+        context->schedule(context->kernel()->preamble());
+        context->schedule(context->kernel()->prolog());
+
+        auto kb = [&]() -> Generator<Instruction> {
+            int M = 16, N = 16, K = 128;
+
+            auto A_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+            auto B_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+
+            A_tile->sizes = {M, K};
+            A_tile->vgpr
+                = std::make_shared<Register::Value>(context.get(),
+                                                    Register::Type::Vector,
+                                                    DataType::FP8x4,
+                                                    M * K / 64 / 4,
+                                                    Register::AllocationOptions::FullyContiguous());
+            co_yield A_tile->vgpr->allocate();
+
+            B_tile->sizes = {K, N};
+            B_tile->vgpr
+                = std::make_shared<Register::Value>(context.get(),
+                                                    Register::Type::Vector,
+                                                    DataType::FP8x4,
+                                                    K * N / 64 / 4,
+                                                    Register::AllocationOptions::FullyContiguous());
+            co_yield B_tile->vgpr->allocate();
+
+            auto C_reg
+                = std::make_shared<Register::Value>(context.get(),
+                                                    Register::Type::Accumulator,
+                                                    DataType::Double,
+                                                    M * N / 64,
+                                                    Register::AllocationOptions::FullyContiguous());
+            co_yield C_reg->allocate();
+
+            auto C_offset = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Double, M * N / 64);
+            co_yield C_offset->allocate();
+
+            auto scaleA = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Double, 1);
+            co_yield scaleA->allocate();
+
+            auto scaleB = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Double, 1);
+            co_yield scaleB->allocate();
+
+            auto scale_offset = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Double, 1);
+            co_yield scale_offset->allocate();
+
+            auto A_expr = std::make_shared<Expression::Expression>(A_tile);
+            auto B_expr = std::make_shared<Expression::Expression>(B_tile);
+
+            auto C_expr = convert(DataType::Float, C_reg->expression() + C_offset->expression());
+
+            auto scaleA_expr
+                = convert(DataType::Float, scaleA->expression() + scale_offset->expression());
+
+            auto scaleB_expr = convert(DataType::Float, scaleB->expression());
+
+            auto scaledMM = std::make_shared<Expression::Expression>(
+                Expression::ScaledMatrixMultiply{A_expr, B_expr, C_expr, scaleA_expr, scaleB_expr});
+
+            auto convertedMM = convert(DataType::Float, scaledMM);
+
+            Register::ValuePtr result;
+            co_yield Expression::generate(result, convertedMM, context.get());
+        };
+
+        REQUIRE_THROWS_WITH(context->schedule(kb()),
+                            Catch::Matchers::ContainsSubstring("Invalid scale expression type"));
+    }
 }
