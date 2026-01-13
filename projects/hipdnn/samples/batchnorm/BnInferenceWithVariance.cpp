@@ -93,7 +93,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
-        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<InputType>();
+        auto tolerance
+            = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<InputType>();
         double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
