@@ -702,11 +702,21 @@ namespace GEMMTests
         // TODO: remove this condition when SwizzleScale supports non-TN data layout
         if(problem.transA == "T" && problem.transB == "N")
         {
-            problem.swizzleScale  = true;
-            problem.swizzleM      = 64;
-            problem.swizzleN      = 64;
-            problem.swizzleK      = 4;
-            problem.prefetchScale = true;
+            problem.scaleAMode = Operations::ScaleMode::Separate;
+            problem.scaleBMode = Operations::ScaleMode::Separate;
+
+            problem.scaleTypeA = DataType::E8M0;
+            problem.scaleTypeB = DataType::E8M0;
+
+            problem.swizzleScale = true;
+            problem.swizzleM     = 64;
+            problem.swizzleN     = 64;
+            problem.swizzleK     = 4;
+            // TODO: Fix scale prefetch for StreamK
+            //problem.prefetchScale = true;
+
+            problem.scaleBlockSize = m_context->targetArchitecture().GetCapability(
+                GPUCapability::DefaultScaleBlockSize);
         }
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
