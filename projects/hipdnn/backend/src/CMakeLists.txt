@@ -54,10 +54,8 @@ target_include_directories(
 )
 
 # Backend headers include HIP headers, so both backend and consumers need this definition
-# Use INTERFACE to ensure it's exported to consumers (SHARED libraries don't export PUBLIC properly)
+# Use PUBLIC to ensure it's exported to consumers
 target_compile_definitions(hipdnn_backend PUBLIC __HIP_PLATFORM_AMD__)
-# Also define it privately for building the backend itself
-# target_compile_definitions(hipdnn_backend PRIVATE __HIP_PLATFORM_AMD__)
 
 target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 # This definition is used to enable logging in the backend.  It is #ifdef'ed in the backend code.
