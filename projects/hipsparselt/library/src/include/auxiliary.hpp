@@ -123,6 +123,8 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
+    case HIP_R_32I:
+        return "i32_r";        
 #if defined(HIP_FP8_TYPE_OCP) || defined(__HIP_PLATFORM_NVIDIA__)
     case HIP_R_8F_E4M3:
         return "f8_r";

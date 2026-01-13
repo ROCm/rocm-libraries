@@ -127,6 +127,9 @@ namespace
     constexpr auto tensile_datatype<int8_t> = rocisa::DataType::Int8;
 
     template <>
+    constexpr auto tensile_datatype<int32_t> = rocisa::DataType::Int32;    
+
+    template <>
     constexpr auto tensile_datatype<__half> = rocisa::DataType::Half;
 
     template <>
@@ -174,6 +177,8 @@ namespace
             return rocisa::DataType::BFloat16;
         case HIP_R_8I:
             return rocisa::DataType::Int8;
+        case HIP_R_32I:
+            return rocisa::DataType::Int32;            
 #if HIP_FP8_TYPE_OCP
         case HIP_R_8F_E4M3:
             return rocisa::DataType::Float8;
@@ -1098,6 +1103,7 @@ GENERATE_DEFINITIONS(hip_bfloat16, hip_bfloat16, float)
 GENERATE_DEFINITIONS(int8_t, int8_t, float)
 GENERATE_DEFINITIONS(int8_t, __half, float)
 GENERATE_DEFINITIONS(int8_t, hip_bfloat16, float)
+GENERATE_DEFINITIONS(int8_t, int32_t, float)
 GENERATE_DEFINITIONS(__hip_fp8_e4m3, float, float)
 GENERATE_DEFINITIONS(__hip_fp8_e5m2, float, float)
 
