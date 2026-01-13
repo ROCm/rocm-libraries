@@ -109,7 +109,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
         }
         zlocalsize = 1;
-        zgridsize  = 1;
+        zgridsize  = std::min(size_t{n}, size_t{65535}); // do not exceed max grid size in z
 
         // HIP runtime does not support non-uniform blocks
         // Adjust the global worker sizes accordingly
