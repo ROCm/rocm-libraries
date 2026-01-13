@@ -4022,6 +4022,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       kernel["LocalWriteUseSgprA"] = False # Requires DirectToLdsA
       kernel["LocalWriteUseSgprB"] = False # Requires DirectToLdsB
 
+    # KRingShift depends on BAddrInterleave/BInterleaveG. If BAddrInterleave is not enabled,
+    # force-disable KRingShift so the rest of codegen can simply key off KRingShift.
+    if kernel["KRingShift"] and (not kernel["BAddrInterleave"]):
+      kernel["KRingShift"] = False
+
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       kernel["LocalWriteUseSgprMetadata"] = False
 

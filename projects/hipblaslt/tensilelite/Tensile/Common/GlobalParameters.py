@@ -363,6 +363,9 @@ defaultBenchmarkCommonParameters = [
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
+    # Restricted address remap features (default off unless explicitly enabled in the solution config):
+    {"BAddrInterleave": [False]},
+    {"KRingShift": [False]},
     {"DirectToLds": [False]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},

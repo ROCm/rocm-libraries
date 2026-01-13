@@ -947,6 +947,12 @@ class Solution(collections.abc.Mapping):
 
     Solution.assignProblemIndependentDerivedParameters(state, printRejectionReason, isaInfoMap)
 
+    # KRingShift is defined to operate only in conjunction with BAddrInterleave (BInterleaveG).
+    # If BAddrInterleave is not enabled, do not allow KRingShift to be enabled.
+    if state.get("KRingShift", False) and (not state.get("BAddrInterleave", False)):
+      reject(state, printRejectionReason, "KRingShift requires BAddrInterleave (BInterleaveG)")
+      return
+
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
       #   Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
