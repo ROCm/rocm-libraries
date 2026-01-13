@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -61,8 +62,7 @@ void testing_sddmm_coo_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSDDMMAlg_t  alg       = HIPSPARSE_SDDMM_ALG_DEFAULT;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto drow_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int32_t) * safe_size), device_free};
@@ -204,8 +204,7 @@ void testing_sddmm_coo(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hcsr_row_ptr;
@@ -317,7 +316,7 @@ void testing_sddmm_coo(Arguments argus)
 
     // Query SDDMM buffer
     size_t bufferSize;
-    CHECK_HIPSPARSE_ERROR(hipsparseSDDMM_bufferSize(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
     void* buffer;
@@ -325,23 +324,23 @@ void testing_sddmm_coo(Arguments argus)
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    CHECK_HIPSPARSE_ERROR(hipsparseSDDMM_preprocess(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_preprocess(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 
     // HIPSPARSE pointer mode device
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-    CHECK_HIPSPARSE_ERROR(hipsparseSDDMM_preprocess(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_preprocess(
         handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 
     if(argus.unit_check)
     {
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
             handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(
-            hipsparseSDDMM(handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
+            handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 
         // copy output from device to CPU.
         std::vector<T> hval1(nnz);
@@ -393,7 +392,7 @@ void testing_sddmm_coo(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
                 handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
         }
 
@@ -402,7 +401,7 @@ void testing_sddmm_coo(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
                 handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
         }
 

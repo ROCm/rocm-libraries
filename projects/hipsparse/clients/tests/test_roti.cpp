@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,13 @@
 #include "testing_roti.hpp"
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
-TEST_ROUTINE_WITH_CONFIG(
-    roti, level1, hipsparse_test_config_real_only, arg.N, arg.nnz, arg.c, arg.s, arg.baseA);
+TEST_ROUTINE_WITH_CONFIG(roti,
+                         level1,
+                         hipsparse_test_config_real_only,
+                         arg.N,
+                         arg.nnz,
+                         arg.c,
+                         arg.s,
+                         arg.baseA,
+                         arg.graph_test);
 #endif
