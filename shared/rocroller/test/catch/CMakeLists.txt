@@ -104,6 +104,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCCTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBufferTest.cpp"
+
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomMatchers.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomSections.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionMatchers.hpp"
@@ -112,8 +113,6 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels_impl.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SourceMatcher.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Utilities.hpp"
 )
 
 target_include_directories(rocroller-tests-catch PRIVATE

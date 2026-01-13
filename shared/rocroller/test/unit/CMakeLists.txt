@@ -60,6 +60,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DependencyTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/EnumToStringTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ErrorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/F6Test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/F8Test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FP4Test.cpp"
@@ -118,6 +119,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/VectorAddBenchmark.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountTest.cpp"
+
         "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF8F6F4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMTestBase.hpp"

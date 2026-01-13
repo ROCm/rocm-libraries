@@ -24,41 +24,43 @@
  *
  *******************************************************************************/
 
-#pragma once
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
-#include <common/Utilities.hpp>
+#include "GenericContextFixture.hpp"
+#include "SimpleFixture.hpp"
+#include "SourceMatcher.hpp"
 
-#include <catch2/matchers/catch_matchers.hpp>
-
-#include <hip/hip_runtime.h>
-#include <string>
+using namespace rocRoller;
 
 namespace rocRollerTest
 {
-    class HasHipSuccessMatcher : public Catch::Matchers::MatcherBase<hipError_t>
+    class ErrorTest : public SimpleFixture
     {
-    public:
-        bool match(hipError_t const& result) const override
-        {
-            m_last = result;
-            return result == hipSuccess;
-        }
-
-        std::string describe() const override
-        {
-            if(m_last == hipSuccess)
-                return "HIP call returns hipSuccess";
-
-            return std::string("HIP call returns hipSuccess (got: ") + hipGetErrorString(m_last)
-                   + ")";
-        }
-
-    private:
-        mutable hipError_t m_last = hipSuccess;
     };
 
-    inline HasHipSuccessMatcher HasHipSuccess()
+    class ErrorFixtureTest : public GenericContextFixture
     {
-        return HasHipSuccessMatcher{};
+    };
+
+    using ErrorFixtureDeathTest = ErrorFixtureTest;
+
+    TEST_F(ErrorFixtureDeathTest, BreakOnAssertFatal)
+    {
+        (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
+
+        Settings::getInstance()->set(Settings::BreakOnThrow, true);
+
+        EXPECT_DEATH({ AssertFatal(0 == 1); }, "");
+    }
+
+    TEST_F(ErrorFixtureDeathTest, BreakOnThrow)
+    {
+        (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
+
+        Settings::getInstance()->set(Settings::BreakOnThrow, true);
+
+        EXPECT_DEATH({ Throw<FatalError>("Error"); }, "");
     }
 }

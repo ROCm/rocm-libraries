@@ -29,8 +29,6 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
-#include "SourceMatcher.hpp"
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_exception.hpp>
@@ -72,27 +70,6 @@ namespace
         return true;
     }
 
-    static void requireDeath(void (*fn)())
-    {
-        pid_t pid = ::fork();
-        REQUIRE(pid >= 0);
-
-        if(pid == 0)
-        {
-            fn();
-            _exit(0);
-        }
-
-        int status = 0;
-        REQUIRE(::waitpid(pid, &status, 0) == pid);
-
-        if(WIFSIGNALED(status))
-            return;
-
-        REQUIRE(WIFEXITED(status));
-        REQUIRE(WEXITSTATUS(status) != 0);
-    }
-
     [[noreturn]] void HelperThatThrows(std::source_location loc = std::source_location::current())
     {
         (void)loc;
@@ -118,18 +95,18 @@ TEST_CASE("ErrorTest: BaseRecoverableErrorTest", "[utils][error]")
 
 TEST_CASE("ErrorTest: BaseFileNameTest", "[utils][error]")
 {
-    REQUIRE(std::string(GetBaseFileName("/absolute/path/to/file.txt"))
-            == "/absolute/path/to/file.txt");
-    REQUIRE(std::string(GetBaseFileName("./relative/local/path/to/file.txt"))
-            == "relative/local/path/to/file.txt");
-    REQUIRE(std::string(GetBaseFileName("../relative/path/to/file.txt"))
-            == "relative/path/to/file.txt");
-    REQUIRE(std::string(GetBaseFileName("../../../long/relative/path/to/file.txt"))
-            == "long/relative/path/to/file.txt");
-    REQUIRE(std::string(GetBaseFileName("./../../../long/local/relative/path/to/file.txt"))
-            == "long/local/relative/path/to/file.txt");
-    REQUIRE(std::string(GetBaseFileName("./")) == "");
-    REQUIRE(std::string(GetBaseFileName("../")) == "");
+    CHECK(std::string(GetBaseFileName("/absolute/path/to/file.txt"))
+          == "/absolute/path/to/file.txt");
+    CHECK(std::string(GetBaseFileName("./relative/local/path/to/file.txt"))
+          == "relative/local/path/to/file.txt");
+    CHECK(std::string(GetBaseFileName("../relative/path/to/file.txt"))
+          == "relative/path/to/file.txt");
+    CHECK(std::string(GetBaseFileName("../../../long/relative/path/to/file.txt"))
+          == "long/relative/path/to/file.txt");
+    CHECK(std::string(GetBaseFileName("./../../../long/local/relative/path/to/file.txt"))
+          == "long/local/relative/path/to/file.txt");
+    CHECK(std::string(GetBaseFileName("./")) == "");
+    CHECK(std::string(GetBaseFileName("../")) == "");
 }
 
 TEST_CASE("ErrorTest: FatalErrorTest", "[utils][error]")
@@ -226,26 +203,6 @@ TEST_CASE("ErrorTest: DontBreakOnThrow", "[utils][error]")
     Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
     CHECK_THROWS_AS(([&] { Throw<FatalError>("Error"); }()), FatalError);
-
-    Settings::reset();
-}
-
-TEST_CASE("ErrorTest: BreakOnThrow", "[utils][error][death]")
-{
-    requireDeath([] {
-        Settings::getInstance()->set(Settings::BreakOnThrow, true);
-        Throw<FatalError>("Error");
-    });
-
-    Settings::reset();
-}
-
-TEST_CASE("ErrorTest: BreakOnAssertFatal", "[utils][error][death]")
-{
-    requireDeath([] {
-        Settings::getInstance()->set(Settings::BreakOnThrow, true);
-        AssertFatal(0 == 1);
-    });
 
     Settings::reset();
 }

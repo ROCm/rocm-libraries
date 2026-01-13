@@ -68,49 +68,77 @@ namespace rocRoller
         using Error::Error;
     };
 
+    /**
+     * MessageWithLocation is implicitly constructed from the first argument of
+     * the direct Throw<>(...) overload. Because the constructor defaults the location to
+     * std::source_location::current(), the captured location points at the user's call site.
+    */
+
     struct MessageWithLocation
     {
         std::string          message;
         std::source_location loc;
 
         MessageWithLocation(std::string          msg,
-                            std::source_location l = std::source_location::current())
+                            std::source_location srcLoc = std::source_location::current())
             : message(std::move(msg))
-            , loc(l)
+            , loc(srcLoc)
         {
         }
 
         MessageWithLocation(std::string_view     msg,
-                            std::source_location l = std::source_location::current())
+                            std::source_location srcLoc = std::source_location::current())
             : message(msg)
-            , loc(l)
+            , loc(srcLoc)
         {
         }
 
         MessageWithLocation(const char*          msg,
-                            std::source_location l = std::source_location::current())
+                            std::source_location srcLoc = std::source_location::current())
             : message(msg ? msg : "")
-            , loc(l)
+            , loc(srcLoc)
         {
         }
     };
 
-    // Overload for AssertError / AssertFatal / AssertRecoverable
+    /**
+     * Throw overload used by AssertError / AssertFatal / AssertRecoverable.
+     * Assert macros already capture source_location and tags explicitly.
+     * Example:
+     * // In user code:
+     * AssertFatal(x < y, "oops");
+     * // Conceptual expansion:
+     * Throw<FatalError>(std::source_location::current(), "FatalError", "x < y", "oops");
+     */
     template <typename T_Exception, typename... Ts>
     [[noreturn]] void Throw(std::source_location location,
                             const char*          exceptionTag,
                             const char*          conditionText,
                             Ts const&... message);
 
-    // Overload for direct Throw<>(...)
+    /**
+     * Throw overload used for direct Throw<>(...) calls. The first message argument is 
+     * wrapped in MessageWithLocation, which automatically captures source_location
+     * at the call site and preserves it in the final error text.
+     * Example:
+     * // In user code:
+     * Throw<FatalError>("prefix: ", ShowValue(x), "tail");
+     * // Conceptual expansion:
+     * Throw<FatalError>(MessageWithLocation("prefix: ", std::source_location::current()),
+     *     ShowValue(x), "tail");
+     */
     template <typename T_Exception, typename... Ts>
     [[noreturn]] void Throw(MessageWithLocation leadingMessage, Ts const&... messageParts);
 
-    // Initiates a segfault.  This can be useful for debugging purposes.
+    /**
+     * Initiates a segfault.  This can be useful for debugging purposes.
+     */
     [[noreturn]] void Crash();
 
     int* GetNullPointer();
 
+    // Get path
+    // Strips all "../" and "./"
     constexpr const char* GetBaseFileName(const char* file)
     {
         if(strnlen(file, 3) >= 3 && file[0] == '.' && file[1] == '.' && file[2] == '/')
