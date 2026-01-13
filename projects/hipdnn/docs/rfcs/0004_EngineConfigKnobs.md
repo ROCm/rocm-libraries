@@ -61,7 +61,6 @@ A robust knobs system for hipDNN must support:
 3. **Plugin Autonomy**: Plugins can define custom knobs without modifying core hipDNN
 4. **Namespace Isolation**: Different plugins can have knobs with the same semantic meaning without conflicts
 5. **Discovery**: Users can query available knobs and their valid ranges/values
-6. **Execution Plan Serialization**: Eventually plugin authors will wish to serialize / deserialize / cache execution plans, and if the selected mechanism can support that, it should.
 
 ## 3. Current System Overview
 
@@ -160,7 +159,7 @@ union KnobConstraint {
 table IntConstraint {
     min_value: int64;
     max_value: int64;
-    step: int64 = 1;            // Step size (default 1)
+    step: int64 = 1;              // Step size (default 1)
     valid_values: [int64];        // Optional: explicit list of valid values
 }
 
@@ -186,7 +185,7 @@ include "knob_value.fbs";
 
 table EngineDetails {
     engine_id: int64;
-    supported_knobs: [Knob];  // NEW: Knobs this engine supports
+    knobs: [Knob];  // NEW: Knobs this engine supports
 }
 
 // data_sdk/schemas/engine_config.fbs
@@ -286,7 +285,7 @@ public:
         int64_t defaultValue,
         int64_t minValue,
         int64_t maxValue,
-        int64_t stride = 1
+        int64_t step = 1
     );
 
     // Register an integer knob with explicit valid values
@@ -424,7 +423,7 @@ public:
     struct IntConstraint {
         int64_t minValue;
         int64_t maxValue;
-        int64_t stride;
+        int64_t step;
         std::vector<int64_t> validValues;  // Optional explicit list
     };
     struct FloatConstraint {
@@ -526,7 +525,7 @@ graph.create_execution_plan_ext(MIOPEN_ENGINE, customKnobSettings);
 The extension methods provide:
 - **Richer metadata**: `Knob` includes display names, descriptions, constraints, and default values
 - **Type safety**: `KnobSetting` class enforces type-safe value setting
-- **Flexibility**: Support for multiple value types beyond int64_t
+- **Flexibility**: Support for several value types beyond int64_t
 - **Early Validation**: Since we know the constraints for the knobs, we can error out early if they defy constraints
 
 The existing methods will use the flatbuffer variants under the hood.
@@ -564,7 +563,7 @@ Examples:
 
 **Rationale**:
 - **Type Safety**: Unions provide compile-time and runtime type checking
-- **Expressiveness**: Can represent boolean flags, floating-point parameters, and enumerations naturally
+- **Expressiveness**: Can represent string parameters, floating-point parameters, and integers naturally
 - **Flexibility**: Easy to add new value types without breaking existing code
 - **Efficiency**: Flatbuffers are zero-copy and highly efficient
 - **Validation**: Type-specific constraints are more intuitive (e.g., enum valid values vs. min/max/stride)
