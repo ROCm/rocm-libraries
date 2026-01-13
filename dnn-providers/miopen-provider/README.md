@@ -1,4 +1,4 @@
-# MIOpen Legacy Plugin
+# MIOpen Provider Plugin
 A plugin wrapping MIOpen in order to provide engines to solve some hipDNN graphs.
 
 ## Building
