@@ -199,9 +199,10 @@ enum class prediction_modes_t : std::uint32_t {
  */
 enum class target_t : std::uint32_t {
   generic           = 0,  ///< Generic backend (backend agnostic, not supported yet)
-  hipblaslt         = 1,  ///< hipBLASLt backend
-  triton            = 2,  ///< Triton backend
-  composable_kernel = 3,  ///< Composable Kernel backend (Not supported yet)
+  tensilelite       = 1,  ///< hipBLASLt (tensilelite) backend
+  rocroller         = 2,  ///< hipBLASLt (rocroller) backend
+  triton            = 3,  ///< Triton backend
+  composable_kernel = 4,  ///< Composable Kernel backend (Not supported yet)
   count,                  ///< Count of target types
   none = 0xFFFFFFFFu      ///< Explicitly invalid
 };
@@ -354,7 +355,7 @@ struct config_t {
   prediction_modes_t prediction_mode = prediction_modes_t::estimation;
 
   /// Target backend for kernel execution.
-  target_t target = target_t::hipblaslt;
+  target_t target = target_t::tensilelite;
 
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
@@ -450,3 +451,4 @@ struct hash<origami::config_t> {
   }
 };
 }  // namespace std
+
