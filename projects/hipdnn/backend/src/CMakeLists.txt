@@ -1,6 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+include(CMakePackageConfigHelpers)
+
 find_package(hip REQUIRED)
 
 set(HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR "${PROJECT_BINARY_DIR}/backend/include/")
@@ -51,6 +53,12 @@ target_include_directories(
            $<BUILD_INTERFACE:${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}>
 )
 
+# Backend headers include HIP headers, so both backend and consumers need this definition
+# Use INTERFACE to ensure it's exported to consumers (SHARED libraries don't export PUBLIC properly)
+target_compile_definitions(hipdnn_backend PUBLIC __HIP_PLATFORM_AMD__)
+# Also define it privately for building the backend itself
+# target_compile_definitions(hipdnn_backend PRIVATE __HIP_PLATFORM_AMD__)
+
 target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 # This definition is used to enable logging in the backend.  It is #ifdef'ed in the backend code.
 # This is to stop the frontend/plugin from having lazy log initialization which will end up with the
@@ -58,6 +66,8 @@ target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 # different name.
 target_compile_definitions(hipdnn_backend PRIVATE HIPDNN_BACKEND_COMPILATION)
 target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
+# Export dependencies for consumers - backend headers include HIP and data_sdk headers
+target_link_libraries(hipdnn_backend INTERFACE hip::host hipdnn_data_sdk)
 # HIDE symbols from linked static libs
 target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
 set_target_properties(hipdnn_backend PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -79,7 +89,7 @@ install(
 
 export(
     TARGETS hipdnn_backend
-    FILE ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake
+    FILE ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendTargets.cmake
 )
 
 install(
@@ -95,5 +105,16 @@ install(FILES ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}/hipdnn_backend_export.h
 )
 
 install(EXPORT hipdnn_backend_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend
-        FILE hipdnn_backendConfig.cmake COMPONENT Development
+        FILE hipdnn_backendTargets.cmake COMPONENT Development
+)
+
+# Generate the Config.cmake file from template
+configure_package_config_file(
+    "${CMAKE_CURRENT_LIST_DIR}/../cmake/hipdnn_backendConfig.cmake.in"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend
+)
+
+install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend COMPONENT Development
 )
