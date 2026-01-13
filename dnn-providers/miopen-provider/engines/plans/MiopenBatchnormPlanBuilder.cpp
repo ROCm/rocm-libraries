@@ -420,7 +420,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         // checks manually.
         try
         {
-            checkBatchnormTensorConfigSupported(bnInfAttr, opGraph.getTensorMap());
+            checkBatchnormTensorConfigSupported(bnInfAttr, actAttr, opGraph.getTensorMap());
             checkBatchnormFwdActivationModeSupported(actAttr);
         }
         catch(const std::exception& e)
