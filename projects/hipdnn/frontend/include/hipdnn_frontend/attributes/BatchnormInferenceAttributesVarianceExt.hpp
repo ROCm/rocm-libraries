@@ -170,6 +170,7 @@ public:
         attr.set_variance(tensorMap.at(fb->variance_tensor_uid()));
         attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
         attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
         attr.set_y(tensorMap.at(fb->y_tensor_uid()));
 
         return attr;

@@ -591,7 +591,7 @@ TEST(TestGraphSerialization, ToFlatBufferReturnsValidBuffer)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     auto y = graph.pointwise(x, pwAttrs);
-    y->set_uid(2);
+    y->set_output(true); // Mark as output to test non-virtual tensor
 
     // Get flatbuffer (assigns UIDs if needed)
     auto buffer = graph.toFlatBuffer();
@@ -711,7 +711,7 @@ TEST(TestGraphSerialization, SerializeOverloadReturnsDetachedBuffer)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     auto y = graph.pointwise(x, pwAttrs);
-    y->set_uid(2);
+    y->set_output(true); // Mark as output to test non-virtual tensor
 
     // Use toFlatBuffer() that returns DetachedBuffer
     auto buffer = graph.toFlatBuffer();
@@ -740,7 +740,7 @@ TEST(TestGraphSerialization, DeserializeFromFlatBufferGraphObject)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
     auto y = graph.pointwise(x, pwAttrs);
-    y->set_uid(2);
+    y->set_output(true); // Mark as output to test non-virtual tensor
 
     // Serialize to buffer
     auto buffer = graph.toFlatBuffer();
@@ -1268,7 +1268,7 @@ TEST_P(TestGraphSerializationRoundTrip, MatmulNode)
 
     MatmulAttributes matmulAttrs;
     auto c = graph.matmul(a, b, matmulAttrs);
-    c->set_uid(3);
+    c->set_output(true); // Mark as output to test non-virtual tensor
 
     // Only verify counts for JSON format
     if(GetParam() == SerializationFormat::JSON)
@@ -1293,18 +1293,19 @@ TEST_P(TestGraphSerializationRoundTrip, BatchnormInferenceNodeVarianceExt)
     auto variance = createTensor1D("variance", 64, DataType::FLOAT, 3);
     auto scale = createTensor1D("scale", 64, DataType::FLOAT, 4);
     auto bias = createTensor1D("bias", 64, DataType::FLOAT, 5);
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
 
     BatchnormInferenceAttributesVarianceExt bnInfVarAttrs;
 
-    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, bnInfVarAttrs);
-    y->set_uid(6);
+    auto y = graph.batchnorm_inference_variance_ext(
+        x, mean, variance, scale, bias, epsilon, bnInfVarAttrs);
 
     // Only verify counts for JSON format
     if(GetParam() == SerializationFormat::JSON)
     {
         auto json = graph.toJson();
         EXPECT_EQ(json["nodes"].size(), 1);
-        EXPECT_EQ(json["tensors"].size(), 6); // x, mean, variance, scale, bias, y
+        EXPECT_EQ(json["tensors"].size(), 7); // x, mean, variance, scale, bias, epsilon, y
     }
 
     roundTripAndCompare(graph);
@@ -1329,7 +1330,7 @@ TEST_P(TestGraphSerializationRoundTrip, ConvFprop)
         .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto y = graph.conv_fprop(x, w, convAttrs);
-    y->set_uid(3);
+    y->set_output(true); // Mark as output to test non-virtual tensor
 
     roundTripAndCompare(graph);
 }
@@ -1348,7 +1349,7 @@ TEST_P(TestGraphSerializationRoundTrip, PointwiseWithParams)
     eluAttrs.set_mode(PointwiseMode::ELU_FWD).set_elu_alpha(0.5f);
 
     auto y = graph.pointwise(x, eluAttrs);
-    y->set_uid(2);
+    y->set_output(true); // Mark as output to test non-virtual tensor
 
     roundTripAndCompare(graph);
 }
@@ -1394,7 +1395,7 @@ TEST_P(TestGraphSerializationRoundTrip, ConvDgrad)
         .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto dx = graph.conv_dgrad(dy, w, dgradAttrs);
-    dx->set_uid(3);
+    dx->set_output(true); // Mark as output to test non-virtual tensor
 
     roundTripAndCompare(graph);
 }
@@ -1418,7 +1419,7 @@ TEST_P(TestGraphSerializationRoundTrip, ConvWgrad)
         .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto dw = graph.conv_wgrad(dy, x, wgradAttrs);
-    dw->set_uid(3);
+    dw->set_output(true); // Mark as output to test non-virtual tensor
 
     roundTripAndCompare(graph);
 }
@@ -1462,7 +1463,7 @@ TEST_P(TestGraphSerializationRoundTrip, BatchnormInference)
     BatchnormInferenceAttributes bnInfAttrs;
 
     auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnInfAttrs);
-    y->set_uid(6);
+    y->set_output(true); // Mark as output to test non-virtual tensor
 
     roundTripAndCompare(graph);
 }
