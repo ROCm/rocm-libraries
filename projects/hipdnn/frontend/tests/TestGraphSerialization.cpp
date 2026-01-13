@@ -154,7 +154,7 @@ protected:
             FAIL() << "Unknown serialization format";
         }
 
-        expectGraphsEqual(graph, restored);
+        ASSERT_NO_FATAL_FAILURE(expectGraphsEqual(graph, restored));
     }
 };
 
@@ -567,11 +567,11 @@ TEST(TestGraphSerialization, BinaryVsJsonConsistency)
     binaryGraph.deserialize(nullHandle, binaryData);
 
     // Verify both deserialized graphs are fully identical
-    expectGraphsEqual(jsonGraph, binaryGraph);
+    ASSERT_NO_FATAL_FAILURE(expectGraphsEqual(jsonGraph, binaryGraph));
 
     // Also verify they match the original
-    expectGraphsEqual(graph, jsonGraph);
-    expectGraphsEqual(graph, binaryGraph);
+    ASSERT_NO_FATAL_FAILURE(expectGraphsEqual(graph, jsonGraph));
+    ASSERT_NO_FATAL_FAILURE(expectGraphsEqual(graph, binaryGraph));
 }
 
 //==============================================================================
