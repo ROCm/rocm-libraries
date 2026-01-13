@@ -107,8 +107,6 @@ int main(int argc, char* argv[])
     
     std::cout << "\nInput data decomposition:\n";
     std::vector<size_t> inlength = length;
-    if(place == rocfft_placement_inplace)
-        inlength[0] += 2;
     std::vector<std::vector<size_t>> inbrick_lower(devices.size());
     std::vector<std::vector<size_t>> inbrick_upper(devices.size());
     std::vector<std::vector<size_t>> inbrick_stride(devices.size());
@@ -126,7 +124,8 @@ int main(int argc, char* argv[])
             const size_t inbrick_upper1 = inbrick_lower1 + inbrick_length1;
             inbrick_lower[idx]          = {0, inbrick_lower1, 0};
             inbrick_upper[idx]          = {inlength[0], inbrick_upper1, 1};
-            inbrick_stride[idx] = {1, inlength[0], inbrick_upper[idx][1] - inbrick_lower[idx][1]};
+            inbrick_stride[idx] = {1, inlength[0] + ( place == rocfft_placement_inplace ? 2 : 0),
+                                   inbrick_upper[idx][1] - inbrick_lower[idx][1]};
             
             rocfft_brick inbrick = nullptr;
             rocfft_brick_create(&inbrick,
@@ -139,10 +138,11 @@ int main(int argc, char* argv[])
             rocfft_brick_destroy(inbrick);
             inbrick = nullptr;
 
-            const size_t memSize = inlength[0] * inbrick_length1 * sizeof(double);
+            const size_t memSize = inbrick_stride[idx][1]
+                * (inbrick_upper[idx][1] - inbrick_lower[idx][1]) * sizeof(double);
             inbufsizes[idx] = memSize;
             
-            std::cout << "in-brick " << idx;
+            std::cout << "Input brick " << idx;
             std::cout << "\n\tlower indices:";
             for(const auto val : inbrick_lower[idx])
                 std::cout << " " << val;
@@ -199,7 +199,7 @@ int main(int argc, char* argv[])
             outbufsizes[idx] = memSize;
                         
             
-            std::cout << "out-brick " << idx;
+            std::cout << "Output brick " << idx;
             std::cout << "\n\tlower indices:";
             for(const auto val : outbrick_lower[idx])
                 std::cout << " " << val;
@@ -235,8 +235,7 @@ int main(int argc, char* argv[])
         hiprc = hipMalloc(&gpu_in[idx], memsize);
         if(hiprc != hipSuccess)
             throw std::runtime_error("hipMalloc failed");
-        std::vector<double> host_in((inbrick_upper[idx][0] - inbrick_lower[idx][0])
-                                    *(inbrick_upper[idx][1] - inbrick_lower[idx][1]));
+        std::vector<double> host_in(memsize / sizeof(double));
         for(auto idx0 = inbrick_lower[idx][0]; idx0 < inbrick_upper[idx][0]; ++idx0)
         {
             for(auto idx1 = inbrick_lower[idx][1]; idx1 < inbrick_upper[idx][1]; ++idx1)
@@ -269,7 +268,7 @@ int main(int argc, char* argv[])
                                1, // Number of transforms
                                description); // Description
     if(fftrc != rocfft_status_success)
-        throw std::runtime_error("failed to create plan");
+        throw std::runtime_error("rocfft_plan_create failed with code " + std::to_string(fftrc));
 
     // Get execution information and allocate work buffer
     rocfft_execution_info planinfo      = nullptr;
