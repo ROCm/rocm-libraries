@@ -154,6 +154,20 @@ inline hipdnn_data_sdk::data_objects::ConvMode toSdkType(const ConvolutionMode& 
     }
 }
 
+inline hipdnn_frontend::ConvolutionMode
+    fromSdkType(const hipdnn_data_sdk::data_objects::ConvMode& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION:
+        return hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION;
+    case hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION:
+        return hipdnn_frontend::ConvolutionMode::CONVOLUTION;
+    default:
+        return hipdnn_frontend::ConvolutionMode::NOT_SET;
+    }
+}
+
 inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
 {
     switch(type)
@@ -300,6 +314,110 @@ inline hipdnn_data_sdk::data_objects::PointwiseMode toSdkType(const PointwiseMod
         return hipdnn_data_sdk::data_objects::PointwiseMode::TANH_FWD;
     default:
         return hipdnn_data_sdk::data_objects::PointwiseMode::UNSET;
+    }
+}
+
+inline hipdnn_frontend::PointwiseMode
+    fromSdkType(const hipdnn_data_sdk::data_objects::PointwiseMode& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::PointwiseMode::ABS:
+        return hipdnn_frontend::PointwiseMode::ABS;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::ADD:
+        return hipdnn_frontend::PointwiseMode::ADD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::ADD_SQUARE:
+        return hipdnn_frontend::PointwiseMode::ADD_SQUARE;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::BINARY_SELECT:
+        return hipdnn_frontend::PointwiseMode::BINARY_SELECT;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::CEIL:
+        return hipdnn_frontend::PointwiseMode::CEIL;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::CMP_EQ:
+        return hipdnn_frontend::PointwiseMode::CMP_EQ;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::CMP_GE:
+        return hipdnn_frontend::PointwiseMode::CMP_GE;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::CMP_GT:
+        return hipdnn_frontend::PointwiseMode::CMP_GT;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::CMP_LE:
+        return hipdnn_frontend::PointwiseMode::CMP_LE;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::CMP_LT:
+        return hipdnn_frontend::PointwiseMode::CMP_LT;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::CMP_NEQ:
+        return hipdnn_frontend::PointwiseMode::CMP_NEQ;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::DIV:
+        return hipdnn_frontend::PointwiseMode::DIV;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::ELU_BWD:
+        return hipdnn_frontend::PointwiseMode::ELU_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::ELU_FWD:
+        return hipdnn_frontend::PointwiseMode::ELU_FWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::ERF:
+        return hipdnn_frontend::PointwiseMode::ERF;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::EXP:
+        return hipdnn_frontend::PointwiseMode::EXP;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::FLOOR:
+        return hipdnn_frontend::PointwiseMode::FLOOR;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_BWD:
+        return hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD:
+        return hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_FWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::GELU_BWD:
+        return hipdnn_frontend::PointwiseMode::GELU_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD:
+        return hipdnn_frontend::PointwiseMode::GELU_FWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::GEN_INDEX:
+        return hipdnn_frontend::PointwiseMode::GEN_INDEX;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY:
+        return hipdnn_frontend::PointwiseMode::IDENTITY;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::LOG:
+        return hipdnn_frontend::PointwiseMode::LOG;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::LOGICAL_AND:
+        return hipdnn_frontend::PointwiseMode::LOGICAL_AND;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::LOGICAL_NOT:
+        return hipdnn_frontend::PointwiseMode::LOGICAL_NOT;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::LOGICAL_OR:
+        return hipdnn_frontend::PointwiseMode::LOGICAL_OR;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::MAX_OP:
+        return hipdnn_frontend::PointwiseMode::MAX;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::MIN_OP:
+        return hipdnn_frontend::PointwiseMode::MIN;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::MUL:
+        return hipdnn_frontend::PointwiseMode::MUL;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::NEG:
+        return hipdnn_frontend::PointwiseMode::NEG;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::RECIPROCAL:
+        return hipdnn_frontend::PointwiseMode::RECIPROCAL;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD:
+        return hipdnn_frontend::PointwiseMode::RELU_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD:
+        return hipdnn_frontend::PointwiseMode::RELU_FWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::RSQRT:
+        return hipdnn_frontend::PointwiseMode::RSQRT;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
+        return hipdnn_frontend::PointwiseMode::SIGMOID_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
+        return hipdnn_frontend::PointwiseMode::SIGMOID_FWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SIN:
+        return hipdnn_frontend::PointwiseMode::SIN;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD:
+        return hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
+        return hipdnn_frontend::PointwiseMode::SOFTPLUS_FWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SQRT:
+        return hipdnn_frontend::PointwiseMode::SQRT;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SUB:
+        return hipdnn_frontend::PointwiseMode::SUB;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_BWD:
+        return hipdnn_frontend::PointwiseMode::SWISH_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD:
+        return hipdnn_frontend::PointwiseMode::SWISH_FWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::TAN:
+        return hipdnn_frontend::PointwiseMode::TAN;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::TANH_BWD:
+        return hipdnn_frontend::PointwiseMode::TANH_BWD;
+    case hipdnn_data_sdk::data_objects::PointwiseMode::TANH_FWD:
+        return hipdnn_frontend::PointwiseMode::TANH_FWD;
+    default:
+        return hipdnn_frontend::PointwiseMode::NOT_SET;
     }
 }
 
