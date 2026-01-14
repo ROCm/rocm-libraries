@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 #ifndef GUARD_MIOPEN_SOFTMAX_DRIVER_HPP
 #define GUARD_MIOPEN_SOFTMAX_DRIVER_HPP
 
@@ -39,11 +16,9 @@
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 
-#include <algorithm>
 #include <cfloat>
 #include <cstdlib>
 #include <memory>
-#include <numeric>
 #include <vector>
 
 template <typename Tgpu, typename Tref>
@@ -67,6 +42,7 @@ public:
 
     int GetandSetData() override;
     std::vector<int> GetInputTensorLengthsFromCmdLine();
+    void ValidateLayout();
 
     int AllocateBuffersAndCopy() override;
 
@@ -134,12 +110,29 @@ template <typename Tgpu, typename Tref>
 int SoftmaxDriver<Tgpu, Tref>::GetandSetData()
 {
     std::vector<int> in_len = GetInputTensorLengthsFromCmdLine();
+    ValidateLayout();
 
-    SetTensor4d(inputTensor, in_len, data_type);
-    SetTensor4d(outputTensor, in_len, data_type);
+    if(SetTensorNd(inputTensor, in_len, inflags.GetValueStr("layout"), data_type) !=
+       miopenStatusSuccess)
+    {
+        MIOPEN_THROW("Error setting input tensor.");
+    }
+    if(SetTensorNd(outputTensor, in_len, inflags.GetValueStr("layout"), data_type) !=
+       miopenStatusSuccess)
+    {
+        MIOPEN_THROW("Error setting output tensor.");
+    }
 
-    SetTensor4d(dInputTensor, in_len, data_type);
-    SetTensor4d(dOutputTensor, in_len, data_type);
+    if(SetTensorNd(dInputTensor, in_len, inflags.GetValueStr("layout"), data_type) !=
+       miopenStatusSuccess)
+    {
+        MIOPEN_THROW("Error setting dinput tensor.");
+    }
+    if(SetTensorNd(dOutputTensor, in_len, inflags.GetValueStr("layout"), data_type) !=
+       miopenStatusSuccess)
+    {
+        MIOPEN_THROW("Error setting doutput tensor.");
+    }
 
     alpha = static_cast<float>(inflags.GetValueDouble("alpha"));
     beta  = static_cast<float>(inflags.GetValueDouble("beta"));
@@ -152,6 +145,8 @@ template <typename Tgpu, typename Tref>
 int SoftmaxDriver<Tgpu, Tref>::AddCmdLineArgs()
 {
     inflags.AddInputFlag("forw", 'F', "0", "Run only Forward Softmax (Default=0)", "int");
+    inflags.AddInputFlag(
+        "layout", 'L', "", "Tensor layout: [NCHW, NHWC] (Default=NCHW)", "string", true);
     inflags.AddInputFlag("batchsize", 'n', "100", "Mini-batch size (Default=100)", "int");
     inflags.AddInputFlag("in_channels", 'c', "3", "Number of Input Channels (Default=3)", "int");
     inflags.AddInputFlag("in_h", 'H', "32", "Input Height (Default=32)", "int");
@@ -185,6 +180,20 @@ std::vector<int> SoftmaxDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
     isForward = inflags.GetValueInt("forw") == 1;
 
     return std::vector<int>({in_n, in_c, in_h, in_w});
+}
+
+template <typename Tgpu, typename Tref>
+void SoftmaxDriver<Tgpu, Tref>::ValidateLayout()
+{
+    auto layout_value = inflags.GetValueStr("layout");
+    if(layout_value.empty())
+    {
+        inflags.SetValue("layout", "NCHW");
+    }
+    else if(layout_value != "NCHW" && layout_value != "NHWC")
+    {
+        MIOPEN_THROW(miopenStatusInvalidValue, "Invalid layout parameter value: " + layout_value);
+    }
 }
 
 template <typename Tgpu, typename Tref>
