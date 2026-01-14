@@ -1048,8 +1048,10 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         ,
         double expAvgFactor /* input momentum */
         ,
-        mio_bn_config::fp_prec_type* __restrict__ resultRunningMean, /*input and output*/
-        mio_bn_config::fp_prec_type* __restrict__ resultRunningVariance
+        const mio_bn_config::fp_prec_type* __restrict__ prevResultRunningMean,
+        const mio_bn_config::fp_prec_type* __restrict__ prevResultRunningVariance,
+        mio_bn_config::fp_prec_type* __restrict__ nextResultRunningMean,
+        mio_bn_config::fp_prec_type* __restrict__ nextResultRunningVariance
 #endif
         ,
         double epsilon
@@ -1083,8 +1085,10 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     {
 #if(MIO_RUNNING_RESULT == 1)
         miopen::batchnorm::running_stash<fp_accum_type, fp_accum_c_type, fp_prec_c_type>(
-            (mio_bn_config::fp_prec_c_type*)resultRunningMean,
-            (mio_bn_config::fp_prec_c_type*)resultRunningVariance,
+            (const mio_bn_config::fp_prec_c_type*)prevResultRunningMean,
+            (const mio_bn_config::fp_prec_c_type*)prevResultRunningVariance,
+            (mio_bn_config::fp_prec_c_type*)nextResultRunningMean,
+            (mio_bn_config::fp_prec_c_type*)nextResultRunningVariance,
             expAvgFactor,
             mean,
             variance,
