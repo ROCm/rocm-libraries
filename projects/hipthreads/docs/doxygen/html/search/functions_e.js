@@ -1,0 +1,9 @@
+var searchData=
+[
+  ['sendtogpu_222',['sendToGPU',['../structhip_1_1internal_1_1WorkNode__Header.html#a346debebdbd226fd078aeb42b58bace1',1,'hip::internal::WorkNode_Header::sendToGPU()'],['../structhip_1_1internal_1_1WorkNode__Header.html#aeaac58bc0ad9187ffb483b56a3dd6d92',1,'hip::internal::WorkNode_Header::sendToGPU(WorkNode_Header **new_location)']]],
+  ['shouldkeeppollingforwork_223',['shouldKeepPollingForWork',['../namespacehip_1_1internal.html#a25b326c5ebf3b7cefffce2275058b969',1,'hip::internal']]],
+  ['sleep_5ffor_224',['sleep_for',['../namespacehip_1_1this__thread.html#a714022eda7bee4f5434cf66aa812c7ef',1,'hip::this_thread::sleep_for(hip::std::chrono::nanoseconds __ns)'],['../namespacehip_1_1this__thread.html#a9b3fe59764a5cfc7d699a226141f88a4',1,'hip::this_thread::sleep_for(const hip::std::chrono::duration&lt; _Rep, _Period &gt; &amp;__d)']]],
+  ['spin_5fcondition_5fvariable_225',['spin_condition_variable',['../clasship_1_1spin__condition__variable.html#ae8961f0e2fcd919352d61493a3809ff2',1,'hip::spin_condition_variable::spin_condition_variable() noexcept=default'],['../clasship_1_1spin__condition__variable.html#a3be26f31edb3f08c88ee8fb09b4e8989',1,'hip::spin_condition_variable::spin_condition_variable(const spin_condition_variable &amp;)=delete']]],
+  ['spin_5fmutex_226',['spin_mutex',['../clasship_1_1spin__mutex.html#a07a45e7f78338ee90c1acf924e61eeb9',1,'hip::spin_mutex::spin_mutex()=default'],['../clasship_1_1spin__mutex.html#a2cf79952066ebda7addb20a3ce465797',1,'hip::spin_mutex::spin_mutex(const spin_mutex &amp;)=delete']]],
+  ['swap_227',['swap',['../clasship_1_1unique__lock.html#af43a119efe87f4b45d4e276221513adf',1,'hip::unique_lock::swap()'],['../clasship_1_1internal_1_1thread.html#a41d46319408bbf4ede146149ec4d0d6b',1,'hip::internal::thread::swap()'],['../namespacehip.html#a3922650e7e8142e5c55ba7dbc3592532',1,'hip::swap()'],['../namespacehip_1_1std.html#a71a5bd55bcac98e24d198c80aaffa21e',1,'hip::std::swap()']]]
+];

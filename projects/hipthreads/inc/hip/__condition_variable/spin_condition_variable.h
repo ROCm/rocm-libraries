@@ -27,6 +27,23 @@
 #ifndef __LIBHIPTHREADS___CONDITION_VARIABLE_SPIN_CONDITION_VARIABLE_H__
 #define __LIBHIPTHREADS___CONDITION_VARIABLE_SPIN_CONDITION_VARIABLE_H__
 
+/**
+ * @file
+ * @brief Specialized spinning condition variable restricted to spin_mutex.
+ * @ingroup condition_variable
+ *
+ * One of two device-side analogues of std::condition_variable (the other one being pseudo_condition_variable).
+ *
+ * Currently implemented as a thin adapter over condition_variable_any that:
+ * - Restricts waits to unique_lock<spin_mutex> (no templates exposed here).
+ * - Inlines the fast path so the compiler can optimize for a known lock type.
+ * - Retains pure spinning semantics (no blocking / sleep).
+ *
+ * Limitations:
+ * - No timed waits yet.
+ * - Busy-waits: prolonged contention wastes GPU execution resources.
+ */
+
 #include "hip/thread_config"
 
 #include "hip/hip_runtime_api.h"
@@ -37,19 +54,52 @@
 
 namespace cuda {
 
+/**
+ * @brief Spin-based condition variable bound to spin_mutex.
+ * @ingroup condition_variable
+ *
+ * Privately inherits condition_variable_any to reuse its counter logic,
+ * re-exposing notify and tailored wait overloads for unique_lock<spin_mutex>.
+ *
+ * @note Not copyable.
+ * @warning Pure spinning; avoid long waits to reduce resource burn.
+ */
 class _LIBHIPTHREADS_TYPE_VIS spin_condition_variable : private condition_variable_any {
   public:
+    /// Constructs an empty spin condition variable.
     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI _LIBHIPTHREADS_CONSTEXPR spin_condition_variable() _NOEXCEPT = default;
 
+    /// \name Deleted copy / move operations
+    /// Instances are neither copyable nor movable.
+    ///@{
     __device__ spin_condition_variable(const spin_condition_variable &) = delete;
     __device__ spin_condition_variable &operator=(const spin_condition_variable &) = delete;
+    ///@}
 
     using condition_variable_any::notify_all;
     using condition_variable_any::notify_one;
 
+    /**
+     * @brief Waits (spins) until notified.
+     *
+     * Releases the lock, spins polling the internal counters, then
+     * reacquires before returning.
+     *
+     * @param __lk Acquired unique_lock guarding the predicate.
+     */
     __device__ void wait(unique_lock<spin_mutex> &__lk) _NOEXCEPT {
         condition_variable_any::wait(__lk);
     }
+
+    /**
+     * @brief Waits until predicate returns true.
+     *
+     * Repeatedly performs wait() then rechecks __pred() under the lock.
+     *
+     * @tparam _Predicate Callable returning bool.
+     * @param __lk Acquired unique_lock.
+     * @param __pred Predicate tested after each wake/spin cycle.
+     */
     template <class _Predicate>
     __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS void wait(unique_lock<spin_mutex> &__lk, _Predicate __pred) {
         condition_variable_any::wait(__lk, __pred);

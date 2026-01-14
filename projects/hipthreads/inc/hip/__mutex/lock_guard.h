@@ -31,29 +31,72 @@
 
 #include <mutex>
 
+/**
+ * @file
+ * @brief RAII wrapper that acquires a mutex for a scope and releases on destruction.
+ * @ingroup mutex
+ *
+ * Device-side analogue of std::lock_guard. Ensures a BasicLockable mutex is
+ * locked for the lifetime of the guard object, providing exception / early
+ * return safety.
+ *
+ * Differences vs std::lock_guard:
+ * - Annotated __device__ (no host build path yet).
+ * - Same interface otherwise (default locking ctor + adopt_lock tag).
+ *
+ * Pitfall:
+ *   Avoid constructing an unnamed temporary (e.g. lock_guard<spin_mutex>{m};)
+ *   because it is destroyed immediately and provides no protection.
+ */
+
 namespace cuda {
 
 //====================================================================================================================//
 //      Adapted from libc++ ::std::lock_guard
 //====================================================================================================================//
 
+ /**
+ * @tparam _Mutex Mutex type meeting BasicLockable (lock(), unlock()).
+ * @brief Scoped non-copyable guard that owns a mutex for its lifetime.
+ * @ingroup mutex
+ * 
+ * Guarantees:
+ * - Acquires the mutex in the locking constructor.
+ * - Releases the mutex in the destructor.
+ * - Non-copyable and non-assignable to prevent multiple owners.
+ */
 template <class _Mutex>
 class _LIBHIPTHREADS_TEMPLATE_VIS _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(scoped_lockable) lock_guard {
 public:
+  /// Alias for the underlying mutex type.
   typedef _Mutex mutex_type;
 
 private:
   mutex_type& __m_;
 
 public:
+  /**
+   * @brief Locks the given mutex.
+   * @param __m Mutex to lock (must not already be locked by this thread).
+   */
   _LIBHIPTHREADS_NODISCARD_EXT __device__ _LIBHIPTHREADS_HIDE_FROM_ABI explicit lock_guard(mutex_type& __m) _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(acquire_capability(__m))
       : __m_(__m) {
     __m_.lock();
   }
 
+  /**
+   * @brief Adopts ownership of an already-locked mutex.
+   * @param __m Mutex already locked by the calling thread.
+   * @param (adopt_lock) Tag indicating adoption (no lock attempt made).
+   * @pre The calling thread holds the mutex.
+   */
   _LIBHIPTHREADS_NODISCARD_EXT __device__ _LIBHIPTHREADS_HIDE_FROM_ABI lock_guard(mutex_type& __m, ::std::adopt_lock_t)
       _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(requires_capability(__m))
       : __m_(__m) {}
+
+  /**
+   * @brief Unlocks the mutex.
+   */
   __device__ _LIBHIPTHREADS_HIDE_FROM_ABI ~lock_guard() _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(release_capability()) { __m_.unlock(); }
 
 private:

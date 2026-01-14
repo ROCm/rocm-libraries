@@ -14,6 +14,31 @@
 
 #include "hip/thread_config"
 
+/**
+ * @file
+ * @brief Lightweight GPU thread identifier type and helper I/O operator.
+ * @ingroup thread
+ *
+ * Provides cuda::__thread_id, a trivially copyable identifier for a GPU fiber
+ * produced by cuda::this_thread::get_id() and cuda::thread::get_id(). 
+ * Semantics mirror (a subset of) std::thread::id:
+ *
+ *  - Default constructed id compares equal only to other default ids.
+ *  - Value 0 is a reserved sentinel used to impose a strict weak ordering
+ *    where the sentinel is always the least element.
+ *  - Comparison operators provide total ordering (C++20: three-way comparison).
+ *  - Stream insertion operator writes a stable textual form (implementation detail).
+ *
+ * Notes:
+ *  - Underlying representation is an opaque 32-bit value; no guarantees about
+ *    reuse after a thread completes.
+ *  - Equality of ids implies they refer (or referred) to the same logical
+ *    execution context; inequality does not guarantee concurrency.
+ *  - API is in flux. It may change in the future so all fibers in the same
+ *    `hip::thread` share the same id. A "sub-ID" may be introduced instead for
+ *    identifying individual fibers.
+ */
+
 namespace cuda {
 
 class _LIBHIPTHREADS_EXPORTED_FROM_ABI __thread_id;
@@ -38,6 +63,25 @@ operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id);
 
 namespace cuda {
 
+/**
+ * @class __thread_id
+ * @brief Opaque handle identifying a logical GPU thread (work node lane).
+ * @ingroup thread
+ *
+ * Acts similarly to std::thread::id but for the hipThreads runtime. A default
+ * constructed id (value 0) represents “no thread” and is always ordered
+ * before any non‑default id. Instances are obtained via:
+ *  - cuda::this_thread::get_id()
+ *  - cuda::thread::get_id()
+ *
+ * Ordering:
+ *  - All non‑zero ids are ordered by underlying integral value.
+ *  - Zero (sentinel) < any non‑zero.
+ *
+ * Lifetime:
+ *  - An id may outlive the associated thread; equality remains valid for
+ *    comparison but does not retain resources.
+ */
 class _LIBHIPTHREADS_TEMPLATE_VIS __thread_id {
   using underlying_type = uint32_t;
   underlying_type __id_;
@@ -52,8 +96,11 @@ class _LIBHIPTHREADS_TEMPLATE_VIS __thread_id {
   }
 
 public:
+
+  /// Constructs a sentinel (non-joinable / no-thread) id (value 0).
   __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI __thread_id() _NOEXCEPT : __id_(0) {}
 
+  /// Resets this id back to the sentinel (value 0).
   __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void __reset() { __id_ = 0; }
 
   __host__ __device__ friend _LIBHIPTHREADS_HIDE_FROM_ABI bool operator==(__thread_id __x, __thread_id __y) _NOEXCEPT;
@@ -112,6 +159,13 @@ __host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI ::std::strong_ordering o
 
 } // namespace cuda
 
+/**
+ * @brief Stream insertion for cuda::__thread_id.
+ * @ingroup thread
+ *
+ * Produces a textual representation; distinct ids yield distinct text,
+ * equal ids yield identical text (except default constructed which prints 0).
+ */
 template <class _CharT, class _Traits>
 _LIBHIPTHREADS_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
 operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id) {

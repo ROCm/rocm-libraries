@@ -214,8 +214,42 @@ template<class Callable, class ...Args>
 #include "hip/__mutex/spin_mutex.h"
 #include "hip/__mutex/unique_lock.h"
 
+/**
+ * @file
+ * @brief Multi-mutex locking helpers (device-side analogues of `std::try_lock` / `std::lock`).
+ * @ingroup mutex
+ *
+ * Provides overloads of:
+ *  - try_lock(m1, m2[, ...])  : Attempts to acquire all mutexes without indefinite blocking.
+ *       Returns -1 on success (all locked) or the (0-based) index of the first mutex
+ *       that could not be locked. On failure, all successfully locked earlier mutexes
+ *       are unlocked before return.
+ *  - lock(m1, m2[, ...])      : Acquires all mutexes (spinning) using a deadlock‑avoidance
+ *       strategy that alternates starting points until success.
+ *
+ * Implementation strategy (adapted from libc++):
+ *  - try_lock variants use RAII (unique_lock) for early resources and release on failure.
+ *  - lock variants loop, attempting acquisition order permutations until all succeed.
+ *
+ * Notes:
+ *  - Intended for short critical sections (spin semantics).
+ *  - Mutex types must model BasicLockable (lock(), try_lock(), unlock()).
+ *  - Overloads with >2 locks are variadic templates; helpers (__lock_first / __unlock)
+ *    are internal.
+ */
+
 namespace cuda {
 
+/**
+ * @brief try_lock for two mutex-like objects.
+ *
+ * Attempts to lock @p __l0 (non-blocking) then @p __l1 (non-blocking).
+ * On success both are locked and -1 is returned. On failure:
+ *  - Return 0 if @p __l0 could not be locked.
+ *  - Return 1 if @p __l0 locked but @p __l1 failed (and @p __l0 is released).
+ *
+ * @return int Index of the first mutex that failed, or -1 if all locked.
+ */
 template <class _L0, class _L1>
 __device__ _LIBHIPTHREADS_HIDE_FROM_ABI int
 try_lock(_L0& __l0, _L1& __l1)
@@ -236,6 +270,14 @@ try_lock(_L0& __l0, _L1& __l1)
 
 #ifndef _LIBHIPTHREADS_CXX03_LANG
 
+/**
+ * @brief try_lock for N >= 3 mutex-like objects.
+ *
+ * Attempts to lock the first mutex then recursively tries the remainder.
+ * On failure the already-locked subset is released (strong exception / failure safety).
+ *
+ * @return int Index (0-based) of first mutex that failed, or -1 if all locked.
+ */
 template <class _L0, class _L1, class _L2, class... _L3>
 __device__ _LIBHIPTHREADS_HIDE_FROM_ABI int
 try_lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3)
@@ -255,6 +297,12 @@ try_lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3)
 
 #endif // _LIBHIPTHREADS_CXX03_LANG
 
+/**
+ * @brief lock for two mutex-like objects (deadlock avoidance).
+ *
+ * Repeatedly attempts to acquire both without holding them simultaneously on failure,
+ * alternating acquisition order until both succeed.
+ */
 template <class _L0, class _L1>
 __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void
 lock(_L0& __l0, _L1& __l1)
@@ -284,6 +332,11 @@ lock(_L0& __l0, _L1& __l1)
 
 #ifndef _LIBHIPTHREADS_CXX03_LANG
 
+/**
+ * @internal
+ * @brief Recursive helper that acquires all mutexes using a rotating start index.
+ * @param __i Starting index permutation.
+ */
 template <class _L0, class _L1, class _L2, class ..._L3>
 __device__ void
 __lock_first(int __i, _L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
@@ -328,6 +381,14 @@ __lock_first(int __i, _L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
     }
 }
 
+/**
+ * @brief lock for N >= 3 mutex-like objects.
+ *
+ * Employs permutation / rotation strategy to avoid classic deadlock when multiple
+ * threads attempt to lock the same set in different orders.
+ *
+ * Spins until all locks are held.
+ */
 template <class _L0, class _L1, class _L2, class ..._L3>
 __device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void
@@ -336,12 +397,20 @@ lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
     hip::__lock_first(0, __l0, __l1, __l2, __l3...);
 }
 
+/**
+ * @internal
+ * @brief Unlock helper (single).
+ */
 template <class _L0>
 __device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void __unlock(_L0& __l0) {
     __l0.unlock();
 }
 
+/**
+ * @internal
+ * @brief Unlock helper (two).
+ */
 template <class _L0, class _L1>
 __device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void __unlock(_L0& __l0, _L1& __l1) {
@@ -349,6 +418,10 @@ void __unlock(_L0& __l0, _L1& __l1) {
     __l1.unlock();
 }
 
+/**
+ * @internal
+ * @brief Variadic unlock helper (N >= 3).
+ */
 template <class _L0, class _L1, class _L2, class ..._L3>
 __device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void __unlock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3) {

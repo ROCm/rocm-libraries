@@ -27,15 +27,56 @@
 #ifndef __LIBHIPTHREADS___THREAD_THIS_THREAD_H__
 #define __LIBHIPTHREADS___THREAD_THIS_THREAD_H__
 
+/**
+ * @file
+ * @brief Utilities operating on the calling (current) GPU thread context.
+ * @ingroup thread
+ *
+ * Facilities mirror a subset of `std::this_thread` adapted for HIP GPU
+ * execution plus CUDA/HIP–specific helpers:
+ *
+ *  - sleep_for(duration): Busy / pseudo blocking wait for at least the
+ *    specified duration (device/host variants routed through scheduler).
+ *  - pseudo_yield(): Cooperative hint allowing other GPU work to progress.
+ *  - get_width(): Returns logical participation width for the current
+ *    work node (number of active lanes in this logical thread group).
+ *  - get_fiber_id(): Internal / diagnostic identifier for the current
+ *    fiber / lane (stable only within the lifetime of the work node).
+ *
+ * Notes:
+ *  - Durations use cuda::std::chrono types (distinct from ::std).
+ *  - pseudo_yield() allows the scheduler to switch to other ready work, but
+ *    provides no guarantees about which thread runs next, when the yielding
+ *    thread resumes, or scheduling fairness. Additionally, the yielding thread
+ *    cannot resume until the yieldee completes, which can cause deadlock in
+ *    yield-loop scenarios (see pseudo_mutex documentation).
+ *  - Width may be < warp size when a thread was launched with an
+ *    explicit width parameter.
+ */
+
 #include <hip/std/chrono>
 
 namespace cuda {
 
 namespace this_thread {
 
+/**
+ * @brief Sleep (busy / scheduler mediated) for at least @p __ns.
+ * @param __ns Duration in nanoseconds (cuda::std::chrono).
+ *
+ * May spin or cooperatively yield internally; precision not guaranteed.
+ */
 _LIBHIPTHREADS_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns);
 
 // TODO: Should we also provide an implementation that accepts ::std::chrono::duration (and not just cuda::std::chrono::duration)?
+/**
+ * @brief Templated convenience overload forwarding to nanosecond sleep.
+ * @tparam _Rep Rep type.
+ * @tparam _Period Period ratio.
+ * @param __d Duration to sleep (negative or zero -> no-op).
+ *
+ * Rounds up to the next nanosecond if needed; clamps at nanoseconds::max().
+ */
 template <class _Rep, class _Period>
 __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void sleep_for(const cuda::std::chrono::duration<_Rep, _Period>& __d) {
   if (__d > cuda::std::chrono::duration<_Rep, _Period>::zero()) {
@@ -54,8 +95,27 @@ __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void sleep_for(const cuda::std:
   }
 }
 
+/**
+ * @brief Cooperative yield hint.
+ *
+ * Allows scheduler / runtime to switch to other ready work. No ordering
+ * or fairness guarantee.
+ */
 __device__ void pseudo_yield();
+
+/**
+ * @brief Returns logical width (active lanes) of current work node.
+ * @return Number of lanes participating (>=1).
+ */
 __device__ unsigned int get_width() noexcept;
+
+/**
+ * @brief Returns the current fiber's unique identifier within this thread.
+ * @return Zero-based fiber index, stable within the lifetime of the work unit.
+ *
+ * Commonly used for loop indexing and work distribution across fibers.
+ * Example: `for (uint32_t i = get_fiber_id(); i < n; i += get_width())`
+ */
 __device__ unsigned int get_fiber_id() noexcept;
 
 } // namespace this_thread
