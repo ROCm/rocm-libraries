@@ -166,7 +166,6 @@ table IntConstraint {
 table FloatConstraint {
     min_value: float64;
     max_value: float64;
-    valid_values: [float64];      // Optional: explicit list
 }
 
 table StringConstraint {
