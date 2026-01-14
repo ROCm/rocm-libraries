@@ -5,6 +5,7 @@
 #include <HipdnnBackendHeuristicType.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
@@ -108,9 +109,10 @@ typedef BuildPlanPolicy BuildPlanPolicy_t; // NOLINT(readability-identifier-nami
 
 enum class KnobValueType
 {
-    INT64,
-    FLOAT64,
-    STRING,
+    NOT_SET = 0,
+    INT64 = 1,
+    FLOAT64 = 2,
+    STRING = 3,
 };
 typedef KnobValueType KnobValueType_t; // NOLINT(readability-identifier-naming)
 
@@ -505,6 +507,37 @@ inline const char* to_string(const HeuristicMode& mode)
 inline std::ostream& operator<<(std::ostream& os, const HeuristicMode& mode)
 {
     return os << to_string(mode);
+}
+
+inline hipdnn_data_sdk::data_objects::KnobValue toSdkType(const KnobValueType& type)
+{
+    switch(type)
+    {
+    case KnobValueType::INT64:
+        return hipdnn_data_sdk::data_objects::KnobValue::IntValue;
+    case KnobValueType::FLOAT64:
+        return hipdnn_data_sdk::data_objects::KnobValue::FloatValue;
+    case KnobValueType::STRING:
+        return hipdnn_data_sdk::data_objects::KnobValue::StringValue;
+    default:
+        return hipdnn_data_sdk::data_objects::KnobValue::NONE;
+    }
+}
+
+inline hipdnn_frontend::KnobValueType
+    fromSdkType(const hipdnn_data_sdk::data_objects::KnobValue& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+        return hipdnn_frontend::KnobValueType::INT64;
+    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+        return hipdnn_frontend::KnobValueType::FLOAT64;
+    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+        return hipdnn_frontend::KnobValueType::STRING;
+    default:
+        return hipdnn_frontend::KnobValueType::NOT_SET;
+    }
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)

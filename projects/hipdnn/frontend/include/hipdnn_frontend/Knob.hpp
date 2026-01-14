@@ -6,6 +6,8 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 #include <algorithm>
@@ -22,11 +24,19 @@
 namespace hipdnn_frontend
 {
 
+#define KNOB_TYPES int64_t, double, std::string
+
 // Type alias for knob IDs
 typedef int64_t KnobType_t; // NOLINT(readability-identifier-naming)
 
-// Forward declarations
-class KnobSetting;
+// Abstract knob interface
+class IKnob
+{
+public:
+    virtual ~IKnob() = default;
+
+    virtual const std::variant<KNOB_TYPES>& getChoice() const = 0;
+};
 
 // Abstract constraint interface
 class IConstraint
@@ -35,7 +45,7 @@ public:
     virtual ~IConstraint() = default;
 
     // Validate a knob setting against this constraint
-    virtual Error validateKnobChoice(const Knob& knob) const = 0;
+    virtual Error validateKnobChoice(const IKnob& knob) const = 0;
 
     // String representation for logging
     virtual std::string toString() const = 0;
@@ -56,7 +66,57 @@ public:
     {
     }
 
-    Error validateKnobChoice(const Knob& knob) const override;
+    Error validateKnobChoice(const IKnob& knob) const override
+    {
+        auto value = std::get_if<int64_t>(&knob.getChoice());
+        if(value == nullptr)
+        {
+            return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain an integer value"};
+        }
+
+        int64_t val = *value;
+
+        // If explicit valid values are specified, check against them
+        if(!_validValues.empty())
+        {
+            if(_validValues.count(val) == 0)
+            {
+                std::ostringstream oss;
+                oss << "Value " << val << " is not in the list of valid values: [";
+                bool first = true;
+                for(const auto& validVal : _validValues)
+                {
+                    if(!first)
+                    {
+                        oss << ", ";
+                    }
+                    oss << validVal;
+                    first = false;
+                }
+                oss << "]";
+                return {ErrorCode::INVALID_VALUE, oss.str()};
+            }
+            return {ErrorCode::OK, ""};
+        }
+
+        // Otherwise check min/max/step
+        if(val < _minValue || val > _maxValue)
+        {
+            std::ostringstream oss;
+            oss << "Value " << val << " is out of range [" << _minValue << ", " << _maxValue << "]";
+            return {ErrorCode::INVALID_VALUE, oss.str()};
+        }
+
+        if(_step > 1 && ((val - _minValue) % _step) != 0)
+        {
+            std::ostringstream oss;
+            oss << "Value " << val << " does not satisfy step constraint (step=" << _step
+                << ", min=" << _minValue << ")";
+            return {ErrorCode::INVALID_VALUE, oss.str()};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
 
     std::string toString() const override
     {
@@ -107,7 +167,25 @@ public:
     {
     }
 
-    Error validateKnobChoice(const Knob& knob) const override;
+    Error validateKnobChoice(const IKnob& knob) const override
+    {
+        auto value = std::get_if<double>(&knob.getChoice());
+        if(value == nullptr)
+        {
+            return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a float value"};
+        }
+
+        double val = *value;
+
+        if(val < _minValue || val > _maxValue)
+        {
+            std::ostringstream oss;
+            oss << "Value " << val << " is out of range [" << _minValue << ", " << _maxValue << "]";
+            return {ErrorCode::INVALID_VALUE, oss.str()};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
 
     std::string toString() const override
     {
@@ -140,7 +218,49 @@ public:
     {
     }
 
-    Error validateKnobChoice(const Knob& knob) const override;
+    Error validateKnobChoice(const IKnob& knob) const override
+    {
+        auto value = std::get_if<std::string>(&knob.getChoice());
+        if(value == nullptr)
+        {
+            return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a string value"};
+        }
+
+        const std::string& val = *value;
+
+        // If explicit valid values are specified, check against them
+        if(!_validValues.empty())
+        {
+            if(_validValues.count(val) == 0)
+            {
+                std::ostringstream oss;
+                oss << "Value \"" << val << "\" is not in the list of valid values: [";
+                bool first = true;
+                for(const auto& validVal : _validValues)
+                {
+                    if(!first)
+                    {
+                        oss << ", ";
+                    }
+                    oss << "\"" << validVal << "\"";
+                    first = false;
+                }
+                oss << "]";
+                return {ErrorCode::INVALID_VALUE, oss.str()};
+            }
+            return {ErrorCode::OK, ""};
+        }
+
+        // Otherwise check max length
+        if(static_cast<int32_t>(val.length()) > _maxLength)
+        {
+            std::ostringstream oss;
+            oss << "String length " << val.length() << " exceeds maximum length " << _maxLength;
+            return {ErrorCode::INVALID_VALUE, oss.str()};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
 
     std::string toString() const override
     {
@@ -150,16 +270,9 @@ public:
         {
             std::vector<std::string> sortedValues(_validValues.begin(), _validValues.end());
             std::sort(sortedValues.begin(), sortedValues.end());
-            oss << ", validValues=[";
-            for(size_t i = 0; i < sortedValues.size(); ++i)
-            {
-                if(i > 0)
-                {
-                    oss << ", ";
-                }
-                oss << "\"" << sortedValues[i] << "\"";
-            }
-            oss << "]";
+            oss << ", validValues=";
+
+            hipdnn_data_sdk::utilities::stringVecToStream(oss, sortedValues);
         }
         oss << "}";
         return oss.str();
@@ -180,12 +293,100 @@ private:
 };
 
 // Knob information class - describes available knobs for an engine
-class Knob
+class Knob : public IKnob
 {
 public:
     // Factory function to create from flatbuffer
-    // TODO: Implement once flatbuffer schemas are available
-    // static Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob);
+    static Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob)
+    {
+        if(fbKnob == nullptr)
+        {
+            throw std::invalid_argument("Null flatbuffer Knob pointer");
+        }
+
+        // Extract default value based on type
+        std::variant<KNOB_TYPES> defaultValue;
+        switch(fbKnob->default_value_type())
+        {
+        case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+        {
+            auto intVal = fbKnob->default_value_as_IntValue();
+            defaultValue = intVal != nullptr ? intVal->value() : 0;
+            break;
+        }
+        case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+        {
+            auto floatVal = fbKnob->default_value_as_FloatValue();
+            defaultValue = floatVal != nullptr ? floatVal->value() : 0.0;
+            break;
+        }
+        case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+        {
+            auto stringVal = fbKnob->default_value_as_StringValue();
+            defaultValue = stringVal != nullptr && stringVal->value() != nullptr
+                               ? stringVal->value()->str()
+                               : std::string("");
+            break;
+        }
+        default:
+            throw std::invalid_argument("Unknown knob value type");
+        }
+
+        // Create the knob
+        Knob knob(fbKnob->knob_id_str() != nullptr ? fbKnob->knob_id_str()->str() : "",
+                  fbKnob->description() != nullptr ? fbKnob->description()->str() : "",
+                  defaultValue,
+                  fbKnob->deprecated());
+
+        // Set constraint if present
+        switch(fbKnob->constraints_type())
+        {
+        case hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:
+        {
+            auto fbConstraint = fbKnob->constraints_as_IntConstraint();
+            if(fbConstraint != nullptr)
+            {
+                std::unordered_set<int64_t> validValues
+                    = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdUnorderedSet(
+                        fbConstraint->valid_values());
+
+                knob._constraint = std::make_unique<IntConstraint>(fbConstraint->min_value(),
+                                                                   fbConstraint->max_value(),
+                                                                   fbConstraint->step(),
+                                                                   std::move(validValues));
+            }
+            break;
+        }
+        case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
+        {
+            auto fbConstraint = fbKnob->constraints_as_FloatConstraint();
+            if(fbConstraint != nullptr)
+            {
+                knob._constraint = std::make_unique<FloatConstraint>(fbConstraint->min_value(),
+                                                                     fbConstraint->max_value());
+            }
+            break;
+        }
+        case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
+        {
+            auto fbConstraint = fbKnob->constraints_as_StringConstraint();
+            if(fbConstraint != nullptr)
+            {
+                std::unordered_set<std::string> validValues
+                    = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdUnorderedSet(
+                        fbConstraint->valid_values());
+                knob._constraint = std::make_unique<StringConstraint>(fbConstraint->max_length(),
+                                                                      std::move(validValues));
+            }
+            break;
+        }
+        default:
+            // No constraint
+            break;
+        }
+
+        return knob;
+    }
 
     // Accessors
     int64_t getKnobId() const
@@ -213,30 +414,20 @@ public:
         return getKnobValueTypeFromVariant(_defaultValue);
     }
 
-    template <typename T>
-    std::optional<T> getDefaultValue() const
+    const std::variant<KNOB_TYPES>& getDefaultValue() const
     {
-        if(auto* val = std::get_if<T>(&_defaultValue))
-        {
-            return *val;
-        }
-        return std::nullopt;
+        return _defaultValue;
     }
 
     template <typename T>
-    void setChoice(T value)
+    void setChoice(const T& value)
     {
         _choice = value;
     }
 
-    template <typename T>
-    std::optional<T> getChoice() const
+    const std::variant<KNOB_TYPES>& getChoice() const override
     {
-        if(auto* val = std::get_if<T>(&_choice))
-        {
-            return *val;
-        }
-        return std::nullopt;
+        return _choice;
     }
 
     // Get constraint
@@ -296,7 +487,7 @@ private:
     // Private constructor - use factory function to create instances
     Knob(std::string knobIdStr,
          std::string description,
-         std::variant<int64_t, double, std::string> defaultValue,
+         std::variant<KNOB_TYPES> defaultValue,
          bool deprecated)
         : _knobIdStr(std::move(knobIdStr))
         , _knobId(makeKnobId(_knobIdStr))
@@ -306,8 +497,7 @@ private:
     {
     }
 
-    void variantToStream(std::ostringstream& oss,
-                         const std::variant<int64_t, double, std::string>& variant) const
+    static void variantToStream(std::ostringstream& oss, const std::variant<KNOB_TYPES>& variant)
     {
         std::visit(
             [&oss](auto&& value) {
@@ -326,137 +516,16 @@ private:
     std::string _knobIdStr;
     int64_t _knobId;
     std::string _description;
-    std::variant<int64_t, double, std::string> _defaultValue;
-    std::variant<int64_t, double, std::string> _choice;
+    std::variant<KNOB_TYPES> _defaultValue;
+    std::variant<KNOB_TYPES> _choice;
     bool _deprecated;
 
     // Constraint (polymorphic)
     std::unique_ptr<IConstraint> _constraint;
 
     // Allow factory function access to private members
-    // TODO: Uncomment when implementing factory
     // friend Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob);
-
-    // Allow test helper to create Knob instances for testing
-    friend class KnobTestHelper;
 };
-
-// Constraint validation implementations (defined after KnobSetting is complete)
-inline Error IntConstraint::validateKnobChoice(const Knob& knob) const
-{
-    auto value = knob.getChoice<int64_t>();
-    if(!value.has_value())
-    {
-        return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain an integer value"};
-    }
-
-    int64_t val = value.value();
-
-    // If explicit valid values are specified, check against them
-    if(!_validValues.empty())
-    {
-        if(_validValues.count(val) == 0)
-        {
-            std::ostringstream oss;
-            oss << "Value " << val << " is not in the list of valid values: [";
-            bool first = true;
-            for(const auto& validVal : _validValues)
-            {
-                if(!first)
-                {
-                    oss << ", ";
-                }
-                oss << validVal;
-                first = false;
-            }
-            oss << "]";
-            return {ErrorCode::INVALID_VALUE, oss.str()};
-        }
-        return {ErrorCode::OK, ""};
-    }
-
-    // Otherwise check min/max/step
-    if(val < _minValue || val > _maxValue)
-    {
-        std::ostringstream oss;
-        oss << "Value " << val << " is out of range [" << _minValue << ", " << _maxValue << "]";
-        return {ErrorCode::INVALID_VALUE, oss.str()};
-    }
-
-    if(_step > 1 && ((val - _minValue) % _step) != 0)
-    {
-        std::ostringstream oss;
-        oss << "Value " << val << " does not satisfy step constraint (step=" << _step
-            << ", min=" << _minValue << ")";
-        return {ErrorCode::INVALID_VALUE, oss.str()};
-    }
-
-    return {ErrorCode::OK, ""};
-}
-
-inline Error FloatConstraint::validateKnobChoice(const Knob& knob) const
-{
-    auto value = knob.getChoice<double>();
-    if(!value.has_value())
-    {
-        return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a float value"};
-    }
-
-    double val = value.value();
-
-    if(val < _minValue || val > _maxValue)
-    {
-        std::ostringstream oss;
-        oss << "Value " << val << " is out of range [" << _minValue << ", " << _maxValue << "]";
-        return {ErrorCode::INVALID_VALUE, oss.str()};
-    }
-
-    return {ErrorCode::OK, ""};
-}
-
-inline Error StringConstraint::validateKnobChoice(const Knob& knob) const
-{
-    auto value = knob.getChoice<std::string>();
-    if(!value.has_value())
-    {
-        return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a string value"};
-    }
-
-    const std::string& val = value.value();
-
-    // If explicit valid values are specified, check against them
-    if(!_validValues.empty())
-    {
-        if(_validValues.count(val) == 0)
-        {
-            std::ostringstream oss;
-            oss << "Value \"" << val << "\" is not in the list of valid values: [";
-            bool first = true;
-            for(const auto& validVal : _validValues)
-            {
-                if(!first)
-                {
-                    oss << ", ";
-                }
-                oss << "\"" << validVal << "\"";
-                first = false;
-            }
-            oss << "]";
-            return {ErrorCode::INVALID_VALUE, oss.str()};
-        }
-        return {ErrorCode::OK, ""};
-    }
-
-    // Otherwise check max length
-    if(static_cast<int32_t>(val.length()) > _maxLength)
-    {
-        std::ostringstream oss;
-        oss << "String length " << val.length() << " exceeds maximum length " << _maxLength;
-        return {ErrorCode::INVALID_VALUE, oss.str()};
-    }
-
-    return {ErrorCode::OK, ""};
-}
 
 } // namespace hipdnn_frontend
 

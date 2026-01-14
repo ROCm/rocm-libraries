@@ -180,3 +180,39 @@ TEST(TestTypes, GetKnobValueTypeFromVariantString)
     std::variant<int64_t, double, std::string> value = std::string("test");
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::STRING);
 }
+
+TEST(TestTypes, ToSdkTypeKnobValueType)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toSdkType(KnobValueType::INT64), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    EXPECT_EQ(toSdkType(KnobValueType::FLOAT64),
+              hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
+    EXPECT_EQ(toSdkType(KnobValueType::STRING),
+              hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    EXPECT_EQ(toSdkType(KnobValueType::NOT_SET), hipdnn_data_sdk::data_objects::KnobValue::NONE);
+}
+
+TEST(TestTypes, FromSdkTypeKnobValue)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::IntValue),
+              KnobValueType::INT64);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::FloatValue),
+              KnobValueType::FLOAT64);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::StringValue),
+              KnobValueType::STRING);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::NONE), KnobValueType::NOT_SET);
+}
+
+TEST(TestTypes, KnobValueTypeRoundTripConversion)
+{
+    using namespace hipdnn_frontend;
+
+    // Test round-trip conversion: frontend -> SDK -> frontend
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::INT64)), KnobValueType::INT64);
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::FLOAT64)), KnobValueType::FLOAT64);
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::STRING)), KnobValueType::STRING);
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::NOT_SET)), KnobValueType::NOT_SET);
+}

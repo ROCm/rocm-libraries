@@ -5,46 +5,128 @@
 #include <hipdnn_frontend/Knob.hpp>
 
 using namespace hipdnn_frontend;
+namespace fb = hipdnn_data_sdk::data_objects;
 
-// Test helper class to create Knob instances since constructor is private
-class KnobTestHelper
+// Helper functions to create flatbuffer Knob objects for testing
+namespace
 {
-public:
-    static Knob createIntKnob(const std::string& knobIdStr,
-                              const std::string& description,
-                              int64_t defaultValue,
-                              bool deprecated = false)
+
+flatbuffers::DetachedBuffer createIntKnobFlatbuffer(const std::string& knobIdStr,
+                                                    const std::string& description,
+                                                    int64_t defaultValue,
+                                                    bool deprecated = false,
+                                                    const fb::IntConstraintT* constraint = nullptr)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    auto knobIdStrOffset = builder.CreateString(knobIdStr);
+    auto descriptionOffset = builder.CreateString(description);
+
+    auto defaultValueOffset = fb::CreateIntValue(builder, defaultValue);
+
+    flatbuffers::Offset<void> constraintOffset = 0;
+    fb::KnobConstraint constraintType = fb::KnobConstraint::NONE;
+
+    if(constraint != nullptr)
     {
-        return Knob(knobIdStr, description, defaultValue, deprecated);
+        constraintOffset = fb::CreateIntConstraint(builder, constraint).Union();
+        constraintType = fb::KnobConstraint::IntConstraint;
     }
 
-    static Knob createFloatKnob(const std::string& knobIdStr,
-                                const std::string& description,
-                                double defaultValue,
-                                bool deprecated = false)
+    auto knobOffset = fb::CreateKnob(builder,
+                                     hipdnn_frontend::Knob::makeKnobId(knobIdStr),
+                                     knobIdStrOffset,
+                                     descriptionOffset,
+                                     fb::KnobValue::IntValue,
+                                     defaultValueOffset.Union(),
+                                     fb::KnobValue::IntValue,
+                                     defaultValueOffset.Union(),
+                                     constraintType,
+                                     constraintOffset,
+                                     deprecated);
+
+    builder.Finish(knobOffset);
+    return builder.Release();
+}
+
+flatbuffers::DetachedBuffer createFloatKnobFlatbuffer(const std::string& knobIdStr,
+                                                      const std::string& description,
+                                                      double defaultValue,
+                                                      bool deprecated = false,
+                                                      const fb::FloatConstraintT* constraint
+                                                      = nullptr)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    auto knobIdStrOffset = builder.CreateString(knobIdStr);
+    auto descriptionOffset = builder.CreateString(description);
+
+    auto defaultValueOffset = fb::CreateFloatValue(builder, defaultValue);
+
+    flatbuffers::Offset<void> constraintOffset = 0;
+    fb::KnobConstraint constraintType = fb::KnobConstraint::NONE;
+
+    if(constraint != nullptr)
     {
-        return Knob(knobIdStr, description, defaultValue, deprecated);
+        constraintOffset = fb::CreateFloatConstraint(builder, constraint).Union();
+        constraintType = fb::KnobConstraint::FloatConstraint;
     }
 
-    static Knob createStringKnob(const std::string& knobIdStr,
-                                 const std::string& description,
-                                 const std::string& defaultValue,
-                                 bool deprecated = false)
+    auto knobOffset = fb::CreateKnob(builder,
+                                     hipdnn_frontend::Knob::makeKnobId(knobIdStr),
+                                     knobIdStrOffset,
+                                     descriptionOffset,
+                                     fb::KnobValue::FloatValue,
+                                     defaultValueOffset.Union(),
+                                     fb::KnobValue::FloatValue,
+                                     defaultValueOffset.Union(),
+                                     constraintType,
+                                     constraintOffset,
+                                     deprecated);
+
+    builder.Finish(knobOffset);
+    return builder.Release();
+}
+
+flatbuffers::DetachedBuffer createStringKnobFlatbuffer(const std::string& knobIdStr,
+                                                       const std::string& description,
+                                                       const std::string& defaultValue,
+                                                       bool deprecated = false,
+                                                       const fb::StringConstraintT* constraint
+                                                       = nullptr)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    auto knobIdStrOffset = builder.CreateString(knobIdStr);
+    auto descriptionOffset = builder.CreateString(description);
+    auto defaultValueOffset = fb::CreateStringValueDirect(builder, defaultValue.c_str());
+
+    flatbuffers::Offset<void> constraintOffset = 0;
+    fb::KnobConstraint constraintType = fb::KnobConstraint::NONE;
+
+    if(constraint != nullptr)
     {
-        return Knob(knobIdStr, description, defaultValue, deprecated);
+        constraintOffset = fb::CreateStringConstraint(builder, constraint).Union();
+        constraintType = fb::KnobConstraint::StringConstraint;
     }
 
-    // Helper to set constraint on a knob (requires friend access or reflection)
-    template <typename ConstraintType>
-    static void setConstraint(Knob& knob, std::unique_ptr<ConstraintType> constraint)
-    {
-        // This would require friend access to Knob's _constraint member
-        // For now, we'll test knobs without constraints in most cases
-        // and rely on integration tests for constraint validation
-        (void)knob;
-        (void)constraint;
-    }
-};
+    auto knobOffset = fb::CreateKnob(builder,
+                                     hipdnn_frontend::Knob::makeKnobId(knobIdStr),
+                                     knobIdStrOffset,
+                                     descriptionOffset,
+                                     fb::KnobValue::StringValue,
+                                     defaultValueOffset.Union(),
+                                     fb::KnobValue::StringValue,
+                                     defaultValueOffset.Union(),
+                                     constraintType,
+                                     constraintOffset,
+                                     deprecated);
+
+    builder.Finish(knobOffset);
+    return builder.Release();
+}
+
+} // anonymous namespace
 
 // ============================================================================
 // Basic Knob Creation and Accessors Tests
@@ -52,58 +134,74 @@ public:
 
 TEST(TestKnob, CreateIntKnob)
 {
-    auto knob = KnobTestHelper::createIntKnob("test_int_knob", "Test integer knob", 42);
+    auto buffer = createIntKnobFlatbuffer("test_int_knob", "Test integer knob", 42);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     EXPECT_EQ(knob.getKnobIdStr(), "test_int_knob");
     EXPECT_EQ(knob.getDescription(), "Test integer knob");
     EXPECT_EQ(knob.getValueType(), KnobValueType::INT64);
     EXPECT_FALSE(knob.isDeprecated());
 
-    auto defaultValue = knob.getDefaultValue<int64_t>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), 42);
+    auto defaultValue = std::get_if<int64_t>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, 42);
 }
 
 TEST(TestKnob, CreateFloatKnob)
 {
-    auto knob = KnobTestHelper::createFloatKnob("test_float_knob", "Test float knob", 3.14);
+    auto buffer = createFloatKnobFlatbuffer("test_float_knob", "Test float knob", 3.14);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     EXPECT_EQ(knob.getKnobIdStr(), "test_float_knob");
     EXPECT_EQ(knob.getDescription(), "Test float knob");
     EXPECT_EQ(knob.getValueType(), KnobValueType::FLOAT64);
     EXPECT_FALSE(knob.isDeprecated());
 
-    auto defaultValue = knob.getDefaultValue<double>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_DOUBLE_EQ(defaultValue.value(), 3.14);
+    auto defaultValue = std::get_if<double>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_DOUBLE_EQ(*defaultValue, 3.14);
 }
 
 TEST(TestKnob, CreateStringKnob)
 {
-    auto knob = KnobTestHelper::createStringKnob("test_string_knob", "Test string knob", "default");
+    auto buffer = createStringKnobFlatbuffer("test_string_knob", "Test string knob", "default");
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     EXPECT_EQ(knob.getKnobIdStr(), "test_string_knob");
     EXPECT_EQ(knob.getDescription(), "Test string knob");
     EXPECT_EQ(knob.getValueType(), KnobValueType::STRING);
     EXPECT_FALSE(knob.isDeprecated());
 
-    auto defaultValue = knob.getDefaultValue<std::string>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), "default");
+    auto defaultValue = std::get_if<std::string>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, "default");
 }
 
 TEST(TestKnob, CreateDeprecatedKnob)
 {
-    auto knob = KnobTestHelper::createIntKnob("deprecated_knob", "Deprecated knob", 0, true);
+    auto buffer = createIntKnobFlatbuffer("deprecated_knob", "Deprecated knob", 0, true);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     EXPECT_TRUE(knob.isDeprecated());
 }
 
 TEST(TestKnob, KnobIdGeneration)
 {
-    auto knob1 = KnobTestHelper::createIntKnob("knob_a", "First knob", 1);
-    auto knob2 = KnobTestHelper::createIntKnob("knob_b", "Second knob", 2);
-    auto knob3 = KnobTestHelper::createIntKnob("knob_a", "Duplicate ID", 3);
+    auto buffer1 = createIntKnobFlatbuffer("knob_a", "First knob", 1);
+    auto fbKnob1 = flatbuffers::GetRoot<fb::Knob>(buffer1.data());
+    auto knob1 = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob1);
+
+    auto buffer2 = createIntKnobFlatbuffer("knob_b", "Second knob", 2);
+    auto fbKnob2 = flatbuffers::GetRoot<fb::Knob>(buffer2.data());
+    auto knob2 = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob2);
+
+    auto buffer3 = createIntKnobFlatbuffer("knob_a", "Duplicate ID", 3);
+    auto fbKnob3 = flatbuffers::GetRoot<fb::Knob>(buffer3.data());
+    auto knob3 = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob3);
 
     // Different string IDs should produce different numeric IDs
     EXPECT_NE(knob1.getKnobId(), knob2.getKnobId());
@@ -118,84 +216,91 @@ TEST(TestKnob, KnobIdGeneration)
 
 TEST(TestKnob, SetAndGetIntChoice)
 {
-    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 10);
-
-    // Initially, choice should not be set
-    auto initialChoice = knob.getChoice<int64_t>();
-    EXPECT_FALSE(initialChoice.has_value());
+    auto buffer = createIntKnobFlatbuffer("int_knob", "Integer knob", 10);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     // Set a choice
     knob.setChoice<int64_t>(42);
 
     // Get the choice back
-    auto choice = knob.getChoice<int64_t>();
-    ASSERT_TRUE(choice.has_value());
-    EXPECT_EQ(choice.value(), 42);
+    auto choice = std::get_if<int64_t>(&knob.getChoice());
+    ASSERT_NE(choice, nullptr);
+    EXPECT_EQ(*choice, 42);
 
     // Default value should remain unchanged
-    auto defaultValue = knob.getDefaultValue<int64_t>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), 10);
+    auto defaultValue = std::get_if<int64_t>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, 10);
 }
 
 TEST(TestKnob, SetAndGetFloatChoice)
 {
-    auto knob = KnobTestHelper::createFloatKnob("float_knob", "Float knob", 1.0);
+    auto buffer = createFloatKnobFlatbuffer("float_knob", "Float knob", 1.0);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     knob.setChoice<double>(2.718);
 
-    auto choice = knob.getChoice<double>();
-    ASSERT_TRUE(choice.has_value());
-    EXPECT_DOUBLE_EQ(choice.value(), 2.718);
+    auto choice = std::get_if<double>(&knob.getChoice());
+    ASSERT_NE(choice, nullptr);
+    EXPECT_DOUBLE_EQ(*choice, 2.718);
 }
 
 TEST(TestKnob, SetAndGetStringChoice)
 {
-    auto knob = KnobTestHelper::createStringKnob("string_knob", "String knob", "default");
+    auto buffer = createStringKnobFlatbuffer("string_knob", "String knob", "default");
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     knob.setChoice<std::string>("custom_value");
 
-    auto choice = knob.getChoice<std::string>();
-    ASSERT_TRUE(choice.has_value());
-    EXPECT_EQ(choice.value(), "custom_value");
+    auto choice = std::get_if<std::string>(&knob.getChoice());
+    ASSERT_NE(choice, nullptr);
+    EXPECT_EQ(*choice, "custom_value");
 }
 
 TEST(TestKnob, GetChoiceWrongType)
 {
-    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 10);
+    auto buffer = createIntKnobFlatbuffer("int_knob", "Integer knob", 10);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
     knob.setChoice<int64_t>(42);
 
     // Try to get as wrong type
-    auto wrongChoice = knob.getChoice<double>();
-    EXPECT_FALSE(wrongChoice.has_value());
+    auto wrongChoice = std::get_if<double>(&knob.getChoice());
+    EXPECT_EQ(wrongChoice, nullptr);
 
-    auto stringChoice = knob.getChoice<std::string>();
-    EXPECT_FALSE(stringChoice.has_value());
+    auto stringChoice = std::get_if<std::string>(&knob.getChoice());
+    EXPECT_EQ(stringChoice, nullptr);
 }
 
 TEST(TestKnob, UpdateChoice)
 {
-    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 10);
+    auto buffer = createIntKnobFlatbuffer("int_knob", "Integer knob", 10);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     knob.setChoice<int64_t>(42);
-    auto choice1 = knob.getChoice<int64_t>();
-    ASSERT_TRUE(choice1.has_value());
-    EXPECT_EQ(choice1.value(), 42);
+    auto choice1 = std::get_if<int64_t>(&knob.getChoice());
+    ASSERT_NE(choice1, nullptr);
+    EXPECT_EQ(*choice1, 42);
 
     // Update the choice
     knob.setChoice<int64_t>(100);
-    auto choice2 = knob.getChoice<int64_t>();
-    ASSERT_TRUE(choice2.has_value());
-    EXPECT_EQ(choice2.value(), 100);
+    auto choice2 = std::get_if<int64_t>(&knob.getChoice());
+    ASSERT_NE(choice2, nullptr);
+    EXPECT_EQ(*choice2, 100);
 }
 
 // ============================================================================
 // Constraint Tests
 // ============================================================================
 
-TEST(TestIntConstraint, ConstraintToString)
+TEST(TestKnobIntConstraint, ConstraintToString)
 {
-    IntConstraint constraint(0, 100, 1);
+    hipdnn_frontend::IntConstraint constraint(0, 100, 1);
     std::string str = constraint.toString();
 
     EXPECT_NE(str.find("IntConstraint"), std::string::npos);
@@ -204,20 +309,30 @@ TEST(TestIntConstraint, ConstraintToString)
     EXPECT_NE(str.find("step=1"), std::string::npos);
 }
 
-TEST(TestIntConstraint, ConstraintWithValidValues)
+TEST(TestKnobIntConstraint, ConstraintWithValidValues)
 {
-    std::unordered_set<int64_t> validValues = {1, 2, 4, 8, 16};
-    IntConstraint constraint(0, 100, 1, validValues);
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 1;
+    constraintT.valid_values = {1, 2, 4, 8, 16};
 
-    std::string str = constraint.toString();
+    auto buffer = createIntKnobFlatbuffer("test_knob", "Test knob", 1, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    auto constraint = knob.getConstraint();
+    ASSERT_NE(constraint, nullptr);
+
+    std::string str = constraint->toString();
     EXPECT_NE(str.find("validValues"), std::string::npos);
     // Values should be sorted in output
     EXPECT_NE(str.find("[1, 2, 4, 8, 16]"), std::string::npos);
 }
 
-TEST(TestFloatConstraint, ConstraintToString)
+TEST(TestKnobFloatConstraint, ConstraintToString)
 {
-    FloatConstraint constraint(0.0, 1.0);
+    hipdnn_frontend::FloatConstraint constraint(0.0, 1.0);
     std::string str = constraint.toString();
 
     EXPECT_NE(str.find("FloatConstraint"), std::string::npos);
@@ -225,21 +340,47 @@ TEST(TestFloatConstraint, ConstraintToString)
     EXPECT_NE(str.find("max=1"), std::string::npos);
 }
 
-TEST(TestStringConstraint, ConstraintToString)
+TEST(TestKnobFloatConstraint, ConstraintFromFlatbuffer)
 {
-    StringConstraint constraint(100);
+    fb::FloatConstraintT constraintT;
+    constraintT.min_value = 0.0;
+    constraintT.max_value = 1.0;
+
+    auto buffer = createFloatKnobFlatbuffer("test_knob", "Test knob", 0.5, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    auto constraint = knob.getConstraint();
+    ASSERT_NE(constraint, nullptr);
+
+    std::string str = constraint->toString();
+    EXPECT_NE(str.find("FloatConstraint"), std::string::npos);
+}
+
+TEST(TestKnobStringConstraint, ConstraintToString)
+{
+    hipdnn_frontend::StringConstraint constraint(100);
     std::string str = constraint.toString();
 
     EXPECT_NE(str.find("StringConstraint"), std::string::npos);
     EXPECT_NE(str.find("maxLength=100"), std::string::npos);
 }
 
-TEST(TestStringConstraint, ConstraintWithValidValues)
+TEST(TestKnobStringConstraint, ConstraintWithValidValues)
 {
-    std::unordered_set<std::string> validValues = {"option1", "option2", "option3"};
-    StringConstraint constraint(100, validValues);
+    fb::StringConstraintT constraintT;
+    constraintT.max_length = 100;
+    constraintT.valid_values = {"option1", "option2", "option3"};
 
-    std::string str = constraint.toString();
+    auto buffer
+        = createStringKnobFlatbuffer("test_knob", "Test knob", "option1", false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    auto constraint = knob.getConstraint();
+    ASSERT_NE(constraint, nullptr);
+
+    std::string str = constraint->toString();
     EXPECT_NE(str.find("validValues"), std::string::npos);
     // Check that values are quoted
     EXPECT_NE(str.find("\"option1\""), std::string::npos);
@@ -248,12 +389,217 @@ TEST(TestStringConstraint, ConstraintWithValidValues)
 }
 
 // ============================================================================
+// Validation Tests
+// ============================================================================
+
+TEST(TestKnob, ValidateIntKnobInRange)
+{
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 1;
+
+    auto buffer = createIntKnobFlatbuffer("test_knob", "Test knob", 50, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Valid value
+    knob.setChoice<int64_t>(50);
+    auto err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::OK);
+
+    // Value at min boundary
+    knob.setChoice<int64_t>(0);
+    err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::OK);
+
+    // Value at max boundary
+    knob.setChoice<int64_t>(100);
+    err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::OK);
+}
+
+TEST(TestKnob, ValidateIntKnobOutOfRange)
+{
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 1;
+
+    auto buffer = createIntKnobFlatbuffer("test_knob", "Test knob", 50, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Value below min
+    knob.setChoice<int64_t>(-1);
+    auto err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("out of range"), std::string::npos);
+
+    // Value above max
+    knob.setChoice<int64_t>(101);
+    err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("out of range"), std::string::npos);
+}
+
+TEST(TestKnob, ValidateIntKnobWithStep)
+{
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 10;
+
+    auto buffer = createIntKnobFlatbuffer("test_knob", "Test knob", 0, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Valid step values
+    knob.setChoice<int64_t>(0);
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+
+    knob.setChoice<int64_t>(10);
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+
+    knob.setChoice<int64_t>(100);
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+
+    // Invalid step value
+    knob.setChoice<int64_t>(15);
+    auto err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("step constraint"), std::string::npos);
+}
+
+TEST(TestKnob, ValidateIntKnobWithValidValues)
+{
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 1;
+    constraintT.valid_values = {1, 2, 4, 8, 16};
+
+    auto buffer = createIntKnobFlatbuffer("test_knob", "Test knob", 1, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Valid values
+    for(auto validVal : {1, 2, 4, 8, 16})
+    {
+        knob.setChoice<int64_t>(validVal);
+        EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+    }
+
+    // Invalid value
+    knob.setChoice<int64_t>(3);
+    auto err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("not in the list of valid values"), std::string::npos);
+}
+
+TEST(TestKnob, ValidateFloatKnobInRange)
+{
+    fb::FloatConstraintT constraintT;
+    constraintT.min_value = 0.0;
+    constraintT.max_value = 1.0;
+
+    auto buffer = createFloatKnobFlatbuffer("test_knob", "Test knob", 0.5, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Valid value
+    knob.setChoice<double>(0.5);
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+
+    // Boundary values
+    knob.setChoice<double>(0.0);
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+
+    knob.setChoice<double>(1.0);
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+}
+
+TEST(TestKnob, ValidateFloatKnobOutOfRange)
+{
+    fb::FloatConstraintT constraintT;
+    constraintT.min_value = 0.0;
+    constraintT.max_value = 1.0;
+
+    auto buffer = createFloatKnobFlatbuffer("test_knob", "Test knob", 0.5, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Value below min
+    knob.setChoice<double>(-0.1);
+    auto err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+
+    // Value above max
+    knob.setChoice<double>(1.1);
+    err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestKnob, ValidateStringKnobWithValidValues)
+{
+    fb::StringConstraintT constraintT;
+    constraintT.max_length = 100;
+    constraintT.valid_values = {"option1", "option2", "option3"};
+
+    auto buffer
+        = createStringKnobFlatbuffer("test_knob", "Test knob", "option1", false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Valid values
+    for(const auto& validVal : {"option1", "option2", "option3"})
+    {
+        knob.setChoice<std::string>(validVal);
+        EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+    }
+
+    // Invalid value
+    knob.setChoice<std::string>("invalid");
+    auto err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("not in the list of valid values"), std::string::npos);
+}
+
+TEST(TestKnob, ValidateStringKnobMaxLength)
+{
+    fb::StringConstraintT constraintT;
+    constraintT.max_length = 10;
+
+    auto buffer
+        = createStringKnobFlatbuffer("test_knob", "Test knob", "short", false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Valid length
+    knob.setChoice<std::string>("short");
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+
+    // Exactly at max length
+    knob.setChoice<std::string>("1234567890");
+    EXPECT_EQ(knob.validate().code, ErrorCode::OK);
+
+    // Exceeds max length
+    knob.setChoice<std::string>("12345678901");
+    auto err = knob.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("exceeds maximum length"), std::string::npos);
+}
+
+// ============================================================================
 // toString Tests
 // ============================================================================
 
 TEST(TestKnob, ToStringIntKnob)
 {
-    auto knob = KnobTestHelper::createIntKnob("test_knob", "Test description", 42);
+    auto buffer = createIntKnobFlatbuffer("test_knob", "Test description", 42);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
     knob.setChoice<int64_t>(100);
 
     std::string str = knob.toString();
@@ -267,7 +613,10 @@ TEST(TestKnob, ToStringIntKnob)
 
 TEST(TestKnob, ToStringFloatKnob)
 {
-    auto knob = KnobTestHelper::createFloatKnob("float_knob", "Float test", 3.14);
+    auto buffer = createFloatKnobFlatbuffer("float_knob", "Float test", 3.14);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
     knob.setChoice<double>(2.718);
 
     std::string str = knob.toString();
@@ -278,7 +627,10 @@ TEST(TestKnob, ToStringFloatKnob)
 
 TEST(TestKnob, ToStringStringKnob)
 {
-    auto knob = KnobTestHelper::createStringKnob("string_knob", "String test", "default");
+    auto buffer = createStringKnobFlatbuffer("string_knob", "String test", "default");
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
     knob.setChoice<std::string>("custom");
 
     std::string str = knob.toString();
@@ -289,11 +641,30 @@ TEST(TestKnob, ToStringStringKnob)
 
 TEST(TestKnob, ToStringDeprecatedKnob)
 {
-    auto knob = KnobTestHelper::createIntKnob("deprecated", "Deprecated knob", 0, true);
+    auto buffer = createIntKnobFlatbuffer("deprecated", "Deprecated knob", 0, true);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     std::string str = knob.toString();
 
     EXPECT_NE(str.find("deprecated=true"), std::string::npos);
+}
+
+TEST(TestKnob, ToStringWithConstraint)
+{
+    fb::IntConstraintT constraintT;
+    constraintT.min_value = 0;
+    constraintT.max_value = 100;
+    constraintT.step = 1;
+
+    auto buffer = createIntKnobFlatbuffer("test_knob", "Test knob", 50, false, &constraintT);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    std::string str = knob.toString();
+
+    EXPECT_NE(str.find("constraint="), std::string::npos);
+    EXPECT_NE(str.find("IntConstraint"), std::string::npos);
 }
 
 // ============================================================================
@@ -302,19 +673,21 @@ TEST(TestKnob, ToStringDeprecatedKnob)
 
 TEST(TestKnob, GetDefaultValueWrongType)
 {
-    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 42);
+    auto buffer = createIntKnobFlatbuffer("int_knob", "Integer knob", 42);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     // Try to get default value as wrong type
-    auto wrongDefault = knob.getDefaultValue<double>();
-    EXPECT_FALSE(wrongDefault.has_value());
+    auto wrongDefault = std::get_if<double>(&knob.getDefaultValue());
+    EXPECT_EQ(wrongDefault, nullptr);
 
-    auto stringDefault = knob.getDefaultValue<std::string>();
-    EXPECT_FALSE(stringDefault.has_value());
+    auto stringDefault = std::get_if<std::string>(&knob.getDefaultValue());
+    EXPECT_EQ(stringDefault, nullptr);
 
     // Correct type should work
-    auto correctDefault = knob.getDefaultValue<int64_t>();
-    ASSERT_TRUE(correctDefault.has_value());
-    EXPECT_EQ(correctDefault.value(), 42);
+    auto correctDefault = std::get_if<int64_t>(&knob.getDefaultValue());
+    ASSERT_NE(correctDefault, nullptr);
+    EXPECT_EQ(*correctDefault, 42);
 }
 
 // ============================================================================
@@ -323,94 +696,110 @@ TEST(TestKnob, GetDefaultValueWrongType)
 
 TEST(TestKnob, EmptyStringKnob)
 {
-    auto knob = KnobTestHelper::createStringKnob("empty_string", "Empty string knob", "");
+    auto buffer = createStringKnobFlatbuffer("empty_string", "Empty string knob", "");
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto defaultValue = knob.getDefaultValue<std::string>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), "");
+    auto defaultValue = std::get_if<std::string>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, "");
 
     knob.setChoice<std::string>("");
-    auto choice = knob.getChoice<std::string>();
-    ASSERT_TRUE(choice.has_value());
-    EXPECT_EQ(choice.value(), "");
+    auto choice = std::get_if<std::string>(&knob.getChoice());
+    ASSERT_NE(choice, nullptr);
+    EXPECT_EQ(*choice, "");
 }
 
 TEST(TestKnob, NegativeIntValues)
 {
-    auto knob = KnobTestHelper::createIntKnob("negative_knob", "Negative values", -100);
+    auto buffer = createIntKnobFlatbuffer("negative_knob", "Negative values", -100);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto defaultValue = knob.getDefaultValue<int64_t>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), -100);
+    auto defaultValue = std::get_if<int64_t>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, -100);
 
     knob.setChoice<int64_t>(-50);
-    auto choice = knob.getChoice<int64_t>();
-    ASSERT_TRUE(choice.has_value());
-    EXPECT_EQ(choice.value(), -50);
+    auto choice = std::get_if<int64_t>(&knob.getChoice());
+    ASSERT_NE(choice, nullptr);
+    EXPECT_EQ(*choice, -50);
 }
 
 TEST(TestKnob, ZeroValues)
 {
-    auto intKnob = KnobTestHelper::createIntKnob("zero_int", "Zero int", 0);
-    auto floatKnob = KnobTestHelper::createFloatKnob("zero_float", "Zero float", 0.0);
+    auto intBuffer = createIntKnobFlatbuffer("zero_int", "Zero int", 0);
+    auto fbIntKnob = flatbuffers::GetRoot<fb::Knob>(intBuffer.data());
+    auto intKnob = hipdnn_frontend::Knob::fromFlatbuffer(fbIntKnob);
 
-    auto intDefault = intKnob.getDefaultValue<int64_t>();
-    ASSERT_TRUE(intDefault.has_value());
-    EXPECT_EQ(intDefault.value(), 0);
+    auto floatBuffer = createFloatKnobFlatbuffer("zero_float", "Zero float", 0.0);
+    auto fbFloatKnob = flatbuffers::GetRoot<fb::Knob>(floatBuffer.data());
+    auto floatKnob = hipdnn_frontend::Knob::fromFlatbuffer(fbFloatKnob);
 
-    auto floatDefault = floatKnob.getDefaultValue<double>();
-    ASSERT_TRUE(floatDefault.has_value());
-    EXPECT_DOUBLE_EQ(floatDefault.value(), 0.0);
+    auto intDefault = std::get_if<int64_t>(&intKnob.getDefaultValue());
+    ASSERT_NE(intDefault, nullptr);
+    EXPECT_EQ(*intDefault, 0);
+
+    auto floatDefault = std::get_if<double>(&floatKnob.getDefaultValue());
+    ASSERT_NE(floatDefault, nullptr);
+    EXPECT_DOUBLE_EQ(*floatDefault, 0.0);
 }
 
 TEST(TestKnob, LargeIntValues)
 {
     int64_t largeValue = 9223372036854775807LL; // INT64_MAX
-    auto knob = KnobTestHelper::createIntKnob("large_knob", "Large value", largeValue);
+    auto buffer = createIntKnobFlatbuffer("large_knob", "Large value", largeValue);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto defaultValue = knob.getDefaultValue<int64_t>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), largeValue);
+    auto defaultValue = std::get_if<int64_t>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, largeValue);
 }
 
 TEST(TestKnob, SpecialFloatValues)
 {
-    auto knob = KnobTestHelper::createFloatKnob("special_float", "Special float", 1.23456789);
+    auto buffer = createFloatKnobFlatbuffer("special_float", "Special float", 1.23456789);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     knob.setChoice<double>(0.0);
-    auto zero = knob.getChoice<double>();
-    ASSERT_TRUE(zero.has_value());
-    EXPECT_DOUBLE_EQ(zero.value(), 0.0);
+    auto zero = std::get_if<double>(&knob.getChoice());
+    ASSERT_NE(zero, nullptr);
+    EXPECT_DOUBLE_EQ(*zero, 0.0);
 
     knob.setChoice<double>(-1.5);
-    auto negative = knob.getChoice<double>();
-    ASSERT_TRUE(negative.has_value());
-    EXPECT_DOUBLE_EQ(negative.value(), -1.5);
+    auto negative = std::get_if<double>(&knob.getChoice());
+    ASSERT_NE(negative, nullptr);
+    EXPECT_DOUBLE_EQ(*negative, -1.5);
 }
 
 TEST(TestKnob, LongStrings)
 {
     std::string longString(1000, 'a');
-    auto knob = KnobTestHelper::createStringKnob("long_string", "Long string knob", longString);
+    auto buffer = createStringKnobFlatbuffer("long_string", "Long string knob", longString);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto defaultValue = knob.getDefaultValue<std::string>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), longString);
+    auto defaultValue = std::get_if<std::string>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, longString);
 
     std::string anotherLongString(500, 'b');
     knob.setChoice<std::string>(anotherLongString);
-    auto choice = knob.getChoice<std::string>();
-    ASSERT_TRUE(choice.has_value());
-    EXPECT_EQ(choice.value(), anotherLongString);
+    auto choice = std::get_if<std::string>(&knob.getChoice());
+    ASSERT_NE(choice, nullptr);
+    EXPECT_EQ(*choice, anotherLongString);
 }
 
 TEST(TestKnob, SpecialCharactersInStrings)
 {
     std::string specialChars = "Test\nwith\ttabs\rand\"quotes\"";
-    auto knob
-        = KnobTestHelper::createStringKnob("special_chars", "Special characters", specialChars);
+    auto buffer = createStringKnobFlatbuffer("special_chars", "Special characters", specialChars);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto defaultValue = knob.getDefaultValue<std::string>();
-    ASSERT_TRUE(defaultValue.has_value());
-    EXPECT_EQ(defaultValue.value(), specialChars);
+    auto defaultValue = std::get_if<std::string>(&knob.getDefaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, specialChars);
 }

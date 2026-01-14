@@ -795,10 +795,15 @@ public:
         return {ErrorCode::OK, "get_knobs_for_engine not yet implemented"};
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_knob_lookup_for_engine(int64_t engineId,
                                      std::unordered_map<int64_t, Knob>& knobs) const
     {
         // TODO
+        (void)engineId;
+        (void)knobs;
+
+        return {ErrorCode::OK, ""};
     }
 
     // Get ranked list of engine IDs based on heuristics
@@ -856,19 +861,24 @@ public:
                                 const std::unordered_map<KnobType_t, int64_t>& knobs) const
     {
         // Convert int64 knobs to KnobSetting objects
-        std::unordered_map<int64_t, KnobSetting> knobSettings;
-        for(const auto& [knobId, value] : knobs)
-        {
-            knobSettings.emplace(knobId, KnobSetting(knobId, value));
-        }
+        // std::unordered_map<int64_t, KnobSetting> knobSettings;
+        // for(const auto& [knobId, value] : knobs)
+        // {
+        //     knobSettings.emplace(knobId, KnobSetting(knobId, value));
+        // }
 
-        return create_execution_plan(engineId, knobSettings, false);
+        // return create_execution_plan(engineId, knobSettings, false);
+
+        (void)engineId;
+        (void)knobs;
+
+        return {ErrorCode::OK, ""};
     }
 
     // Create execution plan with typed knob settings
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error create_execution_plan(int64_t engineId,
-                                const std::unordered_map<int64_t, KnobSetting>& userKnobs,
+                                const std::unordered_map<int64_t, Knob>& userKnobs,
                                 bool filterByKnobs = false) const
     {
         // TODO: Implement once flatbuffer schemas and backend support are available
