@@ -10,10 +10,12 @@
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
+#include <nlohmann/json.hpp>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -120,5 +122,21 @@ void graph_bindings(nb::module_& m)
         .def("set_preferred_engine_id_ext", &graph::Graph::set_preferred_engine_id_ext)
         .def("tensor", &graph::Graph::tensor, nb::rv_policy::reference)
         .def_static(
-            "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "");
+            "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
+        .def(
+            "to_json",
+            [](graph::Graph& g) {
+                // toJson() is non-const, assigns UIDs if not set
+                nlohmann::json j = g.toJson();
+                return j.dump(); // Convert to JSON string
+            },
+            "Serialize the graph to a JSON string")
+        .def(
+            "from_json",
+            [](graph::Graph& g, const std::string& jsonStr) {
+                nlohmann::json j = nlohmann::json::parse(jsonStr);
+                return g.deserialize(j);
+            },
+            nb::arg("json_string"),
+            "Deserialize a graph from a JSON string");
 }
