@@ -119,7 +119,8 @@ NB_MODULE(origami, m) {
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
-      .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c);
+      .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
+      .def_rw("grid_selection", &origami::config_t::grid_selection);
 
   nanobind::class_<origami::prediction_result_t>(m, "prediction_result_t")
       .def(nanobind::init<>())
