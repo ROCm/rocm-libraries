@@ -119,8 +119,7 @@ void testing_scal_strided_batched(const Arguments& arg)
     device_strided_batch_vector<T> dx(N, incx, stride_x, batch_count);
     CHECK_DEVICE_ALLOCATION(dx.memcheck());
 
-    double gpu_time_used = 0.0, cpu_time_used = 0.0;
-    double hipblas_error = 0.0;
+    double hipblas_error{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);
@@ -160,6 +159,7 @@ void testing_scal_strided_batched(const Arguments& arg)
 
     if(timing)
     {
+        double      gpu_time_used{0};
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 
