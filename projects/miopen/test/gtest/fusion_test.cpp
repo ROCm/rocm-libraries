@@ -30,12 +30,21 @@
 #include "tensor_holder.hpp"
 #include "get_handle.hpp"
 #include "cba.hpp"
+#include "lib_env_var.hpp"
 
 #if MIOPEN_BACKEND_HIP
 namespace {
 bool IsTestSupportedForDevice()
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X, Gpu::gfx115X>;
+    // gfx120X is not enabled due to WORKAROUND_SWDEV_479810
+    using d_mask = disabled<Gpu::None>;
+    return ::IsTestSupportedForDevMask<d_mask, e_mask>();
+}
+
+bool IsWorkspaceTestSupportedForDevice()
+{
+    using e_mask = enabled<Gpu::gfx94X>;
     // gfx120X is not enabled due to WORKAROUND_SWDEV_479810
     using d_mask = disabled<Gpu::None>;
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
@@ -166,5 +175,147 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
     auto status = miopenCreateOpConvForward(fusionPlanDesc, &convOp, convDesc, wDesc);
     EXPECT_EQUAL(status, miopenStatusUnknownError);
 }
+
+MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_MODE_FUSION)
+
+template <typename T>
+class GPU_CBAFind2FusionWorkspace : public ConvBiasActivInferTest<T>
+{
+public:
+    using cba_base = ConvBiasActivInferTest<T>;
+    // Setup should be extanded to add some specific fields for Fusion
+    void SetUp() override
+    {
+        cba_base::SetUp();
+        fusion_args = static_cast<miopenOperatorArgs_t>(&(cba_base::params));
+        fusion_plan = static_cast<miopenFusionPlanDescriptor_t>(&(cba_base::fusePlanDesc));
+    }
+
+    void RunTest(bool PositiveTest)
+    {
+
+        miopen::solver::debug::TuningIterationScopedLimiter tuning_limit{5};
+
+        auto&& handle = get_handle();
+        {
+            ScopedEnvironment<std::string> find_mode_env1(MIOPEN_FIND_MODE_FUSION,
+                                                          std::string("normal"));
+            ScopedEnvironment<std::string> find_mode_env2(
+                MIOPEN_DEBUG_FIND_ONLY_SOLVER, std::string("ConvCKIgemmGrpFwdBiasActivFused"));
+
+            EXPECT_EQ(miopenCompileFusionPlan(&handle, fusion_plan), miopenStatusSuccess);
+        }
+
+        size_t workspace_size = 0;
+        miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
+        EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
+                  miopenStatusSuccess);
+
+        // This test requires a case with a non-zero workspace size.
+        // If this check fails, the test configuration needs to be updated
+        // to a case that requires workspace.
+        EXPECT_OP(workspace_size, >, 0);
+
+        if(PositiveTest)
+        {
+            // Test with exact workspace size
+            cba_base::wspace.resize(workspace_size);
+
+            EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
+                                                 fusion_plan,
+                                                 &(cba_base::input.desc),
+                                                 cba_base::in_dev.get(),
+                                                 &(cba_base::output.desc),
+                                                 cba_base::out_dev.get(),
+                                                 fusion_args,
+                                                 cba_base::wspace.ptr(),
+                                                 cba_base::wspace.size()),
+                      miopenStatusSuccess);
+
+            // Test with a larger workspace than required
+            cba_base::wspace.resize(workspace_size + 10);
+            EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
+                                                 fusion_plan,
+                                                 &(cba_base::input.desc),
+                                                 cba_base::in_dev.get(),
+                                                 &(cba_base::output.desc),
+                                                 cba_base::out_dev.get(),
+                                                 fusion_args,
+                                                 cba_base::wspace.ptr(),
+                                                 cba_base::wspace.size()),
+                      miopenStatusSuccess);
+        }
+        else
+        {
+            // Test with a smaller workspace than required
+            // Should return miopenStatusBadParm
+            cba_base::wspace.resize(workspace_size - 10);
+            EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
+                                                 fusion_plan,
+                                                 &(cba_base::input.desc),
+                                                 cba_base::in_dev.get(),
+                                                 &(cba_base::output.desc),
+                                                 cba_base::out_dev.get(),
+                                                 fusion_args,
+                                                 cba_base::wspace.ptr(),
+                                                 cba_base::wspace.size()),
+                      miopenStatusBadParm);
+            test_verification = false;
+        }
+        handle.Finish();
+    }
+
+    void TearDown() override
+    {
+        if(test_verification)
+            cba_base::TearDown();
+    }
+    miopenOperatorArgs_t fusion_args;
+    miopenFusionPlanDescriptor_t fusion_plan;
+    bool test_verification = true;
+};
+
+using GPU_CBAFind2FusionWorkspace_FP32 = GPU_CBAFind2FusionWorkspace<float>;
+
+TEST_P(GPU_CBAFind2FusionWorkspace_FP32, CBAFind2_testFindWorkspace)
+{
+    if(SkipTest())
+    {
+        test_skipped = true;
+        GTEST_SKIP() << "Fusion does not support xnack";
+    }
+    if(!IsWorkspaceTestSupportedForDevice())
+    {
+        test_skipped = true;
+        GTEST_SKIP() << "Fusion not supported for this device";
+    }
+    RunTest(true);
+}
+
+TEST_P(GPU_CBAFind2FusionWorkspace_FP32, CBAFind2_testWorkspaceInvalidSize)
+{
+    if(SkipTest())
+    {
+        test_skipped = true;
+        GTEST_SKIP() << "Fusion does not support xnack";
+    }
+    if(!IsWorkspaceTestSupportedForDevice())
+    {
+        test_skipped = true;
+        GTEST_SKIP() << "Fusion not supported for this device";
+    }
+    RunTest(false);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_CBAFind2FusionWorkspace_FP32,
+    testing::Combine(testing::Values(miopenActivationRELU),
+                     testing::Values(ConvTestCaseBase{
+                         1, 64, 56, 56, 64, 1, 1, 0, 0, 1, 1, 1, 1, miopenConvolution}),
+                     testing::Values(miopenTensorNCHW),
+                     testing::Values(0.25f),
+                     testing::Values(0.25f),
+                     testing::Values(0.25f)));
 
 #endif
