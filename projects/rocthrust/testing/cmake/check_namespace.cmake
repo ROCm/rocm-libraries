@@ -5,7 +5,7 @@
 # manually with:
 # cmake -D "Thrust_SOURCE_DIR=<thrust project root>" -P check_namespace.cmake
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.18)
 
 set(exclusions
   # This defines the macros and must have bare namespace declarations:

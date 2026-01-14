@@ -1499,14 +1499,28 @@ struct FmhaFwdKernel
 
             AttentionVariant variant;
             const auto variant_params = [&] {
+                const float scale_s = [&] {
+                    if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+                    {
+                        float q_descale = *(reinterpret_cast<const float*>(kargs.q_descale_ptr));
+                        float k_descale = *(reinterpret_cast<const float*>(kargs.k_descale_ptr));
+
+                        return kargs.scale_s * q_descale * k_descale;
+                    }
+                    else
+                    {
+                        return kargs.scale_s;
+                    }
+                }();
+
                 if constexpr(kHasLogitsSoftCap)
                 {
                     return ck_tile::LogitsSoftCapParams<FmhaMask, CK_TILE_FMHA_FWD_FAST_EXP2>{
-                        mask, kargs.scale_s, kargs.logits_soft_cap, kargs.logits_soft_cap_rcp};
+                        mask, scale_s, kargs.logits_soft_cap, kargs.logits_soft_cap_rcp};
                 }
                 else
                 {
-                    return ck_tile::StandardAttentionParams<FmhaMask>{mask, kargs.scale_s};
+                    return ck_tile::StandardAttentionParams<FmhaMask>{mask, scale_s};
                 }
             }();
 
@@ -1516,21 +1530,19 @@ struct FmhaFwdKernel
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
                 {
                     // TODO - move global load of descale to pipeline
-                    float q_descale = *(reinterpret_cast<const float*>(kargs.q_descale_ptr));
-                    float k_descale = *(reinterpret_cast<const float*>(kargs.k_descale_ptr));
                     float v_descale = *(reinterpret_cast<const float*>(kargs.v_descale_ptr));
 
-                    float scale_s = kargs.scale_s * q_descale * k_descale;
                     float scale_p =
                         ck_tile::type_convert<float>(ck_tile::numeric<PDataType>::max());
                     float scale_o = v_descale / scale_p;
 
                     auto o_acc_element_func = [&]() {
                         if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
-                            return ck_tile::composes(ck_tile::saturates<ck_tile::fp8_t>{},
-                                                     ck_tile::scales{scale_o});
+                            return make_composes(
+                                ck_tile::saturates<ck_tile::fp8_t>{},
+                                ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o});
                         else
-                            return ck_tile::scales{scale_o};
+                            return ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o};
                     }();
                     return FmhaPipeline{}(q_dram_window,
                                           identity{}, // q_element_func
@@ -1542,13 +1554,14 @@ struct FmhaFwdKernel
                                           identity{}, // bias_element_func
                                           randval_dram_window,
                                           lse_dram_window,
-                                          identity{},         // lse_element_func
-                                          identity{},         // s_acc_element_func
-                                          scales{scale_p},    // p_compute_element_func
+                                          identity{}, // lse_element_func
+                                          identity{}, // s_acc_element_func
+                                          scales<remove_cvref_t<decltype(scale_p)>>{
+                                              scale_p},       // p_compute_element_func
                                           o_acc_element_func, // o_acc_element_func
                                           mask,
                                           position_encoding,
-                                          scale_s,
+                                          variant_params.sm_scale,
                                           variant,
                                           variant_params,
                                           block_indices,
@@ -1565,7 +1578,7 @@ struct FmhaFwdKernel
                                           lse_dram_window,
                                           mask,
                                           position_encoding,
-                                          kargs.scale_s,
+                                          variant_params.sm_scale,
                                           variant,
                                           variant_params,
                                           block_indices,

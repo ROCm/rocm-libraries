@@ -132,7 +132,7 @@ Runtime Registration Process:
 ## Execution Flow
 
 The complete execution flow from graph input to results:
-![CPU Graph Executor Execution Flow](./images/hipdnn_cpu_graph_execution_flow.png)
+![CPU Graph Executor Execution Flow](../images/hipdnn_cpu_graph_execution_flow.png)
 
 ## Supported Operations
 
@@ -141,7 +141,7 @@ The CPU Reference Implementation supports a comprehensive set of deep learning o
 - **Convolution**: Forward pass, data gradients, and weight gradients
 - **Pointwise**: Unary and binary element-wise operations (activations, arithmetic)
 
-For a complete list of supported operations, datatypes, and layouts, please refer to the [CPU Reference Implementation Operation Support](./OperationSupport-ReferenceImpl.md) document.
+For a complete list of supported operations, datatypes, and layouts, please refer to the [CPU Reference Implementation Operation Support](../OperationSupport-ReferenceImpl.md) document.
 
 ## Extension Guidelines
 
@@ -175,7 +175,7 @@ public:
 class MyOperationSignatureKey {
 public:
     MyOperationSignatureKey(DataType dataType1, DataType dataType2, /* ... */);
-    MyOperationSignatureKey(const Node& node, const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap);
+    MyOperationSignatureKey(const Node& node, const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap);
     size_t hashSelf() const;
     bool operator==(const MyOperationSignatureKey& other) const;
     static std::unordered_map<MyOperationSignatureKey,

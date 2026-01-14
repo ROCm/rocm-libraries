@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -221,7 +221,7 @@ public:
 
         #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__) || defined(__GFX12__)
         #pragma message "Texture cache iterator is not supported on gfx94x, gfx120x or gfx95x as the texture fetch functions in HIP are not available."
-        ROCPRIM_PRINT_ERROR_ONCE("WARNING: Usage of texture_cache_iterator on gfx94x, gfx120x or gfx95x devices is not supported and will not produce valid results.")
+        __builtin_trap();
         #else
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < multiple; i++)

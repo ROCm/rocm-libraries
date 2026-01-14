@@ -3,10 +3,18 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
+## rocBLAS 5.3.0
+
+### Added
+* Level 3 `herk_ex` function for both C and FORTRAN but without support for the ILP64 API.
+
+### Changed
+* Client build system now automatically builds AOCL 5.2 (AMD Optimizing CPU Libraries) from source on Linux for improved CPU BLAS performance. New `--skip-aocl` and `--clean-deps` flags added to `install.sh` for build control. New `LINK_BLIS` CMake option to control AOCL BLAS linking in client binaries.
+
 ## rocBLAS 5.2.0 for ROCm 7.2
 
 ### Added
-* Level 3 `syrk_ex` function for both C and FORTRAN but without API support for the ILP64 format.
+* Level 3 `syrk_ex` function for both C and FORTRAN but without support for the ILP64 API.
 
 ### Optimized
 * Level 2 `tpmv` and `sbmv` functions.
