@@ -12,8 +12,7 @@ auto GetConvSmokeTestCases()
 {
     std::vector<TestCase> test_cases = {
         // clang-format off
-        TestCase {{1, 4, 8, 28, 28}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1}
-        // clang-format on
+        TestCase {{1, 4, 8, 28, 28}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1} // clang-format on
     };
 
     return test_cases;
@@ -175,4 +174,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(Gpu::None), testing::Values(GetDeterministicConvCase())));
+    testing::Combine(testing::Values(Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950),
+                     testing::Values(GetDeterministicConvCase())));
