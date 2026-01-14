@@ -5,15 +5,27 @@
 ## Documentation
 
 - [Quick Start Guide](#quick-start-guide)
+  - [Prerequisites](#prerequisites)
+  - [Install](#install)
 - [API Example](#api-example)
+  - [Python API](#python-api)
+  - [C++ API](#c-api)
 - [Supported GPUs](#supported-gpus)
 - [Build and Install](#build-and-install)
-  - [C++](#build-and-install-origami-c)
   - [Python](#build-and-install-origami-python)
+  - [C++](#build-and-install-origami-c)
+  - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
 - [Contribute](#contribute)
+- [How to Cite](#how-to-cite)
 
 ## Quick Start Guide
+
+### Prerequisites
+
+**ROCm/HIP**: This package requires ROCm/HIP to be installed on your system. ROCm cannot be installed via pip and must be installed separately. See the [ROCm Quick Start Guide](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) for installation instructions. Ensure the `ROCM_PATH` environment variable is set (default: `/opt/rocm`).
+
+### Install
 
 ```bash
 pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
@@ -144,6 +156,8 @@ For more information on GPU hardware specifications, check out [ROCm documentati
 
 Origami provides Python bindings that allow you to use Origami's functionality directly from Python.
 
+#### Installation
+
 Install directly from the rocm-libraries repository (this could take some time due to the size of the rocm-libraries repo):
 
 ```bash
@@ -171,6 +185,12 @@ pip install -e .
 The build system uses `pyproject.toml` with scikit-build-core, which integrates with CMake for building the Python bindings.
 
 #### CMake Build (Alternative)
+
+When building with CMake, you'll need to manually install the Python dependencies listed in `shared/origami/python/requirements.txt`:
+
+```bash
+pip install -r shared/origami/python/requirements.txt
+```
 
 Build Python bindings using CMake from the `shared/origami` directory:
 
