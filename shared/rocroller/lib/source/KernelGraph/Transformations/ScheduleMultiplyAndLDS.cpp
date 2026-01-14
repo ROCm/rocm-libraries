@@ -410,6 +410,12 @@ namespace rocRoller::KernelGraph
             Log::debug("\n{}", msg);
         }
 
+        std::string showChain(vec const& chain)
+        {
+            auto ts = [](int x) -> std::string { return fmt::format("{}", x); };
+            return fmt::format("({})", fmt::join(chain | std::views::transform(ts), ", "));
+        }
+
         std::string showChains(vec2 const& chains)
         {
             std::ostringstream msg;
@@ -438,7 +444,87 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
+        bool canJoin(KernelGraph const& graph, vec2 const& group, vec const& chain)
+        {
+            auto groupParent = bodyParents(group.at(0).at(0), graph).take(1).only();
+            auto chainParent = bodyParents(chain.at(0), graph).take(1).only();
+
+            auto showParent = [](auto x) -> std::string {
+                if(x)
+                    return std::to_string(x.value());
+                else
+                    return "-";
+            };
+
+            if(groupParent != chainParent)
+            {
+                Log::debug("Chain {{{}}} can't join group {{{}}} due to different parents ({}/{})",
+                           fmt::join(chain, ", "),
+                           showChains(group),
+                           showParent(chainParent),
+                           showParent(groupParent));
+                return false;
+            }
+
+            for(auto const& groupChain : group)
+            {
+                auto order = graph.control.compareNodes(UpdateCache, groupChain.at(0), chain.at(0));
+                if(order != ControlGraph::NodeOrdering::Undefined)
+                {
+                    Log::debug(
+                        "Chain {{{}}} can't join group {{{}}} due to defined order ({} {} {})",
+                        fmt::join(chain, ", "),
+                        showChains(group),
+                        groupChain.at(0),
+                        toString(order),
+                        chain.at(0));
+                    return false;
+                }
+            }
+            return true;
+        }
+
         vec3 identifyParallelChains(KernelGraph const& graph, vec3 groups)
+        {
+            vec3 rv;
+            if(groups.empty())
+                return rv;
+
+            rv.reserve(groups[0].size());
+            for(auto & chain: groups[0])
+            {
+                rv.push_back({std::move(chain)});
+            }
+
+            // Skip the first input group
+            for(auto & inputGroup: groups | std::views::drop(1))
+            {
+                for(auto & chain: inputGroup)
+                {
+                    bool didJoin = false;
+                    for(auto & outputGroup: rv)
+                    {
+                        if(canJoin(graph, outputGroup, chain))
+                        {
+                            Log::debug("({}) joining {}", showChain(chain), showChains(outputGroup));
+                            outputGroup.push_back(std::move(chain));
+                            didJoin = true;
+                            break;
+                        }
+                    }
+                    if(!didJoin)
+                        Log::debug("({}) joined nothing.", showChain(chain));
+                }
+            }
+
+            for(auto & group: rv)
+                if(group.size() == 1)
+                    group.clear();
+
+            return rv;
+        }
+
+        vec3 identifyParallelChains2(KernelGraph const& graph, vec3 groups)
         {
             vec3 rv;
             if(groups.empty())
@@ -496,6 +582,7 @@ namespace rocRoller::KernelGraph
                         }
                         if(canJoin)
                         {
+                            Log::debug("({}) joining {}", showChain(myChain), showChains(aGroup));
                             aGroup.push_back(std::move(myChain));
                             hasJoined = true;
                             break;
@@ -509,12 +596,10 @@ namespace rocRoller::KernelGraph
                 }
             }
 
-            for(auto iter = rv.begin(); iter != rv.end();)
+            for(auto iter = rv.begin(); iter != rv.end(); ++iter)
             {
                 if(iter->size() < 2)
-                    iter = rv.erase(iter);
-                else
-                    ++iter;
+                    iter->clear();
             }
 
             for(auto const& group : rv)
@@ -537,12 +622,21 @@ namespace rocRoller::KernelGraph
             Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
             Log::debug("LDS chains: \n{}", showChains(ldsChains));
 
-            auto chainSets
-                = identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains)});
+            auto chainSets = identifyParallelChains(graph, {multiplyChains, std::move(ldsChains)});
+
+            auto ts = [](auto const& x) { return toString(x); };
 
             // TODO: Generalize this?
             if(chainSets.size() != multiplyCoordTypes.size())
+            {
+                Log::debug(
+                    "#########################\nchainSets: [{}]\nmultiplyCoordTypes: [{}]",
+                    showGroups(chainSets),
+                    fmt::join(multiplyCoordTypes | std::views::transform(ts), ", "));
+
+                Log::debug("{} != {}", chainSets.size(), multiplyCoordTypes.size());
                 return {};
+            }
 
             std::vector<ParallelChainSet> rv;
 
@@ -550,10 +644,13 @@ namespace rocRoller::KernelGraph
 
             for(auto const& [chains, types] : zip(chainSets, multiplyCoordTypes))
             {
-                auto ldsTypes = chains.at(0) | std::views::transform(getType);
+                if(chains.empty())
+                    continue;
+
+                auto ldsTypes = chains.at(1) | std::views::transform(getType);
 
                 rv.push_back(
-                    {chains.at(1), chains.at(0), types, {ldsTypes.begin(), ldsTypes.end()}});
+                    {chains.at(0), chains.at(1), types, {ldsTypes.begin(), ldsTypes.end()}});
             }
 
             return rv;
@@ -565,8 +662,9 @@ namespace rocRoller::KernelGraph
             {
                 std::map<DataType, int> multiplyTypeCounts, ldsTypeCounts;
 
-                multiplyTypeCounts[DataType::FP4x8]  = 14;
-                multiplyTypeCounts[DataType::E8M0x4] = 8;
+                multiplyTypeCounts[DataType::FP4x8]  = 6;
+                multiplyTypeCounts[DataType::FP8x4]  = 6;
+                multiplyTypeCounts[DataType::E8M0x4] = 4;
 
                 AssertFatal(chainSet.multiplyChain.size() == chainSet.multiplyTagTypes.size(),
                             ShowValue(chainSet.multiplyChain.size()),
@@ -628,7 +726,7 @@ namespace rocRoller::KernelGraph
 
         auto chainSets = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
 
-        if(Log::getLogger()->should_log(LogLevel::Debug))
+        // if(Log::getLogger()->should_log(LogLevel::Debug))
         {
             for(auto chainSet : chainSets)
             {
