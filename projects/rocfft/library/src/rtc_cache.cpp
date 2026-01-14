@@ -52,8 +52,34 @@ static std::mutex compile_lock;
 // This prevents oversubscription when running under job managers
 // (SLURM, mpiexec) that pin processes to specific CPU sets.
 // Using counting_semaphore for efficient event-driven synchronization.
-static std::counting_semaphore<>* subprocess_semaphore = nullptr;
-static std::once_flag             semaphore_init_flag;
+static std::unique_ptr<std::counting_semaphore<>> subprocess_semaphore;
+static std::once_flag                             semaphore_init_flag;
+
+// RAII wrapper for semaphore acquire/release
+class semaphore_guard
+{
+public:
+    explicit semaphore_guard(std::counting_semaphore<>* sem)
+        : sem_(sem)
+    {
+        if(sem_)
+            sem_->acquire();
+    }
+
+    ~semaphore_guard()
+    {
+        if(sem_)
+            sem_->release();
+    }
+
+    semaphore_guard(const semaphore_guard&) = delete;
+    semaphore_guard& operator=(const semaphore_guard&) = delete;
+    semaphore_guard(semaphore_guard&&)                 = delete;
+    semaphore_guard& operator=(semaphore_guard&&) = delete;
+
+private:
+    std::counting_semaphore<>* sem_;
+};
 
 // Get max subprocess count and initialize semaphore
 static unsigned int get_max_subprocesses()
@@ -78,7 +104,7 @@ static unsigned int get_max_subprocesses()
 
     // initialize semaphore once with the determined count
     std::call_once(semaphore_init_flag, [max_subprocesses]() {
-        subprocess_semaphore = new std::counting_semaphore<>(max_subprocesses);
+        subprocess_semaphore = std::make_unique<std::counting_semaphore<>>(max_subprocesses);
 
         if(LOG_RTC_ENABLED())
         {
@@ -521,20 +547,16 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
         try
         {
             // initialize semaphore and acquire slot (blocks if limit reached)
+            // RAII guard ensures release even if exception occurs
             get_max_subprocesses();
-            subprocess_semaphore->acquire();
+            semaphore_guard guard(subprocess_semaphore.get());
 
             compile_begin = std::chrono::steady_clock::now();
             code          = compile_subprocess(kernel_src, gpu_arch);
-
-            // release slot for next subprocess
-            subprocess_semaphore->release();
             break;
         }
         catch(std::exception&)
         {
-            // release slot on error
-            subprocess_semaphore->release();
             // if subprocess had a problem, ignore it and
             // fall through to forced-in-process compile
         }
@@ -575,18 +597,14 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
                 try
                 {
                     // acquire semaphore slot (blocks if limit reached)
-                    subprocess_semaphore->acquire();
+                    // RAII guard ensures release even if exception occurs
+                    semaphore_guard guard(subprocess_semaphore.get());
 
                     compile_begin = std::chrono::steady_clock::now();
                     code          = compile_subprocess(kernel_src, gpu_arch);
-
-                    // release slot for next subprocess
-                    subprocess_semaphore->release();
                 }
                 catch(std::exception&)
                 {
-                    // release slot on error
-                    subprocess_semaphore->release();
                     // subprocess still didn't work, re-acquire lock
                     // and fall back to in-process if something went
                     // wrong
