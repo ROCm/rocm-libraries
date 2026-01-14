@@ -261,14 +261,25 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 - Create a requirements file where forward and backwards compatibility is not guaranteed and ensure that each component compiles and runs properly with the versions allowed for in their requirements
 ## 10. Glossary
 **Backward compatibility**: The ability of a newer version of a component to work correctly with older versions of its dependencies or consumers.
+
 **Conventional commits**: A specification guideline on commits that conveys whether a change requires a patch, minor, or major version update. Often useful for automating version updates.
+
 **Deprecated attribute**: A marker (e.g., `[[deprecated]]` in C++) applied to functions, classes, or fields to indicate they are obsolete and should no longer be used. Deprecated items may be removed in the next major version.
+
 **Flatbuffer**: A cross-platform serialization library developed by Google that enables efficient serialization of data with zero-copy deserialization. Used by hipDNN for graph and configuration serialization.
+
 **Forward compatibility**: The ability of an older version of a component to work correctly with newer versions of its dependencies or consumers.
+
 **Major version**: The first number in a semantic version (X.y.z). Incremented when backward-incompatible changes are made. In hipDNN, major version updates coincide with ROCm major releases.
+
 **Minor version**: The second number in a semantic version (x.Y.z). Incremented when new features or API additions are made in a backward-compatible manner.
+
 **Patch version**: The third number in a semantic version (x.y.Z). Incremented for backward-compatible bug fixes.
+
 **Public API**: The set of functions, classes, types, and interfaces that are officially supported for external use. Changes to the public API follow strict versioning rules.
+
 **Schema**: The flatbuffer schema files (`.fbs`) that are used by hipDNN to define graphs, engine configurations, and engine details. In this document, it also refers to the corresponding JSON serialization of the same information.
+
 **Semantic versioning (SemVer)**: A versioning specification that uses a three-part version number (MAJOR.MINOR.PATCH) with defined rules for when each part should be incremented based on the type of changes made.
+
 **Tweak version**: An optional fourth component of a version number, used in hipDNN to represent the git commit hash of the rocm-libraries repository for precise build identification.
