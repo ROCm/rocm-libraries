@@ -37,6 +37,7 @@ struct rnn_seq_driver : rnn_seq_api_test_driver<T>
         this->add(this->inVecLen, "vector-len", this->generate_data(std::vector<int>{1, 7}, 7));
         this->add(this->hiddenSize, "hidden-size", this->generate_data({7, 1, 13}, 13));
         this->add(this->useDropout, "use-dropout", this->generate_data({0, 1}));
+        this->add(this->fwdMode, "fwd-mode", this->generate_data({0, 1}));
         this->add(this->inputMode, "in-mode", this->generate_data(modes));
         this->add(this->biasMode, "bias-mode", this->generate_data({1}));
         this->add(this->dirMode, "dir-mode", this->generate_data(modes));

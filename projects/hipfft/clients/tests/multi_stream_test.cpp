@@ -579,7 +579,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
             }
         }
     }
-    catch(fft_params::work_buffer_alloc_failure& e)
+    catch(const fft_params::work_buffer_alloc_failure& e)
     {
         info.str("");
         info << "Allocation failure detected during the creation of the sub-DFT plans";
@@ -619,11 +619,13 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     {
         hostbuffer.alloc(std::max(isize, osize));
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const std::bad_alloc& e)
     {
-        info.str("");
-        info << "could not allocate host buffer";
-        GTEST_SKIP() << info.str();
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
     }
 
     std::vector<size_t> expected_harmonic(parameters.dim());
