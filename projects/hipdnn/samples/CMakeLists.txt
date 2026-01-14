@@ -37,6 +37,7 @@ endfunction()
 
 # Temporarily disabled bn_inference due to https://github.com/ROCm/rocm-libraries/issues/2459
 # add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)
+add_hipdnn_sample(bn_inference_with_variance batchnorm/BnInferenceWithVariance.cpp)
 add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(fused_bn_training_activ batchnorm/FusedBnTrainingActiv.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
@@ -86,11 +87,12 @@ add_hipdnn_sample_test(fused_conv_fprop_activ)
 add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
 
 # Register batchnorm samples as tests
+# Note: bn_inference is currently disabled per issue #2459
+add_hipdnn_sample_test(bn_inference_with_variance)
 add_hipdnn_sample_test(bn_training)
 add_hipdnn_sample_test(fused_bn_training_activ)
 add_hipdnn_sample_test(bn_backward)
 add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
-# Note: bn_inference is currently disabled per issue #2459
 
 # Register serialization samples as tests
 add_hipdnn_sample_test(serialization_roundtrip)
