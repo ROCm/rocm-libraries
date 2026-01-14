@@ -131,6 +131,7 @@ namespace TensileLite
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
             SolutionSet<MySolution> rv;
+            const bool              debug = Debug::Instance().printPropertyEvaluation();
             const bool              streamK = Debug::Instance().useExperimentalSelection() == 2;
             const auto&             excludedLib = Debug::Instance().excludedLibFromGetAll();
 
@@ -148,32 +149,35 @@ namespace TensileLite
 
                 auto rowSolutions = row.second->findAllSolutions(problem, hardware, searchType);
 
-                if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                if(debug)
                 {
-                    for(auto& sol : rowSolutions)
-                        sol->tag = MySolution::MatchingTag::Equal;
+                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : rowSolutions)
+                            sol->tag = MySolution::MatchingTag::Equal;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : rowSolutions)
+                            sol->tag = MySolution::MatchingTag::GridBased;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : rowSolutions)
+                            sol->tag = MySolution::MatchingTag::Range;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : rowSolutions)
+                            sol->tag = MySolution::MatchingTag::FreeSize;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : rowSolutions)
+                            sol->tag = MySolution::MatchingTag::Prediction;
+                    }
+                    // TODO- Experimental?
                 }
-                else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
-                {
-                    for(auto& sol : rowSolutions)
-                        sol->tag = MySolution::MatchingTag::GridBased;
-                }
-                else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
-                {
-                    for(auto& sol : rowSolutions)
-                        sol->tag = MySolution::MatchingTag::Range;
-                }
-                else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
-                {
-                    for(auto& sol : rowSolutions)
-                        sol->tag = MySolution::MatchingTag::FreeSize;
-                }
-                else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
-                {
-                    for(auto& sol : rowSolutions)
-                        sol->tag = MySolution::MatchingTag::Prediction;
-                }
-                // TODO- Experimental?
 
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
             }
@@ -212,6 +216,7 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv, solutions;
+            const bool                 debug = Debug::Instance().printPropertyEvaluation();
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary();
 
@@ -232,32 +237,35 @@ namespace TensileLite
                     solutions
                         = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
-                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                    if(debug)
                     {
-                        for(auto& sol : solutions)
-                            sol->tag = MySolution::MatchingTag::Equal;
+                        if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                        {
+                            for(auto& sol : solutions)
+                                sol->tag = MySolution::MatchingTag::Equal;
+                        }
+                        else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                        {
+                            for(auto& sol : solutions)
+                                sol->tag = MySolution::MatchingTag::GridBased;
+                        }
+                        else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                        {
+                            for(auto& sol : solutions)
+                                sol->tag = MySolution::MatchingTag::Range;
+                        }
+                        else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                        {
+                            for(auto& sol : solutions)
+                                sol->tag = MySolution::MatchingTag::FreeSize;
+                        }
+                        else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                        {
+                            for(auto& sol : solutions)
+                                sol->tag = MySolution::MatchingTag::Prediction;
+                        }
+                        // TODO- Experimental
                     }
-                    else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
-                    {
-                        for(auto& sol : solutions)
-                            sol->tag = MySolution::MatchingTag::GridBased;
-                    }
-                    else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
-                    {
-                        for(auto& sol : solutions)
-                            sol->tag = MySolution::MatchingTag::Range;
-                    }
-                    else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
-                    {
-                        for(auto& sol : solutions)
-                            sol->tag = MySolution::MatchingTag::FreeSize;
-                    }
-                    else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
-                    {
-                        for(auto& sol : solutions)
-                            sol->tag = MySolution::MatchingTag::Prediction;
-                    }
-                    // TODO- Experimental
 
                     rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
                     if(rv.size() == numSolutions)
