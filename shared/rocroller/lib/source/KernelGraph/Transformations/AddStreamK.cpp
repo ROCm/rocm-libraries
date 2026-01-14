@@ -1061,13 +1061,16 @@ namespace rocRoller
             int dpTopLoop, dpAccumLoop;
             if(params->streamK.isTwoTileMode())
             {
-                // We disable duplication here so that the fix-up pass
-                // uses the correct registers.
+                // Keep the accumulator tile shared between SK and DP sections
+                // so that the fix-up pass uses the correct registers.
+                auto accumTile = accumInfo.accumulatorTile;
                 auto reindexer = std::make_shared<GraphReindexer>();
                 dpTopLoop
-                    = only(duplicateControlNodes(graph, reindexer, {loopInfo.topLoopOp}, [](int x) {
-                          return true;
-                      })).value();
+                    = only(duplicateControlNodes(graph,
+                                                 reindexer,
+                                                 {loopInfo.topLoopOp},
+                                                 [accumTile](int x) { return x == accumTile; }))
+                          .value();
                 dpAccumLoop = reindexer->control[loopInfo.accumulatorLoopOp];
 
                 // Duplicate the epilogue.  We enable duplication here
