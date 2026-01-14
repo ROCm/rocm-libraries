@@ -144,7 +144,7 @@ char InputFlags::FindShortName(const std::string& long_name) const
     }
     if(short_name == '\0')
     {
-        std::cout << "Long Name: " << long_name << " Not Found !";
+        std::cout << "Long Name '" << long_name << "' Not Found!" << std::endl;
         exit(0); // NOLINT (concurrency-mt-unsafe)
     }
     return short_name;

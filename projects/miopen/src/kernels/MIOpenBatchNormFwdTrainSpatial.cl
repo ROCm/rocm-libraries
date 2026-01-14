@@ -69,8 +69,10 @@ MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
                                _FLOAT_PREC INHW,
 #if(MIO_RUNNING_RESULT == 1)
                                double expAvgFactor,
-                               __global _FLOAT_PREC* __restrict resultRunningMean,
-                               __global _FLOAT_PREC* __restrict resultRunningVariance,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningMean,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningVariance,
+                               __global _FLOAT_PREC* __restrict nextResultRunningMean,
+                               __global _FLOAT_PREC* __restrict nextResultRunningVariance,
 #endif
                                double epsilon,
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -184,8 +186,14 @@ MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash(
-            resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
+        running_stash(prevResultRunningMean,
+                      prevResultRunningVariance,
+                      nextResultRunningMean,
+                      nextResultRunningVariance,
+                      expAvgFactor,
+                      mean,
+                      variance,
+                      grpid);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -231,8 +239,10 @@ MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
                                _FLOAT_PREC INHW,
 #if(MIO_RUNNING_RESULT == 1)
                                double expAvgFactor,
-                               __global _FLOAT_PREC* __restrict resultRunningMean,
-                               __global _FLOAT_PREC* __restrict resultRunningVariance,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningMean,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningVariance,
+                               __global _FLOAT_PREC* __restrict nextResultRunningMean,
+                               __global _FLOAT_PREC* __restrict nextResultRunningVariance,
 #endif
                                double epsilon,
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -443,8 +453,14 @@ MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash(
-            resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
+        running_stash(prevResultRunningMean,
+                      prevResultRunningVariance,
+                      nextResultRunningMean,
+                      nextResultRunningVariance,
+                      expAvgFactor,
+                      mean,
+                      variance,
+                      grpid);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -560,8 +576,10 @@ MIOpenBatchNormFwdTrainSpatialFinalMeanVariance(
     ,
     double expAvgFactor /* input momentum */
     ,
-    __global _FLOAT_PREC* __restrict resultRunningMean, /*input and output*/
-    __global _FLOAT_PREC* __restrict resultRunningVariance
+    const __global _FLOAT_PREC* __restrict prevResultRunningMean,
+    const __global _FLOAT_PREC* __restrict prevResultRunningVariance,
+    __global _FLOAT_PREC* __restrict nextResultRunningMean,
+    __global _FLOAT_PREC* __restrict nextResultRunningVariance
 #endif
     ,
     double epsilon
@@ -664,8 +682,10 @@ MIOpenBatchNormFwdTrainSpatialFinalMeanVariance(
     if(ygid == commitID && zgid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash((global _FLOAT_PREC_C*)resultRunningMean,
-                      (global _FLOAT_PREC_C*)resultRunningVariance,
+        running_stash((const global _FLOAT_PREC_C*)prevResultRunningMean,
+                      (const global _FLOAT_PREC_C*)prevResultRunningVariance,
+                      (global _FLOAT_PREC_C*)nextResultRunningMean,
+                      (global _FLOAT_PREC_C*)nextResultRunningVariance,
                       expAvgFactor,
                       mean,
                       variance,
@@ -777,8 +797,10 @@ MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
                                _FLOAT_PREC INHW,
 #if(MIO_RUNNING_RESULT == 1)
                                double expAvgFactor,
-                               __global _FLOAT_PREC* __restrict resultRunningMean,
-                               __global _FLOAT_PREC* __restrict resultRunningVariance,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningMean,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningVariance,
+                               __global _FLOAT_PREC* __restrict nextResultRunningMean,
+                               __global _FLOAT_PREC* __restrict nextResultRunningVariance,
 #endif
                                double epsilon,
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -872,8 +894,14 @@ MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash(
-            resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
+        running_stash(prevResultRunningMean,
+                      prevResultRunningVariance,
+                      nextResultRunningMean,
+                      nextResultRunningVariance,
+                      expAvgFactor,
+                      mean,
+                      variance,
+                      grpid);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -892,25 +920,28 @@ MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
 #endif
 // Batch size 1 and 2
 /* __attribute__((reqd_work_group_size(MIO_BN_GRP0, MIO_BN_GRP1, MIO_BN_GRP2)))  */
-__kernel void MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
-                                             __global _FLOAT* __restrict out,
-                                             __constant _FLOAT_PREC* __restrict scale,
-                                             __constant _FLOAT_PREC* __restrict bias,
-                                             _FLOAT_PREC INHW,
+__kernel void
+MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict in,
+                               __global _FLOAT* __restrict out,
+                               __constant _FLOAT_PREC* __restrict scale,
+                               __constant _FLOAT_PREC* __restrict bias,
+                               _FLOAT_PREC INHW,
 #if(MIO_RUNNING_RESULT == 1)
-                                             double expAvgFactor,
-                                             __global _FLOAT_PREC* __restrict resultRunningMean,
-                                             __global _FLOAT_PREC* __restrict resultRunningVariance,
+                               double expAvgFactor,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningMean,
+                               const __global _FLOAT_PREC* __restrict prevResultRunningVariance,
+                               __global _FLOAT_PREC* __restrict nextResultRunningMean,
+                               __global _FLOAT_PREC* __restrict nextResultRunningVariance,
 #endif
-                                             double epsilon,
+                               double epsilon,
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
-                                             __global _FLOAT_PREC* __restrict resultSaveMean,
-                                             __global _FLOAT_PREC* __restrict resultSaveInvVariance,
+                               __global _FLOAT_PREC* __restrict resultSaveMean,
+                               __global _FLOAT_PREC* __restrict resultSaveInvVariance,
 #endif
-                                             unsigned int imageDims,
-                                             unsigned int batchStride,
-                                             _FLOAT_PREC _alpha,
-                                             _FLOAT_PREC _beta)
+                               unsigned int imageDims,
+                               unsigned int batchStride,
+                               _FLOAT_PREC _alpha,
+                               _FLOAT_PREC _beta)
 {
 
     ACTIVATION_SET()
@@ -994,8 +1025,15 @@ __kernel void MIOpenBatchNormFwdTrainSpatial(const __global _FLOAT* __restrict i
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash_dyn(
-            resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid, INHW);
+        running_stash_dyn(prevResultRunningMean,
+                          prevResultRunningVariance,
+                          nextResultRunningMean,
+                          nextResultRunningVariance,
+                          expAvgFactor,
+                          mean,
+                          variance,
+                          grpid,
+                          INHW);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)

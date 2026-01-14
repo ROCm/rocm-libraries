@@ -2927,6 +2927,71 @@ miopenBatchNormalizationForwardTraining_V2(miopenHandle_t handle,
                                            double epsilon,
                                            void* resultSaveMean,
                                            void* resultSaveInvVariance);
+/*! @brief Execute forward training layer for batch normalization
+ *
+ * Batch normalization pass for forward training pass.
+ * Takes in batch normalization mode bn_mode and input tensor x, output tensor y, bnBias and bnScale
+ * with their descriptor.
+ *
+ * If either resultSaveMean, or resultSaveInvVariance are null pointers then the values for the mean
+ * and inverse variance will not be used.
+ *
+ * Likewise, if either resultRunningMean, or resultRunningVariance are null pointers then the values
+ * for the running mean and variance will not be saved.
+ * Running averages and variances are scaled using an exponential averaging factor: \f[
+ * \mu_{old} = \mu_{new}*factor + \mu_{old}*(1-factor)
+ * \f]
+ * where \f[
+ * factor=1/(1+iteration)
+ * \f]
+ *
+ * @param handle                    MIOpen handle (input)
+ * @param bn_mode                   Batch normalization mode (input)
+ * @param alpha                     Floating point scaling factor, allocated on the host (input)
+ * @param beta                      Floating point shift factor, allocated on the host (input)
+ * @param xDesc                     Tensor descriptor for data input tensor x (input)
+ * @param x                         Data tensor x (input)
+ * @param yDesc                     Tensor descriptor for output data tensor y (input)
+ * @param y                         Data tensor y (output)
+ * @param ScaleDesc                 Tensor descriptor for BN scaling
+ * @param biasVarDesc               Tensor descriptor for BN bias
+ * @param savedMeanDesc             Tensor descriptor for BN saved Mean
+ * @param savedVarDesc              Tensor descriptor for BN saved Variance
+ * @param bnScale                   Batch norm scaling, gamma, tensor (input)
+ * @param bnBias                    Batch norm bias, beta, tensor (input)
+ * @param expAvgFactor              Exponential averaging factor (input)
+ * @param prevResultRunningMean     Running mean from previous iteration, read-only (input)
+ * @param prevResultRunningVariance Running variance from previous iteration, read-only (input)
+ * @param nextResultRunningMean     Updated running mean for current iteration (output)
+ * @param nextResultRunningVariance Updated running variance for current iteration (output)
+ * @param epsilon                   Value to stablize inverse variance calculation (input)
+ * @param resultSaveMean            Saved mini-batch mean for backwards pass (output)
+ * @param resultSaveInvVariance     Saved mini-batch inverse variance for backwards pass (output)
+ * @return                          miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t
+miopenBatchNormalizationForwardTraining_V3(miopenHandle_t handle,
+                                           miopenBatchNormMode_t bn_mode,
+                                           void* alpha,
+                                           void* beta,
+                                           const miopenTensorDescriptor_t xDesc,
+                                           const void* x,
+                                           const miopenTensorDescriptor_t yDesc,
+                                           void* y,
+                                           const miopenTensorDescriptor_t scaleDesc,
+                                           const miopenTensorDescriptor_t biasVarDesc,
+                                           const miopenTensorDescriptor_t savedMeanDesc,
+                                           const miopenTensorDescriptor_t savedVarDesc,
+                                           void* bnScale,
+                                           void* bnBias,
+                                           double expAvgFactor,
+                                           const void* prevResultRunningMean,
+                                           const void* prevResultRunningVariance,
+                                           void* nextResultRunningMean,
+                                           void* nextResultRunningVariance,
+                                           double epsilon,
+                                           void* resultSaveMean,
+                                           void* resultSaveInvVariance);
 /*! @brief Execute forward training layer for batch normalization with fused activation
  *
  * Batch normalization pass for forward training pass.
@@ -2990,6 +3055,74 @@ miopenBatchNormForwardTrainingActivation(miopenHandle_t handle,
                                          void* resultSaveMean,
                                          void* resultSaveInvVariance,
                                          const miopenActivationDescriptor_t activDesc);
+
+/*! @brief Execute forward training layer for batch normalization with fused activation
+ *
+ * Batch normalization pass for forward training pass.
+ * Takes in batch normalization mode bn_mode and input tensor x, output tensor y, bnBias and bnScale
+ * with their descriptor.
+ *
+ * If either resultSaveMean, or resultSaveInvVariance are null pointers then the values for the mean
+ * and inverse variance will not be used.
+ *
+ * Likewise, if either resultRunningMean, or resultRunningVariance are null pointers then the values
+ * for the running mean and variance will not be saved.
+ * Running averages and variances are scaled using an exponential averaging factor: \f[
+ * \mu_{old} = \mu_{new}*factor + \mu_{old}*(1-factor)
+ * \f]
+ * where \f[
+ * factor=1/(1+iteration)
+ * \f]
+ *
+ * @param handle                    MIOpen handle (input)
+ * @param bn_mode                   Batch normalization mode (input)
+ * @param alpha                     Floating point scaling factor, allocated on the host (input)
+ * @param beta                      Floating point shift factor, allocated on the host (input)
+ * @param xDesc                     Tensor descriptor for data input tensor x (input)
+ * @param x                         Data tensor x (input)
+ * @param yDesc                     Tensor descriptor for output data tensor y (input)
+ * @param y                         Data tensor y (output)
+ * @param ScaleDesc                 Tensor descriptor for BN scaling
+ * @param biasVarDesc               Tensor descriptor for BN bias
+ * @param savedMeanDesc             Tensor descriptor for BN saved Mean
+ * @param savedVarDesc              Tensor descriptor for BN saved Variance
+ * @param bnScale                   Batch norm scaling, gamma, tensor (input)
+ * @param bnBias                    Batch norm bias, beta, tensor (input)
+ * @param expAvgFactor              Exponential averaging factor (input)
+ * @param prevResultRunningMean     Running mean from previous iteration, read-only (input)
+ * @param prevResultRunningVariance Running variance from previous iteration, read-only (input)
+ * @param nextResultRunningMean     Updated running mean for current iteration (output)
+ * @param nextResultRunningVariance Updated running variance for current iteration (output)
+ * @param epsilon                   Value to stablize inverse variance calculation (input)
+ * @param resultSaveMean            Saved mini-batch mean for backwards pass (output)
+ * @param resultSaveInvVariance     Saved mini-batch inverse variance for backwards pass (output)
+ * @param activDesc                 Activation descriptor
+ * @return                          miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t
+miopenBatchNormForwardTrainingActivation_V2(miopenHandle_t handle,
+                                            miopenBatchNormMode_t bn_mode,
+                                            void* alpha,
+                                            void* beta,
+                                            const miopenTensorDescriptor_t xDesc,
+                                            const void* x,
+                                            const miopenTensorDescriptor_t yDesc,
+                                            void* y,
+                                            const miopenTensorDescriptor_t scaleDesc,
+                                            const miopenTensorDescriptor_t biasVarDesc,
+                                            const miopenTensorDescriptor_t savedMeanDesc,
+                                            const miopenTensorDescriptor_t savedVarDesc,
+                                            void* bnScale,
+                                            void* bnBias,
+                                            double expAvgFactor,
+                                            const void* prevResultRunningMean,
+                                            const void* prevResultRunningVariance,
+                                            void* nextResultRunningMean,
+                                            void* nextResultRunningVariance,
+                                            double epsilon,
+                                            void* resultSaveMean,
+                                            void* resultSaveInvVariance,
+                                            const miopenActivationDescriptor_t activDesc);
 
 /*! @brief Execute forward inference layer for batch normalization
  *
@@ -8623,9 +8756,10 @@ MIOPEN_EXPORT miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
  */
 typedef enum
 {
-    miopenTuningPolicyNone           = 1, /*!< do not enforce anything */
-    miopenTuningPolicyDbUpdate       = 2, /*!< tune and update the db  */
-    miopenTuningPolicySearch         = 3, /*!< search db first, if record not found tune but do not update the db */
+    miopenTuningPolicyNone     = 1, /*!< do not enforce anything */
+    miopenTuningPolicyDbUpdate = 2, /*!< tune and update the db  */
+    miopenTuningPolicySearch =
+        3, /*!< search db first, if record not found tune but do not update the db */
     miopenTuningPolicySearchDbUpdate = 4, /*!< combination of Search and DbUpdate */
     miopenTuningPolicyDbClean        = 5, /*!< remove existing entry, do not tune */
 } miopenTuningPolicy_t;

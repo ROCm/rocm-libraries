@@ -96,3 +96,24 @@ Tests:
   baseC: [HIPSPARSE_INDEX_BASE_ONE]
   sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
   filename: [shipsec1]
+
+- name: sddmm_csr
+  category: pre_checkin
+  function: sddmm_csr
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [8]
+  alpha: [1.0]
+  alphai: [1.0]
+  beta: [1.0]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderA: [HIPSPARSE_ORDER_ROW]
+  orderB: [HIPSPARSE_ORDER_ROW]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
+  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  filename: [bmwcra_1]
+  graph_test: true
