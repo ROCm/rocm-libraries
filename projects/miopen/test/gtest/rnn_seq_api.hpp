@@ -61,6 +61,7 @@ using RNNSeqApiParam = std::tuple<int,
                                   int,
                                   int,
                                   int,
+                                  int,
                                   std::vector<int>,
                                   bool,
                                   bool,
@@ -74,6 +75,7 @@ auto RNNSeqGenCases(bool full_test = false)
 {
     return ::testing::Combine(::testing::ValuesIn({7}),
                               ::testing::ValuesIn({13}),
+                              ::testing::ValuesIn({0, 1}),
                               ::testing::ValuesIn({0, 1}),
                               ::testing::ValuesIn({3}),
                               ::testing::ValuesIn({0, 1}),
@@ -103,6 +105,7 @@ auto LstmMSGenCases()
 {
     return ::testing::Combine(::testing::ValuesIn({1, 7}),
                               ::testing::ValuesIn({13, 1}),
+                              ::testing::ValuesIn({0}),
                               ::testing::ValuesIn({0}),
                               ::testing::ValuesIn({3}),
                               ::testing::ValuesIn({0}),
@@ -361,7 +364,7 @@ struct rnn_ref
                           std::vector<T>& workSpace,
                           bool nohx) const = 0;
 
-    virtual ~rnn_ref() {};
+    virtual ~rnn_ref(){};
 };
 
 template <class T>
@@ -1872,10 +1875,10 @@ protected:
         }
         else if(!inference_dropout_issue_notified)
         {
-            std::cerr << "Iteration " << this->iteration
-                      << " skipped due to issues with combining inference and dropout, future "
-                         "iterations like this will also be skipped"
-                      << std::endl;
+            std::cerr
+                << "Test case skipped due to issues with combining inference and dropout, future "
+                   "iterations like this will also be skipped"
+                << std::endl;
             inference_dropout_issue_notified = true;
         }
     }
@@ -1886,6 +1889,7 @@ public:
     int inVecLen{};
     int hiddenSize{};
     int numLayers{};
+    int fwdMode{};
     int inputMode{};
     int biasMode{};
     int dirMode{};
