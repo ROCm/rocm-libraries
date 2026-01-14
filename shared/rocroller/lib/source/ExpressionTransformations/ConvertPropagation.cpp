@@ -191,9 +191,7 @@ namespace rocRoller
             ExpressionPtr call(ExpressionPtr expr) const
             {
                 if(!expr)
-                { // TODO: undo
                     return expr;
-                }
 
                 return std::visit(*this, *expr);
             }
