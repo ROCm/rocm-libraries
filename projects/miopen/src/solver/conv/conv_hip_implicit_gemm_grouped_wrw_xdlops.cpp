@@ -445,7 +445,6 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     kernel_id = "";
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    std::cout << "Trying AI heuristic for ConvHipImplicitGemmGroupWrwXdlops\n";
     if(IsModelApplicable(ctx, problem))
     {
         if(problem.GetInDataType() == miopenFloat)
@@ -465,7 +464,6 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
         }
     }
 #endif
-    std::cout << "Using default heuristic for ConvHipImplicitGemmGroupWrwXdlops\n";
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
@@ -532,7 +530,6 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    std::cout << "Validating kernel_id: " << kernel_id << "\n";
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
@@ -638,10 +635,7 @@ bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat: return CheckCKApplicability<float>(problem);
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
-    case miopenBFloat16:
-        return (ctx.GetStream().GetDeviceName() == "gfx942" ||
-                StartsWith(ctx.GetStream().GetDeviceName(), "gfx95")) &&
-               CheckCKApplicability<ck::bhalf_t>(problem);
+    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:
