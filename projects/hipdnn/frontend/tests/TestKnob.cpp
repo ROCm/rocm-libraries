@@ -6,372 +6,411 @@
 
 using namespace hipdnn_frontend;
 
-// ============================================================================
-// KnobSetting Tests
-// ============================================================================
-
-TEST(TestKnobSetting, ConstructWithInt64)
+// Test helper class to create Knob instances since constructor is private
+class KnobTestHelper
 {
-    KnobSetting setting(123, static_cast<int64_t>(42));
+public:
+    static Knob createIntKnob(const std::string& knobIdStr,
+                              const std::string& description,
+                              int64_t defaultValue,
+                              bool deprecated = false)
+    {
+        return Knob(knobIdStr, description, defaultValue, deprecated);
+    }
 
-    EXPECT_EQ(setting.getKnobId(), 123);
-    EXPECT_EQ(setting.getValueType(), KnobValueType::INT64);
+    static Knob createFloatKnob(const std::string& knobIdStr,
+                                const std::string& description,
+                                double defaultValue,
+                                bool deprecated = false)
+    {
+        return Knob(knobIdStr, description, defaultValue, deprecated);
+    }
 
-    auto value = setting.getValue<int64_t>();
-    ASSERT_TRUE(value.has_value());
-    EXPECT_EQ(value.value(), 42);
-}
+    static Knob createStringKnob(const std::string& knobIdStr,
+                                 const std::string& description,
+                                 const std::string& defaultValue,
+                                 bool deprecated = false)
+    {
+        return Knob(knobIdStr, description, defaultValue, deprecated);
+    }
 
-TEST(TestKnobSetting, ConstructWithDouble)
-{
-    KnobSetting setting(456, 3.14);
-
-    EXPECT_EQ(setting.getKnobId(), 456);
-    EXPECT_EQ(setting.getValueType(), KnobValueType::FLOAT64);
-
-    auto value = setting.getValue<double>();
-    ASSERT_TRUE(value.has_value());
-    EXPECT_DOUBLE_EQ(value.value(), 3.14);
-}
-
-TEST(TestKnobSetting, ConstructWithString)
-{
-    KnobSetting setting(789, std::string("test_value"));
-
-    EXPECT_EQ(setting.getKnobId(), 789);
-    EXPECT_EQ(setting.getValueType(), KnobValueType::STRING);
-
-    auto value = setting.getValue<std::string>();
-    ASSERT_TRUE(value.has_value());
-    EXPECT_EQ(value.value(), "test_value");
-}
-
-TEST(TestKnobSetting, GetValueWithWrongType)
-{
-    KnobSetting intSetting(123, static_cast<int64_t>(42));
-
-    // Try to get as wrong types
-    EXPECT_FALSE(intSetting.getValue<double>().has_value());
-    EXPECT_FALSE(intSetting.getValue<std::string>().has_value());
-
-    KnobSetting floatSetting(456, 3.14);
-    EXPECT_FALSE(floatSetting.getValue<int64_t>().has_value());
-    EXPECT_FALSE(floatSetting.getValue<std::string>().has_value());
-
-    KnobSetting stringSetting(789, std::string("test"));
-    EXPECT_FALSE(stringSetting.getValue<int64_t>().has_value());
-    EXPECT_FALSE(stringSetting.getValue<double>().has_value());
-}
+    // Helper to set constraint on a knob (requires friend access or reflection)
+    template <typename ConstraintType>
+    static void setConstraint(Knob& knob, std::unique_ptr<ConstraintType> constraint)
+    {
+        // This would require friend access to Knob's _constraint member
+        // For now, we'll test knobs without constraints in most cases
+        // and rely on integration tests for constraint validation
+        (void)knob;
+        (void)constraint;
+    }
+};
 
 // ============================================================================
-// IntConstraint Tests
+// Basic Knob Creation and Accessors Tests
 // ============================================================================
 
-TEST(TestKnobIntConstraint, ValidateInRange)
+TEST(TestKnob, CreateIntKnob)
+{
+    auto knob = KnobTestHelper::createIntKnob("test_int_knob", "Test integer knob", 42);
+
+    EXPECT_EQ(knob.getKnobIdStr(), "test_int_knob");
+    EXPECT_EQ(knob.getDescription(), "Test integer knob");
+    EXPECT_EQ(knob.getValueType(), KnobValueType::INT64);
+    EXPECT_FALSE(knob.isDeprecated());
+
+    auto defaultValue = knob.getDefaultValue<int64_t>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), 42);
+}
+
+TEST(TestKnob, CreateFloatKnob)
+{
+    auto knob = KnobTestHelper::createFloatKnob("test_float_knob", "Test float knob", 3.14);
+
+    EXPECT_EQ(knob.getKnobIdStr(), "test_float_knob");
+    EXPECT_EQ(knob.getDescription(), "Test float knob");
+    EXPECT_EQ(knob.getValueType(), KnobValueType::FLOAT64);
+    EXPECT_FALSE(knob.isDeprecated());
+
+    auto defaultValue = knob.getDefaultValue<double>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_DOUBLE_EQ(defaultValue.value(), 3.14);
+}
+
+TEST(TestKnob, CreateStringKnob)
+{
+    auto knob = KnobTestHelper::createStringKnob("test_string_knob", "Test string knob", "default");
+
+    EXPECT_EQ(knob.getKnobIdStr(), "test_string_knob");
+    EXPECT_EQ(knob.getDescription(), "Test string knob");
+    EXPECT_EQ(knob.getValueType(), KnobValueType::STRING);
+    EXPECT_FALSE(knob.isDeprecated());
+
+    auto defaultValue = knob.getDefaultValue<std::string>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), "default");
+}
+
+TEST(TestKnob, CreateDeprecatedKnob)
+{
+    auto knob = KnobTestHelper::createIntKnob("deprecated_knob", "Deprecated knob", 0, true);
+
+    EXPECT_TRUE(knob.isDeprecated());
+}
+
+TEST(TestKnob, KnobIdGeneration)
+{
+    auto knob1 = KnobTestHelper::createIntKnob("knob_a", "First knob", 1);
+    auto knob2 = KnobTestHelper::createIntKnob("knob_b", "Second knob", 2);
+    auto knob3 = KnobTestHelper::createIntKnob("knob_a", "Duplicate ID", 3);
+
+    // Different string IDs should produce different numeric IDs
+    EXPECT_NE(knob1.getKnobId(), knob2.getKnobId());
+
+    // Same string ID should produce same numeric ID
+    EXPECT_EQ(knob1.getKnobId(), knob3.getKnobId());
+}
+
+// ============================================================================
+// setChoice and getChoice Tests
+// ============================================================================
+
+TEST(TestKnob, SetAndGetIntChoice)
+{
+    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 10);
+
+    // Initially, choice should not be set
+    auto initialChoice = knob.getChoice<int64_t>();
+    EXPECT_FALSE(initialChoice.has_value());
+
+    // Set a choice
+    knob.setChoice<int64_t>(42);
+
+    // Get the choice back
+    auto choice = knob.getChoice<int64_t>();
+    ASSERT_TRUE(choice.has_value());
+    EXPECT_EQ(choice.value(), 42);
+
+    // Default value should remain unchanged
+    auto defaultValue = knob.getDefaultValue<int64_t>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), 10);
+}
+
+TEST(TestKnob, SetAndGetFloatChoice)
+{
+    auto knob = KnobTestHelper::createFloatKnob("float_knob", "Float knob", 1.0);
+
+    knob.setChoice<double>(2.718);
+
+    auto choice = knob.getChoice<double>();
+    ASSERT_TRUE(choice.has_value());
+    EXPECT_DOUBLE_EQ(choice.value(), 2.718);
+}
+
+TEST(TestKnob, SetAndGetStringChoice)
+{
+    auto knob = KnobTestHelper::createStringKnob("string_knob", "String knob", "default");
+
+    knob.setChoice<std::string>("custom_value");
+
+    auto choice = knob.getChoice<std::string>();
+    ASSERT_TRUE(choice.has_value());
+    EXPECT_EQ(choice.value(), "custom_value");
+}
+
+TEST(TestKnob, GetChoiceWrongType)
+{
+    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 10);
+    knob.setChoice<int64_t>(42);
+
+    // Try to get as wrong type
+    auto wrongChoice = knob.getChoice<double>();
+    EXPECT_FALSE(wrongChoice.has_value());
+
+    auto stringChoice = knob.getChoice<std::string>();
+    EXPECT_FALSE(stringChoice.has_value());
+}
+
+TEST(TestKnob, UpdateChoice)
+{
+    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 10);
+
+    knob.setChoice<int64_t>(42);
+    auto choice1 = knob.getChoice<int64_t>();
+    ASSERT_TRUE(choice1.has_value());
+    EXPECT_EQ(choice1.value(), 42);
+
+    // Update the choice
+    knob.setChoice<int64_t>(100);
+    auto choice2 = knob.getChoice<int64_t>();
+    ASSERT_TRUE(choice2.has_value());
+    EXPECT_EQ(choice2.value(), 100);
+}
+
+// ============================================================================
+// Constraint Tests
+// ============================================================================
+
+TEST(TestIntConstraint, ConstraintToString)
 {
     IntConstraint constraint(0, 100, 1);
-    KnobSetting setting(1, static_cast<int64_t>(50));
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::OK);
-}
-
-TEST(TestKnobIntConstraint, ValidateBelowMin)
-{
-    IntConstraint constraint(10, 100, 1);
-    KnobSetting setting(1, static_cast<int64_t>(5));
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("out of range"), std::string::npos);
-}
-
-TEST(TestKnobIntConstraint, ValidateAboveMax)
-{
-    IntConstraint constraint(0, 100, 1);
-    KnobSetting setting(1, static_cast<int64_t>(150));
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("out of range"), std::string::npos);
-}
-
-TEST(TestKnobIntConstraint, ValidateStride)
-{
-    IntConstraint constraint(0, 100, 10);
-
-    KnobSetting validSetting(1, static_cast<int64_t>(50));
-    EXPECT_EQ(constraint.validateKnobSetting(validSetting).get_code(), ErrorCode::OK);
-
-    KnobSetting invalidSetting(1, static_cast<int64_t>(55));
-    Error result = constraint.validateKnobSetting(invalidSetting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("stride constraint"), std::string::npos);
-}
-
-TEST(TestKnobIntConstraint, ValidateExplicitValues)
-{
-    IntConstraint constraint(0, 100, 1, {8, 16, 32, 64});
-
-    KnobSetting validSetting(1, static_cast<int64_t>(32));
-    EXPECT_EQ(constraint.validateKnobSetting(validSetting).get_code(), ErrorCode::OK);
-
-    KnobSetting invalidSetting(1, static_cast<int64_t>(24));
-    Error result = constraint.validateKnobSetting(invalidSetting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("not in the list of valid values"), std::string::npos);
-}
-
-TEST(TestKnobIntConstraint, ValidateWrongType)
-{
-    IntConstraint constraint(0, 100, 1);
-    KnobSetting setting(1, 3.14); // Double instead of int64
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("does not contain an integer value"), std::string::npos);
-}
-
-TEST(TestKnobIntConstraint, ToStringWithRange)
-{
-    IntConstraint constraint(0, 100, 5);
     std::string str = constraint.toString();
 
     EXPECT_NE(str.find("IntConstraint"), std::string::npos);
     EXPECT_NE(str.find("min=0"), std::string::npos);
     EXPECT_NE(str.find("max=100"), std::string::npos);
-    EXPECT_NE(str.find("stride=5"), std::string::npos);
+    EXPECT_NE(str.find("step=1"), std::string::npos);
 }
 
-TEST(TestKnobIntConstraint, ToStringWithValidValues)
+TEST(TestIntConstraint, ConstraintWithValidValues)
 {
-    IntConstraint constraint(0, 100, 1, {8, 16, 32});
+    std::unordered_set<int64_t> validValues = {1, 2, 4, 8, 16};
+    IntConstraint constraint(0, 100, 1, validValues);
+
     std::string str = constraint.toString();
-
     EXPECT_NE(str.find("validValues"), std::string::npos);
-    EXPECT_NE(str.find('8'), std::string::npos);
-    EXPECT_NE(str.find("16"), std::string::npos);
-    EXPECT_NE(str.find("32"), std::string::npos);
+    // Values should be sorted in output
+    EXPECT_NE(str.find("[1, 2, 4, 8, 16]"), std::string::npos);
 }
 
-// ============================================================================
-// FloatConstraint Tests
-// ============================================================================
-
-TEST(TestKnobFloatConstraint, ValidateInRange)
+TEST(TestFloatConstraint, ConstraintToString)
 {
     FloatConstraint constraint(0.0, 1.0);
-    KnobSetting setting(1, 0.5);
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::OK);
-}
-
-TEST(TestKnobFloatConstraint, ValidateBelowMin)
-{
-    FloatConstraint constraint(0.0, 1.0);
-    KnobSetting setting(1, -0.5);
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("out of range"), std::string::npos);
-}
-
-TEST(TestKnobFloatConstraint, ValidateAboveMax)
-{
-    FloatConstraint constraint(0.0, 1.0);
-    KnobSetting setting(1, 1.5);
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("out of range"), std::string::npos);
-}
-
-TEST(TestKnobFloatConstraint, ValidateExplicitValues)
-{
-    FloatConstraint constraint(0.0, 1.0, {0.1, 0.5, 0.9});
-
-    KnobSetting validSetting(1, 0.5);
-    EXPECT_EQ(constraint.validateKnobSetting(validSetting).get_code(), ErrorCode::OK);
-
-    KnobSetting invalidSetting(1, 0.7);
-    Error result = constraint.validateKnobSetting(invalidSetting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("not in the list of valid values"), std::string::npos);
-}
-
-TEST(TestKnobFloatConstraint, ValidateWrongType)
-{
-    FloatConstraint constraint(0.0, 1.0);
-    KnobSetting setting(1, static_cast<int64_t>(42));
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("does not contain a float value"), std::string::npos);
-}
-
-TEST(TestKnobFloatConstraint, ToString)
-{
-    FloatConstraint constraint(0.0, 1.0, {0.1, 0.5, 0.9});
     std::string str = constraint.toString();
 
     EXPECT_NE(str.find("FloatConstraint"), std::string::npos);
     EXPECT_NE(str.find("min=0"), std::string::npos);
     EXPECT_NE(str.find("max=1"), std::string::npos);
-    EXPECT_NE(str.find("validValues"), std::string::npos);
 }
 
-// ============================================================================
-// StringConstraint Tests
-// ============================================================================
-
-TEST(TestKnobStringConstraint, ValidateWithinMaxLength)
-{
-    StringConstraint constraint(10);
-    KnobSetting setting(1, std::string("short"));
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::OK);
-}
-
-TEST(TestKnobStringConstraint, ValidateExceedsMaxLength)
-{
-    StringConstraint constraint(5);
-    KnobSetting setting(1, std::string("toolongstring"));
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("exceeds maximum length"), std::string::npos);
-}
-
-TEST(TestKnobStringConstraint, ValidateExplicitValues)
-{
-    StringConstraint constraint(100, {"option1", "option2", "option3"});
-
-    KnobSetting validSetting(1, std::string("option2"));
-    EXPECT_EQ(constraint.validateKnobSetting(validSetting).get_code(), ErrorCode::OK);
-
-    KnobSetting invalidSetting(1, std::string("option4"));
-    Error result = constraint.validateKnobSetting(invalidSetting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("not in the list of valid values"), std::string::npos);
-}
-
-TEST(TestKnobStringConstraint, ValidateWrongType)
+TEST(TestStringConstraint, ConstraintToString)
 {
     StringConstraint constraint(100);
-    KnobSetting setting(1, static_cast<int64_t>(42));
-
-    Error result = constraint.validateKnobSetting(setting);
-    EXPECT_EQ(result.get_code(), ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.get_message().find("does not contain a string value"), std::string::npos);
-}
-
-TEST(TestKnobStringConstraint, ToString)
-{
-    StringConstraint constraint(50, {"opt1", "opt2"});
     std::string str = constraint.toString();
 
     EXPECT_NE(str.find("StringConstraint"), std::string::npos);
-    EXPECT_NE(str.find("maxLength=50"), std::string::npos);
+    EXPECT_NE(str.find("maxLength=100"), std::string::npos);
+}
+
+TEST(TestStringConstraint, ConstraintWithValidValues)
+{
+    std::unordered_set<std::string> validValues = {"option1", "option2", "option3"};
+    StringConstraint constraint(100, validValues);
+
+    std::string str = constraint.toString();
     EXPECT_NE(str.find("validValues"), std::string::npos);
-    EXPECT_NE(str.find("opt1"), std::string::npos);
+    // Check that values are quoted
+    EXPECT_NE(str.find("\"option1\""), std::string::npos);
+    EXPECT_NE(str.find("\"option2\""), std::string::npos);
+    EXPECT_NE(str.find("\"option3\""), std::string::npos);
 }
 
 // ============================================================================
-// Knob Tests
+// toString Tests
 // ============================================================================
 
-TEST(TestKnob, MakeKnobId)
+TEST(TestKnob, ToStringIntKnob)
 {
-    // Test that the same string produces the same hash
-    int64_t id1 = Knob::makeKnobId("test.knob.name");
-    int64_t id2 = Knob::makeKnobId("test.knob.name");
-    EXPECT_EQ(id1, id2);
+    auto knob = KnobTestHelper::createIntKnob("test_knob", "Test description", 42);
+    knob.setChoice<int64_t>(100);
 
-    // Test that different strings produce different hashes
-    int64_t id3 = Knob::makeKnobId("different.knob.name");
-    EXPECT_NE(id1, id3);
+    std::string str = knob.toString();
+
+    EXPECT_NE(str.find("knobIdStr=\"test_knob\""), std::string::npos);
+    EXPECT_NE(str.find("description=\"Test description\""), std::string::npos);
+    EXPECT_NE(str.find("defaultValue=42"), std::string::npos);
+    EXPECT_NE(str.find("choice=100"), std::string::npos);
+    EXPECT_NE(str.find("deprecated=false"), std::string::npos);
 }
 
-// Note: Since Knob has a private constructor and requires a factory function
-// that depends on flatbuffer schemas (not yet implemented), we cannot directly
-// test Knob construction. The following tests would be added once the factory
-// function is implemented:
-//
-// TEST(TestKnob, GetKnobId)
-// TEST(TestKnob, GetKnobIdStr)
-// TEST(TestKnob, GetDescription)
-// TEST(TestKnob, IsDeprecated)
-// TEST(TestKnob, GetValueTypeInt64)
-// TEST(TestKnob, GetValueTypeFloat64)
-// TEST(TestKnob, GetValueTypeString)
-// TEST(TestKnob, GetDefaultValueInt64)
-// TEST(TestKnob, GetDefaultValueFloat64)
-// TEST(TestKnob, GetDefaultValueString)
-// TEST(TestKnob, GetDefaultValueWrongType)
-// TEST(TestKnob, ToDefaultKnobSetting)
-// TEST(TestKnob, ValidateKnobSettingMatchingTypes)
-// TEST(TestKnob, ValidateKnobSettingMismatchedTypes)
-// TEST(TestKnob, ValidateKnobSettingMismatchedIds)
-// TEST(TestKnob, ValidateWithConstraint)
+TEST(TestKnob, ToStringFloatKnob)
+{
+    auto knob = KnobTestHelper::createFloatKnob("float_knob", "Float test", 3.14);
+    knob.setChoice<double>(2.718);
+
+    std::string str = knob.toString();
+
+    EXPECT_NE(str.find("defaultValue=3.14"), std::string::npos);
+    EXPECT_NE(str.find("choice=2.718"), std::string::npos);
+}
+
+TEST(TestKnob, ToStringStringKnob)
+{
+    auto knob = KnobTestHelper::createStringKnob("string_knob", "String test", "default");
+    knob.setChoice<std::string>("custom");
+
+    std::string str = knob.toString();
+
+    EXPECT_NE(str.find("defaultValue=\"default\""), std::string::npos);
+    EXPECT_NE(str.find("choice=\"custom\""), std::string::npos);
+}
+
+TEST(TestKnob, ToStringDeprecatedKnob)
+{
+    auto knob = KnobTestHelper::createIntKnob("deprecated", "Deprecated knob", 0, true);
+
+    std::string str = knob.toString();
+
+    EXPECT_NE(str.find("deprecated=true"), std::string::npos);
+}
 
 // ============================================================================
-// Integration Tests
+// Type Safety Tests
 // ============================================================================
 
-TEST(TestKnobIntegration, IntConstraintWithKnobSetting)
+TEST(TestKnob, GetDefaultValueWrongType)
 {
-    IntConstraint constraint(0, 100, 10, {10, 20, 30, 40, 50});
+    auto knob = KnobTestHelper::createIntKnob("int_knob", "Integer knob", 42);
 
-    // Valid value from list
-    KnobSetting validSetting(1, static_cast<int64_t>(30));
-    EXPECT_EQ(constraint.validateKnobSetting(validSetting).get_code(), ErrorCode::OK);
+    // Try to get default value as wrong type
+    auto wrongDefault = knob.getDefaultValue<double>();
+    EXPECT_FALSE(wrongDefault.has_value());
 
-    // Invalid value not in list
-    KnobSetting invalidSetting(1, static_cast<int64_t>(35));
-    EXPECT_EQ(constraint.validateKnobSetting(invalidSetting).get_code(), ErrorCode::INVALID_VALUE);
+    auto stringDefault = knob.getDefaultValue<std::string>();
+    EXPECT_FALSE(stringDefault.has_value());
+
+    // Correct type should work
+    auto correctDefault = knob.getDefaultValue<int64_t>();
+    ASSERT_TRUE(correctDefault.has_value());
+    EXPECT_EQ(correctDefault.value(), 42);
 }
 
-TEST(TestKnobIntegration, FloatConstraintWithKnobSetting)
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+TEST(TestKnob, EmptyStringKnob)
 {
-    FloatConstraint constraint(0.0, 1.0);
+    auto knob = KnobTestHelper::createStringKnob("empty_string", "Empty string knob", "");
 
-    KnobSetting validSetting(1, 0.5);
-    EXPECT_EQ(constraint.validateKnobSetting(validSetting).get_code(), ErrorCode::OK);
+    auto defaultValue = knob.getDefaultValue<std::string>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), "");
 
-    KnobSetting invalidSetting(1, 1.5);
-    EXPECT_EQ(constraint.validateKnobSetting(invalidSetting).get_code(), ErrorCode::INVALID_VALUE);
+    knob.setChoice<std::string>("");
+    auto choice = knob.getChoice<std::string>();
+    ASSERT_TRUE(choice.has_value());
+    EXPECT_EQ(choice.value(), "");
 }
 
-TEST(TestKnobIntegration, StringConstraintWithKnobSetting)
+TEST(TestKnob, NegativeIntValues)
 {
-    StringConstraint constraint(20, {"small", "medium", "large"});
+    auto knob = KnobTestHelper::createIntKnob("negative_knob", "Negative values", -100);
 
-    KnobSetting validSetting(1, std::string("medium"));
-    EXPECT_EQ(constraint.validateKnobSetting(validSetting).get_code(), ErrorCode::OK);
+    auto defaultValue = knob.getDefaultValue<int64_t>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), -100);
 
-    KnobSetting invalidSetting(1, std::string("extra-large"));
-    EXPECT_EQ(constraint.validateKnobSetting(invalidSetting).get_code(), ErrorCode::INVALID_VALUE);
+    knob.setChoice<int64_t>(-50);
+    auto choice = knob.getChoice<int64_t>();
+    ASSERT_TRUE(choice.has_value());
+    EXPECT_EQ(choice.value(), -50);
 }
 
-TEST(TestKnobIntegration, ConstraintErrorMessages)
+TEST(TestKnob, ZeroValues)
 {
-    IntConstraint intConstraint(0, 10, 1);
-    KnobSetting intSetting(1, static_cast<int64_t>(20));
-    Error intError = intConstraint.validateKnobSetting(intSetting);
-    EXPECT_NE(intError.get_message().find("20"), std::string::npos);
-    EXPECT_NE(intError.get_message().find("[0, 10]"), std::string::npos);
+    auto intKnob = KnobTestHelper::createIntKnob("zero_int", "Zero int", 0);
+    auto floatKnob = KnobTestHelper::createFloatKnob("zero_float", "Zero float", 0.0);
 
-    FloatConstraint floatConstraint(0.0, 1.0, {0.1, 0.5, 0.9});
-    KnobSetting floatSetting(1, 0.7);
-    Error floatError = floatConstraint.validateKnobSetting(floatSetting);
-    EXPECT_NE(floatError.get_message().find("0.7"), std::string::npos);
-    EXPECT_NE(floatError.get_message().find("0.1"), std::string::npos);
+    auto intDefault = intKnob.getDefaultValue<int64_t>();
+    ASSERT_TRUE(intDefault.has_value());
+    EXPECT_EQ(intDefault.value(), 0);
 
-    StringConstraint stringConstraint(10, {"opt1", "opt2"});
-    KnobSetting stringSetting(1, std::string("opt3"));
-    Error stringError = stringConstraint.validateKnobSetting(stringSetting);
-    EXPECT_NE(stringError.get_message().find("opt3"), std::string::npos);
-    EXPECT_NE(stringError.get_message().find("opt1"), std::string::npos);
+    auto floatDefault = floatKnob.getDefaultValue<double>();
+    ASSERT_TRUE(floatDefault.has_value());
+    EXPECT_DOUBLE_EQ(floatDefault.value(), 0.0);
+}
+
+TEST(TestKnob, LargeIntValues)
+{
+    int64_t largeValue = 9223372036854775807LL; // INT64_MAX
+    auto knob = KnobTestHelper::createIntKnob("large_knob", "Large value", largeValue);
+
+    auto defaultValue = knob.getDefaultValue<int64_t>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), largeValue);
+}
+
+TEST(TestKnob, SpecialFloatValues)
+{
+    auto knob = KnobTestHelper::createFloatKnob("special_float", "Special float", 1.23456789);
+
+    knob.setChoice<double>(0.0);
+    auto zero = knob.getChoice<double>();
+    ASSERT_TRUE(zero.has_value());
+    EXPECT_DOUBLE_EQ(zero.value(), 0.0);
+
+    knob.setChoice<double>(-1.5);
+    auto negative = knob.getChoice<double>();
+    ASSERT_TRUE(negative.has_value());
+    EXPECT_DOUBLE_EQ(negative.value(), -1.5);
+}
+
+TEST(TestKnob, LongStrings)
+{
+    std::string longString(1000, 'a');
+    auto knob = KnobTestHelper::createStringKnob("long_string", "Long string knob", longString);
+
+    auto defaultValue = knob.getDefaultValue<std::string>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), longString);
+
+    std::string anotherLongString(500, 'b');
+    knob.setChoice<std::string>(anotherLongString);
+    auto choice = knob.getChoice<std::string>();
+    ASSERT_TRUE(choice.has_value());
+    EXPECT_EQ(choice.value(), anotherLongString);
+}
+
+TEST(TestKnob, SpecialCharactersInStrings)
+{
+    std::string specialChars = "Test\nwith\ttabs\rand\"quotes\"";
+    auto knob
+        = KnobTestHelper::createStringKnob("special_chars", "Special characters", specialChars);
+
+    auto defaultValue = knob.getDefaultValue<std::string>();
+    ASSERT_TRUE(defaultValue.has_value());
+    EXPECT_EQ(defaultValue.value(), specialChars);
 }

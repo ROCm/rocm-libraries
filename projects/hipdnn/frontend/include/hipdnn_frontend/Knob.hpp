@@ -6,12 +6,16 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <spdlog/fmt/fmt.h>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -31,7 +35,7 @@ public:
     virtual ~IConstraint() = default;
 
     // Validate a knob setting against this constraint
-    virtual Error validateKnobSetting(const KnobSetting& knobSetting) const = 0;
+    virtual Error validateKnobChoice(const Knob& knob) const = 0;
 
     // String representation for logging
     virtual std::string toString() const = 0;
@@ -43,33 +47,27 @@ class IntConstraint : public IConstraint
 public:
     IntConstraint(int64_t minValue,
                   int64_t maxValue,
-                  int64_t stride = 1,
-                  std::vector<int64_t> validValues = {})
+                  int64_t step = 1,
+                  std::unordered_set<int64_t> validValues = {})
         : _minValue(minValue)
         , _maxValue(maxValue)
-        , _stride(stride)
+        , _step(step)
         , _validValues(std::move(validValues))
     {
     }
 
-    Error validateKnobSetting(const KnobSetting& knobSetting) const override;
+    Error validateKnobChoice(const Knob& knob) const override;
 
     std::string toString() const override
     {
         std::ostringstream oss;
-        oss << "IntConstraint{min=" << _minValue << ", max=" << _maxValue << ", stride=" << _stride;
+        oss << "IntConstraint{min=" << _minValue << ", max=" << _maxValue << ", step=" << _step;
         if(!_validValues.empty())
         {
-            oss << ", validValues=[";
-            for(size_t i = 0; i < _validValues.size(); ++i)
-            {
-                if(i > 0)
-                {
-                    oss << ", ";
-                }
-                oss << _validValues[i];
-            }
-            oss << "]";
+            std::vector<int64_t> sortedValues(_validValues.begin(), _validValues.end());
+            std::sort(sortedValues.begin(), sortedValues.end());
+            oss << ", validValues=";
+            hipdnn_data_sdk::utilities::vecToStream(oss, sortedValues);
         }
         oss << "}";
         return oss.str();
@@ -83,11 +81,11 @@ public:
     {
         return _maxValue;
     }
-    int64_t getStride() const
+    int64_t getStep() const
     {
-        return _stride;
+        return _step;
     }
-    const std::vector<int64_t>& getValidValues() const
+    const std::unordered_set<int64_t>& getValidValues() const
     {
         return _validValues;
     }
@@ -95,41 +93,26 @@ public:
 private:
     int64_t _minValue;
     int64_t _maxValue;
-    int64_t _stride;
-    std::vector<int64_t> _validValues;
+    int64_t _step;
+    std::unordered_set<int64_t> _validValues;
 };
 
 // Float constraint implementation
 class FloatConstraint : public IConstraint
 {
 public:
-    FloatConstraint(double minValue, double maxValue, std::vector<double> validValues = {})
+    FloatConstraint(double minValue, double maxValue)
         : _minValue(minValue)
         , _maxValue(maxValue)
-        , _validValues(std::move(validValues))
     {
     }
 
-    Error validateKnobSetting(const KnobSetting& knobSetting) const override;
+    Error validateKnobChoice(const Knob& knob) const override;
 
     std::string toString() const override
     {
         std::ostringstream oss;
-        oss << "FloatConstraint{min=" << _minValue << ", max=" << _maxValue;
-        if(!_validValues.empty())
-        {
-            oss << ", validValues=[";
-            for(size_t i = 0; i < _validValues.size(); ++i)
-            {
-                if(i > 0)
-                {
-                    oss << ", ";
-                }
-                oss << _validValues[i];
-            }
-            oss << "]";
-        }
-        oss << "}";
+        oss << "FloatConstraint{min=" << _minValue << ", max=" << _maxValue << "}";
         return oss.str();
     }
 
@@ -141,28 +124,23 @@ public:
     {
         return _maxValue;
     }
-    const std::vector<double>& getValidValues() const
-    {
-        return _validValues;
-    }
 
 private:
     double _minValue;
     double _maxValue;
-    std::vector<double> _validValues;
 };
 
 // String constraint implementation
 class StringConstraint : public IConstraint
 {
 public:
-    StringConstraint(int32_t maxLength, std::vector<std::string> validValues = {})
+    StringConstraint(int32_t maxLength, std::unordered_set<std::string> validValues = {})
         : _maxLength(maxLength)
         , _validValues(std::move(validValues))
     {
     }
 
-    Error validateKnobSetting(const KnobSetting& knobSetting) const override;
+    Error validateKnobChoice(const Knob& knob) const override;
 
     std::string toString() const override
     {
@@ -170,14 +148,16 @@ public:
         oss << "StringConstraint{maxLength=" << _maxLength;
         if(!_validValues.empty())
         {
+            std::vector<std::string> sortedValues(_validValues.begin(), _validValues.end());
+            std::sort(sortedValues.begin(), sortedValues.end());
             oss << ", validValues=[";
-            for(size_t i = 0; i < _validValues.size(); ++i)
+            for(size_t i = 0; i < sortedValues.size(); ++i)
             {
                 if(i > 0)
                 {
                     oss << ", ";
                 }
-                oss << "\"" << _validValues[i] << "\"";
+                oss << "\"" << sortedValues[i] << "\"";
             }
             oss << "]";
         }
@@ -189,94 +169,14 @@ public:
     {
         return _maxLength;
     }
-    const std::vector<std::string>& getValidValues() const
+    const std::unordered_set<std::string>& getValidValues() const
     {
         return _validValues;
     }
 
 private:
     int32_t _maxLength;
-    std::vector<std::string> _validValues;
-};
-
-// Knob setting class - represents a configured knob value
-class KnobSetting
-{
-public:
-    // Factory function to create from flatbuffer
-    // TODO: Implement once flatbuffer schemas are available
-    // static KnobSetting fromFlatbuffer(const hipdnn_data_sdk::data_objects::KnobSetting* fbKnobSetting);
-
-    // Constructors for different value types
-    KnobSetting(int64_t knobId, int64_t value)
-        : _knobId(knobId)
-        , _value(value)
-    {
-    }
-
-    KnobSetting(int64_t knobId, double value)
-        : _knobId(knobId)
-        , _value(value)
-    {
-    }
-
-    KnobSetting(int64_t knobId, const std::string& value)
-        : _knobId(knobId)
-        , _value(value)
-    {
-    }
-
-    // String representation for logging
-    std::string toString() const
-    {
-        return std::visit(
-            [this](auto&& value) -> std::string {
-                std::ostringstream oss;
-                oss << "KnobSetting{knobId=" << _knobId << ", value=";
-                if constexpr(std::is_same_v<std::decay_t<decltype(value)>, std::string>)
-                {
-                    oss << "\"" << value << "\"";
-                }
-                else
-                {
-                    oss << value;
-                }
-                oss << "}";
-                return oss.str();
-            },
-            _value);
-    }
-
-    // Accessors
-    int64_t getKnobId() const
-    {
-        return _knobId;
-    }
-
-    KnobValueType getValueType() const
-    {
-        return getKnobValueTypeFromVariant(_value);
-    }
-
-    // Get value (templated)
-    template <typename T>
-    std::optional<T> getValue() const
-    {
-        if(auto* val = std::get_if<T>(&_value))
-        {
-            return *val;
-        }
-        return std::nullopt;
-    }
-
-    // Flatbuffer pack method
-    // TODO: Implement once flatbuffer schemas are available
-    // flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting> pack(
-    //     flatbuffers::FlatBufferBuilder& builder) const;
-
-private:
-    int64_t _knobId;
-    std::variant<int64_t, double, std::string> _value;
+    std::unordered_set<std::string> _validValues;
 };
 
 // Knob information class - describes available knobs for an engine
@@ -313,11 +213,26 @@ public:
         return getKnobValueTypeFromVariant(_defaultValue);
     }
 
-    // Get default value (templated)
     template <typename T>
     std::optional<T> getDefaultValue() const
     {
         if(auto* val = std::get_if<T>(&_defaultValue))
+        {
+            return *val;
+        }
+        return std::nullopt;
+    }
+
+    template <typename T>
+    void setChoice(T value)
+    {
+        _choice = value;
+    }
+
+    template <typename T>
+    std::optional<T> getChoice() const
+    {
+        if(auto* val = std::get_if<T>(&_choice))
         {
             return *val;
         }
@@ -330,35 +245,13 @@ public:
         return _constraint.get();
     }
 
-    // Convert to KnobSetting with default value
-    KnobSetting toDefaultKnobSetting() const
-    {
-        return std::visit(
-            [this](auto&& value) -> KnobSetting { return KnobSetting(_knobId, value); },
-            _defaultValue);
-    }
-
     // Validate a knob setting against this knob's constraints
-    Error validateKnobSetting(const KnobSetting& knobSetting) const
+    Error validate() const
     {
-        // Check that the knob IDs match
-        if(knobSetting.getKnobId() != _knobId)
-        {
-            return {ErrorCode::INVALID_VALUE, "KnobSetting knob ID does not match Knob knob ID"};
-        }
-
-        // Check that the value types match
-        if(knobSetting.getValueType() != getValueType())
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    "KnobSetting value type does not match Knob value type for knob '" + _knobIdStr
-                        + "'"};
-        }
-
         // Validate against constraint if present
         if(_constraint)
         {
-            return _constraint->validateKnobSetting(knobSetting);
+            return _constraint->validateKnobChoice(*this);
         }
 
         return {ErrorCode::OK, ""};
@@ -382,18 +275,11 @@ public:
         oss << "Knob{knobId=" << _knobId << ", knobIdStr=\"" << _knobIdStr << "\", description=\""
             << _description << "\", defaultValue=";
 
-        std::visit(
-            [&oss](auto&& value) {
-                if constexpr(std::is_same_v<std::decay_t<decltype(value)>, std::string>)
-                {
-                    oss << "\"" << value << "\"";
-                }
-                else
-                {
-                    oss << value;
-                }
-            },
-            _defaultValue);
+        variantToStream(oss, _defaultValue);
+
+        oss << ", choice=";
+
+        variantToStream(oss, _choice);
 
         oss << ", deprecated=" << (_deprecated ? "true" : "false");
 
@@ -420,10 +306,28 @@ private:
     {
     }
 
+    void variantToStream(std::ostringstream& oss,
+                         const std::variant<int64_t, double, std::string>& variant) const
+    {
+        std::visit(
+            [&oss](auto&& value) {
+                if constexpr(std::is_same_v<std::decay_t<decltype(value)>, std::string>)
+                {
+                    oss << "\"" << value << "\"";
+                }
+                else
+                {
+                    oss << value;
+                }
+            },
+            variant);
+    }
+
     std::string _knobIdStr;
     int64_t _knobId;
     std::string _description;
     std::variant<int64_t, double, std::string> _defaultValue;
+    std::variant<int64_t, double, std::string> _choice;
     bool _deprecated;
 
     // Constraint (polymorphic)
@@ -432,12 +336,15 @@ private:
     // Allow factory function access to private members
     // TODO: Uncomment when implementing factory
     // friend Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob);
+
+    // Allow test helper to create Knob instances for testing
+    friend class KnobTestHelper;
 };
 
 // Constraint validation implementations (defined after KnobSetting is complete)
-inline Error IntConstraint::validateKnobSetting(const KnobSetting& knobSetting) const
+inline Error IntConstraint::validateKnobChoice(const Knob& knob) const
 {
-    auto value = knobSetting.getValue<int64_t>();
+    auto value = knob.getChoice<int64_t>();
     if(!value.has_value())
     {
         return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain an integer value"};
@@ -448,26 +355,19 @@ inline Error IntConstraint::validateKnobSetting(const KnobSetting& knobSetting) 
     // If explicit valid values are specified, check against them
     if(!_validValues.empty())
     {
-        bool found = false;
-        for(auto validVal : _validValues)
-        {
-            if(val == validVal)
-            {
-                found = true;
-                break;
-            }
-        }
-        if(!found)
+        if(_validValues.count(val) == 0)
         {
             std::ostringstream oss;
             oss << "Value " << val << " is not in the list of valid values: [";
-            for(size_t i = 0; i < _validValues.size(); ++i)
+            bool first = true;
+            for(const auto& validVal : _validValues)
             {
-                if(i > 0)
+                if(!first)
                 {
                     oss << ", ";
                 }
-                oss << _validValues[i];
+                oss << validVal;
+                first = false;
             }
             oss << "]";
             return {ErrorCode::INVALID_VALUE, oss.str()};
@@ -475,7 +375,7 @@ inline Error IntConstraint::validateKnobSetting(const KnobSetting& knobSetting) 
         return {ErrorCode::OK, ""};
     }
 
-    // Otherwise check min/max/stride
+    // Otherwise check min/max/step
     if(val < _minValue || val > _maxValue)
     {
         std::ostringstream oss;
@@ -483,10 +383,10 @@ inline Error IntConstraint::validateKnobSetting(const KnobSetting& knobSetting) 
         return {ErrorCode::INVALID_VALUE, oss.str()};
     }
 
-    if(_stride > 1 && ((val - _minValue) % _stride) != 0)
+    if(_step > 1 && ((val - _minValue) % _step) != 0)
     {
         std::ostringstream oss;
-        oss << "Value " << val << " does not satisfy stride constraint (stride=" << _stride
+        oss << "Value " << val << " does not satisfy step constraint (step=" << _step
             << ", min=" << _minValue << ")";
         return {ErrorCode::INVALID_VALUE, oss.str()};
     }
@@ -494,9 +394,9 @@ inline Error IntConstraint::validateKnobSetting(const KnobSetting& knobSetting) 
     return {ErrorCode::OK, ""};
 }
 
-inline Error FloatConstraint::validateKnobSetting(const KnobSetting& knobSetting) const
+inline Error FloatConstraint::validateKnobChoice(const Knob& knob) const
 {
-    auto value = knobSetting.getValue<double>();
+    auto value = knob.getChoice<double>();
     if(!value.has_value())
     {
         return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a float value"};
@@ -504,37 +404,6 @@ inline Error FloatConstraint::validateKnobSetting(const KnobSetting& knobSetting
 
     double val = value.value();
 
-    // If explicit valid values are specified, check against them
-    if(!_validValues.empty())
-    {
-        bool found = false;
-        for(auto validVal : _validValues)
-        {
-            if(val == validVal)
-            {
-                found = true;
-                break;
-            }
-        }
-        if(!found)
-        {
-            std::ostringstream oss;
-            oss << "Value " << val << " is not in the list of valid values: [";
-            for(size_t i = 0; i < _validValues.size(); ++i)
-            {
-                if(i > 0)
-                {
-                    oss << ", ";
-                }
-                oss << _validValues[i];
-            }
-            oss << "]";
-            return {ErrorCode::INVALID_VALUE, oss.str()};
-        }
-        return {ErrorCode::OK, ""};
-    }
-
-    // Otherwise check min/max
     if(val < _minValue || val > _maxValue)
     {
         std::ostringstream oss;
@@ -545,9 +414,9 @@ inline Error FloatConstraint::validateKnobSetting(const KnobSetting& knobSetting
     return {ErrorCode::OK, ""};
 }
 
-inline Error StringConstraint::validateKnobSetting(const KnobSetting& knobSetting) const
+inline Error StringConstraint::validateKnobChoice(const Knob& knob) const
 {
-    auto value = knobSetting.getValue<std::string>();
+    auto value = knob.getChoice<std::string>();
     if(!value.has_value())
     {
         return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a string value"};
@@ -558,26 +427,19 @@ inline Error StringConstraint::validateKnobSetting(const KnobSetting& knobSettin
     // If explicit valid values are specified, check against them
     if(!_validValues.empty())
     {
-        bool found = false;
-        for(const auto& validVal : _validValues)
-        {
-            if(val == validVal)
-            {
-                found = true;
-                break;
-            }
-        }
-        if(!found)
+        if(_validValues.count(val) == 0)
         {
             std::ostringstream oss;
             oss << "Value \"" << val << "\" is not in the list of valid values: [";
-            for(size_t i = 0; i < _validValues.size(); ++i)
+            bool first = true;
+            for(const auto& validVal : _validValues)
             {
-                if(i > 0)
+                if(!first)
                 {
                     oss << ", ";
                 }
-                oss << "\"" << _validValues[i] << "\"";
+                oss << "\"" << validVal << "\"";
+                first = false;
             }
             oss << "]";
             return {ErrorCode::INVALID_VALUE, oss.str()};
@@ -596,30 +458,6 @@ inline Error StringConstraint::validateKnobSetting(const KnobSetting& knobSettin
     return {ErrorCode::OK, ""};
 }
 
-// Validate knob settings against knob constraints
-inline Error validateKnobSettings(const std::unordered_map<int64_t, Knob>& knobs,
-                                  const std::unordered_map<int64_t, KnobSetting>& settings)
-{
-    for(const auto& setting : settings)
-    {
-        auto found = knobs.find(setting.first);
-        if(found == knobs.end())
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    fmt::format("KnobSetting {} isn't a knob supported by this engine",
-                                setting.second)};
-        }
-
-        Error err = found->second.validateKnobSetting(setting.second);
-        if(err.code != ErrorCode::OK)
-        {
-            return err;
-        }
-    }
-
-    return {ErrorCode::OK, ""};
-}
-
 } // namespace hipdnn_frontend
 
 template <>
@@ -629,15 +467,5 @@ struct fmt::formatter<hipdnn_frontend::Knob> : fmt::formatter<const char*>
     auto format(const hipdnn_frontend::Knob& knob, FormatContext& ctx) const
     {
         return fmt::formatter<const char*>::format(knob.toString().c_str(), ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<hipdnn_frontend::KnobSetting> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(const hipdnn_frontend::KnobSetting& setting, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(setting.toString().c_str(), ctx);
     }
 };

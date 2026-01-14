@@ -512,7 +512,7 @@ public:
 
     // Get knobs for a specific engine
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
-    Error get_knobs_for_engine(int64_t engineId, std::unordered_map<int64_t, Knob>& knobs) const
+    Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
         // TODO: Implement once flatbuffer schemas and backend support are available
         // This method will:
@@ -526,6 +526,12 @@ public:
         (void)knobs; // Suppress unused parameter warning
 
         return {ErrorCode::OK, "get_knobs_for_engine not yet implemented"};
+    }
+
+    Error get_knob_lookup_for_engine(int64_t engineId,
+                                     std::unordered_map<int64_t, Knob>& knobs) const
+    {
+        // TODO
     }
 
     // Get ranked list of engine IDs based on heuristics
