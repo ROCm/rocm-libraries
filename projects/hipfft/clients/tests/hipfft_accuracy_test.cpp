@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <math.h>
@@ -30,6 +29,7 @@
 
 #include "../hipfft_params.h"
 
+#include "../../shared/CLI11.hpp"
 #include "../../shared/accuracy_test.h"
 #include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
@@ -39,6 +39,38 @@
 #include "../../shared/subprocess.h"
 
 extern std::string mp_launch;
+struct user_mp_launch_command
+{
+    std::string              exe;
+    std::vector<std::string> user_mp_argv;
+};
+static user_mp_launch_command get_mp_launch_command()
+{
+    user_mp_launch_command ret;
+    try
+    {
+        CLI::App command_splitter;
+        command_splitter.allow_extras();
+        command_splitter.parse(mp_launch, /*program_name_included = */ true);
+        ret.exe          = command_splitter.get_name();
+        ret.user_mp_argv = command_splitter.remaining();
+    }
+    catch(const CLI::Error& e)
+    {
+        if(verbose)
+        {
+            if(!mp_launch.empty())
+                std::cout << "CLI11 failed to parse the command " << mp_launch << "\n";
+            std::cout << "CLI11 exception name: " << e.get_name() << "\n"
+                      << "CLI11 exception info: " << e.what() << "\n"
+                      << "CLI11 error code:" << e.get_exit_code() << std::endl;
+        }
+        // returned empty struct
+        ret.exe.clear();
+        ret.user_mp_argv.clear();
+    }
+    return ret;
+}
 
 extern last_cpu_fft_cache last_cpu_fft_data;
 
@@ -115,13 +147,19 @@ TEST_P(accuracy_test, vs_fftw)
         {
             fft_vs_reference(params, do_round_trip);
         }
-        catch(HOSTBUF_MEM_USAGE& e)
+        catch(const std::bad_alloc&)
+        {
+            // explicitly clear cache
+            last_cpu_fft_data = last_cpu_fft_cache();
+            GTEST_SKIP() << "host memory allocation failure";
+        }
+        catch(const HOSTBUF_MEM_USAGE& e)
         {
             // explicitly clear cache
             last_cpu_fft_data = last_cpu_fft_cache();
             GTEST_SKIP() << e.what();
         }
-        catch(ROCFFT_SKIP& e)
+        catch(const ROCFFT_SKIP& e)
         {
             GTEST_SKIP() << e.what();
         }
@@ -129,7 +167,7 @@ TEST_P(accuracy_test, vs_fftw)
         {
             GTEST_SKIP() << "Unimplemented exception: " << e.what();
         }
-        catch(ROCFFT_FAIL& e)
+        catch(const ROCFFT_FAIL& e)
         {
             GTEST_FAIL() << e.what();
         }
@@ -137,22 +175,14 @@ TEST_P(accuracy_test, vs_fftw)
     }
     case fft_params::fft_mp_lib_mpi:
     {
-        // split launcher into tokens since the first one is the exe
-        // and the remainder is the start of its argv
-        boost::escaped_list_separator<char>                   sep('\\', ' ', '\"');
-        boost::tokenizer<boost::escaped_list_separator<char>> tokenizer(mp_launch, sep);
-        std::string                                           exe;
-        std::vector<std::string>                              argv;
-        for(auto t : tokenizer)
-        {
-            if(t.empty())
-                continue;
+        // Multi-proc FFT.
+        static const auto mp_launch_command = get_mp_launch_command();
 
-            if(exe.empty())
-                exe = t;
-            else
-                argv.push_back(t);
-        }
+        if(mp_launch_command.exe.empty())
+            GTEST_FAIL() << "Cannot proceed due to empty multi-process executable: omitted "
+                            "\"--mp_launch\" option or invalid value thereof.";
+        auto argv = mp_launch_command.user_mp_argv;
+
         // append test token and ask for accuracy test
         argv.push_back("--token");
         argv.push_back(params.token());
@@ -160,7 +190,7 @@ TEST_P(accuracy_test, vs_fftw)
 
         // throws an exception if launch fails or if subprocess
         // returns nonzero exit code
-        execute_subprocess(exe, argv, {});
+        execute_subprocess(mp_launch_command.exe, argv, {});
         break;
     }
     default:

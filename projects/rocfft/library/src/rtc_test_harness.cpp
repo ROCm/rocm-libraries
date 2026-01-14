@@ -245,12 +245,17 @@ std::string test_harness_main(const Function& f)
     launch_loop.body += If{CallExpr{"hipEventRecord", {stop}} != "hipSuccess",
                            {Call{"throw std::runtime_error", {"\"hipEventRecord failed\""}}}};
     launch_loop.body += If{CallExpr{"hipEventSynchronize", {stop}} != "hipSuccess",
-                           {Call{"throw std::runtime_error", {"\"hipEventRecord failed\""}}}};
+                           {Call{"throw std::runtime_error", {"\"hipEventSynchronize failed\""}}}};
     launch_loop.body += If{CallExpr{"hipEventElapsedTime", {"samples.data() + trial", start, stop}}
                                != "hipSuccess",
                            {Call{"throw std::runtime_error", {"\"hipEventElapsedTime failed\""}}}};
 
     main.body += launch_loop;
+
+    main.body += If{CallExpr{"hipEventDestroy", {start}} != "hipSuccess",
+                    {Call{"throw std::runtime_error", {"\"hipEventDestroy failed\""}}}};
+    main.body += If{CallExpr{"hipEventDestroy", {stop}} != "hipSuccess",
+                    {Call{"throw std::runtime_error", {"\"hipEventDestroy failed\""}}}};
 
     For print_loop{trial, 0, trial < num_trials, 1, {}};
     print_loop.body += Call{"printf", {"\"%f ms\\n\"", "static_cast<double>(samples[trial])"}};

@@ -769,14 +769,6 @@ void testing_csrgeam2(Arguments argus)
     CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
         filename, M, N, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A));
 
-    if(idx_base_C != idx_base_A || idx_base_C != idx_base_B || M == 0 || N == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse does not support mixed index bases nor does it properly handle m == 0 or n == 0
-        return;
-#endif
-    }
-
     // B = A so that we can compute the square of A
     int              nnz_B = nnz_A;
     std::vector<int> hcsr_row_ptr_B(M + 1, 0);

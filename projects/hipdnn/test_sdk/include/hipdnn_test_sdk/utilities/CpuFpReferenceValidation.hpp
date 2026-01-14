@@ -57,12 +57,14 @@ public:
                 // Log error and mark as failed
                 HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
                                  "implementation value = {}, "
-                                 "absolute difference = {}, threshold = {} (atol={}, rtol={})",
+                                 "absolute difference = {}, threshold = {}, "
+                                 "difference - threshold = {}, (atol={}, rtol={})",
                                  indices,
                                  refValue,
                                  implValue,
                                  absDiff,
                                  threshold,
+                                 absDiff - threshold,
                                  _absoluteTolerance,
                                  _relativeTolerance);
                 result.store(false, std::memory_order_relaxed);
