@@ -37,11 +37,12 @@
     #include <cub/block/block_store.cuh>
     #include <cub/cub.cuh>
     #include <cub/util_ptx.cuh>
-    #include <cub/util_type.cuh>
     #include <cuda/std/array>
     #include <cuda/std/mdspan>
     #include <hipcub/hipcub.hpp>
 #endif
+
+#include <hipcub/util_type.hpp>
 
 #include "test_utils_assertions.hpp"
 #include "test_utils_bfloat16.hpp"
